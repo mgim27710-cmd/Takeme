@@ -1,0 +1,1856 @@
+import React, { useState, useEffect, Fragment } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { MapContainer, TileLayer, Polygon, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+import * as turf from '@turf/turf';
+import * as XLSX from 'xlsx';
+import { useRef } from 'react';
+import io from 'socket.io-client';
+import LogViewer from './LogViewer';
+import MessagePanel from './MessagePanel';
+
+// Fix Leaflet default icon issue
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+// Helper to generate a random bright color
+const getRandomColor = () => {
+  const hues = [0, 30, 60, 120, 200, 280, 320]; // Red, Orange, Yellow, Green, Blue, Purple, Pink
+  const randomHue = hues[Math.floor(Math.random() * hues.length)];
+  return `hsl(${randomHue}, 70%, 50%)`;
+};
+
+// Dummy data for initial demonstration
+const dummyBusData = [
+  {
+    id: 1, name: '1호차', color: '#3b82f6',
+    points: [ [37.5665, 126.9780], [37.5700, 126.9800], [37.5650, 126.9850], [37.5620, 126.9750] ]
+  },
+  {
+    id: 2, name: '2호차', color: '#ef4444',
+    points: [ [37.5600, 126.9700], [37.5620, 126.9600], [37.5550, 126.9650] ]
+  }
+];
+
+function MapBoundsFit({ buses, academy }) {
+  const map = useMap();
+  useEffect(() => {
+    const allPoints = [];
+    if (academy && !isNaN(academy.lat) && !isNaN(academy.lng)) {
+      allPoints.push([academy.lat, academy.lng]);
+    }
+    buses.forEach(bus => {
+      if (bus.points) {
+        bus.points.forEach(pt => allPoints.push(pt));
+      }
+    });
+    
+    if (allPoints.length > 0) {
+      const bounds = L.latLngBounds(allPoints);
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+    }
+  }, [buses, academy, map]);
+  return null;
+}
+
+function ZoneEditEvents({ isAddingPoint, onAddPoint }) {
+  useMapEvents({
+    click(e) {
+      if (isAddingPoint) {
+        onAddPoint([e.latlng.lat, e.latlng.lng]);
+      }
+    },
+  });
+  return null;
+}
+
+function PickupPointEvents({ isAddingPickupPoint, onAddPickupPoint }) {
+  useMapEvents({
+    click(e) {
+      if (isAddingPickupPoint) {
+        onAddPickupPoint([e.latlng.lat, e.latlng.lng]);
+      }
+    },
+  });
+  return null;
+}
+
+export default function Dashboard() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const fileInputRef = useRef(null);
+  const [buses, setBuses] = useState([]);
+  const [students, setStudents] = useState([]); // Array of { name, address, lat, lng, assignedBusId, color }
+  const [selectedBusId, setSelectedBusId] = useState(null);
+  const [activeTab, setActiveTab] = useState('status'); // 'status', 'students', 'settings', 'log', 'messages'
+  const [isLogClosing, setIsLogClosing] = useState(false);
+  const [isMessageClosing, setIsMessageClosing] = useState(false);
+  const [editingBus, setEditingBus] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // Messaging States
+  const [msgSelectedBusId, setMsgSelectedBusId] = useState(null);
+  const [msgTargetDriver, setMsgTargetDriver] = useState(false);
+  const [msgTargetTeacher, setMsgTargetTeacher] = useState(false);
+  const [msgTargetStudents, setMsgTargetStudents] = useState([]); // array of student IDs
+
+  const handleTabChange = (newTab) => {
+    if (activeTab === 'log' && newTab !== 'log') {
+      setIsLogClosing(true);
+      setTimeout(() => {
+        setIsLogClosing(false);
+        setActiveTab(newTab);
+      }, 300);
+    } else if (activeTab === 'messages' && newTab !== 'messages') {
+      setIsMessageClosing(true);
+      setTimeout(() => {
+        setIsMessageClosing(false);
+        setActiveTab(newTab);
+      }, 300);
+    } else {
+      setActiveTab(newTab);
+    }
+  };
+  
+  // Load academy from localStorage if it exists
+  const [academy, setAcademy] = useState(() => {
+    const saved = localStorage.getItem('takeme_academy');
+    return saved ? JSON.parse(saved) : null;
+  });
+  
+  const [showAcademyModal, setShowAcademyModal] = useState(!localStorage.getItem('takeme_academy'));
+  const [setupStep, setSetupStep] = useState(1);
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [academyForm, setAcademyForm] = useState({ name: '', address: '' });
+  const [isResettingZones, setIsResettingZones] = useState(false);
+  const resetFileInputRef = useRef(null);
+  const setupFileInputRef = useRef(null);
+  const [isChangingAcademy, setIsChangingAcademy] = useState(false);
+  const [academyChangeForm, setAcademyChangeForm] = useState({ name: '', address: '' });
+  
+  // Zone Editing State
+  const [isZoneEditingMode, setIsZoneEditingMode] = useState(false);
+  const [editingZoneBusId, setEditingZoneBusId] = useState(null);
+  const [editingPolygon, setEditingPolygon] = useState([]);
+  const [isAddingPoint, setIsAddingPoint] = useState(false);
+  
+  // Pickup Point State
+  const [pickupPoints, setPickupPoints] = useState([]);
+  const [showPickupPoints, setShowPickupPoints] = useState(false);
+  const [isAddingPickupPoint, setIsAddingPickupPoint] = useState(false);
+  
+  // Log Viewer State
+  const [logTab, setLogTab] = useState('LOG'); // 'LOG', 'ABSENCE', 'HOLIDAY'
+
+  // Day Filter State
+  const [selectedDay, setSelectedDay] = useState('ALL'); // 'ALL', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'
+
+  const [busLocations, setBusLocations] = useState({});
+
+  useEffect(() => {
+    const socket = io('http://localhost:3000');
+    socket.on('locationUpdated', (data) => {
+      setBusLocations(prev => ({ ...prev, [data.vehicleId]: data }));
+    });
+    return () => socket.disconnect();
+  }, []);
+
+  const handleGenerateAuthCode = async () => {
+    if (!window.confirm('새로운 학원 인증코드를 발급하시겠습니까? 기존 코드는 사용할 수 없게 됩니다.')) return;
+    try {
+      setIsProcessing(true);
+      const res = await fetch('http://localhost:3000/routing/generate-auth-code', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.authCode) {
+        setAcademy(prev => {
+          const updated = { ...prev, authCode: data.authCode };
+          localStorage.setItem('takeme_academy', JSON.stringify(updated));
+          return updated;
+        });
+        alert('새로운 인증코드가 발급되었습니다!');
+      } else {
+        alert(data.message || '인증코드 발급에 실패했습니다. 학원 정보를 먼저 설정해주세요.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('오류가 발생했습니다.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleApproveStudent = async (studentId) => {
+    try {
+      const res = await fetch('http://localhost:3000/routing/approve-student', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId })
+      });
+      if (res.ok) {
+        setStudents(students.map(s => s.id === studentId ? { ...s, approvalStatus: 'APPROVED' } : s));
+      }
+    } catch (e) {
+      console.error(e);
+      alert('승인 처리 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleRevokeStudent = async (studentId, isPending = false) => {
+    if (!window.confirm(isPending ? '가입 승인을 거절하시겠습니까?' : '이 학생의 앱 접근 권한을 해제(탈퇴)하시겠습니까?')) return;
+    try {
+      const res = await fetch('http://localhost:3000/routing/revoke-student', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId })
+      });
+      if (res.ok) {
+        setStudents(students.map(s => s.id === studentId ? { ...s, approvalStatus: 'UNREGISTERED', isRegistered: false } : s));
+      }
+    } catch (e) {
+      console.error(e);
+      alert('처리 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleApproveStaff = async (vehicleId, role) => {
+    try {
+      const res = await fetch('http://localhost:3000/routing/approve-staff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vehicleId, role })
+      });
+      if (res.ok) {
+        setBuses(buses.map(b => {
+          if (b.id !== vehicleId) return b;
+          return role === 'DRIVER' ? { ...b, driverApprovalStatus: 'APPROVED' } : { ...b, teacherApprovalStatus: 'APPROVED' };
+        }));
+      }
+    } catch (e) {
+      console.error(e);
+      alert('승인 처리 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleRevokeStaff = async (vehicleId, role, isPending = false) => {
+    if (!window.confirm(isPending ? '가입 승인을 거절하시겠습니까?' : '이 직원의 앱 접근 권한을 해제(탈퇴)하시겠습니까?')) return;
+    try {
+      const res = await fetch('http://localhost:3000/routing/revoke-staff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vehicleId, role })
+      });
+      if (res.ok) {
+        setBuses(buses.map(b => {
+          if (b.id !== vehicleId) return b;
+          return role === 'DRIVER' 
+            ? { ...b, driverApprovalStatus: 'UNREGISTERED', isDriverRegistered: false } 
+            : { ...b, teacherApprovalStatus: 'UNREGISTERED', isTeacherRegistered: false };
+        }));
+      }
+    } catch (e) {
+      console.error(e);
+      alert('처리 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleDeleteAcademy = async () => {
+    if (!window.confirm('정말 학원 계정을 탈퇴(삭제)하시겠습니까?\n학생 명단, 배차 정보 등 모든 데이터가 영구적으로 삭제됩니다.')) return;
+    try {
+      setIsProcessing(true);
+      const res = await fetch('http://localhost:3000/routing/delete-academy', { method: 'POST' });
+      if (res.ok) {
+        localStorage.removeItem('takeme_academy');
+        localStorage.removeItem('takeme_buses');
+        localStorage.removeItem('takeme_user');
+        setAcademy(null);
+        setBuses([]);
+        setStudents([]);
+        setActiveTab('status');
+        setShowAcademyModal(true);
+        alert('학원 회원 탈퇴 및 데이터 초기화가 완료되었습니다. 로그인 화면으로 돌아갑니다.');
+        navigate('/');
+      } else {
+        alert('탈퇴 처리 중 오류가 발생했습니다.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('처리 중 서버 통신 오류가 발생했습니다.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleAddPickupPoint = async (latlng) => {
+    const name = window.prompt('탑승지 이름을 입력하세요 (예: 한신아파트 정문):');
+    if (!name) {
+      setIsAddingPickupPoint(false);
+      return;
+    }
+    
+    setIsProcessing(true);
+    try {
+      const res = await fetch('http://localhost:3000/routing/pickup-point', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, latitude: latlng[0], longitude: latlng[1] })
+      });
+      if (res.ok) {
+        const newPoint = await res.json();
+        setPickupPoints([...pickupPoints, newPoint]);
+        setShowPickupPoints(true);
+        alert('탑승지가 추가되었습니다.');
+      }
+    } catch (e) {
+      alert('오류가 발생했습니다.');
+    } finally {
+      setIsProcessing(false);
+      setIsAddingPickupPoint(false);
+    }
+  };
+
+  const handleDeletePickupPoint = async (id) => {
+    if (!window.confirm('이 탑승지를 삭제하시겠습니까?')) return;
+    try {
+      const res = await fetch(`http://localhost:3000/routing/pickup-point/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setPickupPoints(pickupPoints.filter(p => p.id !== id));
+      }
+    } catch (e) {}
+  };
+
+  const handleUpdateBus = async (e) => {
+    e.preventDefault();
+    if (!editingBus) return;
+    setIsProcessing(true);
+    try {
+      const res = await fetch(`http://localhost:3000/routing/vehicle/${editingBus.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          busNumber: editingBus.busNumber,
+          plateNumber: editingBus.plateNumber,
+          driverName: editingBus.driverName,
+          driverPhone: editingBus.driverPhone,
+          teacherName: editingBus.teacherName,
+          teacherPhone: editingBus.teacherPhone,
+          capacity: parseInt(editingBus.capacity) || 25,
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert('버스 정보가 성공적으로 수정되었습니다.');
+        // Update local buses array
+        const updatedBuses = buses.map(b => b.id === data.id ? { ...b, ...data } : b);
+        setBuses(updatedBuses);
+        localStorage.setItem('takeme_buses', JSON.stringify(updatedBuses));
+        setEditingBus(null);
+      } else {
+        alert(data.message || '오류가 발생했습니다.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('서버 통신 오류');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const formatPhoneNumber = (value) => {
+    if (!value) return '';
+    const onlyNums = value.replace(/[^\d]/g, '');
+    if (onlyNums.length <= 3) return onlyNums;
+    if (onlyNums.length <= 7) return `${onlyNums.slice(0, 3)}-${onlyNums.slice(3)}`;
+    return `${onlyNums.slice(0, 3)}-${onlyNums.slice(3, 7)}-${onlyNums.slice(7, 11)}`;
+  };
+
+  // Custom icon for Academy
+  const academyIcon = L.divIcon({
+    html: '<div style="font-size: 36px; line-height: 1; text-align: center; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3));">🏫</div>',
+    className: 'bg-transparent',
+    iconSize: [36, 36],
+    iconAnchor: [18, 36],
+    popupAnchor: [0, -36]
+  });
+
+  const computePolygons = (busArray) => {
+    return busArray.map(bus => {
+      if (!bus.points || bus.points.length < 3) return { ...bus, polygon: [] };
+      
+      const turfPoints = turf.featureCollection(
+        bus.points.map(p => turf.point([p[1], p[0]]))
+      );
+      const hull = turf.convex(turfPoints);
+      if (!hull) return { ...bus, polygon: [] };
+      
+      const leafletCoords = hull.geometry.coordinates[0].map(coord => [coord[1], coord[0]]);
+      return { ...bus, polygon: leafletCoords, turfPolygon: hull };
+    });
+  };
+
+  useEffect(() => {
+    const loadInitialState = async () => {
+      try {
+        const res = await fetch('http://localhost:3000/routing/initial-state');
+        const data = await res.json();
+        
+        let foundBuses = false;
+        
+        if (data.academy) {
+          const formattedAcademy = {
+            name: data.academy.name,
+            address: data.academy.roadAddress,
+            lat: parseFloat(data.academy.latitude),
+            lng: parseFloat(data.academy.longitude),
+            authCode: data.academy.authCode
+          };
+          setAcademy(formattedAcademy);
+          setShowAcademyModal(false);
+          localStorage.setItem('takeme_academy', JSON.stringify(formattedAcademy));
+        } else {
+          const savedAcademy = localStorage.getItem('takeme_academy');
+          if (savedAcademy) {
+            try {
+              setAcademy(JSON.parse(savedAcademy));
+              setShowAcademyModal(false);
+            } catch(e) {
+              setAcademy(null);
+              setShowAcademyModal(true);
+            }
+          } else {
+            setAcademy(null);
+            setShowAcademyModal(true);
+          }
+        }
+        
+        if (data.buses && data.buses.length > 0) {
+          setBuses(computePolygons(data.buses));
+          localStorage.setItem('takeme_buses', JSON.stringify(data.buses));
+          foundBuses = true;
+          setShowAcademyModal(false); // Force hide setup wizard if zones already exist
+        } 
+        
+        if (data.students && data.students.length > 0) {
+          setStudents(data.students);
+        }
+        
+        try {
+          const ptRes = await fetch('http://localhost:3000/routing/pickup-points');
+          if (ptRes.ok) {
+            setPickupPoints(await ptRes.json());
+          }
+        } catch (e) {
+          console.error('Failed to fetch pickup points', e);
+        }
+        
+        if (!foundBuses) {
+          let rawBusData = dummyBusData;
+          if (location.state && location.state.buses) {
+            rawBusData = location.state.buses;
+            localStorage.setItem('takeme_buses', JSON.stringify(rawBusData));
+            setShowAcademyModal(false);
+          } else {
+            const saved = localStorage.getItem('takeme_buses');
+            if (saved) { 
+              try { 
+                rawBusData = JSON.parse(saved); 
+                if (rawBusData.length > 0 && rawBusData !== dummyBusData) {
+                  setShowAcademyModal(false);
+                }
+              } catch(e){} 
+            }
+          }
+          setBuses(computePolygons(rawBusData));
+        }
+      } catch (err) {
+        console.error('Failed to load initial state', err);
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+    
+    loadInitialState();
+  }, [location.state]);
+
+  const handleAcademySubmit = async (e) => {
+    e.preventDefault();
+    if (!academyForm.name || !academyForm.address) return alert('학원명과 주소를 입력해주세요.');
+
+    setIsProcessing(true);
+    try {
+      const res = await fetch('http://localhost:3000/routing/geocode-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ addresses: [academyForm.address] })
+      });
+      const geocoded = await res.json();
+      
+      if (geocoded.length > 0 && geocoded[0].coords && !isNaN(geocoded[0].coords.lat) && !isNaN(geocoded[0].coords.lng)) {
+        const newAcademy = {
+          name: academyForm.name,
+          address: academyForm.address,
+          lat: geocoded[0].coords.lat,
+          lng: geocoded[0].coords.lng
+        };
+        
+        // Save to backend
+        try {
+          await fetch('http://localhost:3000/routing/setup-academy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newAcademy)
+          });
+        } catch (e) {
+          console.error('Failed to save academy to backend', e);
+        }
+        
+        setAcademy(newAcademy);
+        localStorage.setItem('takeme_academy', JSON.stringify(newAcademy));
+        setShowAcademyModal(false);
+      } else {
+        alert('주소를 좌표로 변환할 수 없습니다. (카카오 API 키가 만료되었거나 일일 한도를 초과했을 수 있습니다.)');
+      }
+    } catch (err) {
+      alert('주소 변환 중 에러가 발생했습니다.');
+      console.error(err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleChangeAcademySubmit = async (e) => {
+    e.preventDefault();
+    if (!academyChangeForm.name || !academyChangeForm.address) return alert('학원명과 주소를 입력해주세요.');
+
+    setIsProcessing(true);
+    try {
+      const res = await fetch('http://localhost:3000/routing/geocode-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ addresses: [academyChangeForm.address] })
+      });
+      const geocoded = await res.json();
+      
+      if (geocoded.length > 0 && geocoded[0].coords && !isNaN(geocoded[0].coords.lat) && !isNaN(geocoded[0].coords.lng)) {
+        const newAcademy = {
+          name: academyChangeForm.name,
+          address: academyChangeForm.address,
+          lat: geocoded[0].coords.lat,
+          lng: geocoded[0].coords.lng
+        };
+        
+        try {
+          await fetch('http://localhost:3000/routing/setup-academy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newAcademy)
+          });
+        } catch (err) {
+          console.error('Failed to save academy to backend', err);
+        }
+        
+        setAcademy(newAcademy);
+        localStorage.setItem('takeme_academy', JSON.stringify(newAcademy));
+        setIsChangingAcademy(false);
+        alert('학원 위치가 성공적으로 변경되었습니다!');
+      } else {
+        alert('주소를 좌표로 변환할 수 없습니다. 정확한 주소를 입력해주세요.');
+      }
+    } catch (err) {
+      alert('주소 변환 중 에러가 발생했습니다.');
+      console.error(err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleStudentUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setIsProcessing(true);
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const bstr = evt.target.result;
+      const wb = XLSX.read(bstr, { type: 'binary' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws);
+      
+      // Assuming '학생이름/영문이름' and '주소' columns exist
+      const addressMap = data.map(row => ({
+        name: row['학생이름/영문이름'] || row['이름'] || row['원생명'] || '익명',
+        address: row['주소'] || row['승차지'] || row['탑승지'] || row['실탑승지'] || '',
+        raw: row
+      })).filter(item => item.address);
+
+      try {
+        const res = await fetch('http://localhost:3000/routing/geocode-bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ addresses: addressMap.map(a => a.address) })
+        });
+        const geocoded = await res.json();
+        
+        // Point-in-Polygon Assignment
+        const newStudents = [];
+        geocoded.forEach((item, idx) => {
+          if (!item.coords) return;
+          
+          const pt = turf.point([item.coords.lng, item.coords.lat]);
+          let assignedBus = null;
+          let minDistance = Infinity;
+
+          for (const bus of buses) {
+            // 1. Check if inside polygon
+            if (bus.turfPolygon && turf.booleanPointInPolygon(pt, bus.turfPolygon)) {
+              assignedBus = bus;
+              minDistance = 0;
+              break;
+            }
+            
+            // 2. Fallback: calculate distance to closest known point of this bus
+            if (bus.points && bus.points.length > 0) {
+              for (const bPt of bus.points) {
+                // Leaflet uses [lat, lng], Turf uses [lng, lat]
+                const busNode = turf.point([bPt[1], bPt[0]]);
+                const dist = turf.distance(pt, busNode);
+                if (dist < minDistance) {
+                  minDistance = dist;
+                  assignedBus = bus;
+                }
+              }
+            }
+          }
+
+          newStudents.push({
+            id: idx,
+            name: addressMap[idx].name,
+            address: item.address,
+            lat: item.coords.lat,
+            lng: item.coords.lng,
+            assignedBusId: assignedBus ? assignedBus.id : null,
+            color: assignedBus ? assignedBus.color : '#64748b', // Slate for unassigned
+            raw: addressMap[idx].raw
+          });
+        });
+
+        setStudents(newStudents);
+        
+        // Save to backend
+        try {
+          await fetch('http://localhost:3000/routing/save-students', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newStudents)
+          });
+        } catch (e) {
+          console.error('Failed to save students to backend', e);
+        }
+        
+        alert(`총 ${newStudents.length}명의 원생 배차가 완료되었습니다!`);
+      } catch (err) {
+        alert('지오코딩 중 에러가 발생했습니다.');
+        console.error(err);
+      } finally {
+        setIsProcessing(false);
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const handleZoneResetUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setIsProcessing(true);
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const bstr = evt.target.result;
+      const wb = XLSX.read(bstr, { type: 'binary' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws);
+      
+      const busSet = new Set();
+      data.forEach(row => {
+        const b1 = row['등원차량'] || row['차량'] || row['호차'];
+        const b2 = row['하원차량'];
+        if (b1) busSet.add(b1.toString().trim());
+        if (b2) busSet.add(b2.toString().trim());
+      });
+
+      const count = busSet.size > 0 ? busSet.size : 1;
+      const vehicles = Array.from({ length: count }).map((_, i) => ({
+        id: i + 1,
+        busNumber: Array.from(busSet)[i] || `${i + 1}호차`,
+        plateNumber: '',
+        driverName: '미정',
+        driverPhone: '000-0000-0000',
+        teacherName: '미정',
+        teacherPhone: '000-0000-0000',
+        capacity: 25
+      }));
+
+      try {
+        const res = await fetch('http://localhost:3000/routing/init-zones', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vehicles, parsedData: data })
+        });
+        const geocodedBuses = await res.json();
+        
+        // Process polygons before updating state
+        const processedBuses = computePolygons(geocodedBuses);
+        
+        // Immediately update state, map, and localStorage
+        setBuses(processedBuses);
+        localStorage.setItem('takeme_buses', JSON.stringify(geocodedBuses));
+        
+        setStudents([]); // clear old students
+        
+        if (showAcademyModal) {
+          alert('구역 세팅이 완료되었습니다!\n왼쪽 메뉴의 [버스 정보 관리] 탭에서 기사님과 교사님 정보를 등록해주세요.');
+          setSetupStep(2); // Go to Academy Info Input
+        } else {
+          setIsResettingZones(false);
+          alert('구역 세팅이 완료되었습니다!');
+        }
+      } catch (e) {
+        alert('구역 리셋에 실패했습니다.');
+        console.error(e);
+      } finally {
+        setIsProcessing(false);
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const enforceConvexHull = (points) => {
+    if (points.length < 3) return points;
+    const turfPoints = turf.featureCollection(
+      points.map(p => turf.point([p[1], p[0]]))
+    );
+    const hull = turf.convex(turfPoints);
+    if (!hull) return points;
+    const leafletCoords = hull.geometry.coordinates[0].map(coord => [coord[1], coord[0]]);
+    // Remove duplicate last coordinate to prevent overlapping markers
+    if (leafletCoords.length > 1) {
+      const first = leafletCoords[0];
+      const last = leafletCoords[leafletCoords.length - 1];
+      if (first[0] === last[0] && first[1] === last[1]) {
+        leafletCoords.pop();
+      }
+    }
+    return leafletCoords;
+  };
+
+  const handleSelectEditBus = (busId) => {
+    setEditingZoneBusId(busId);
+    setIsAddingPoint(false);
+    const bus = buses.find(b => b.id === busId);
+    if (bus && bus.polygon) {
+      setEditingPolygon(enforceConvexHull([...bus.polygon]));
+    } else {
+      setEditingPolygon([]);
+    }
+  };
+
+  const handleDragEndPoint = (index, e) => {
+    const newPos = [e.target.getLatLng().lat, e.target.getLatLng().lng];
+    setEditingPolygon(prev => {
+      const copy = [...prev];
+      copy[index] = newPos;
+      // Option: to keep it strictly convex even on drag, uncomment below:
+      // return enforceConvexHull(copy);
+      return copy;
+    });
+  };
+
+  const handleAddPoint = (latlng) => {
+    setEditingPolygon(prev => enforceConvexHull([...prev, latlng]));
+    setIsAddingPoint(false); // turn off add mode after 1 click
+  };
+
+  const handleDeletePoint = (index) => {
+    setEditingPolygon(prev => {
+      const copy = [...prev];
+      copy.splice(index, 1);
+      return copy;
+    });
+  };
+
+  const handleSavePolygon = async () => {
+    if (!editingZoneBusId) return;
+    try {
+      setIsProcessing(true);
+      const res = await fetch(`http://localhost:3000/routing/vehicle/${editingZoneBusId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ polygonCoordinates: editingPolygon })
+      });
+      if (res.ok) {
+        const updatedBus = await res.json();
+        // Because backend saves polygonCoordinates as array of [lat, lng],
+        // and we might need to compute the hull again? 
+        // Wait, if user explicitly defines the polygon, we should NOT convex hull it!
+        // We just save it and use it as the polygon.
+        
+        const updated = buses.map(b => {
+          if (b.id === editingZoneBusId) {
+            return { ...b, polygon: editingPolygon, points: editingPolygon }; // Use exact polygon
+          }
+          return b;
+        });
+        setBuses(updated);
+        localStorage.setItem('takeme_buses', JSON.stringify(updated));
+        alert('구역이 저장되었습니다.');
+        setEditingZoneBusId(null);
+      } else {
+        alert('구역 저장에 실패했습니다.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('구역 저장 중 오류가 발생했습니다.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      setIsProcessing(true);
+      const res = await fetch('http://localhost:3000/routing/export-excel');
+      if (!res.ok) throw new Error('다운로드 실패');
+      
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `학원생_데이터_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      alert('엑셀 다운로드 중 오류가 발생했습니다.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  if (isInitializing) {
+    return (
+      <div className="flex h-screen bg-slate-50 items-center justify-center">
+        <div className="text-center">
+          <div className="text-4xl mb-4 animate-bounce">🚌</div>
+          <div className="font-bold text-slate-500 text-lg">데이터를 불러오는 중입니다...</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans relative">
+      {/* Academy Registration Modal Overlay */}
+      {showAcademyModal && (
+        <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 transform transition-all">
+            {setupStep === 1 && (
+              <>
+                <div className="text-center mb-6">
+                  <div className="text-5xl mb-4">🗺️</div>
+                  <h2 className="text-2xl font-bold text-slate-800">초기 구역 설정</h2>
+                  <p className="text-slate-500 text-sm mt-2">전년도 배차 기준 파일을 업로드하여 기본 구역을 세팅해주세요.</p>
+                </div>
+                
+                <div className="p-3 bg-red-100/50 rounded-lg mb-4 text-left">
+                  <p className="text-xs text-red-800 font-bold">💡 작성 안내</p>
+                  <p className="text-xs text-red-700 mt-1">
+                    아래에서 양식을 다운로드한 후, <b>하이라이트 표시된 필수 항목(등원지, 하원지, 차량)</b>만 채워주시면 됩니다.<br/>해당 장소들을 바탕으로 자동으로 픽업/드랍 구역이 나뉩니다.
+                  </p>
+                </div>
+
+                <a href="/전년도_자료_입력_시트_양식.xlsx" download="전년도_자료_입력_시트_양식.xlsx" className="w-full py-3 mb-3 bg-white text-slate-700 rounded-xl text-sm font-bold border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors flex items-center justify-center">
+                  ⬇️ 전년도 양식 다운로드
+                </a>
+                
+                <input type="file" accept=".xlsx, .xls" className="hidden" ref={setupFileInputRef} onChange={handleZoneResetUpload} />
+                <button 
+                  onClick={() => setupFileInputRef.current.click()}
+                  disabled={isProcessing}
+                  className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors shadow-md disabled:opacity-50"
+                >
+                  {isProcessing ? '구역 세팅 중...' : '⬆️ 엑셀 업로드 및 시작하기'}
+                </button>
+              </>
+            )}
+            
+            {setupStep === 2 && (
+              <>
+                <div className="text-center mb-6">
+                  <div className="text-5xl mb-4">🏫</div>
+                  <h2 className="text-2xl font-bold text-slate-800">학원 위치 확인</h2>
+                  <p className="text-slate-500 text-sm mt-2">지도의 중심이 될 학원의 위치를 등록해주세요.</p>
+                </div>
+                
+                <form onSubmit={handleAcademySubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">학원명</label>
+                    <input 
+                      type="text" 
+                      value={academyForm.name} 
+                      onChange={e => setAcademyForm({...academyForm, name: e.target.value})}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                      placeholder="예: 에듀탑 학원"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">학원 도로명 주소</label>
+                    <input 
+                      type="text" 
+                      value={academyForm.address} 
+                      onChange={e => setAcademyForm({...academyForm, address: e.target.value})}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                      placeholder="예: 서울 강남구 역삼로 123"
+                      required
+                    />
+                  </div>
+                  <button 
+                    type="submit" 
+                    disabled={isProcessing}
+                    className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors mt-6 disabled:opacity-50"
+                  >
+                    {isProcessing ? '위치 확인 및 완료 중...' : '모든 설정 완료하고 메인으로'}
+                  </button>
+                </form>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Bookmark Rail (Left Navigation) */}
+      <div className="w-20 bg-blue-700 flex flex-col items-center py-8 gap-6 z-20 shadow-xl">
+        <div className="text-white font-bold text-xs mb-4">Takeme</div>
+        <button onClick={() => handleTabChange('status')} className={`p-4 rounded-2xl transition-all ${activeTab === 'status' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="차량 구역 현황">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" /></svg>
+        </button>
+        <button onClick={() => handleTabChange('buses')} className={`p-4 rounded-2xl transition-all ${activeTab === 'buses' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="버스 정보 관리">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /><path d="M4 15h2v5h12V4H6v5" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} /></svg>
+        </button>
+        <button onClick={() => handleTabChange('students')} className={`p-4 rounded-2xl transition-all ${activeTab === 'students' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="현 학원생 정보">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+        </button>
+        <button onClick={() => handleTabChange('auth')} className={`p-4 rounded-2xl transition-all ${activeTab === 'auth' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="인증 관리">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>
+        </button>
+        <button onClick={() => handleTabChange('log')} className={`p-4 rounded-2xl transition-all ${activeTab === 'log' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="캘린더 및 로그보기">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+          </svg>
+        </button>
+        <button onClick={() => handleTabChange('messages')} className={`p-4 rounded-2xl transition-all ${activeTab === 'messages' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="메세지함">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+        </button>
+        <button onClick={() => handleTabChange('settings')} className={`p-4 rounded-2xl transition-all mt-auto ${activeTab === 'settings' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="환경설정">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+        </button>
+      </div>
+
+      {/* Sidebar Content Panel */}
+      <div className="w-80 bg-white shadow-lg z-10 flex flex-col">
+        {activeTab === 'status' && (
+          <div className="p-6 h-full flex flex-col">
+            <h2 className="text-xl font-bold text-slate-800 mb-4">차량 구역 현황</h2>
+            <button 
+              onClick={() => setShowPickupPoints(!showPickupPoints)} 
+              className={`mb-2 w-full py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${showPickupPoints ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-inner' : 'border-slate-200 bg-white text-slate-600 hover:border-orange-300 hover:text-orange-600 shadow-sm'}`}
+            >
+              {showPickupPoints ? '🚏 탑승지 숨기기' : '🚏 탑승지 보기'}
+            </button>
+            <button 
+              onClick={() => setIsAddingPickupPoint(!isAddingPickupPoint)} 
+              className={`mb-4 w-full py-2.5 rounded-xl text-sm font-bold border-2 transition-all ${isAddingPickupPoint ? 'border-purple-500 bg-purple-50 text-purple-700 shadow-inner' : 'border-slate-200 bg-white text-slate-600 hover:border-purple-300 hover:text-purple-600 shadow-sm'}`}
+            >
+              {isAddingPickupPoint ? '📍 지도에서 탑승지 위치를 클릭하세요' : '📍 새 탑승지 추가'}
+            </button>
+            <div className="space-y-3 overflow-y-auto">
+              {buses.length === 0 ? (
+                <div className="text-slate-400 text-sm text-center py-10">위저드에서 전년도 엑셀을 업로드하여 구역을 생성해주세요.</div>
+              ) : (
+                buses.map(bus => {
+                  const isSelected = selectedBusId === bus.id;
+                  const busStudents = students.filter(st => st.assignedBusId === bus.id);
+                  return (
+                    <div 
+                      key={bus.id} 
+                      className={`p-4 border shadow-sm rounded-xl transition-all cursor-pointer ${isSelected ? 'border-blue-500 bg-blue-50/30' : 'border-slate-100 hover:border-blue-200'}`}
+                      onClick={() => setSelectedBusId(isSelected ? null : bus.id)}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-4 h-4 rounded-full shadow-inner flex-shrink-0" style={{ backgroundColor: bus.color }}></div>
+                        <div className="flex-1">
+                          <div className="font-bold text-slate-800 flex items-center justify-between">
+                            {bus.name} 
+                            {busStudents.length > 0 && <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{busStudents.length}명</span>}
+                          </div>
+                          <div className="text-xs text-slate-500 mt-0.5">
+                            {bus.polygon && bus.polygon.length > 0 ? '구역 설정됨' : '좌표만 인식됨 (구역 불가)'}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {isSelected && busStudents.length > 0 && (
+                        <div className="mt-4 border-t border-slate-100 pt-3 space-y-2">
+                          {busStudents.map(st => (
+                            <div key={st.id} className="text-xs flex justify-between items-center bg-white p-2 rounded-lg border border-slate-100 shadow-sm">
+                              <span className="font-bold text-slate-700">{st.name}</span>
+                              <span className="text-slate-400 truncate max-w-[120px] text-right" title={st.address}>{st.address}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {isSelected && busStudents.length === 0 && (
+                        <div className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-400 text-center">배정된 학생이 없습니다.</div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'messages' && (
+          <div className="p-6 h-full flex flex-col">
+            <h2 className="text-xl font-bold text-slate-800 mb-2">메세지 수신 선택</h2>
+            <p className="text-xs text-slate-500 mb-6">메세지를 보낼 호차와 수신자를 선택해주세요.</p>
+            
+            <div className="space-y-3 overflow-y-auto pr-2">
+              {buses.length === 0 ? (
+                <div className="text-slate-400 text-sm text-center py-10">등록된 버스가 없습니다.</div>
+              ) : (
+                buses.map(bus => {
+                  const isSelected = msgSelectedBusId === bus.id;
+                  const busStudents = students.filter(st => st.assignedBusId === bus.id);
+                  return (
+                    <div 
+                      key={bus.id} 
+                      className={`p-4 border shadow-sm rounded-xl transition-all ${isSelected ? 'border-blue-500 bg-blue-50' : 'border-slate-100 hover:border-blue-200 bg-white'}`}
+                    >
+                      <div 
+                        className="flex items-center gap-4 cursor-pointer"
+                        onClick={() => {
+                          if (isSelected) {
+                            setMsgSelectedBusId(null);
+                            setMsgTargetStudents([]);
+                          } else {
+                            setMsgSelectedBusId(bus.id);
+                            setMsgTargetDriver(false);
+                            setMsgTargetTeacher(false);
+                            setMsgTargetStudents([]);
+                          }
+                        }}
+                      >
+                        <div className="w-4 h-4 rounded-full shadow-inner flex-shrink-0" style={{ backgroundColor: bus.color }}></div>
+                        <div className="flex-1 font-bold text-slate-800">
+                          {bus.name}
+                        </div>
+                      </div>
+                      
+                      {isSelected && (
+                        <div className="mt-4 border-t border-slate-200 pt-3 space-y-3">
+                          <div className="flex gap-2">
+                            <label className={`flex-1 flex items-center justify-center gap-2 p-2 rounded-lg border-2 cursor-pointer transition-all ${msgTargetDriver ? 'border-blue-500 bg-blue-100' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                              <input type="checkbox" className="hidden" checked={msgTargetDriver} onChange={() => setMsgTargetDriver(!msgTargetDriver)} />
+                              <span className={`font-bold text-sm ${msgTargetDriver ? 'text-blue-700' : 'text-slate-600'}`}>🚙 기사님</span>
+                            </label>
+                            <label className={`flex-1 flex items-center justify-center gap-2 p-2 rounded-lg border-2 cursor-pointer transition-all ${msgTargetTeacher ? 'border-green-500 bg-green-100' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                              <input type="checkbox" className="hidden" checked={msgTargetTeacher} onChange={() => setMsgTargetTeacher(!msgTargetTeacher)} />
+                              <span className={`font-bold text-sm ${msgTargetTeacher ? 'text-green-700' : 'text-slate-600'}`}>👩‍🏫 지도교사</span>
+                            </label>
+                          </div>
+                          
+                          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+                            <div className="bg-slate-50 px-3 py-2 flex justify-between items-center border-b border-slate-200">
+                              <span className="text-xs font-bold text-slate-600">학생 학부모님 ({msgTargetStudents.length}/{busStudents.length})</span>
+                              <button 
+                                onClick={() => {
+                                  if (msgTargetStudents.length === busStudents.length) setMsgTargetStudents([]);
+                                  else setMsgTargetStudents(busStudents.map(s => s.id));
+                                }}
+                                className="text-[10px] bg-white border border-slate-300 px-2 py-1 rounded hover:bg-slate-100 font-bold"
+                              >전체 선택</button>
+                            </div>
+                            <div className="max-h-40 overflow-y-auto p-2 space-y-1">
+                              {busStudents.map(st => (
+                                <label key={st.id} className={`flex items-center gap-2 p-1.5 rounded cursor-pointer ${msgTargetStudents.includes(st.id) ? 'bg-slate-100' : 'hover:bg-slate-50'}`}>
+                                  <input 
+                                    type="checkbox" 
+                                    checked={msgTargetStudents.includes(st.id)}
+                                    onChange={() => {
+                                      if (msgTargetStudents.includes(st.id)) setMsgTargetStudents(msgTargetStudents.filter(id => id !== st.id));
+                                      else setMsgTargetStudents([...msgTargetStudents, st.id]);
+                                    }}
+                                    className="w-3.5 h-3.5 rounded text-blue-600"
+                                  />
+                                  <span className="text-xs font-bold text-slate-700">{st.name} <span className="font-normal text-slate-400">({st.raw?.['보호자 성함'] || '학부모'})</span></span>
+                                </label>
+                              ))}
+                              {busStudents.length === 0 && <div className="text-center text-xs text-slate-400 py-2">배정된 학생이 없습니다.</div>}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'buses' && (
+          <div className="p-6 h-full flex flex-col">
+            <h2 className="text-xl font-bold text-slate-800 mb-6">버스 정보 관리</h2>
+            <div className="space-y-3 overflow-y-auto pr-2">
+              {buses.length === 0 ? (
+                <div className="text-slate-400 text-sm text-center py-10">등록된 버스가 없습니다.</div>
+              ) : (
+                buses.map(bus => (
+                  <div key={bus.id} className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: bus.color }}></div>
+                        <h3 className="font-bold text-slate-800 text-lg">{bus.name}</h3>
+                      </div>
+                      <button 
+                        onClick={() => setEditingBus(bus)}
+                        className="text-xs bg-blue-50 text-blue-600 font-bold px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors"
+                      >
+                        상세 수정
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+                      <div><span className="text-slate-400 inline-block w-16">호차:</span> {bus.busNumber || '미지정'}</div>
+                      <div><span className="text-slate-400 inline-block w-16">차량번호:</span> {bus.plateNumber || '미등록'}</div>
+                      <div><span className="text-slate-400 inline-block w-16">기사님:</span> {bus.driverName || '미지정'}</div>
+                      <div><span className="text-slate-400 inline-block w-16">교사님:</span> {bus.teacherName || '미지정'}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'students' && (
+          <div className="p-6 h-full flex flex-col">
+            <h2 className="text-xl font-bold text-slate-800 mb-2">현 학원생 정보</h2>
+            <div className="mb-4 space-y-2">
+              <p className="text-xs text-slate-500">학부모님들이 학생 앱을 통해 등록한 원생들의 정보가 자동으로 이곳에 모입니다.<br/><b>아래 버튼을 눌러 요일별 엑셀 시트로 정보를 다운로드하세요.</b></p>
+            </div>
+            
+            <button 
+              onClick={handleExportExcel}
+              disabled={isProcessing}
+              className="flex items-center justify-center w-full py-3 mb-6 bg-emerald-600 text-white font-bold rounded-xl shadow-md hover:bg-emerald-700 transition-colors disabled:opacity-50"
+            >
+              {isProcessing ? '다운로드 준비 중...' : '⬇️ 학원생 엑셀파일 다운로드'}
+            </button>
+            {students.length > 0 && (
+              <div className="mt-6 flex-1 overflow-y-auto">
+                <h3 className="font-bold text-slate-700 text-sm mb-3 border-b pb-2">배차 결과 ({students.length}명)</h3>
+                <div className="space-y-3 pr-2">
+                  {students.map(st => (
+                    <div key={st.id} className="p-3 bg-white border border-slate-200 rounded-lg shadow-sm hover:shadow-md transition-shadow">
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: st.color }}></div>
+                        <span className="font-bold text-slate-800 text-sm">{st.name}</span>
+                        <span className="text-xs text-slate-500">{st.raw?.['학교명']} {st.raw?.['학년']}</span>
+                      </div>
+                      <div className="text-xs text-slate-600 truncate mb-1">{st.address}</div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500">{st.raw?.['보호자 성함']} {st.raw?.['보호자연락처']}</span>
+                        <span className="font-bold" style={{ color: st.color }}>
+                          {st.assignedBusId ? buses.find(b=>b.id===st.assignedBusId)?.name : '배정 실패'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'auth' && (
+          <div className="p-6 h-full flex flex-col">
+            <h2 className="text-xl font-bold text-slate-800 mb-6">학생 앱 가입 현황</h2>
+            
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 mb-6 text-center shadow-sm">
+              <h3 className="text-blue-800 font-bold mb-2">학원 인증코드</h3>
+              {academy?.authCode ? (
+                <div className="text-3xl font-black text-blue-600 tracking-widest">{academy.authCode}</div>
+              ) : (
+                <div className="text-slate-500 mb-3 text-sm">현재 발급된 코드가 없습니다.</div>
+              )}
+              <button 
+                onClick={handleGenerateAuthCode}
+                disabled={isProcessing}
+                className="mt-4 px-6 py-2 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 transition shadow-sm text-sm"
+              >
+                {academy?.authCode ? '인증코드 재발급' : '인증코드 발급받기'}
+              </button>
+              <p className="text-xs text-blue-600/80 mt-3">학부모님들이 학생 앱에 가입할 때 이 코드를 입력해야 합니다.</p>
+            </div>
+
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex flex-col gap-2 mb-4">
+                <h3 className="font-bold text-slate-700">전체 원생 ({students.length}명)</h3>
+                <div className="flex flex-wrap gap-3 text-xs font-medium">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500"></span>승인 {students.filter(s => s.approvalStatus === 'APPROVED').length}명</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500"></span>대기 {students.filter(s => s.approvalStatus === 'PENDING').length}명</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-300"></span>미가입 {students.filter(s => !s.approvalStatus || s.approvalStatus === 'UNREGISTERED').length}명</span>
+                </div>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+                {students.map(st => (
+                  <div key={st.id} className="p-3 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center justify-between">
+                    <div>
+                      <div className="font-bold text-slate-800 flex items-center gap-2">
+                        {st.name} 
+                        {st.approvalStatus === 'APPROVED' ? (
+                          <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded border border-green-200 font-bold">승인완료</span>
+                        ) : st.approvalStatus === 'PENDING' ? (
+                          <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded border border-orange-200 font-bold">승인대기</span>
+                        ) : (
+                          <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded border border-slate-200">미가입</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1">{st.assignedBusId ? buses.find(b=>b.id===st.assignedBusId)?.name : '배정 안됨'} • {st.address}</div>
+                    </div>
+                    
+                    <div className="flex gap-2">
+                      {st.approvalStatus === 'PENDING' && (
+                        <>
+                          <button onClick={() => handleApproveStudent(st.id)} className="px-3 py-1.5 bg-green-600 text-white text-xs font-bold rounded shadow-sm hover:bg-green-700">승인</button>
+                          <button onClick={() => handleRevokeStudent(st.id, true)} className="px-3 py-1.5 bg-slate-200 text-slate-600 text-xs font-bold rounded shadow-sm hover:bg-slate-300">거절</button>
+                        </>
+                      )}
+                      {st.approvalStatus === 'APPROVED' && (
+                        <button onClick={() => handleRevokeStudent(st.id, false)} className="px-3 py-1.5 border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50">연동 해제</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {students.length === 0 && (
+                  <div className="text-center text-slate-400 py-10 text-sm">먼저 원생 명단을 업로드해주세요.</div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex-1 flex flex-col overflow-hidden mt-6">
+              <div className="flex flex-col gap-2 mb-4">
+                <h3 className="font-bold text-slate-700">차량 스태프 (기사/교사) 가입 현황</h3>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+                {buses.map(bus => (
+                  <div key={bus.id} className="p-3 bg-white border border-slate-200 rounded-lg shadow-sm flex flex-col gap-3">
+                    <div className="font-bold text-slate-800 text-sm border-b pb-2">{bus.name} ({bus.plateNumber})</div>
+                    
+                    <div className="flex flex-col gap-2">
+                      <div className="text-sm flex items-center gap-2">
+                        <span className="text-slate-500 w-14 shrink-0 whitespace-nowrap">기사님</span>
+                        <span className="font-bold text-slate-700 whitespace-nowrap text-base">{bus.driverName}</span>
+                      </div>
+                      <div className="flex items-center gap-3 ml-16">
+                        {bus.driverApprovalStatus === 'APPROVED' ? (
+                          <span className="text-[11px] bg-green-100 text-green-700 px-2 py-1 rounded border border-green-200 font-bold">승인완료</span>
+                        ) : bus.driverApprovalStatus === 'PENDING' ? (
+                          <span className="text-[11px] bg-orange-100 text-orange-700 px-2 py-1 rounded border border-orange-200 font-bold">승인대기</span>
+                        ) : (
+                          <span className="text-[11px] bg-slate-100 text-slate-500 px-2 py-1 rounded border border-slate-200">미가입</span>
+                        )}
+                        <div className="flex gap-2">
+                          {bus.driverApprovalStatus === 'PENDING' && (
+                            <>
+                              <button onClick={() => handleApproveStaff(bus.id, 'DRIVER')} className="px-4 py-1.5 bg-green-600 text-white text-xs font-bold rounded shadow-sm hover:bg-green-700">승인</button>
+                              <button onClick={() => handleRevokeStaff(bus.id, 'DRIVER', true)} className="px-4 py-1.5 bg-slate-200 text-slate-600 text-xs font-bold rounded shadow-sm hover:bg-slate-300">거절</button>
+                            </>
+                          )}
+                          {bus.driverApprovalStatus === 'APPROVED' && (
+                            <button onClick={() => handleRevokeStaff(bus.id, 'DRIVER', false)} className="px-4 py-1.5 border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50">연동 해제</button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2 pt-3 border-t border-slate-100">
+                      <div className="text-sm flex items-center gap-2">
+                        <span className="text-slate-500 w-14 shrink-0 whitespace-nowrap">지도교사</span>
+                        <span className="font-bold text-slate-700 whitespace-nowrap text-base">{bus.teacherName}</span>
+                      </div>
+                      <div className="flex items-center gap-3 ml-16">
+                        {bus.teacherApprovalStatus === 'APPROVED' ? (
+                          <span className="text-[11px] bg-green-100 text-green-700 px-2 py-1 rounded border border-green-200 font-bold">승인완료</span>
+                        ) : bus.teacherApprovalStatus === 'PENDING' ? (
+                          <span className="text-[11px] bg-orange-100 text-orange-700 px-2 py-1 rounded border border-orange-200 font-bold">승인대기</span>
+                        ) : (
+                          <span className="text-[11px] bg-slate-100 text-slate-500 px-2 py-1 rounded border border-slate-200">미가입</span>
+                        )}
+                        <div className="flex gap-2">
+                          {bus.teacherApprovalStatus === 'PENDING' && (
+                            <>
+                              <button onClick={() => handleApproveStaff(bus.id, 'TEACHER')} className="px-4 py-1.5 bg-green-600 text-white text-xs font-bold rounded shadow-sm hover:bg-green-700">승인</button>
+                              <button onClick={() => handleRevokeStaff(bus.id, 'TEACHER', true)} className="px-4 py-1.5 bg-slate-200 text-slate-600 text-xs font-bold rounded shadow-sm hover:bg-slate-300">거절</button>
+                            </>
+                          )}
+                          {bus.teacherApprovalStatus === 'APPROVED' && (
+                            <button onClick={() => handleRevokeStaff(bus.id, 'TEACHER', false)} className="px-4 py-1.5 border border-red-200 text-red-600 text-xs font-bold rounded hover:bg-red-50">연동 해제</button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'settings' && (
+          <div className="p-6 h-full flex flex-col">
+            <h2 className="text-xl font-bold text-slate-800 mb-6">환경설정</h2>
+            
+            <div className="space-y-4">
+              <div className="p-4 bg-blue-50 rounded-xl border border-blue-100 transition-all">
+                <h3 className="font-bold text-blue-700 mb-1">구역 맵핑(Zone) 수정</h3>
+                <p className="text-xs text-blue-600 mb-3 opacity-80">지도에서 직접 각 호차의 배차 구역을 정밀하게 다듬습니다.</p>
+                <button onClick={() => {
+                  setIsZoneEditingMode(!isZoneEditingMode);
+                  if (isZoneEditingMode) setEditingZoneBusId(null);
+                }} className={`w-full py-2 bg-white rounded-lg text-sm font-bold border shadow-sm transition-colors ${isZoneEditingMode ? 'border-blue-600 text-blue-700 bg-blue-100' : 'text-blue-600 border-blue-200 hover:bg-blue-600 hover:text-white'}`}>
+                  {isZoneEditingMode ? '구역 수정 모드 종료' : '구역 수정 모드 진입'}
+                </button>
+              </div>
+
+              <div className="p-4 bg-red-50 rounded-xl border border-red-100 transition-all">
+                <h3 className="font-bold text-red-700 mb-1">전년도 구역 초기화</h3>
+                <p className="text-xs text-red-600 mb-3 opacity-80">현재 설정된 모든 버스와 배차 구역이 영구적으로 삭제됩니다.</p>
+                
+                {!isResettingZones ? (
+                  <button onClick={() => setIsResettingZones(true)} className="w-full py-2 bg-white text-red-600 rounded-lg text-sm font-bold border border-red-200 shadow-sm hover:bg-red-600 hover:text-white transition-colors">
+                    구역 리셋 모드 진입
+                  </button>
+                ) : (
+                  <div className="space-y-3 mt-4 pt-4 border-t border-red-200">
+                    <div className="p-3 bg-red-100/50 rounded-lg">
+                      <p className="text-xs text-red-800 font-bold">💡 작성 안내</p>
+                      <p className="text-xs text-red-700 mt-1">
+                        다운로드한 양식에서 <b>하이라이트 표시된 필수 항목(등원지, 하원지, 차량)</b>만 채워주시면 됩니다. 해당 장소들을 바탕으로 자동으로 픽업/드랍 구역이 나뉩니다.
+                      </p>
+                    </div>
+                    
+                    <a href="/전년도_자료_입력_시트_양식.xlsx" download="전년도_자료_입력_시트_양식.xlsx" className="w-full py-2 bg-white text-slate-700 rounded-lg text-sm border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors flex items-center justify-center font-medium">
+                      ⬇️ 전년도 양식 다운로드
+                    </a>
+                    
+                    <input type="file" accept=".xlsx, .xls" className="hidden" ref={resetFileInputRef} onChange={handleZoneResetUpload} />
+                    <button 
+                      onClick={() => resetFileInputRef.current.click()} 
+                      disabled={isProcessing}
+                      className="w-full py-2 bg-red-600 text-white rounded-lg text-sm font-bold shadow-sm hover:bg-red-700 disabled:opacity-50 transition-colors"
+                    >
+                      {isProcessing ? '초기화 및 지오코딩 중...' : '⬆️ 새 엑셀 업로드 및 리셋'}
+                    </button>
+                    
+                    <button onClick={() => setIsResettingZones(false)} className="w-full py-2 mt-2 bg-transparent text-red-600 rounded-lg text-xs hover:underline">
+                      취소
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-4 bg-orange-50 rounded-xl border border-orange-100 transition-all">
+                <h3 className="font-bold text-orange-700 mb-1">학원 위치 변경</h3>
+                <p className="text-xs text-orange-600 mb-3 opacity-80">학원이 이전한 경우 새 주소와 이름을 입력하세요.</p>
+                
+                {!isChangingAcademy ? (
+                  <button onClick={() => {
+                    setAcademyChangeForm({ name: academy?.name || '', address: academy?.address || '' });
+                    setIsChangingAcademy(true);
+                  }} className="w-full py-2 bg-white text-orange-600 rounded-lg text-sm font-bold border border-orange-200 shadow-sm hover:bg-orange-600 hover:text-white transition-colors">
+                    학원 위치 변경 모드
+                  </button>
+                ) : (
+                  <form onSubmit={handleChangeAcademySubmit} className="space-y-3 mt-4 pt-4 border-t border-orange-200">
+                    <div>
+                      <label className="block text-xs font-bold text-orange-800 mb-1">새 학원명</label>
+                      <input 
+                        type="text" 
+                        value={academyChangeForm.name} 
+                        onChange={e => setAcademyChangeForm({...academyChangeForm, name: e.target.value})}
+                        className="w-full px-3 py-2 bg-white border border-orange-200 rounded-lg text-sm outline-none"
+                        placeholder="학원명"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-orange-800 mb-1">새 학원 주소 (도로명/지번)</label>
+                      <input 
+                        type="text" 
+                        value={academyChangeForm.address} 
+                        onChange={e => setAcademyChangeForm({...academyChangeForm, address: e.target.value})}
+                        className="w-full px-3 py-2 bg-white border border-orange-200 rounded-lg text-sm outline-none"
+                        placeholder="주소"
+                        required
+                      />
+                    </div>
+                    <button 
+                      type="submit" 
+                      disabled={isProcessing}
+                      className="w-full py-2 bg-orange-600 text-white rounded-lg text-sm font-bold shadow-sm hover:bg-orange-700 disabled:opacity-50 transition-colors"
+                    >
+                      {isProcessing ? '변경 중...' : '변경 완료'}
+                    </button>
+                    <button type="button" onClick={() => setIsChangingAcademy(false)} className="w-full py-2 mt-1 bg-transparent text-orange-600 rounded-lg text-xs hover:underline">
+                      취소
+                    </button>
+                  </form>
+                )}
+              </div>
+
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 mt-auto">
+                <h3 className="font-bold text-slate-700 mb-1">계정 관리</h3>
+                <button 
+                  onClick={handleDeleteAcademy}
+                  disabled={isProcessing}
+                  className="w-full py-2 bg-white text-slate-500 rounded-lg text-sm font-bold border border-slate-300 shadow-sm hover:bg-red-50 hover:text-red-600 hover:border-red-200 disabled:opacity-50 transition-colors"
+                >
+                  {isProcessing ? '처리 중...' : '회원 탈퇴'}
+                </button>
+              </div>
+              </div>
+            </div>
+        )}
+
+          {activeTab === 'log' && (
+            <div className="flex flex-col h-full">
+              <div className="p-5 border-b border-slate-100 bg-white">
+                <h2 className="text-xl font-black text-slate-800 mb-2 flex items-center gap-2">
+                  <span>📅</span> 캘린더 및 로그
+                </h2>
+                <p className="text-sm text-slate-500 font-medium">원생의 출결과 로그를 확인하세요.</p>
+              </div>
+              <div className="p-4 flex flex-col gap-3">
+                <button onClick={() => setLogTab('LOG')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'LOG' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>로그보기</button>
+                <button onClick={() => setLogTab('ABSENCE')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'ABSENCE' ? 'bg-red-500 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>학원생 결석관리</button>
+                <button onClick={() => setLogTab('HOLIDAY')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'HOLIDAY' ? 'bg-orange-500 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>🎉 휴업일 설정</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+      {/* Map Area */}
+      <div className="flex-1 relative z-0 overflow-hidden">
+        
+        {activeTab === 'log' && (
+          <LogViewer 
+            buses={buses} 
+            students={students}
+            currentTab={logTab} 
+            isClosing={isLogClosing}
+          />
+        )}
+
+        {activeTab === 'messages' && (
+          <MessagePanel 
+            buses={buses} 
+            students={students} 
+            isClosing={isMessageClosing}
+            msgSelectedBusId={msgSelectedBusId}
+            msgTargetDriver={msgTargetDriver}
+            msgTargetTeacher={msgTargetTeacher}
+            msgTargetStudents={msgTargetStudents}
+            resetSelections={() => {
+              setMsgSelectedBusId(null);
+              setMsgTargetDriver(false);
+              setMsgTargetTeacher(false);
+              setMsgTargetStudents([]);
+            }}
+          />
+        )}
+
+        {/* Zone Editing Overlay */}
+        {isZoneEditingMode && (
+          <div className="absolute top-4 left-16 z-[1000] bg-white/95 backdrop-blur-sm p-4 rounded-2xl shadow-xl border border-blue-100 flex flex-col gap-3 min-w-[200px]">
+            <h3 className="font-bold text-slate-800 text-sm">구역 수정할 호차 선택</h3>
+            <div className="flex flex-col gap-1">
+              {buses.map(bus => (
+                <button
+                  key={bus.id}
+                  onClick={() => handleSelectEditBus(bus.id)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-bold transition-all ${editingZoneBusId === bus.id ? 'bg-blue-50 border-blue-200 shadow-inner text-blue-800' : 'hover:bg-slate-50 border-transparent text-slate-600'} border`}
+                >
+                  <span className="w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: bus.color }}></span>
+                  {bus.name}
+                </button>
+              ))}
+            </div>
+            {editingZoneBusId && (
+              <div className="mt-1 pt-3 border-t border-slate-200 flex flex-col gap-2">
+                <button 
+                  onClick={() => setIsAddingPoint(!isAddingPoint)}
+                  className={`w-full py-2.5 rounded-lg text-xs font-bold transition-colors ${isAddingPoint ? 'bg-blue-600 text-white shadow-inner' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                >
+                  {isAddingPoint ? '지도 빈곳 클릭 시 점 추가' : '+ 새 꼭짓점 추가'}
+                </button>
+                <button 
+                  onClick={handleSavePolygon}
+                  disabled={isProcessing}
+                  className="w-full py-2.5 bg-green-600 text-white rounded-lg text-xs font-bold shadow-md hover:bg-green-700 transition-colors disabled:opacity-50"
+                >
+                  {isProcessing ? '저장 중...' : '✅ 수정 내역 저장'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Log Viewer Overlay */}
+        {activeTab === 'log' && (
+          <LogViewer 
+            buses={buses} 
+            students={students}
+            currentTab={logTab} 
+          />
+        )}
+
+        {/* Day Filter Controls */}
+        <div className="absolute top-4 right-4 z-[1000] flex bg-white rounded-lg shadow-lg border border-slate-200 overflow-hidden text-sm font-bold">
+          {[
+            { id: 'ALL', label: '전체' },
+            { id: 'MON', label: '월' },
+            { id: 'TUE', label: '화' },
+            { id: 'WED', label: '수' },
+            { id: 'THU', label: '목' },
+            { id: 'FRI', label: '금' },
+            { id: 'SAT', label: '토' },
+            { id: 'SUN', label: '일' },
+          ].map(day => (
+            <button
+              key={day.id}
+              onClick={() => setSelectedDay(day.id)}
+              className={`px-3 py-2 transition-colors ${selectedDay === day.id ? 'bg-blue-600 text-white' : 'hover:bg-slate-50 text-slate-700 border-l first:border-l-0 border-slate-200'}`}
+            >
+              {day.label}
+            </button>
+          ))}
+        </div>
+
+        <MapContainer 
+          center={academy && !isNaN(academy.lat) && !isNaN(academy.lng) ? [academy.lat, academy.lng] : [37.5650, 126.9750]} 
+          zoom={14} 
+          className="w-full h-full"
+          key={academy && !isNaN(academy.lat) && !isNaN(academy.lng) ? `${academy.lat}-${academy.lng}` : 'default-map'} // Re-center map when academy updates
+        >
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+
+          <MapBoundsFit buses={buses} academy={academy} />
+
+          {/* Draw Academy Marker */}
+          {academy && !isNaN(academy.lat) && !isNaN(academy.lng) && (
+            <Marker position={[academy.lat, academy.lng]} icon={academyIcon}>
+              <Popup>
+                <div className="font-bold text-lg text-center text-blue-700">{academy.name}</div>
+                <div className="text-xs text-slate-500 mt-1">{academy.address}</div>
+              </Popup>
+            </Marker>
+          )}
+          
+          <ZoneEditEvents isAddingPoint={isAddingPoint} onAddPoint={handleAddPoint} />
+          <PickupPointEvents isAddingPickupPoint={isAddingPickupPoint} onAddPickupPoint={handleAddPickupPoint} />
+
+          {/* Draw Pickup Points */}
+          {showPickupPoints && (() => {
+            const allPickupPoints = [];
+            const uniqueNames = new Set();
+            
+            pickupPoints.forEach(p => {
+              uniqueNames.add(p.name);
+              allPickupPoints.push({ ...p, isDb: true });
+            });
+
+            students.forEach(st => {
+              const locName = st.boardingLocation || st.address;
+              if (locName && st.lat && st.lng && !uniqueNames.has(locName)) {
+                uniqueNames.add(locName);
+                allPickupPoints.push({
+                  id: `st-${st.id}`,
+                  name: locName,
+                  latitude: st.lat,
+                  longitude: st.lng
+                });
+              }
+            });
+
+            const visiblePickupPoints = allPickupPoints.filter(p => {
+              if (selectedBusId) {
+                const bus = buses.find(b => b.id === selectedBusId);
+                if (!bus) return false;
+                const poly = (isZoneEditingMode && editingZoneBusId === bus.id) ? editingPolygon : bus.polygon;
+                if (!poly || poly.length < 3) return false;
+                
+                try {
+                  const coords = poly.map(coord => [coord[1], coord[0]]);
+                  coords.push(coords[0]); // close polygon
+                  const polygon = turf.polygon([coords]);
+                  const pt = turf.point([p.longitude, p.latitude]);
+                  return turf.booleanPointInPolygon(pt, polygon);
+                } catch (e) {
+                  return false;
+                }
+              }
+              return true;
+            });
+
+            return visiblePickupPoints.map(p => {
+            const ptIcon = L.divIcon({
+              className: 'pickup-marker',
+              html: `<div style="font-size: 24px; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">🚏</div>`,
+              iconSize: [24, 24],
+              iconAnchor: [12, 24]
+            });
+            return (
+              <Marker key={`pickup-${p.id}`} position={[p.latitude, p.longitude]} icon={ptIcon}>
+                <Popup>
+                  <div className="text-left p-1 w-40 max-h-48 overflow-y-auto">
+                    <div className="font-bold text-sm text-slate-800 border-b pb-1 mb-1">{p.name}</div>
+                    
+                    <div className="text-xs text-slate-600 mb-2">
+                      <div className="font-bold text-slate-500 mb-1">
+                        탑승학생 ({(() => {
+                          const boardingStudents = students.filter(st => (st.boardingLocation || st.address) === p.name);
+                          return boardingStudents.length;
+                        })()}명)
+                      </div>
+                      {(() => {
+                        const boardingStudents = students.filter(st => (st.boardingLocation || st.address) === p.name);
+                        if (boardingStudents.length > 0) {
+                          return (
+                            <ul className="list-disc pl-4 space-y-0.5">
+                              {boardingStudents.map(st => <li key={st.id}>{st.name}</li>)}
+                            </ul>
+                          );
+                        } else {
+                          return <span className="text-slate-400">없음</span>;
+                        }
+                      })()}
+                    </div>
+                    
+                    {p.isDb && (
+                      <div className="text-right border-t pt-1 mt-1">
+                        <button onClick={() => handleDeletePickupPoint(p.id)} className="w-full py-1 bg-red-50 text-red-600 border border-red-200 text-xs font-bold rounded shadow-sm hover:bg-red-500 hover:text-white transition-colors">삭제</button>
+                      </div>
+                    )}
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })})()}
+          
+          {/* Draw Convex Hull Polygon */}
+          {(selectedBusId ? buses.filter(b => b.id === selectedBusId) : buses).map(bus => {
+            const isEditingThis = isZoneEditingMode && editingZoneBusId === bus.id;
+            const polygonPoints = isEditingThis ? editingPolygon : bus.polygon;
+            
+            return (
+            <Fragment key={bus.id}>
+              {polygonPoints && polygonPoints.length > 0 ? (
+                <>
+                  <Polygon 
+                    positions={polygonPoints} 
+                    pathOptions={{ 
+                      color: bus.color, 
+                      fillColor: bus.color, 
+                      fillOpacity: isEditingThis ? 0.1 : 0.3,
+                      weight: isEditingThis ? 3 : 2,
+                      dashArray: isEditingThis ? '5, 10' : null
+                    }} 
+                  />
+                  {isEditingThis && polygonPoints.map((pt, i) => {
+                    const editIcon = L.divIcon({
+                      className: 'edit-marker',
+                      html: `<div style="background-color: white; width: 16px; height: 16px; border-radius: 50%; border: 4px solid ${bus.color}; box-shadow: 0 2px 4px rgba(0,0,0,0.3); cursor: move;"></div>`,
+                      iconSize: [16, 16],
+                      iconAnchor: [8, 8]
+                    });
+                    return (
+                      <Marker 
+                        key={`edit-pt-${i}`} 
+                        position={pt} 
+                        icon={editIcon}
+                        draggable={true}
+                        eventHandlers={{
+                          dragend: (e) => handleDragEndPoint(i, e)
+                        }}
+                      >
+                        <Popup>
+                          <div className="text-center p-1">
+                            <p className="text-xs text-slate-500 mb-2">이 꼭짓점을 지우시겠습니까?</p>
+                            <button onClick={() => handleDeletePoint(i)} className="px-3 py-1 bg-red-500 text-white text-xs font-bold rounded shadow-sm hover:bg-red-600">삭제</button>
+                          </div>
+                        </Popup>
+                      </Marker>
+                    );
+                  })}
+                </>
+              ) : (
+                /* Fallback markers if polygon cannot be formed */
+                !isEditingThis && bus.points && bus.points.map((pt, i) => {
+                  const fallbackIcon = L.divIcon({
+                    className: 'fallback-marker',
+                    html: `<div style="background-color: ${bus.color}; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: bold;">${bus.name.replace(/[^0-9]/g, '')}</div>`,
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
+                  });
+                  return (
+                    <Marker key={i} position={pt} icon={fallbackIcon}>
+                      <Popup><b style={{color: bus.color}}>{bus.name}</b><br/>구역(도형)을 생성하려면 최소 3개 이상의 다른 위치가 필요합니다.</Popup>
+                    </Marker>
+                  );
+                })
+              )}
+            </Fragment>
+          )})}
+
+          {/* Draw New Students */}
+          {(selectedBusId ? students.filter(s => s.assignedBusId === selectedBusId) : students).map(st => {
+            let displayLat = st.lat;
+            let displayLng = st.lng;
+            let displayBusId = st.assignedBusId;
+            let showStudent = true;
+
+            if (selectedDay !== 'ALL') {
+              // Check if they have a schedule for this day
+              const sched = st.schedules?.find(s => s.dayOfWeek === selectedDay);
+              if (sched && sched.latitude && sched.longitude) {
+                displayLat = sched.latitude;
+                displayLng = sched.longitude;
+                displayBusId = sched.assignedVehicle ? sched.assignedVehicle.id : null;
+              } else if (!st.lat || !st.lng) {
+                showStudent = false; // no fallback and no schedule
+              }
+            }
+            
+            if (!showStudent || !displayLat || !displayLng) return null;
+
+            const stColor = displayBusId ? (buses.find(b=>b.id===displayBusId)?.color || '#64748b') : '#64748b';
+
+            const studentIcon = L.divIcon({
+              className: 'custom-student-marker',
+              html: `<div style="background-color: ${stColor}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>`,
+              iconSize: [14, 14],
+              iconAnchor: [7, 7]
+            });
+            return (
+              <Marker key={st.id} position={[displayLat, displayLng]} icon={studentIcon}>
+                <Popup className="student-popup">
+                <div className="font-bold text-lg mb-1">{st.name} <span className="text-sm font-normal text-slate-500">{st.raw?.['성별']} / {st.raw?.['연령']}</span></div>
+                <div className="text-sm text-slate-700 mb-2">{st.raw?.['학교명']} {st.raw?.['학년']}</div>
+                
+                <div className="bg-slate-50 p-2 rounded border border-slate-100 text-xs mb-2">
+                  <div className="mb-1"><b>주소:</b> {st.address}</div>
+                  <div className="mb-1"><b>학부모:</b> {st.raw?.['보호자 성함']} ({st.raw?.['보호자연락처']})</div>
+                  <div><b>담임:</b> {st.raw?.['담임명']}</div>
+                </div>
+                
+                <div className="text-sm font-bold text-center p-2 rounded" style={{ backgroundColor: stColor + '20', color: stColor }}>
+                  {displayBusId ? `배차: ${buses.find(b=>b.id===displayBusId)?.name}` : '배차 없음 (구역 밖)'}
+                </div>
+              </Popup>
+            </Marker>
+            );
+          })}
+
+          {/* Draw Real-Time Bus Locations */}
+          {Object.entries(busLocations).map(([vid, loc]) => {
+            const bus = buses.find(b => b.id.toString() === vid.toString());
+            if (!bus || (selectedBusId && bus.id !== selectedBusId)) return null;
+            const busIcon = L.divIcon({
+              className: 'custom-bus-marker',
+              html: `<div style="background-color: ${bus.color || '#ef4444'}; font-size: 14px; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 2px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">🚌</div>`,
+              iconSize: [28, 28],
+              iconAnchor: [14, 14]
+            });
+            return (
+              <Marker key={`realtime-bus-${vid}`} position={[loc.lat, loc.lng]} icon={busIcon}>
+                <Popup className="font-bold">{bus.name} 실시간 위치</Popup>
+              </Marker>
+            );
+          })}
+        </MapContainer>
+      </div>
+      {/* Bus Editing Modal */}
+      {editingBus && (
+        <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h2 className="text-xl font-bold text-slate-800 mb-6">{editingBus.name} 상세 정보 수정</h2>
+            <form onSubmit={handleUpdateBus} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">호차</label>
+                  <input type="text" value={editingBus.busNumber || ''} onChange={e => setEditingBus({...editingBus, busNumber: e.target.value})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="예: 1호차" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">차량번호</label>
+                  <input type="text" value={editingBus.plateNumber || ''} onChange={e => setEditingBus({...editingBus, plateNumber: e.target.value})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="예: 12가 3456" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">기사님 성함</label>
+                  <input type="text" value={editingBus.driverName || ''} onChange={e => setEditingBus({...editingBus, driverName: e.target.value})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="기사님 이름" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">기사님 연락처</label>
+                  <input type="text" value={editingBus.driverPhone || ''} onChange={e => setEditingBus({...editingBus, driverPhone: formatPhoneNumber(e.target.value)})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="010-0000-0000" maxLength={13} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">지도교사님 성함</label>
+                  <input type="text" value={editingBus.teacherName || ''} onChange={e => setEditingBus({...editingBus, teacherName: e.target.value})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="교사 이름" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">지도교사 연락처</label>
+                  <input type="text" value={editingBus.teacherPhone || ''} onChange={e => setEditingBus({...editingBus, teacherPhone: formatPhoneNumber(e.target.value)})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="010-0000-0000" maxLength={13} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">차량 정원 (명)</label>
+                <input type="number" value={editingBus.capacity || 25} onChange={e => setEditingBus({...editingBus, capacity: e.target.value})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="25" />
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button type="button" onClick={() => setEditingBus(null)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200">취소</button>
+                <button type="submit" disabled={isProcessing} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50">저장하기</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
