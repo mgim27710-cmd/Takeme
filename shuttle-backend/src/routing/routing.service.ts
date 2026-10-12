@@ -45,8 +45,33 @@ export class RoutingService {
   ) {}
 
   public async checkArrivalAndNotify(vehicleId: number, lat: number, lng: number): Promise<any[]> {
-    // Dummy implementation for now to fix TS compilation
-    return [];
+    const students = await this.studentRepository.find({
+      where: { assignedVehicle: { id: vehicleId } },
+      relations: { parentUser: true }
+    });
+
+    const notifications: any[] = [];
+    for (const student of students) {
+      if (student.latitude && student.longitude) {
+        const dLat = (student.latitude - lat) * (Math.PI / 180);
+        const dLng = (student.longitude - lng) * (Math.PI / 180);
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(lat * (Math.PI / 180)) * Math.cos(student.latitude * (Math.PI / 180)) *
+          Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        const distanceMeters = 6371e3 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+        if (distanceMeters <= 400) {
+          notifications.push({
+            studentId: student.id,
+            studentName: student.name,
+            parentEmail: student.parentUser?.email,
+            message: `${student.name} 학생 승하차 지점 부근에 차량이 접근 중입니다.`
+          });
+        }
+      }
+    }
+    return notifications;
   }
 
   public async geocodeAddress(address: string): Promise<{ lat: number, lng: number } | null> {

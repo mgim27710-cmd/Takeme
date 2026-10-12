@@ -25,18 +25,6 @@ const getRandomColor = () => {
   return `hsl(${randomHue}, 70%, 50%)`;
 };
 
-// Dummy data for initial demonstration
-const dummyBusData = [
-  {
-    id: 1, name: '1호차', color: '#3b82f6',
-    points: [ [37.5665, 126.9780], [37.5700, 126.9800], [37.5650, 126.9850], [37.5620, 126.9750] ]
-  },
-  {
-    id: 2, name: '2호차', color: '#ef4444',
-    points: [ [37.5600, 126.9700], [37.5620, 126.9600], [37.5550, 126.9650] ]
-  }
-];
-
 function MapBoundsFit({ buses, academy }) {
   const map = useMap();
   useEffect(() => {
@@ -448,7 +436,7 @@ export default function Dashboard() {
         }
         
         if (!foundBuses) {
-          let rawBusData = dummyBusData;
+          let rawBusData = [];
           if (location.state && location.state.buses) {
             rawBusData = location.state.buses;
             localStorage.setItem('takeme_buses', JSON.stringify(rawBusData));
@@ -458,7 +446,7 @@ export default function Dashboard() {
             if (saved) { 
               try { 
                 rawBusData = JSON.parse(saved); 
-                if (rawBusData.length > 0 && rawBusData !== dummyBusData) {
+                if (rawBusData.length > 0) {
                   setShowAcademyModal(false);
                 }
               } catch(e){} 
