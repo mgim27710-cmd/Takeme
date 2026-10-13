@@ -630,8 +630,31 @@ export default function Dashboard() {
     reader.onload = async (evt) => {
       const bstr = evt.target.result;
       const wb = XLSX.read(bstr, { type: 'binary' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const data = XLSX.utils.sheet_to_json(ws);
+      
+      // Multi-sheet support: extract data across sheets or first non-empty sheet
+      let data = [];
+      wb.SheetNames.forEach(sheetName => {
+        const sheet = wb.Sheets[sheetName];
+        const sheetData = XLSX.utils.sheet_to_json(sheet);
+        if (Array.isArray(sheetData) && sheetData.length > 0) {
+          const hasRelevantColumns = sheetData.some(r => 
+            r['등원차량'] || r['하원차량'] || r['차량'] || r['호차'] || r['등원지'] || r['주소'] || r['승차지'] || r['학생이름/영문이름'] || r['이름']
+          );
+          if (hasRelevantColumns) {
+            data = data.concat(sheetData);
+          }
+        }
+      });
+
+      if (data.length === 0 && wb.SheetNames.length > 0) {
+        data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]) || [];
+      }
+
+      if (data.length === 0) {
+        alert('엑셀 파일에서 유효한 학생/배차 데이터 행을 찾을 수 없습니다. 시트에 내용이 입력되어 있는지 확인해주세요.');
+        setIsProcessing(false);
+        return;
+      }
       
       const busSet = new Set();
       data.forEach(row => {
@@ -641,10 +664,16 @@ export default function Dashboard() {
         if (b2) busSet.add(b2.toString().trim());
       });
 
-      const count = busSet.size > 0 ? busSet.size : 1;
+      const busList = Array.from(busSet).sort((a, b) => {
+        const na = parseInt(a.replace(/[^0-9]/g, ''), 10) || 0;
+        const nb = parseInt(b.replace(/[^0-9]/g, ''), 10) || 0;
+        return na - nb;
+      });
+
+      const count = busList.length > 0 ? busList.length : 1;
       const vehicles = Array.from({ length: count }).map((_, i) => ({
         id: i + 1,
-        busNumber: Array.from(busSet)[i] || `${i + 1}호차`,
+        busNumber: busList[i] || `${i + 1}호차`,
         plateNumber: '',
         driverName: '미정',
         driverPhone: '000-0000-0000',
@@ -659,6 +688,10 @@ export default function Dashboard() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ vehicles, parsedData: data })
         });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || '서버 처리 실패');
+        }
         const geocodedBuses = await res.json();
         
         // Process polygons before updating state
@@ -678,7 +711,7 @@ export default function Dashboard() {
           alert('구역 세팅이 완료되었습니다!');
         }
       } catch (e) {
-        alert('구역 리셋에 실패했습니다.');
+        alert(`구역 리셋에 실패했습니다: ${e.message}`);
         console.error(e);
       } finally {
         setIsProcessing(false);

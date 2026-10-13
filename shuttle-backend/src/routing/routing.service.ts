@@ -136,9 +136,10 @@ export class RoutingService {
   }
 
   async initializeZones(vehicles: any[], parsedData: any[]) {
-    // 1. Reset Database Data (Cascade Delete)
-    await this.studentRepository.clear();
-    await this.vehicleRepository.clear();
+    // 1. Reset Database Data (Cascade Delete for PostgreSQL)
+    await this.studentRepository.query(
+      'TRUNCATE TABLE student_schedules, schedule_overrides, operation_logs, approval_requests, parent_messages, pickup_point, students, vehicles CASCADE;'
+    );
 
     const savedVehicles: any[] = [];
     const vehiclePointsMap: Record<string, any> = {};
@@ -172,29 +173,53 @@ export class RoutingService {
       vehiclePointsMap[v.busNumber] = savedVehicles[savedVehicles.length - 1];
     }
 
-    // 3. Geocode Addresses and Associate with Vehicles
+    // 3. Geocode Addresses and Associate with Vehicles (with caching & deduplication)
+    const geocodeCache = new Map<string, { lat: number, lng: number } | null>();
+    const geocodeWithCache = async (addr: string) => {
+      const cleanAddr = addr.trim();
+      if (!cleanAddr) return null;
+      if (geocodeCache.has(cleanAddr)) return geocodeCache.get(cleanAddr);
+      const res = await this.geocodeAddress(cleanAddr);
+      geocodeCache.set(cleanAddr, res);
+      return res;
+    };
+
+    const findTargetVehicle = (busName: string | null) => {
+      if (!busName) return null;
+      if (vehiclePointsMap[busName]) return vehiclePointsMap[busName];
+      const numOnly = busName.replace(/[^0-9]/g, '');
+      for (const key of Object.keys(vehiclePointsMap)) {
+        if (key === busName || (numOnly && key.replace(/[^0-9]/g, '') === numOnly)) {
+          return vehiclePointsMap[key];
+        }
+      }
+      return null;
+    };
+
     for (const row of parsedData) {
-      const inBusRaw = row['등원차량'];
+      const inBusRaw = row['등원차량'] || row['차량'] || row['호차'] || row['등원_차량'];
       const inBusName = inBusRaw ? inBusRaw.toString().trim() : null;
-      const inLocation = row['등원지'] || row['탑승지'];
+      const inLocation = row['등원지'] || row['탑승지'] || row['승차지'] || row['승차지(주소)'] || row['주소'] || row['도로명주소'];
 
-      const outBusRaw = row['하원차량'];
+      const outBusRaw = row['하원차량'] || row['차량'] || row['호차'] || row['하원_차량'];
       const outBusName = outBusRaw ? outBusRaw.toString().trim() : null;
-      const outLocation = row['하원지'] || row['하차지'];
+      const outLocation = row['하원지'] || row['하차지'] || row['하차지(주소)'] || row['주소'] || row['도로명주소'];
 
-      if (inBusName && inLocation && vehiclePointsMap[inBusName]) {
-        console.log(`Processing inbound for bus ${inBusName} at ${inLocation}`);
-        const coords = await this.geocodeAddress(inLocation);
+      const inTarget = inBusName ? findTargetVehicle(inBusName) : null;
+      if (inTarget && inLocation) {
+        const coords = await geocodeWithCache(inLocation.toString());
         if (coords) {
-          vehiclePointsMap[inBusName].points.push([coords.lat, coords.lng]);
+          const exists = inTarget.points.some((p: any) => p[0] === coords.lat && p[1] === coords.lng);
+          if (!exists) inTarget.points.push([coords.lat, coords.lng]);
         }
       }
 
-      if (outBusName && outLocation && vehiclePointsMap[outBusName]) {
-        console.log(`Processing outbound for bus ${outBusName} at ${outLocation}`);
-        const coords = await this.geocodeAddress(outLocation);
+      const outTarget = outBusName ? findTargetVehicle(outBusName) : null;
+      if (outTarget && outLocation) {
+        const coords = await geocodeWithCache(outLocation.toString());
         if (coords) {
-          vehiclePointsMap[outBusName].points.push([coords.lat, coords.lng]);
+          const exists = outTarget.points.some((p: any) => p[0] === coords.lat && p[1] === coords.lng);
+          if (!exists) outTarget.points.push([coords.lat, coords.lng]);
         }
       }
     }
@@ -415,7 +440,9 @@ export class RoutingService {
   }
 
   async saveStudents(students: any[]) {
-    await this.studentRepository.clear();
+    await this.studentRepository.query(
+      'TRUNCATE TABLE student_schedules, schedule_overrides, operation_logs, approval_requests, parent_messages, students CASCADE;'
+    );
     
     const academies = await this.academyRepository.find();
     const academy = academies.length > 0 ? academies[0] : null;
