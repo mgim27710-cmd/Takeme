@@ -1192,10 +1192,10 @@ export default function Dashboard() {
         )}
 
         {activeTab === 'students' && (
-          <div className="p-6 h-full flex flex-col">
-            <h2 className="text-xl font-bold text-slate-800 mb-1">현 학원생 정보</h2>
-            <p className="text-xs text-slate-500 mb-4">
-              학원생 명단 엑셀을 업로드하여 구역별로 자동 배차하거나, 현재 등록된 원생 정보를 다운로드하세요.
+          <div className="p-4 h-full flex flex-col">
+            <h2 className="text-lg font-bold text-slate-800 mb-1 text-center">현 학원생 정보</h2>
+            <p className="text-xs text-slate-500 mb-3 text-center">
+              학원생 명단 엑셀을 업로드하여 구역별로 자동 배차하거나 현재 원생 정보를 다운로드하세요.
             </p>
 
             <input 
@@ -1206,55 +1206,52 @@ export default function Dashboard() {
               onChange={handleStudentUpload} 
             />
 
-            <div className="grid grid-cols-2 gap-3 mb-3">
+            <div className="grid grid-cols-2 gap-2 mb-2">
               <button 
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isProcessing}
-                className="flex items-center justify-center gap-1.5 py-3 px-3 bg-blue-600 text-white font-bold rounded-xl shadow-md hover:bg-blue-700 transition-colors disabled:opacity-50 text-xs sm:text-sm"
+                className="w-full py-2.5 px-2 bg-blue-600 text-white font-bold rounded-lg shadow-sm hover:bg-blue-700 transition-colors disabled:opacity-50 text-center text-xs sm:text-sm"
               >
-                <span>⬆️</span>
-                <span>{isProcessing ? '처리 중...' : '학원생 엑셀 업로드'}</span>
+                {isProcessing ? '처리 중...' : '학원생 엑셀 업로드'}
               </button>
               
               <button 
                 onClick={handleExportExcel}
                 disabled={isProcessing}
-                className="flex items-center justify-center gap-1.5 py-3 px-3 bg-emerald-600 text-white font-bold rounded-xl shadow-md hover:bg-emerald-700 transition-colors disabled:opacity-50 text-xs sm:text-sm"
+                className="w-full py-2.5 px-2 bg-emerald-600 text-white font-bold rounded-lg shadow-sm hover:bg-emerald-700 transition-colors disabled:opacity-50 text-center text-xs sm:text-sm"
               >
-                <span>⬇️</span>
-                <span>{isProcessing ? '준비 중...' : '엑셀 다운로드'}</span>
+                {isProcessing ? '준비 중...' : '엑셀 다운로드'}
               </button>
             </div>
 
             <a 
               href="/학원생_정보_입력_시트.xlsx" 
               download="학원생_정보_입력_시트.xlsx" 
-              className="w-full py-2.5 mb-4 bg-white text-slate-700 rounded-xl text-xs font-bold border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors flex items-center justify-center gap-1.5"
+              className="w-full py-2 mb-3 bg-white text-slate-600 rounded-lg text-xs font-semibold border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors text-center block"
             >
-              <span>📄</span>
-              <span>학원생 등록용 양식 다운로드</span>
+              학원생 등록 양식 다운로드
             </a>
 
             {students.length > 0 ? (
-              <div className="mt-2 flex-1 overflow-y-auto">
-                <div className="flex justify-between items-center mb-3 border-b pb-2">
-                  <h3 className="font-bold text-slate-700 text-sm">배차 결과</h3>
-                  <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+              <div className="mt-1 flex-1 overflow-y-auto">
+                <div className="flex justify-between items-center mb-2 border-b pb-1.5">
+                  <h3 className="font-bold text-slate-700 text-xs">배차 결과</h3>
+                  <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
                     총 {students.length}명
                   </span>
                 </div>
-                <div className="space-y-3 pr-2">
+                <div className="space-y-2 pr-1">
                   {students.map(st => (
-                    <div key={st.id} className="p-3 bg-white border border-slate-200 rounded-lg shadow-sm hover:shadow-md transition-shadow">
+                    <div key={st.id} className="p-2.5 bg-white border border-slate-200 rounded-lg shadow-sm hover:shadow-md transition-shadow">
                       <div className="flex items-center gap-2 mb-1">
-                        <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: st.color }}></div>
-                        <span className="font-bold text-slate-800 text-sm">{st.name}</span>
-                        <span className="text-xs text-slate-500">{st.raw?.['학교명']} {st.raw?.['학년']}</span>
+                        <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: st.color }}></div>
+                        <span className="font-bold text-slate-800 text-xs">{st.name}</span>
+                        <span className="text-[11px] text-slate-400">{st.raw?.['학교명']} {st.raw?.['학년']}</span>
                       </div>
                       <div className="text-xs text-slate-600 truncate mb-1">{st.address}</div>
                       <div className="flex justify-between items-center text-xs">
-                        <span className="text-slate-500">{st.raw?.['보호자 성함']} {st.raw?.['보호자연락처']}</span>
-                        <span className="font-bold" style={{ color: st.color }}>
+                        <span className="text-slate-400 text-[11px]">{st.raw?.['보호자 성함']} {st.raw?.['보호자연락처']}</span>
+                        <span className="font-bold text-[11px]" style={{ color: st.color }}>
                           {st.assignedBusId ? buses.find(b=>b.id===st.assignedBusId)?.name : '배정 실패'}
                         </span>
                       </div>
@@ -1263,17 +1260,16 @@ export default function Dashboard() {
                 </div>
               </div>
             ) : (
-              <div className="mt-4 flex-1 flex flex-col items-center justify-center text-center p-6 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
-                <div className="text-4xl mb-3">👨‍🎓</div>
-                <h4 className="font-bold text-slate-700 text-sm mb-1">등록된 학원생이 없습니다</h4>
-                <p className="text-xs text-slate-500 mb-4 max-w-xs leading-relaxed">
-                  [학원생 엑셀 업로드] 버튼을 눌러 원생 명단을 등록하시면 지도상의 구역에 맞추어 자동으로 배차됩니다.
+              <div className="mt-2 flex-1 flex flex-col items-center justify-center text-center p-4 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                <h4 className="font-bold text-slate-700 text-xs mb-1 text-center">등록된 학원생이 없습니다</h4>
+                <p className="text-[11px] text-slate-500 mb-3 text-center max-w-xs leading-relaxed">
+                  학원생 엑셀 파일을 업로드하시면 구역에 맞추어 자동으로 배차됩니다.
                 </p>
                 <button 
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 shadow-sm transition"
+                  className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-xs font-bold hover:bg-blue-700 shadow-sm transition text-center"
                 >
-                  지금 명단 업로드하기
+                  명단 업로드하기
                 </button>
               </div>
             )}
