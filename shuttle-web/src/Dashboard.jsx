@@ -410,6 +410,11 @@ export default function Dashboard() {
     return `${onlyNums.slice(0, 3)}-${onlyNums.slice(3, 7)}-${onlyNums.slice(7, 11)}`;
   };
 
+  const maskPhoneNumber = (value) => {
+    if (!value || typeof value !== 'string') return '';
+    return value.replace(/(\d{2,3})[-.]?(\d{3,4})[-.]?(\d{4})/, '$1-****-$3');
+  };
+
   // Custom icon for Academy
   const academyIcon = L.divIcon({
     html: '<div style="font-size: 36px; line-height: 1; text-align: center; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3));">🏫</div>',
@@ -1322,7 +1327,7 @@ export default function Dashboard() {
                       </div>
                       <div className="text-xs text-slate-600 truncate mb-1">{st.address}</div>
                       <div className="flex justify-between items-center text-xs">
-                        <span className="text-slate-400 text-[11px]">{st.raw?.['보호자 성함']} {st.raw?.['보호자연락처']}</span>
+                        <span className="text-slate-400 text-[11px]">{st.raw?.['보호자 성함']} {maskPhoneNumber(st.raw?.['보호자연락처'])}</span>
                         <span className="font-bold text-[11px]" style={{ color: st.color }}>
                           {st.assignedBusId ? buses.find(b=>b.id===st.assignedBusId)?.name : '배정 실패'}
                         </span>
@@ -1965,7 +1970,7 @@ export default function Dashboard() {
                 
                 <div className="bg-slate-50 p-2 rounded border border-slate-100 text-xs mb-2">
                   <div className="mb-1"><b>주소:</b> {st.address}</div>
-                  <div className="mb-1"><b>학부모:</b> {st.raw?.['보호자 성함']} ({st.raw?.['보호자연락처']})</div>
+                  <div className="mb-1"><b>학부모:</b> {st.raw?.['보호자 성함']} ({maskPhoneNumber(st.raw?.['보호자연락처'])})</div>
                   <div><b>담임:</b> {st.raw?.['담임명']}</div>
                 </div>
                 

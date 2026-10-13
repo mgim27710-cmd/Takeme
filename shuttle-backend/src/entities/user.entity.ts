@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { encryptionTransformer } from '../utils/crypto.util';
 
 export enum UserRole {
   SUPER_ADMIN = 'SUPER_ADMIN',
@@ -26,8 +27,8 @@ export class User {
   @Column({ nullable: true })
   name: string;
 
-  @Column({ nullable: true })
-  otpSecret: string; // Google OTP secret
+  @Column({ nullable: true, transformer: encryptionTransformer })
+  otpSecret: string; // Google OTP secret (AES-256-GCM encrypted)
 
   @Column({ default: false })
   isOtpEnabled: boolean;
