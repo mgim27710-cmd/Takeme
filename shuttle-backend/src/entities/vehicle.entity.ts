@@ -13,16 +13,16 @@ export class Vehicle {
   @Column({ nullable: true })
   plateNumber: string;
 
-  @Column()
+  @Column({ default: '미정' })
   driverName: string;
 
-  @Column()
+  @Column({ default: '000-0000-0000' })
   driverPhone: string;
 
-  @Column()
+  @Column({ default: '미정' })
   teacherName: string;
 
-  @Column()
+  @Column({ default: '000-0000-0000' })
   teacherPhone: string;
 
   @Column({ type: 'int', default: 25 })

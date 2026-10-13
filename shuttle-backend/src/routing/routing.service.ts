@@ -153,13 +153,13 @@ export class RoutingService {
     // 2. Save Vehicles and Assign Colors
     for (const v of vehicles) {
       const newVehicle = this.vehicleRepository.create({
-        busNumber: v.busNumber,
-        plateNumber: v.plateNumber,
-        driverName: v.driverName,
-        driverPhone: v.driverPhone,
-        teacherName: v.teacherName,
-        teacherPhone: v.teacherPhone,
-        capacity: v.capacity,
+        busNumber: v.busNumber || `${savedVehicles.length + 1}호차`,
+        plateNumber: v.plateNumber || '',
+        driverName: v.driverName || '미정',
+        driverPhone: v.driverPhone || '000-0000-0000',
+        teacherName: v.teacherName || '미정',
+        teacherPhone: v.teacherPhone || '000-0000-0000',
+        capacity: Number(v.capacity) || 25,
         academy: academy || undefined,
       });
       const saved = await this.vehicleRepository.save(newVehicle);
