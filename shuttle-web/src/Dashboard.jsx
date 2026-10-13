@@ -105,13 +105,8 @@ export default function Dashboard() {
     }
   };
   
-  // Load academy from localStorage if it exists
-  const [academy, setAcademy] = useState(() => {
-    const saved = localStorage.getItem('takeme_academy');
-    return saved ? JSON.parse(saved) : null;
-  });
-  
-  const [showAcademyModal, setShowAcademyModal] = useState(!localStorage.getItem('takeme_academy'));
+  const [academy, setAcademy] = useState(null);
+  const [showAcademyModal, setShowAcademyModal] = useState(false);
   const [setupStep, setSetupStep] = useState(1);
   const [isInitializing, setIsInitializing] = useState(true);
   const [academyForm, setAcademyForm] = useState({ name: '', address: '' });
@@ -386,10 +381,9 @@ export default function Dashboard() {
         const res = await fetch(`${API_BASE_URL}/routing/initial-state`);
         const data = await res.json();
         
-        let foundBuses = false;
-        
-        if (data.academy) {
+        if (data.academy && data.academy.name && data.academy.roadAddress && !isNaN(parseFloat(data.academy.latitude))) {
           const formattedAcademy = {
+            id: data.academy.id,
             name: data.academy.name,
             address: data.academy.roadAddress,
             lat: parseFloat(data.academy.latitude),
@@ -397,33 +391,30 @@ export default function Dashboard() {
             authCode: data.academy.authCode
           };
           setAcademy(formattedAcademy);
-          setShowAcademyModal(false);
-          localStorage.setItem('takeme_academy', JSON.stringify(formattedAcademy));
+          setAcademyForm({
+            name: formattedAcademy.name,
+            address: formattedAcademy.address
+          });
         } else {
-          const savedAcademy = localStorage.getItem('takeme_academy');
-          if (savedAcademy) {
-            try {
-              setAcademy(JSON.parse(savedAcademy));
-              setShowAcademyModal(false);
-            } catch(e) {
-              setAcademy(null);
-              setShowAcademyModal(true);
-            }
-          } else {
-            setAcademy(null);
-            setShowAcademyModal(true);
-          }
+          setAcademy(null);
         }
         
         if (data.buses && data.buses.length > 0) {
           setBuses(computePolygons(data.buses));
-          localStorage.setItem('takeme_buses', JSON.stringify(data.buses));
-          foundBuses = true;
-          setShowAcademyModal(false); // Force hide setup wizard if zones already exist
-        } 
+          setShowAcademyModal(false);
+        } else if (location.state && location.state.buses && location.state.buses.length > 0) {
+          setBuses(computePolygons(location.state.buses));
+          setShowAcademyModal(false);
+        } else {
+          setBuses([]);
+          setShowAcademyModal(true);
+          setSetupStep(1);
+        }
         
         if (data.students && data.students.length > 0) {
           setStudents(data.students);
+        } else {
+          setStudents([]);
         }
         
         try {
@@ -433,26 +424,6 @@ export default function Dashboard() {
           }
         } catch (e) {
           console.error('Failed to fetch pickup points', e);
-        }
-        
-        if (!foundBuses) {
-          let rawBusData = [];
-          if (location.state && location.state.buses) {
-            rawBusData = location.state.buses;
-            localStorage.setItem('takeme_buses', JSON.stringify(rawBusData));
-            setShowAcademyModal(false);
-          } else {
-            const saved = localStorage.getItem('takeme_buses');
-            if (saved) { 
-              try { 
-                rawBusData = JSON.parse(saved); 
-                if (rawBusData.length > 0) {
-                  setShowAcademyModal(false);
-                }
-              } catch(e){} 
-            }
-          }
-          setBuses(computePolygons(rawBusData));
         }
       } catch (err) {
         console.error('Failed to load initial state', err);

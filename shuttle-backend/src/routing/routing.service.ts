@@ -143,6 +143,12 @@ export class RoutingService {
     const savedVehicles: any[] = [];
     const vehiclePointsMap: Record<string, any> = {};
 
+    const academy = await this.academyRepository.findOne({ where: {} });
+    if (academy) {
+      academy.vehicleCount = vehicles.length;
+      await this.academyRepository.save(academy);
+    }
+
     // 2. Save Vehicles and Assign Colors
     for (const v of vehicles) {
       const newVehicle = this.vehicleRepository.create({
@@ -153,6 +159,7 @@ export class RoutingService {
         teacherName: v.teacherName,
         teacherPhone: v.teacherPhone,
         capacity: v.capacity,
+        academy: academy || undefined,
       });
       const saved = await this.vehicleRepository.save(newVehicle);
       
@@ -340,16 +347,26 @@ export class RoutingService {
   }
 
   async setupAcademy(data: { name: string, address: string, lat: number, lng: number }) {
-    await this.academyRepository.createQueryBuilder().delete().execute();
-    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const newAcademy = this.academyRepository.create({
-      name: data.name,
-      roadAddress: data.address,
-      latitude: data.lat.toString(),
-      longitude: data.lng.toString(),
-      authCode: code
-    });
-    return await this.academyRepository.save(newAcademy);
+    let academy = await this.academyRepository.findOne({ where: {} });
+    if (!academy) {
+      const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+      academy = this.academyRepository.create({
+        name: data.name,
+        roadAddress: data.address,
+        latitude: data.lat.toString(),
+        longitude: data.lng.toString(),
+        authCode: code
+      });
+    } else {
+      academy.name = data.name;
+      academy.roadAddress = data.address;
+      academy.latitude = data.lat.toString();
+      academy.longitude = data.lng.toString();
+      if (!academy.authCode) {
+        academy.authCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+      }
+    }
+    return await this.academyRepository.save(academy);
   }
 
   async updateVehicleZone(vehicleId: number, email: string, polygonCoordinates: any[]) {

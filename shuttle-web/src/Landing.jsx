@@ -117,6 +117,8 @@ export default function Landing() {
         setQrCodeUrl(data.qrCodeUrl);
         setMode('otp-setup');
       } else {
+        localStorage.removeItem('takeme_academy');
+        localStorage.removeItem('takeme_buses');
         localStorage.setItem('takeme_user', JSON.stringify(data.user));
         navigate('/dashboard');
       }
