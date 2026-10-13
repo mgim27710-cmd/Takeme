@@ -72,6 +72,21 @@ export default function Dashboard() {
   const location = useLocation();
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
+
+  // Multi-tenant User Context
+  const currentUser = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('takeme_user') || '{}');
+    } catch (e) {
+      return {};
+    }
+  })();
+  const isSuperAdmin = currentUser.role === 'SUPER_ADMIN';
+  const [allAcademies, setAllAcademies] = useState([]);
+  const [selectedAcademyId, setSelectedAcademyId] = useState(
+    Number(localStorage.getItem('takeme_selected_academy_id')) || currentUser.academyId || null
+  );
+
   const [buses, setBuses] = useState([]);
   const [students, setStudents] = useState([]); // Array of { name, address, lat, lng, assignedBusId, color }
   const [selectedBusId, setSelectedBusId] = useState(null);
@@ -143,11 +158,49 @@ export default function Dashboard() {
     return () => socket.disconnect();
   }, []);
 
+  const handleLogout = () => {
+    if (window.confirm('로그아웃 하시겠습니까?')) {
+      localStorage.removeItem('takeme_user');
+      localStorage.removeItem('takeme_selected_academy_id');
+      localStorage.removeItem('takeme_academy');
+      localStorage.removeItem('takeme_buses');
+      navigate('/');
+    }
+  };
+
+  useEffect(() => {
+    if (isSuperAdmin) {
+      fetch(`${API_BASE_URL}/routing/academies`)
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data) && data.length > 0) {
+            setAllAcademies(data);
+            if (!selectedAcademyId) {
+              setSelectedAcademyId(data[0].id);
+              localStorage.setItem('takeme_selected_academy_id', String(data[0].id));
+            }
+          }
+        })
+        .catch(err => console.error('Failed to load academies', err));
+    }
+  }, [isSuperAdmin]);
+
+  const handleSwitchAcademy = (newAcademyId) => {
+    setSelectedAcademyId(newAcademyId);
+    localStorage.setItem('takeme_selected_academy_id', String(newAcademyId));
+    loadInitialState(newAcademyId);
+  };
+
   const handleGenerateAuthCode = async () => {
     if (!window.confirm('새로운 학원 인증코드를 발급하시겠습니까? 기존 코드는 사용할 수 없게 됩니다.')) return;
     try {
       setIsProcessing(true);
-      const res = await fetch(`${API_BASE_URL}/routing/generate-auth-code`, { method: 'POST' });
+      const targetAcademyId = selectedAcademyId || currentUser.academyId;
+      const res = await fetch(`${API_BASE_URL}/routing/generate-auth-code`, { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ academyId: targetAcademyId })
+      });
       const data = await res.json();
       if (res.ok && data.authCode) {
         setAcademy(prev => {
@@ -245,7 +298,12 @@ export default function Dashboard() {
     if (!window.confirm('정말 학원 계정을 탈퇴(삭제)하시겠습니까?\n학생 명단, 배차 정보 등 모든 데이터가 영구적으로 삭제됩니다.')) return;
     try {
       setIsProcessing(true);
-      const res = await fetch(`${API_BASE_URL}/routing/delete-academy`, { method: 'POST' });
+      const targetAcademyId = selectedAcademyId || currentUser.academyId;
+      const res = await fetch(`${API_BASE_URL}/routing/delete-academy`, { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ academyId: targetAcademyId })
+      });
       if (res.ok) {
         localStorage.removeItem('takeme_academy');
         localStorage.removeItem('takeme_buses');
@@ -277,10 +335,11 @@ export default function Dashboard() {
     
     setIsProcessing(true);
     try {
+      const targetAcademyId = selectedAcademyId || currentUser.academyId;
       const res = await fetch(`${API_BASE_URL}/routing/pickup-point`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, latitude: latlng[0], longitude: latlng[1] })
+        body: JSON.stringify({ name, latitude: latlng[0], longitude: latlng[1], academyId: targetAcademyId })
       });
       if (res.ok) {
         const newPoint = await res.json();
@@ -375,63 +434,68 @@ export default function Dashboard() {
     });
   };
 
-  useEffect(() => {
-    const loadInitialState = async () => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/routing/initial-state`);
-        const data = await res.json();
-        
-        if (data.academy && data.academy.name && data.academy.roadAddress && !isNaN(parseFloat(data.academy.latitude))) {
-          const formattedAcademy = {
-            id: data.academy.id,
-            name: data.academy.name,
-            address: data.academy.roadAddress,
-            lat: parseFloat(data.academy.latitude),
-            lng: parseFloat(data.academy.longitude),
-            authCode: data.academy.authCode
-          };
-          setAcademy(formattedAcademy);
-          setAcademyForm({
-            name: formattedAcademy.name,
-            address: formattedAcademy.address
-          });
-        } else {
-          setAcademy(null);
-        }
-        
-        if (data.buses && data.buses.length > 0) {
-          setBuses(computePolygons(data.buses));
-          setShowAcademyModal(false);
-        } else if (location.state && location.state.buses && location.state.buses.length > 0) {
-          setBuses(computePolygons(location.state.buses));
-          setShowAcademyModal(false);
-        } else {
-          setBuses([]);
-          setShowAcademyModal(true);
-          setSetupStep(1);
-        }
-        
-        if (data.students && data.students.length > 0) {
-          setStudents(data.students);
-        } else {
-          setStudents([]);
-        }
-        
-        try {
-          const ptRes = await fetch(`${API_BASE_URL}/routing/pickup-points`);
-          if (ptRes.ok) {
-            setPickupPoints(await ptRes.json());
-          }
-        } catch (e) {
-          console.error('Failed to fetch pickup points', e);
-        }
-      } catch (err) {
-        console.error('Failed to load initial state', err);
-      } finally {
-        setIsInitializing(false);
+  const loadInitialState = async (overrideAcademyId) => {
+    try {
+      setIsInitializing(true);
+      const targetAcademyId = overrideAcademyId !== undefined ? overrideAcademyId : (selectedAcademyId || currentUser.academyId);
+      const url = targetAcademyId 
+        ? `${API_BASE_URL}/routing/initial-state?academyId=${targetAcademyId}`
+        : `${API_BASE_URL}/routing/initial-state`;
+      const res = await fetch(url);
+      const data = await res.json();
+      
+      if (data.academy && data.academy.name && data.academy.roadAddress && !isNaN(parseFloat(data.academy.latitude))) {
+        const formattedAcademy = {
+          id: data.academy.id,
+          name: data.academy.name,
+          address: data.academy.roadAddress,
+          lat: parseFloat(data.academy.latitude),
+          lng: parseFloat(data.academy.longitude),
+          authCode: data.academy.authCode
+        };
+        setAcademy(formattedAcademy);
+        setAcademyForm({
+          name: formattedAcademy.name,
+          address: formattedAcademy.address
+        });
+      } else {
+        setAcademy(null);
       }
-    };
-    
+      
+      if (data.buses && data.buses.length > 0) {
+        setBuses(computePolygons(data.buses));
+        setShowAcademyModal(false);
+      } else if (location.state && location.state.buses && location.state.buses.length > 0) {
+        setBuses(computePolygons(location.state.buses));
+        setShowAcademyModal(false);
+      } else {
+        setBuses([]);
+        setShowAcademyModal(true);
+        setSetupStep(1);
+      }
+      
+      if (data.students && data.students.length > 0) {
+        setStudents(data.students);
+      } else {
+        setStudents([]);
+      }
+      
+      try {
+        const ptRes = await fetch(`${API_BASE_URL}/routing/pickup-points`);
+        if (ptRes.ok) {
+          setPickupPoints(await ptRes.json());
+        }
+      } catch (e) {
+        console.error('Failed to fetch pickup points', e);
+      }
+    } catch (err) {
+      console.error('Failed to load initial state', err);
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  useEffect(() => {
     loadInitialState();
   }, [location.state]);
 
@@ -458,10 +522,11 @@ export default function Dashboard() {
         
         // Save to backend
         try {
+          const targetAcademyId = selectedAcademyId || currentUser.academyId;
           await fetch(`${API_BASE_URL}/routing/setup-academy`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newAcademy)
+            body: JSON.stringify({ ...newAcademy, academyId: targetAcademyId })
           });
         } catch (e) {
           console.error('Failed to save academy to backend', e);
@@ -503,10 +568,11 @@ export default function Dashboard() {
         };
         
         try {
+          const targetAcademyId = selectedAcademyId || currentUser.academyId;
           await fetch(`${API_BASE_URL}/routing/setup-academy`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newAcademy)
+            body: JSON.stringify({ ...newAcademy, academyId: targetAcademyId })
           });
         } catch (err) {
           console.error('Failed to save academy to backend', err);
@@ -636,10 +702,11 @@ export default function Dashboard() {
         });
 
         // Save to backend
+        const targetAcademyId = selectedAcademyId || currentUser.academyId;
         const saveRes = await fetch(`${API_BASE_URL}/routing/save-students`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newStudents)
+          body: JSON.stringify({ students: newStudents, academyId: targetAcademyId })
         });
         if (!saveRes.ok) {
           const errData = await saveRes.json().catch(() => ({}));
@@ -647,7 +714,7 @@ export default function Dashboard() {
         }
 
         // Refresh initial state so DB-assigned IDs and relations are fresh
-        const stateRes = await fetch(`${API_BASE_URL}/routing/initial-state`);
+        const stateRes = await fetch(`${API_BASE_URL}/routing/initial-state?academyId=${targetAcademyId}`);
         if (stateRes.ok) {
           const stateData = await stateRes.json();
           if (Array.isArray(stateData.students)) {
@@ -733,10 +800,11 @@ export default function Dashboard() {
       }));
 
       try {
+        const targetAcademyId = selectedAcademyId || currentUser.academyId;
         const res = await fetch(`${API_BASE_URL}/routing/init-zones`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ vehicles, parsedData: data })
+          body: JSON.stringify({ vehicles, parsedData: data, academyId: targetAcademyId })
         });
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
@@ -864,7 +932,8 @@ export default function Dashboard() {
   const handleExportExcel = async () => {
     try {
       setIsProcessing(true);
-      const res = await fetch(`${API_BASE_URL}/routing/export-excel`);
+      const targetAcademyId = selectedAcademyId || currentUser.academyId;
+      const res = await fetch(`${API_BASE_URL}/routing/export-excel${targetAcademyId ? `?academyId=${targetAcademyId}` : ''}`);
       if (!res.ok) throw new Error('다운로드 실패');
       
       const blob = await res.blob();
@@ -978,7 +1047,10 @@ export default function Dashboard() {
 
       {/* Bookmark Rail (Left Navigation) */}
       <div className="w-20 bg-blue-700 flex flex-col items-center py-8 gap-6 z-20 shadow-xl">
-        <div className="text-white font-bold text-xs mb-4">Takeme</div>
+        <div className="text-white font-bold text-xs mb-1">Takeme</div>
+        <div className="text-[10px] text-blue-200 text-center truncate max-w-[70px] mb-4 font-medium" title={currentUser.name}>
+          {isSuperAdmin ? '플랫폼관리' : (currentUser.name ? `${currentUser.name} 원장` : '원장')}
+        </div>
         <button onClick={() => handleTabChange('status')} className={`p-4 rounded-2xl transition-all ${activeTab === 'status' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="차량 구역 현황">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" /></svg>
         </button>
@@ -1516,14 +1588,20 @@ export default function Dashboard() {
                 )}
               </div>
 
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 mt-auto">
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 mt-auto space-y-2">
                 <h3 className="font-bold text-slate-700 mb-1">계정 관리</h3>
+                <button 
+                  onClick={handleLogout}
+                  className="w-full py-2 bg-white text-slate-700 rounded-lg text-sm font-bold border border-slate-300 shadow-sm hover:bg-slate-100 transition-colors"
+                >
+                  로그아웃
+                </button>
                 <button 
                   onClick={handleDeleteAcademy}
                   disabled={isProcessing}
                   className="w-full py-2 bg-white text-slate-500 rounded-lg text-sm font-bold border border-slate-300 shadow-sm hover:bg-red-50 hover:text-red-600 hover:border-red-200 disabled:opacity-50 transition-colors"
                 >
-                  {isProcessing ? '처리 중...' : '회원 탈퇴'}
+                  {isProcessing ? '처리 중...' : '학원 데이터 삭제 및 탈퇴'}
                 </button>
               </div>
               </div>
@@ -1622,26 +1700,53 @@ export default function Dashboard() {
           />
         )}
 
-        {/* Day Filter Controls */}
-        <div className="absolute top-4 right-4 z-[1000] flex bg-white rounded-lg shadow-lg border border-slate-200 overflow-hidden text-sm font-bold">
-          {[
-            { id: 'ALL', label: '전체' },
-            { id: 'MON', label: '월' },
-            { id: 'TUE', label: '화' },
-            { id: 'WED', label: '수' },
-            { id: 'THU', label: '목' },
-            { id: 'FRI', label: '금' },
-            { id: 'SAT', label: '토' },
-            { id: 'SUN', label: '일' },
-          ].map(day => (
-            <button
-              key={day.id}
-              onClick={() => setSelectedDay(day.id)}
-              className={`px-3 py-2 transition-colors ${selectedDay === day.id ? 'bg-blue-600 text-white' : 'hover:bg-slate-50 text-slate-700 border-l first:border-l-0 border-slate-200'}`}
-            >
-              {day.label}
-            </button>
-          ))}
+        {/* Top-Right Controls: SuperAdmin Switcher & Day Filter & Logout */}
+        <div className="absolute top-4 right-4 z-[1000] flex items-center gap-2">
+          {isSuperAdmin && (
+            <div className="flex items-center gap-2 bg-indigo-700 text-white px-3 py-1.5 rounded-lg shadow-lg text-xs font-bold border border-indigo-500">
+              <span className="whitespace-nowrap">🏛️ 학원 선택:</span>
+              <select
+                value={selectedAcademyId || ''}
+                onChange={(e) => handleSwitchAcademy(Number(e.target.value))}
+                className="bg-white text-slate-800 px-2 py-1 rounded font-bold text-xs outline-none cursor-pointer"
+              >
+                {allAcademies.map(ac => (
+                  <option key={ac.id} value={ac.id}>
+                    {ac.name} ({ac.vehicleCount}대 / {ac.studentCount}명)
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="flex bg-white rounded-lg shadow-lg border border-slate-200 overflow-hidden text-sm font-bold">
+            {[
+              { id: 'ALL', label: '전체' },
+              { id: 'MON', label: '월' },
+              { id: 'TUE', label: '화' },
+              { id: 'WED', label: '수' },
+              { id: 'THU', label: '목' },
+              { id: 'FRI', label: '금' },
+              { id: 'SAT', label: '토' },
+              { id: 'SUN', label: '일' },
+            ].map(day => (
+              <button
+                key={day.id}
+                onClick={() => setSelectedDay(day.id)}
+                className={`px-3 py-2 transition-colors ${selectedDay === day.id ? 'bg-blue-600 text-white' : 'hover:bg-slate-50 text-slate-700 border-l first:border-l-0 border-slate-200'}`}
+              >
+                {day.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={handleLogout}
+            className="px-3 py-2 bg-white text-slate-700 hover:text-red-600 rounded-lg shadow-lg border border-slate-200 text-xs font-bold transition-colors whitespace-nowrap"
+            title="로그아웃"
+          >
+            로그아웃
+          </button>
         </div>
 
         <MapContainer 

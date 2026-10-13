@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 
 export enum UserRole {
+  SUPER_ADMIN = 'SUPER_ADMIN',
   ACADEMY_ADMIN = 'ACADEMY_ADMIN',
   STUDENT = 'STUDENT',
   PARENT = 'PARENT',
