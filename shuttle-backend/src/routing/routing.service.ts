@@ -137,12 +137,10 @@ export class RoutingService {
 
   async getAcademy(academyId?: number, userId?: number): Promise<Academy | null> {
     if (academyId && !isNaN(Number(academyId))) {
-      const ac = await this.academyRepository.findOne({ where: { id: Number(academyId) } });
-      if (ac) return ac;
+      return this.academyRepository.findOne({ where: { id: Number(academyId) } });
     }
     if (userId && !isNaN(Number(userId))) {
-      const ac = await this.academyRepository.findOne({ where: { owner: { id: Number(userId) } } });
-      if (ac) return ac;
+      return this.academyRepository.findOne({ where: { owner: { id: Number(userId) } } });
     }
     return this.academyRepository.findOne({ where: {} });
   }
