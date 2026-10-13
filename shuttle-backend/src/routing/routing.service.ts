@@ -477,8 +477,9 @@ export class RoutingService {
         name: st.name,
         adminDisplayName,
         address: st.address,
-        latitude: st.lat,
-        longitude: st.lng,
+        boardingLocation: st.boardingLocation || st.address,
+        latitude: st.lat !== undefined && st.lat !== null ? parseFloat(st.lat) : undefined,
+        longitude: st.lng !== undefined && st.lng !== null ? parseFloat(st.lng) : undefined,
         raw: st.raw,
         assignedVehicle: vehicle || undefined,
         academy: academy || undefined
@@ -490,10 +491,21 @@ export class RoutingService {
   }
 
   async geocodeBulk(addresses: string[]) {
-    // Sequentially geocode to avoid hitting Kakao API rate limits too hard
+    const cache = new Map<string, { lat: number, lng: number } | null>();
     const results = [];
     for (const address of addresses) {
-      const coords = await this.geocodeAddress(address);
+      if (!address) {
+        results.push({ address, coords: null });
+        continue;
+      }
+      const trimmed = address.trim();
+      let coords;
+      if (cache.has(trimmed)) {
+        coords = cache.get(trimmed);
+      } else {
+        coords = await this.geocodeAddress(trimmed);
+        cache.set(trimmed, coords);
+      }
       results.push({ address, coords });
     }
     return results;

@@ -534,24 +534,61 @@ export default function Dashboard() {
     setIsProcessing(true);
     const reader = new FileReader();
     reader.onload = async (evt) => {
-      const bstr = evt.target.result;
-      const wb = XLSX.read(bstr, { type: 'binary' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const data = XLSX.utils.sheet_to_json(ws);
-      
-      // Assuming '학생이름/영문이름' and '주소' columns exist
-      const addressMap = data.map(row => ({
-        name: row['학생이름/영문이름'] || row['이름'] || row['원생명'] || '익명',
-        address: row['주소'] || row['승차지'] || row['탑승지'] || row['실탑승지'] || '',
-        raw: row
-      })).filter(item => item.address);
-
       try {
+        const bstr = evt.target.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        
+        let data = [];
+        wb.SheetNames.forEach(sheetName => {
+          const sheet = wb.Sheets[sheetName];
+          const sheetData = XLSX.utils.sheet_to_json(sheet);
+          if (Array.isArray(sheetData) && sheetData.length > 0) {
+            const hasRelevantColumns = sheetData.some(r => 
+              r['학생이름/영문이름'] || r['이름'] || r['원생명'] || r['학생명'] || r['원생이름'] || r['주소'] || r['등원지'] || r['탑승지'] || r['승차지']
+            );
+            if (hasRelevantColumns) {
+              data = data.concat(sheetData);
+            }
+          }
+        });
+
+        if (data.length === 0 && wb.SheetNames.length > 0) {
+          data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]) || [];
+        }
+
+        if (data.length === 0) {
+          alert('엑셀 파일에서 유효한 학원생 명단 데이터를 찾을 수 없습니다.');
+          setIsProcessing(false);
+          return;
+        }
+
+        const addressMap = data.map((row, idx) => {
+          const name = row['학생이름/영문이름'] || row['이름'] || row['원생명'] || row['학생명'] || row['원생이름'] || `원생${idx + 1}`;
+          const address = row['등원지'] || row['탑승지'] || row['승차지'] || row['승차지(주소)'] || row['주소'] || row['도로명주소'] || row['실탑승지'] || '';
+          const boardingLocation = row['등원지'] || row['탑승지'] || row['승차지'] || address;
+          return {
+            name: name.toString().trim(),
+            address: address.toString().trim(),
+            boardingLocation: boardingLocation.toString().trim(),
+            raw: row
+          };
+        }).filter(item => item.address);
+
+        if (addressMap.length === 0) {
+          alert('유효한 주소(등원지, 탑승지, 주소 등)가 입력된 학생 행을 찾을 수 없습니다.');
+          setIsProcessing(false);
+          return;
+        }
+
         const res = await fetch(`${API_BASE_URL}/routing/geocode-bulk`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ addresses: addressMap.map(a => a.address) })
         });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.message || '지오코딩 처리 실패');
+        }
         const geocoded = await res.json();
         
         // Point-in-Polygon Assignment
@@ -586,9 +623,10 @@ export default function Dashboard() {
           }
 
           newStudents.push({
-            id: idx,
+            id: idx + 1,
             name: addressMap[idx].name,
             address: item.address,
+            boardingLocation: addressMap[idx].boardingLocation,
             lat: item.coords.lat,
             lng: item.coords.lng,
             assignedBusId: assignedBus ? assignedBus.id : null,
@@ -597,25 +635,37 @@ export default function Dashboard() {
           });
         });
 
-        setStudents(newStudents);
-        
         // Save to backend
-        try {
-          await fetch(`${API_BASE_URL}/routing/save-students`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newStudents)
-          });
-        } catch (e) {
-          console.error('Failed to save students to backend', e);
+        const saveRes = await fetch(`${API_BASE_URL}/routing/save-students`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newStudents)
+        });
+        if (!saveRes.ok) {
+          const errData = await saveRes.json().catch(() => ({}));
+          throw new Error(errData.message || '원생 데이터 저장 실패');
+        }
+
+        // Refresh initial state so DB-assigned IDs and relations are fresh
+        const stateRes = await fetch(`${API_BASE_URL}/routing/initial-state`);
+        if (stateRes.ok) {
+          const stateData = await stateRes.json();
+          if (Array.isArray(stateData.students)) {
+            setStudents(stateData.students);
+          } else {
+            setStudents(newStudents);
+          }
+        } else {
+          setStudents(newStudents);
         }
         
-        alert(`총 ${newStudents.length}명의 원생 배차가 완료되었습니다!`);
+        alert(`총 ${newStudents.length}명의 원생 등록 및 구역 배차가 완료되었습니다!`);
       } catch (err) {
-        alert('지오코딩 중 에러가 발생했습니다.');
+        alert(`원생 명단 처리 중 에러가 발생했습니다: ${err.message}`);
         console.error(err);
       } finally {
         setIsProcessing(false);
+        if (e.target) e.target.value = '';
       }
     };
     reader.readAsBinaryString(file);
@@ -1143,26 +1193,61 @@ export default function Dashboard() {
 
         {activeTab === 'students' && (
           <div className="p-6 h-full flex flex-col">
-            <h2 className="text-xl font-bold text-slate-800 mb-2">현 학원생 정보</h2>
-            <div className="mb-4 space-y-2">
-              <p className="text-xs text-slate-500">학부모님들이 학생 앱을 통해 등록한 원생들의 정보가 자동으로 이곳에 모입니다.<br/><b>아래 버튼을 눌러 요일별 엑셀 시트로 정보를 다운로드하세요.</b></p>
+            <h2 className="text-xl font-bold text-slate-800 mb-1">현 학원생 정보</h2>
+            <p className="text-xs text-slate-500 mb-4">
+              학원생 명단 엑셀을 업로드하여 구역별로 자동 배차하거나, 현재 등록된 원생 정보를 다운로드하세요.
+            </p>
+
+            <input 
+              type="file" 
+              accept=".xlsx, .xls" 
+              className="hidden" 
+              ref={fileInputRef} 
+              onChange={handleStudentUpload} 
+            />
+
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isProcessing}
+                className="flex items-center justify-center gap-1.5 py-3 px-3 bg-blue-600 text-white font-bold rounded-xl shadow-md hover:bg-blue-700 transition-colors disabled:opacity-50 text-xs sm:text-sm"
+              >
+                <span>⬆️</span>
+                <span>{isProcessing ? '처리 중...' : '학원생 엑셀 업로드'}</span>
+              </button>
+              
+              <button 
+                onClick={handleExportExcel}
+                disabled={isProcessing}
+                className="flex items-center justify-center gap-1.5 py-3 px-3 bg-emerald-600 text-white font-bold rounded-xl shadow-md hover:bg-emerald-700 transition-colors disabled:opacity-50 text-xs sm:text-sm"
+              >
+                <span>⬇️</span>
+                <span>{isProcessing ? '준비 중...' : '엑셀 다운로드'}</span>
+              </button>
             </div>
-            
-            <button 
-              onClick={handleExportExcel}
-              disabled={isProcessing}
-              className="flex items-center justify-center w-full py-3 mb-6 bg-emerald-600 text-white font-bold rounded-xl shadow-md hover:bg-emerald-700 transition-colors disabled:opacity-50"
+
+            <a 
+              href="/학원생_정보_입력_시트.xlsx" 
+              download="학원생_정보_입력_시트.xlsx" 
+              className="w-full py-2.5 mb-4 bg-white text-slate-700 rounded-xl text-xs font-bold border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors flex items-center justify-center gap-1.5"
             >
-              {isProcessing ? '다운로드 준비 중...' : '⬇️ 학원생 엑셀파일 다운로드'}
-            </button>
-            {students.length > 0 && (
-              <div className="mt-6 flex-1 overflow-y-auto">
-                <h3 className="font-bold text-slate-700 text-sm mb-3 border-b pb-2">배차 결과 ({students.length}명)</h3>
+              <span>📄</span>
+              <span>학원생 등록용 양식 다운로드</span>
+            </a>
+
+            {students.length > 0 ? (
+              <div className="mt-2 flex-1 overflow-y-auto">
+                <div className="flex justify-between items-center mb-3 border-b pb-2">
+                  <h3 className="font-bold text-slate-700 text-sm">배차 결과</h3>
+                  <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                    총 {students.length}명
+                  </span>
+                </div>
                 <div className="space-y-3 pr-2">
                   {students.map(st => (
                     <div key={st.id} className="p-3 bg-white border border-slate-200 rounded-lg shadow-sm hover:shadow-md transition-shadow">
                       <div className="flex items-center gap-2 mb-1">
-                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: st.color }}></div>
+                        <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: st.color }}></div>
                         <span className="font-bold text-slate-800 text-sm">{st.name}</span>
                         <span className="text-xs text-slate-500">{st.raw?.['학교명']} {st.raw?.['학년']}</span>
                       </div>
@@ -1176,6 +1261,20 @@ export default function Dashboard() {
                     </div>
                   ))}
                 </div>
+              </div>
+            ) : (
+              <div className="mt-4 flex-1 flex flex-col items-center justify-center text-center p-6 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                <div className="text-4xl mb-3">👨‍🎓</div>
+                <h4 className="font-bold text-slate-700 text-sm mb-1">등록된 학원생이 없습니다</h4>
+                <p className="text-xs text-slate-500 mb-4 max-w-xs leading-relaxed">
+                  [학원생 엑셀 업로드] 버튼을 눌러 원생 명단을 등록하시면 지도상의 구역에 맞추어 자동으로 배차됩니다.
+                </p>
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 shadow-sm transition"
+                >
+                  지금 명단 업로드하기
+                </button>
               </div>
             )}
           </div>
