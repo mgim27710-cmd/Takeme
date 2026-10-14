@@ -8,7 +8,11 @@ import { useRef } from 'react';
 import io from 'socket.io-client';
 import LogViewer from './LogViewer';
 import MessagePanel from './MessagePanel';
+import DocumentManager from './documents/DocumentManager';
+import DocumentSidebar from './documents/DocumentSidebar';
+import { getOverallExpirySummary } from './documents/documentStorage';
 import { API_BASE_URL } from './config';
+
 
 // Fix Leaflet default icon issue
 delete L.Icon.Default.prototype._getIconUrl;
@@ -90,9 +94,10 @@ export default function Dashboard() {
   const [buses, setBuses] = useState([]);
   const [students, setStudents] = useState([]); // Array of { name, address, lat, lng, assignedBusId, color }
   const [selectedBusId, setSelectedBusId] = useState(null);
-  const [activeTab, setActiveTab] = useState('status'); // 'status', 'students', 'settings', 'log', 'messages'
+  const [activeTab, setActiveTab] = useState('status'); // 'status', 'students', 'settings', 'log', 'messages', 'documents'
   const [isLogClosing, setIsLogClosing] = useState(false);
   const [isMessageClosing, setIsMessageClosing] = useState(false);
+  const [isDocumentsClosing, setIsDocumentsClosing] = useState(false);
   const [editingBus, setEditingBus] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -101,6 +106,24 @@ export default function Dashboard() {
   const [msgTargetDriver, setMsgTargetDriver] = useState(false);
   const [msgTargetTeacher, setMsgTargetTeacher] = useState(false);
   const [msgTargetStudents, setMsgTargetStudents] = useState([]); // array of student IDs
+
+  // Legal Expiry Urgent Count State
+  const [urgentExpiryCount, setUrgentExpiryCount] = useState(0);
+
+  useEffect(() => {
+    const updateExpiryStatus = () => {
+      try {
+        const summary = getOverallExpirySummary(buses);
+        setUrgentExpiryCount(summary.urgentCount);
+      } catch (e) {
+        console.error('만료 현황 확인 실패:', e);
+      }
+    };
+    updateExpiryStatus();
+    window.addEventListener('takeme_expiry_changed', updateExpiryStatus);
+    return () => window.removeEventListener('takeme_expiry_changed', updateExpiryStatus);
+  }, [buses]);
+
 
   const handleTabChange = (newTab) => {
     if (activeTab === 'log' && newTab !== 'log') {
@@ -113,6 +136,12 @@ export default function Dashboard() {
       setIsMessageClosing(true);
       setTimeout(() => {
         setIsMessageClosing(false);
+        setActiveTab(newTab);
+      }, 300);
+    } else if (activeTab === 'documents' && newTab !== 'documents') {
+      setIsDocumentsClosing(true);
+      setTimeout(() => {
+        setIsDocumentsClosing(false);
         setActiveTab(newTab);
       }, 300);
     } else {
@@ -1076,6 +1105,17 @@ export default function Dashboard() {
         <button onClick={() => handleTabChange('messages')} className={`p-4 rounded-2xl transition-all ${activeTab === 'messages' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="메세지함">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
         </button>
+        <button onClick={() => handleTabChange('documents')} className={`relative p-4 rounded-2xl transition-all ${activeTab === 'documents' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="행정 및 안전 서류 관리">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          {urgentExpiryCount > 0 && (
+            <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-blue-700 animate-pulse shadow-sm">
+              {urgentExpiryCount}
+            </span>
+          )}
+        </button>
+
         <button onClick={() => handleTabChange('settings')} className={`p-4 rounded-2xl transition-all mt-auto ${activeTab === 'settings' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="환경설정">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
         </button>
@@ -1628,6 +1668,16 @@ export default function Dashboard() {
               </div>
             </div>
           )}
+
+          {activeTab === 'documents' && (
+            <DocumentSidebar 
+              academyId={selectedAcademyId} 
+              academyName={academy?.name}
+              currentUser={currentUser}
+              buses={buses}
+              students={students}
+            />
+          )}
         </div>
 
       {/* Map Area */}
@@ -1657,6 +1707,17 @@ export default function Dashboard() {
               setMsgTargetTeacher(false);
               setMsgTargetStudents([]);
             }}
+          />
+        )}
+
+        {activeTab === 'documents' && (
+          <DocumentManager 
+            academyId={selectedAcademyId} 
+            academyName={academy?.name}
+            currentUser={currentUser}
+            isClosing={isDocumentsClosing}
+            buses={buses}
+            students={students}
           />
         )}
 
