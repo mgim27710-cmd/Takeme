@@ -5,7 +5,6 @@ class UserModel {
   final String role;
   final String? token;
   final int? academyId;
-  final String? academyName;
   final String? assignedClass;
 
   UserModel({
@@ -15,7 +14,6 @@ class UserModel {
     required this.role,
     this.token,
     this.academyId,
-    this.academyName,
     this.assignedClass,
   });
 
@@ -27,7 +25,6 @@ class UserModel {
       role: json['role'] ?? 'STUDENT',
       token: token ?? json['token'],
       academyId: json['academyId'] is int ? json['academyId'] : int.tryParse(json['academyId']?.toString() ?? ''),
-      academyName: json['academyName'] ?? json['academy']?['name'],
       assignedClass: json['assignedClass'],
     );
   }
@@ -40,37 +37,7 @@ class UserModel {
       'role': role,
       'token': token,
       'academyId': academyId,
-      'academyName': academyName,
       'assignedClass': assignedClass,
     };
-  }
-}
-
-class VehicleModel {
-  final String id;
-  final String plateNumber;
-  final String model;
-  final int capacity;
-  final String? routeId;
-  final String? routeName;
-
-  VehicleModel({
-    required this.id,
-    required this.plateNumber,
-    required this.model,
-    required this.capacity,
-    this.routeId,
-    this.routeName,
-  });
-
-  factory VehicleModel.fromJson(Map<String, dynamic> json) {
-    return VehicleModel(
-      id: json['id']?.toString() ?? '',
-      plateNumber: json['plateNumber'] ?? json['licensePlate'] ?? '',
-      model: json['model'] ?? json['vehicleName'] ?? '',
-      capacity: json['capacity'] ?? 15,
-      routeId: json['routeId']?.toString() ?? json['route']?['id']?.toString(),
-      routeName: json['routeName'] ?? json['route']?['name'],
-    );
   }
 }
