@@ -1,3 +1,5 @@
+import '../driver/geo.dart';
+
 class RouteStop {
   final String name;
   final double latitude;
@@ -12,6 +14,8 @@ class RouteStop {
     this.address,
     this.expectedTime,
   });
+
+  GeoPoint get point => GeoPoint(latitude, longitude);
 
   factory RouteStop.fromJson(Map<String, dynamic> json) {
     double parseCoord(dynamic val) {
@@ -45,6 +49,9 @@ class RouteDataModel {
     required this.stops,
     required this.routePoints,
   });
+
+  GeoPoint? get academyPoint =>
+      (academyLat != null && academyLng != null) ? GeoPoint(academyLat!, academyLng!) : null;
 
   factory RouteDataModel.fromJson(Map<String, dynamic> json) {
     final academy = json['academy'] as Map<String, dynamic>?;

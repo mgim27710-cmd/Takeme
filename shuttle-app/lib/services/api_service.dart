@@ -21,6 +21,12 @@ class ApiService {
   String? get refreshToken => _refreshToken;
   UserModel? get currentUser => _currentUser;
   bool get isLoggedIn => _accessToken != null && _accessToken!.isNotEmpty;
+  String get baseUrl => AppConfig.apiHost;
+  bool get isDemo => _accessToken == null || _accessToken == 'demo_token' || (_currentUser != null && _currentUser!.email.toLowerCase().contains('demo'));
+
+  void updateBaseUrl(String url) {
+    AppConfig.apiHost = url.trim();
+  }
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
@@ -593,5 +599,72 @@ class ApiService {
     } catch (e) {
       return {'success': false, 'message': '메시지 전송에 실패했습니다.'};
     }
+  }
+
+  /// 기사 배정 차량 조회
+  Future<VehicleModel?> getDriverVehicle(String email) async {
+    if (isDemo || email.toLowerCase().contains('demo')) {
+      return null;
+    }
+    try {
+      final url = Uri.parse('\/teacher/my-vehicle?email=');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        if (data != null && data is Map<String, dynamic>) {
+          return VehicleModel.fromJson(data);
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// 노선 및 정류장 목록 조회
+  Future<RouteDataModel?> getDriverRoute(String email) async {
+    if (isDemo || email.toLowerCase().contains('demo')) {
+      return null;
+    }
+    try {
+      final url = Uri.parse('\/teacher/route?email=');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        if (data != null && data is Map<String, dynamic>) {
+          return RouteDataModel.fromJson(data);
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// 카카오/네이버 길찾기 중계 API (/directions)
+  Future<Map<String, dynamic>> getDirections({
+    required Map<String, dynamic> origin,
+    required Map<String, dynamic> destination,
+    required List<Map<String, dynamic>> waypoints,
+    required String mode,
+  }) async {
+    final url = Uri.parse('\/directions');
+    final res = await postWithAuth(url, jsonEncode({
+      'origin': origin,
+      'destination': destination,
+      'waypoints': waypoints,
+      'mode': mode,
+    }));
+
+    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      return data as Map<String, dynamic>;
+    } else {
+      throw Exception(data['message'] ?? '길찾기 실패 (\)');
+    }
+  }
+
+  /// 운행 종료 통보
+  Future<void> endOperation() async {
+    try {
+      final url = Uri.parse('\/teacher/end-operation');
+      await postWithAuth(url, '{}');
+    } catch (_) {}
   }
 }
