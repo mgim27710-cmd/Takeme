@@ -93,48 +93,60 @@ export class RoutingService {
     const raw = String(address).trim();
     cleanCandidates.push(raw);
 
-    // 1. Remove detailed apartment unit numbers (e.g., "101동 202호", "102동", "304호", "101-202")
-    const withoutUnit = raw
-      .replace(/\s*\b\d+동\s*\d+호\b/g, '')
-      .replace(/\s*\b\d+동\b/g, '')
-      .replace(/\s*\b\d+호\b/g, '')
-      .replace(/\s*\b\d+-\d+\b/g, '')
-      .trim();
-    if (withoutUnit && withoutUnit !== raw) cleanCandidates.push(withoutUnit);
+    // Extract region if present (e.g., '경기도 양주시')
+    const regionMatch = raw.match(/^([가-힣]+(?:시|도)\s+[가-힣]+(?:구|군|시))/);
+    const region = regionMatch ? regionMatch[1] : '';
 
-    // 2. Remove parentheses and bracketed contents (e.g. "(마곡동, 마곡엠밸리)")
-    const withoutParens = raw.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
-    if (withoutParens && !cleanCandidates.includes(withoutParens)) cleanCandidates.push(withoutParens);
-
-    // 3. Remove detailed apartment unit from withoutParens
-    const cleanBase = withoutParens
-      .replace(/\s*\b\d+동\s*\d+호\b/g, '')
-      .replace(/\s*\b\d+동\b/g, '')
-      .replace(/\s*\b\d+호\b/g, '')
-      .replace(/\s*\b\d+-\d+\b/g, '')
-      .trim();
-    if (cleanBase && !cleanCandidates.includes(cleanBase)) cleanCandidates.push(cleanBase);
-
-    // 4. Try road address pattern (시/도 + 시/군/구 + 도로명 + 번호)
-    const roadMatch = cleanBase.match(/([가-힣]+(?:시|도)?\s+[가-힣]+(?:구|군|시)\s+[가-힣0-9]+(?:로|길)\s+\d+(?:-\d+)?)/);
-    if (roadMatch && !cleanCandidates.includes(roadMatch[1])) cleanCandidates.push(roadMatch[1]);
-
-    // 5. Try apartment or building name inside parentheses
+    // 1. Inside parentheses: apartment / complex / building name
     const parenMatch = raw.match(/\(([^)]+)\)/);
     if (parenMatch) {
-      const insideClean = parenMatch[1]
-        .replace(/\s*\b\d+동\s*\d+호\b/g, '')
-        .replace(/\s*\b\d+동\b/g, '')
-        .replace(/\s*\b\d+호\b/g, '')
-        .replace(/\s*\b\d+-\d+\b/g, '')
+      let inside = parenMatch[1]
+        .replace(/\d+\s*동\s*\d+\s*호/g, '')
+        .replace(/\d+\s*동/g, '')
+        .replace(/\d+\s*호/g, '')
+        .replace(/\d+\s*-\s*\d+/g, '')
         .trim();
-      if (insideClean && !cleanCandidates.includes(insideClean)) {
-        cleanCandidates.push(insideClean);
+      if (inside) {
+        if (region) cleanCandidates.push(`${region} ${inside}`);
+        cleanCandidates.push(inside);
       }
     }
 
-    for (const query of cleanCandidates) {
+    // 2. Without parentheses and without unit details
+    let withoutParen = raw.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
+    withoutParen = withoutParen
+      .replace(/\d+\s*동\s*\d+\s*호/g, '')
+      .replace(/\d+\s*동/g, '')
+      .replace(/\d+\s*호/g, '')
+      .replace(/\d+\s*-\s*\d+/g, '')
+      .trim();
+    if (withoutParen && !cleanCandidates.includes(withoutParen)) {
+      cleanCandidates.push(withoutParen);
+    }
+
+    // 3. Road address pattern (시/도 + 시/군/구 + 도로명 + 번호)
+    const roadMatch = withoutParen.match(/([가-힣]+(?:시|도)?\s*[가-힣]+(?:구|군|시)?\s*[가-힣0-9]+(?:로|길)\s*\d+(?:-\d+)?)/);
+    if (roadMatch && !cleanCandidates.includes(roadMatch[1])) {
+      cleanCandidates.push(roadMatch[1]);
+    }
+
+    // 4. Road without number (fallback if building number is missing or non-standard)
+    const roadNoNumMatch = withoutParen.match(/([가-힣]+(?:시|도)?\s*[가-힣]+(?:구|군|시)?\s*[가-힣0-9]+(?:로|길))/);
+    if (roadNoNumMatch && !cleanCandidates.includes(roadNoNumMatch[1])) {
+      cleanCandidates.push(roadNoNumMatch[1]);
+    }
+
+    // 5. Town / Dong pattern (시/도 + 시/군/구 + 읍/면/동)
+    const dongMatch = withoutParen.match(/([가-힣]+(?:시|도)?\s*[가-힣]+(?:구|군|시)?\s*[가-힣0-9]+(?:읍|면|동))/);
+    if (dongMatch && !cleanCandidates.includes(dongMatch[1])) {
+      cleanCandidates.push(dongMatch[1]);
+    }
+
+    const uniqueCandidates = Array.from(new Set(cleanCandidates.filter(Boolean)));
+
+    for (const query of uniqueCandidates) {
       if (!query) continue;
+      // 1. Kakao address search
       try {
         const response = await firstValueFrom(
           this.httpService.get('https://dapi.kakao.com/v2/local/search/address.json', {
@@ -152,7 +164,7 @@ export class RoutingService {
         }
       } catch (e) {}
 
-      // Fallback to keyword search
+      // 2. Kakao keyword search
       try {
         const kw = query.replace(/앞|뒤|옆|근처|건너편|인근/g, '').trim();
         const kwResponse = await firstValueFrom(
@@ -172,7 +184,34 @@ export class RoutingService {
       } catch (e) {}
     }
 
-    console.log(`Failed to geocode completely: ${address}`);
+    // 3. Fallback: Naver Cloud Geocoding API if NCP keys are configured
+    const naverClientId = this.configService.get<string>('NAVER_CLIENT_ID') || this.configService.get<string>('NCP_CLIENT_ID');
+    const naverClientSecret = this.configService.get<string>('NAVER_CLIENT_SECRET') || this.configService.get<string>('NCP_CLIENT_SECRET');
+    if (naverClientId && naverClientSecret && naverClientId !== 'TEST_KEY') {
+      for (const query of uniqueCandidates) {
+        try {
+          const nResponse = await firstValueFrom(
+            this.httpService.get('https://naveropenapi.apigw.ntruss.com/map-geocode/v2/geocode', {
+              params: { query },
+              headers: {
+                'X-NCP-APIGW-API-KEY-ID': naverClientId,
+                'X-NCP-APIGW-API-KEY': naverClientSecret,
+              }
+            })
+          );
+          const addrs = nResponse.data?.addresses;
+          if (addrs && addrs.length > 0) {
+            const x = parseFloat(addrs[0].x);
+            const y = parseFloat(addrs[0].y);
+            if (!isNaN(x) && !isNaN(y)) {
+              return { lat: y, lng: x };
+            }
+          }
+        } catch (e) {}
+      }
+    }
+
+    console.warn(`[geocodeAddress] 주소 변환 실패: ${address}`);
     return null;
   }
 
@@ -1260,7 +1299,7 @@ export class RoutingService {
 
         const expandedPolygon = this.generateZonePolygon(pointsToHull);
         if (expandedPolygon && expandedPolygon.length >= 3) {
-          vehicle.polygonCoordinates = JSON.stringify(expandedPolygon);
+          vehicle.polygonCoordinates = expandedPolygon;
           await this.vehicleRepository.save(vehicle);
         }
       }
@@ -1477,11 +1516,12 @@ export class RoutingService {
   }
 
   async geocodeBulk(addresses: string[]) {
+    if (!Array.isArray(addresses)) return [];
     const cache = new Map<string, { lat: number, lng: number } | null>();
     const results = [];
     for (const address of addresses) {
-      if (!address) {
-        results.push({ address, coords: null });
+      if (!address || typeof address !== 'string' || !address.trim()) {
+        results.push({ address: address || '', coords: null });
         continue;
       }
       const trimmed = address.trim();
@@ -1492,7 +1532,7 @@ export class RoutingService {
         coords = await this.geocodeAddress(trimmed);
         cache.set(trimmed, coords);
       }
-      results.push({ address, coords });
+      results.push({ address: trimmed, coords });
     }
     return results;
   }

@@ -1668,13 +1668,16 @@ const parseKindergartenExcelSheet = (sheet) => {
           throw new Error(errData.message || '지오코딩 처리 실패');
         }
         const geocoded = await res.json();
-        
+        const defaultLat = academy?.lat ? parseFloat(academy.lat) : (academy?.latitude ? parseFloat(academy.latitude) : 37.8083);
+        const defaultLng = academy?.lng ? parseFloat(academy.lng) : (academy?.longitude ? parseFloat(academy.longitude) : 127.0717);
+
         // Point-in-Polygon & Explicit Assignment
         const newStudents = [];
         geocoded.forEach((item, idx) => {
-          if (!item.coords) return;
+          const lat = item.coords?.lat !== undefined && !isNaN(item.coords?.lat) ? item.coords.lat : defaultLat;
+          const lng = item.coords?.lng !== undefined && !isNaN(item.coords?.lng) ? item.coords.lng : defaultLng;
           
-          const pt = turf.point([item.coords.lng, item.coords.lat]);
+          const pt = turf.point([lng, lat]);
           let assignedBus = null;
           let minDistance = Infinity;
 
@@ -1715,8 +1718,8 @@ const parseKindergartenExcelSheet = (sheet) => {
             name: addressMap[idx].name,
             address: item.address,
             boardingLocation: addressMap[idx].boardingLocation,
-            lat: item.coords.lat,
-            lng: item.coords.lng,
+            lat: lat,
+            lng: lng,
             assignedBusId: assignedBus ? assignedBus.id : null,
             color: assignedBus ? assignedBus.color : '#64748b', // Slate for unassigned
             raw: addressMap[idx].raw
