@@ -1562,7 +1562,7 @@ const parseKindergartenExcelSheet = (sheet) => {
 
     // Normalize field aliases
     const name = obj['원아명'] || obj['학생이름/영문이름'] || obj['이름'] || obj['원생명'] || obj['학생명'] || obj['원생이름'] || '';
-    const kindergartenName = obj['유치원명'] || obj['소속원명'] || obj['학교명'] || '';
+    const kindergartenName = (academy?.name && academy.name.trim()) || obj['유치원명'] || obj['소속원명'] || obj['학교명'] || '';
     const age = obj['연령'] || obj['학년'] || '';
     const parentPhone = obj['부모연락처'] || obj['보호자연락처'] || obj['보호자 연락처'] || '';
     const address = obj['등원지'] || obj['탑승지'] || obj['승차지'] || obj['주소'] || obj['도로명주소'] || '';
@@ -1573,6 +1573,15 @@ const parseKindergartenExcelSheet = (sheet) => {
     obj['이름'] = name;
     obj['유치원명'] = kindergartenName;
     obj['학교명'] = kindergartenName;
+
+    // Preserve existing class teacher if already registered in system
+    const studentClass = (obj['반명'] || obj['반'] || '').toString().trim();
+    if (studentClass && Array.isArray(teachers)) {
+      const existingT = teachers.find(t => t.assignedClass && t.assignedClass.trim() === studentClass);
+      if (existingT && existingT.name) {
+        obj['담임명'] = existingT.name;
+      }
+    }
     obj['연령'] = age;
     obj['부모연락처'] = parentPhone;
     obj['보호자연락처'] = parentPhone;
@@ -2353,28 +2362,84 @@ const parseKindergartenExcelSheet = (sheet) => {
               <p className="text-[13px] text-slate-500 mt-1">호차별 운행 구역, 차량 정보 및 탑승 원생을 통합 관리합니다.</p>
             </div>
 
-            {/* Action Buttons: Pickup points */}
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              <button 
-                onClick={() => setShowPickupPoints(!showPickupPoints)} 
-                className={`w-full py-2.5 px-2 rounded-xl text-sm font-bold border transition-all whitespace-nowrap text-center ${
-                  showPickupPoints 
-                    ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-inner' 
-                    : 'border-slate-200 bg-white text-slate-600 hover:border-orange-300 hover:text-orange-600 shadow-xs'
+            {/* Action Buttons: Integrated Zone Mapping & Pickup Points */}
+            <div className="space-y-2.5 mb-4">
+              <button
+                onClick={() => setIsResettingZones(!isResettingZones)}
+                className={`w-full py-2.5 px-3 rounded-xl text-sm font-bold border transition-all flex items-center justify-center gap-2 shadow-xs whitespace-nowrap ${
+                  isResettingZones
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-inner'
+                    : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:border-blue-300'
                 }`}
               >
-                {showPickupPoints ? '탑승지 숨기기' : '탑승지 보기'}
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                </svg>
+                {isResettingZones ? '구역 매핑 패널 닫기' : '구역 매핑 재설정 및 수정'}
               </button>
-              <button 
-                onClick={() => setIsAddingPickupPoint(!isAddingPickupPoint)} 
-                className={`w-full py-2.5 px-2 rounded-xl text-sm font-bold border transition-all whitespace-nowrap text-center ${
-                  isAddingPickupPoint 
-                    ? 'border-purple-500 bg-purple-50 text-purple-700 shadow-inner' 
-                    : 'border-slate-200 bg-white text-slate-600 hover:border-purple-300 hover:text-purple-600 shadow-xs'
-                }`}
-              >
-                {isAddingPickupPoint ? '위치 클릭 중...' : '+ 탑승지 추가'}
-              </button>
+
+              {/* Integrated Zone Remapping Panel */}
+              {isResettingZones && (
+                <div className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50/60 rounded-2xl border border-blue-200 shadow-xs space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-blue-900 text-xs flex items-center gap-1.5">
+                      <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                      </svg>
+                      구역 매핑 엑셀 업로드 및 원생 자동 병합
+                    </span>
+                    <button 
+                      onClick={() => setIsResettingZones(false)}
+                      className="text-xs text-slate-400 hover:text-slate-600 font-bold"
+                    >
+                      닫기
+                    </button>
+                  </div>
+                  <p className="text-xs text-blue-700 leading-relaxed">
+                    새 엑셀 파일의 <b>등원지, 하원지, 차량</b> 데이터를 바탕으로 운행 구역(폴리곤)을 재계산합니다. <b>기존에 등록된 원생 및 선생님 정보는 보존</b>되며 새 구역으로 자동 병합 배차됩니다.
+                  </p>
+                  <input type="file" accept=".xlsx, .xls" className="hidden" ref={resetFileInputRef} onChange={handleZoneResetUpload} />
+                  <div className="flex gap-2">
+                    <a 
+                      href="/전년도_자료_입력_시트_양식.xlsx" 
+                      download="전년도_자료_입력_시트_양식.xlsx" 
+                      className="flex-1 py-2 px-3 bg-white text-slate-700 rounded-xl text-xs border border-slate-200 shadow-xs hover:bg-slate-50 transition-colors flex items-center justify-center font-bold whitespace-nowrap"
+                    >
+                      양식 다운로드
+                    </a>
+                    <button 
+                      onClick={() => resetFileInputRef.current && resetFileInputRef.current.click()} 
+                      disabled={isProcessing}
+                      className="flex-1 py-2 px-3 bg-blue-600 text-white rounded-xl text-xs font-bold shadow-xs hover:bg-blue-700 disabled:opacity-50 transition-colors whitespace-nowrap flex items-center justify-center gap-1.5"
+                    >
+                      {isProcessing ? '구역 매핑 처리 중...' : '새 엑셀 업로드'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <button 
+                  onClick={() => setShowPickupPoints(!showPickupPoints)} 
+                  className={`w-full py-2.5 px-2 rounded-xl text-sm font-bold border transition-all whitespace-nowrap text-center ${
+                    showPickupPoints 
+                      ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-inner' 
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-orange-300 hover:text-orange-600 shadow-xs'
+                  }`}
+                >
+                  {showPickupPoints ? '탑승지 숨기기' : '탑승지 보기'}
+                </button>
+                <button 
+                  onClick={() => setIsAddingPickupPoint(!isAddingPickupPoint)} 
+                  className={`w-full py-2.5 px-2 rounded-xl text-sm font-bold border transition-all whitespace-nowrap text-center ${
+                    isAddingPickupPoint 
+                      ? 'border-purple-500 bg-purple-50 text-purple-700 shadow-inner' 
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-purple-300 hover:text-purple-600 shadow-xs'
+                  }`}
+                >
+                  {isAddingPickupPoint ? '위치 클릭 중...' : '+ 탑승지 추가'}
+                </button>
+              </div>
             </div>
 
             {/* Bus Cards List */}
@@ -3361,11 +3426,11 @@ const parseKindergartenExcelSheet = (sheet) => {
 
               <div className="p-4 bg-red-50 rounded-xl border border-red-100 transition-all">
                 <h3 className="font-bold text-blue-700 mb-1">구역 매핑 재설정 및 기존 원생 병합</h3>
-                <p className="text-xs text-blue-600 mb-3 opacity-80 leading-relaxed">새로운 엑셀 자료를 기반으로 버스 운행 구역(폴리곤)을 재설정합니다. 기존 등록 원생 및 교사/기사님 정보는 안전하게 보존되며 새 구역으로 자동 병합 배차됩니다.</p>
+                <p className="text-xs text-blue-600 mb-3 opacity-80 leading-relaxed">새로운 엑셀 자료를 기반으로 버스 운행 구역(폴리곤)을 재설정합니다. [차량 및 구역 관리] 탭에서도 즉시 설정하실 수 있습니다.</p>
                 
                 {!isResettingZones ? (
-                  <button onClick={() => setIsResettingZones(true)} className="w-full py-2.5 px-3 bg-white text-blue-600 rounded-xl text-sm font-bold border border-blue-200 shadow-xs hover:bg-blue-600 hover:text-white transition-colors whitespace-nowrap">
-                    구역 매핑 재설정 모드 진입
+                  <button onClick={() => { setActiveTab('buses'); setIsResettingZones(true); }} className="w-full py-2.5 px-3 bg-white text-blue-600 rounded-xl text-sm font-bold border border-blue-200 shadow-xs hover:bg-blue-600 hover:text-white transition-colors whitespace-nowrap">
+                    [차량 및 구역 관리]에서 매핑 수정하기
                   </button>
                 ) : (
                   <div className="space-y-3 mt-4 pt-4 border-t border-blue-200">

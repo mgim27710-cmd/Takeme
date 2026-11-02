@@ -267,6 +267,19 @@ export class RoutingService {
     const savedVehicles: any[] = [];
     const vehiclePointsMap: Record<string, any> = {};
 
+    // Only adopt kindergarten name from Excel if there is NO existing saved name
+    const existingAcademyName = academy.name && academy.name.trim() !== '' ? academy.name.trim() : '';
+    if (!existingAcademyName) {
+      for (const row of parsedData) {
+        const kName = row['유치원명'] || row['소속원명'] || row['학교명'];
+        if (kName && String(kName).trim()) {
+          academy.name = String(kName).trim();
+          await this.academyRepository.save(academy);
+          break;
+        }
+      }
+    }
+
     // 2. Synchronize Vehicles: Reuse existing vehicles to preserve IDs, driver/teacher user links and approvals
     for (let i = 0; i < vehicles.length; i++) {
       const v = vehicles[i];
@@ -278,12 +291,31 @@ export class RoutingService {
       if (existing) {
         // Reuse existing vehicle record to preserve IDs, driver/teacher relations and approval statuses
         existing.busNumber = busNum;
-        if (v.plateNumber && v.plateNumber.trim()) existing.plateNumber = v.plateNumber;
-        if (v.capacity) existing.capacity = Number(v.capacity) || existing.capacity || 25;
-        if (v.driverName && v.driverName !== '미정') existing.driverName = v.driverName;
-        if (v.driverPhone && v.driverPhone !== '000-0000-0000') existing.driverPhone = v.driverPhone;
-        if (v.teacherName && v.teacherName !== '미정') existing.teacherName = v.teacherName;
-        if (v.teacherPhone && v.teacherPhone !== '000-0000-0000') existing.teacherPhone = v.teacherPhone;
+        if ((!existing.plateNumber || existing.plateNumber.trim() === '') && v.plateNumber && v.plateNumber.trim()) {
+          existing.plateNumber = v.plateNumber;
+        }
+        if (v.capacity && !existing.capacity) {
+          existing.capacity = Number(v.capacity) || 25;
+        }
+
+        // ONLY bring driver/teacher info if there is NO existing saved data in DB
+        const hasExistingDriver = existing.driverName && existing.driverName !== '미정';
+        if (!hasExistingDriver && v.driverName && v.driverName !== '미정') {
+          existing.driverName = v.driverName;
+        }
+        const hasExistingDriverPhone = existing.driverPhone && existing.driverPhone !== '000-0000-0000';
+        if (!hasExistingDriverPhone && v.driverPhone && v.driverPhone !== '000-0000-0000') {
+          existing.driverPhone = v.driverPhone;
+        }
+        const hasExistingTeacher = existing.teacherName && existing.teacherName !== '미정';
+        if (!hasExistingTeacher && v.teacherName && v.teacherName !== '미정') {
+          existing.teacherName = v.teacherName;
+        }
+        const hasExistingTeacherPhone = existing.teacherPhone && existing.teacherPhone !== '000-0000-0000';
+        if (!hasExistingTeacherPhone && v.teacherPhone && v.teacherPhone !== '000-0000-0000') {
+          existing.teacherPhone = v.teacherPhone;
+        }
+
         if (!existing.colorHex) existing.colorHex = this.getDistinctColor();
         targetVehicle = await this.vehicleRepository.save(existing);
       } else {
@@ -528,6 +560,10 @@ export class RoutingService {
           if (student.raw && typeof student.raw === 'object') {
             student.raw['등원차량'] = targetVehicle.busNumber;
             student.raw['하원차량'] = targetVehicle.busNumber;
+            if (academy.name && academy.name.trim()) {
+              student.raw['유치원명'] = academy.name.trim();
+              student.raw['학교명'] = academy.name.trim();
+            }
           }
         }
       }
@@ -1093,6 +1129,36 @@ export class RoutingService {
     const vehicleMap = new Map();
     vehicles.forEach(v => vehicleMap.set(v.id, v));
 
+    // Preserve existing academy name: only adopt from Excel if no existing saved name
+    const existingAcademyName = academy.name && academy.name.trim() !== '' ? academy.name.trim() : '';
+    if (!existingAcademyName) {
+      for (const st of students) {
+        let r = st.raw;
+        if (typeof r === 'string') { try { r = JSON.parse(r); } catch(e){} }
+        const k = r && (r['유치원명'] || r['소속원명'] || r['학교명']);
+        if (k && String(k).trim()) {
+          academy.name = String(k).trim();
+          await this.academyRepository.save(academy);
+          break;
+        }
+      }
+    }
+    const currentAcademyName = academy.name && academy.name.trim() !== '' ? academy.name.trim() : '';
+
+    // Query existing teachers for this academy to preserve homeroom teachers
+    const existingTeachers = await this.userRepository.find({
+      where: [
+        { role: UserRole.TEACHER, academy: { id: academy.id } },
+        { role: UserRole.HOMEROOM_TEACHER, academy: { id: academy.id } }
+      ]
+    });
+    const classTeacherMap = new Map<string, string>();
+    existingTeachers.forEach(t => {
+      if (t.assignedClass && t.name && t.assignedClass !== '미배정') {
+        classTeacherMap.set(t.assignedClass.trim(), t.name.trim());
+      }
+    });
+
     const nameCounts: Record<string, number> = {};
     
     // First pass to count names
@@ -1117,7 +1183,9 @@ export class RoutingService {
         adminDisplayName = pPhone ? `${st.name}(${String(pPhone).trim()})` : st.name;
       }
       if (rawObj && typeof rawObj === 'object') {
-        const kName = rawObj['유치원명'] || rawObj['소속원명'] || rawObj['학교명'] || academy.name || '';
+        const excelKName = rawObj['유치원명'] || rawObj['소속원명'] || rawObj['학교명'] || '';
+        // If academy.name already exists, KEEP IT and do not overwrite with Excel!
+        const kName = currentAcademyName || excelKName || '';
         const pPhone = rawObj['부모연락처'] || rawObj['보호자연락처'] || rawObj['보호자 연락처'] || '';
         const kAge = rawObj['연령'] || rawObj['학년'] || '';
         const depType = rawObj['하원구분'] || rawObj['하원정보'] || (rawObj['정규하원'] ? '정규하원' : rawObj['방과후하원'] ? '방과후하원' : rawObj['종일반하원'] ? '종일반하원' : '정규하원');
@@ -1128,6 +1196,15 @@ export class RoutingService {
         rawObj['보호자연락처'] = pPhone;
         rawObj['연령'] = kAge;
         rawObj['하원구분'] = depType;
+
+        // Preserve existing teacher data if available in DB
+        const studentClass = (rawObj['반명'] || rawObj['반'] || '').toString().trim();
+        const classTeacher = studentClass ? classTeacherMap.get(studentClass) : null;
+        if (classTeacher) {
+          rawObj['담임명'] = classTeacher;
+        } else {
+          rawObj['담임명'] = rawObj['담임명'] || rawObj['담임'] || '';
+        }
       }
 
       const allergyVal = rawObj ? (rawObj['알레르기'] || rawObj['알러지'] || rawObj['특이사항(알레르기)'] || '') : '';
@@ -1285,11 +1362,22 @@ export class RoutingService {
 
     // Format raw JSON containing kindergarten columns
     const departureType = studentData.departureType || studentData.raw?.['하원구분'] || studentData.raw?.['하원정보'] || '정규하원';
-    const kindergartenName = studentData.kindergartenName || studentData.schoolName || studentData.raw?.['유치원명'] || studentData.raw?.['소속원명'] || studentData.raw?.['학교명'] || academy.name || '';
+    // Preserve existing academy name if present
+    const kindergartenName = (academy.name && academy.name.trim()) || studentData.kindergartenName || studentData.schoolName || studentData.raw?.['유치원명'] || studentData.raw?.['소속원명'] || studentData.raw?.['학교명'] || '';
     const parentPhone = studentData.parentPhone || studentData.raw?.['부모연락처'] || studentData.raw?.['보호자연락처'] || studentData.raw?.['보호자 연락처'] || '';
     const age = studentData.age || studentData.raw?.['연령'] || studentData.raw?.['학년'] || '';
     const className = studentData.className || studentData.raw?.['반명'] || '';
-    const teacherName = studentData.teacherName || studentData.raw?.['담임명'] || '';
+
+    // Check if class already has an existing assigned teacher in the system
+    let teacherName = studentData.teacherName || studentData.raw?.['담임명'] || '';
+    if (className) {
+      const classTeacher = await this.userRepository.findOne({
+        where: { academy: { id: academy.id }, assignedClass: className }
+      });
+      if (classTeacher && classTeacher.name) {
+        teacherName = classTeacher.name; // Preserve existing teacher!
+      }
+    }
 
     const raw = {
       ...(studentData.raw || {}),
@@ -2130,7 +2218,8 @@ export class RoutingService {
     const academy = await this.getAcademy(data.academyId || academyId, userId);
     if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
 
-    if (data.name && String(data.name).trim()) {
+    // Only update academy name if there is NO existing saved name
+    if ((!academy.name || academy.name.trim() === '') && data.name && String(data.name).trim()) {
       academy.name = String(data.name).trim();
       await this.academyRepository.save(academy);
     }
