@@ -107,6 +107,13 @@ class NavMapControllerWeb implements NavMapController {
   @override
   void fitAll() => _run('window.fitAll();');
 
+  @override
+  void setInteractive(bool interactive) {
+    if (_iframe != null) {
+      _iframe!.style.pointerEvents = interactive ? 'auto' : 'none';
+    }
+  }
+
   void dispose() {
     _sub?.cancel();
   }

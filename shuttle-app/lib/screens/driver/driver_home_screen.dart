@@ -56,6 +56,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   }
 
   Future<void> _confirmStop() async {
+    _map.setInteractive(false);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => PointerInterceptor(
@@ -81,6 +82,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         ),
       ),
     );
+    _map.setInteractive(true);
     if (ok == true) await _nav.stop();
   }
 
@@ -89,6 +91,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       setState(() => _nav.simSendToServer = false);
       return;
     }
+    _map.setInteractive(false);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => PointerInterceptor(
@@ -103,6 +106,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         ),
       ),
     );
+    _map.setInteractive(true);
     if (ok == true) setState(() => _nav.simSendToServer = true);
   }
 
@@ -124,7 +128,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         await _confirmSendToServer(!_nav.simSendToServer);
       case 'settings':
         if (mounted) {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+          _map.setInteractive(false);
+          await Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+          _map.setInteractive(true);
         }
     }
   }
@@ -147,7 +153,18 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
               color: _nav.testMode ? _C.orange : _C.slate800,
             ),
           ),
-          actions: [_menu()],
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.settings_outlined, color: _C.slate800, size: 28),
+              tooltip: '설정',
+              onPressed: () => _onMenu('settings'),
+            ),
+            IconButton(
+              icon: const Icon(Icons.more_vert, color: _C.slate800, size: 28),
+              tooltip: '메뉴',
+              onPressed: _openMenu,
+            ),
+          ],
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(1),
             child: Container(color: _C.slate100, height: 1),
@@ -163,40 +180,141 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     );
   }
 
-  Widget _menu() {
-    final items = <PopupMenuEntry<String>>[];
-    if (!_nav.driving) {
-      items.add(_menuItem('test', Icons.science_outlined, '테스트 경로로 연습하기'));
-    } else {
-      items.add(_menuItem('sim', _nav.simulating ? Icons.pause : Icons.play_arrow,
-          _nav.simulating ? '시뮬레이션 멈추기' : '주행 시뮬레이션 시작'));
-      if (_nav.simulating) items.add(_menuItem('offroute', Icons.alt_route, '경로 이탈 테스트'));
-      items.add(_menuItem('switch', Icons.swap_horiz, '${_nav.mode.other.title}로 바꾸기'));
-      if (_nav.serverLive) {
-        items.add(_menuItem('send', _nav.simSendToServer ? Icons.check_box : Icons.check_box_outline_blank,
-            '시뮬레이션 위치를 서버로 보내기'));
-      }
-    }
-    items.add(_menuItem('settings', Icons.settings_outlined, '설정'));
-    return PopupMenuButton<String>(
-      tooltip: '메뉴',
-      icon: const Icon(Icons.more_vert, color: _C.slate800, size: 28),
-      onSelected: _onMenu,
-      itemBuilder: (_) => items,
-    );
-  }
-
-  PopupMenuItem<String> _menuItem(String v, IconData icon, String text) => PopupMenuItem(
-        value: v,
-        height: 52,
-        child: PointerInterceptor(
-          child: Row(children: [
-            Icon(icon, color: _C.slate600),
-            const SizedBox(width: 12),
-            Flexible(child: Text(text, style: const TextStyle(fontSize: 17))),
-          ]),
+  void _openMenu() {
+    _map.setInteractive(false);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => PointerInterceptor(
+        child: Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: _C.slate200,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.menu, color: _C.slate800, size: 22),
+                      const SizedBox(width: 8),
+                      const Text('기사 메뉴', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: _C.slate800)),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: _C.slate500),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(),
+                if (!_nav.driving)
+                  ListTile(
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(color: const Color(0xFFFFF7ED), borderRadius: BorderRadius.circular(8)),
+                      child: const Icon(Icons.science_outlined, color: _C.orange, size: 24),
+                    ),
+                    title: const Text('테스트 경로로 연습하기', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                    subtitle: const Text('실제 운행 없이 가상 경로로 네비게이션을 체험합니다', style: TextStyle(fontSize: 13, color: _C.slate500)),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _onMenu('test');
+                    },
+                  ),
+                if (_nav.driving) ...[
+                  ListTile(
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(color: _C.blueBg, borderRadius: BorderRadius.circular(8)),
+                      child: Icon(_nav.simulating ? Icons.pause : Icons.play_arrow, color: _C.blue, size: 24),
+                    ),
+                    title: Text(_nav.simulating ? '시뮬레이션 멈추기' : '주행 시뮬레이션 시작',
+                        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _onMenu('sim');
+                    },
+                  ),
+                  if (_nav.simulating)
+                    ListTile(
+                      leading: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: const Color(0xFFFEF2F2), borderRadius: BorderRadius.circular(8)),
+                        child: const Icon(Icons.alt_route, color: _C.red, size: 24),
+                      ),
+                      title: const Text('경로 이탈 테스트', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                      subtitle: const Text('현재 위치에서 경로를 이탈하여 자동 재탐색을 시험합니다', style: TextStyle(fontSize: 13, color: _C.slate500)),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _onMenu('offroute');
+                      },
+                    ),
+                  ListTile(
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(color: _C.slate100, borderRadius: BorderRadius.circular(8)),
+                      child: const Icon(Icons.swap_horiz, color: _C.slate600, size: 24),
+                    ),
+                    title: Text('${_nav.mode.other.title}로 바꾸기', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _onMenu('switch');
+                    },
+                  ),
+                  if (_nav.serverLive)
+                    ListTile(
+                      leading: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: _C.blueBg, borderRadius: BorderRadius.circular(8)),
+                        child: Icon(_nav.simSendToServer ? Icons.check_box : Icons.check_box_outline_blank, color: _C.blue, size: 24),
+                      ),
+                      title: const Text('시뮬레이션 위치를 서버로 보내기', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _onMenu('send');
+                      },
+                    ),
+                ],
+                const Divider(),
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: _C.slate100, borderRadius: BorderRadius.circular(8)),
+                    child: const Icon(Icons.settings_outlined, color: _C.slate600, size: 24),
+                  ),
+                  title: const Text('설정', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                  subtitle: const Text('음성 안내, 지도 설정 및 계정 환경설정', style: TextStyle(fontSize: 13, color: _C.slate500)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _onMenu('settings');
+                  },
+                ),
+              ],
+            ),
+          ),
         ),
-      );
+      ),
+    ).whenComplete(() {
+      _map.setInteractive(true);
+    });
+  }
 
   // ───────────────────────── 운행 전 ─────────────────────────
 
@@ -239,6 +357,23 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                   _compareNote(),
                   const SizedBox(height: 16),
                   _startButton(),
+                  if (!_nav.driving) ...[
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      height: 52,
+                      child: OutlinedButton.icon(
+                        onPressed: _nav.busy ? null : _nav.startTestDrive,
+                        icon: const Icon(Icons.science_outlined, size: 24, color: _C.orange),
+                        label: const Text('테스트 경로로 연습하기',
+                            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: _C.orange)),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: _C.orange, width: 2),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          backgroundColor: const Color(0xFFFFF7ED),
+                        ),
+                      ),
+                    ),
+                  ],
                   if (_nav.actionError != null) ...[
                     const SizedBox(height: 10),
                     Text(_nav.actionError!, style: const TextStyle(color: _C.red, fontSize: 16)),

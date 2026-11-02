@@ -66,6 +66,9 @@ class NavMapControllerMobile implements NavMapController {
 
   @override
   void fitAll() => _run('window.fitAll();');
+
+  @override
+  void setInteractive(bool interactive) {}
 }
 
 NavMapController createNavMapController() => NavMapControllerMobile();

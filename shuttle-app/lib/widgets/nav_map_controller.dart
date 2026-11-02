@@ -18,4 +18,5 @@ abstract class NavMapController {
   void centerOn(GeoPoint p, {int zoom = 17});
   void markStopPassed(int index);
   void fitAll();
+  void setInteractive(bool interactive);
 }
