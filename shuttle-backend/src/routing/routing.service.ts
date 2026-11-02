@@ -511,12 +511,16 @@ export class RoutingService {
       }
     }
 
-    // 4. Form dedicated, non-overlapping convex polygon zone for each vehicle
-    // IMPORTANT: Never connect or anchor zones to the central kindergarten point!
+    // 4. Form dedicated, non-overlapping contiguous vehicle zones
+    // Boundaries touch along shared borders, never overlap (0% invasion), and never anchor to the center kindergarten
+    const partitionedPolygons = this.partitionVehicleZones(
+      savedVehicles.map(v => v.points),
+      1.8 // Realistic neighborhood service sector coverage (~2.5km to ~5km span)
+    );
+
     for (let i = 0; i < nVehicles; i++) {
       const v = savedVehicles[i];
-      // Generate clean boundary polygon encompassing ONLY this vehicle's student stops
-      v.points = this.generateZonePolygon(v.points);
+      v.points = partitionedPolygons[i] || [];
       v.polygon = v.points;
 
       // Update DB with polygon points (TypeORM simple-json handles serialization)
@@ -974,7 +978,7 @@ export class RoutingService {
     return lower.concat(upper);
   }
 
-  private generateZonePolygon(points: [number, number][], bufferKm: number = 0.35): [number, number][] {
+  private generateZonePolygon(points: [number, number][], bufferKm: number = 1.8): [number, number][] {
     if (!points || points.length === 0) return [];
 
     // Deduplicate points
@@ -987,7 +991,7 @@ export class RoutingService {
     const uniquePoints = Array.from(pointMap.values());
     if (uniquePoints.length === 0) return [];
 
-    // Service buffer around student boarding locations (~350m radius)
+    // Generous service buffer around student stops (~1.8km radius for realistic neighborhood sector)
     // 1 deg lat ≈ 111.0 km, 1 deg lng ≈ 111.0 * cos(lat) ≈ 88.0 km in Korea
     const avgLat = uniquePoints.reduce((s, p) => s + p[0], 0) / uniquePoints.length;
     const dLat = bufferKm / 111.0;
@@ -998,20 +1002,138 @@ export class RoutingService {
     for (const p of uniquePoints) {
       const lat = p[0];
       const lng = p[1];
-      expandedPoints.push(
-        [lat + dLat, lng],
-        [lat - dLat, lng],
-        [lat, lng + dLng],
-        [lat, lng - dLng],
-        [lat + dLat * 0.707, lng + dLng * 0.707],
-        [lat + dLat * 0.707, lng - dLng * 0.707],
-        [lat - dLat * 0.707, lng + dLng * 0.707],
-        [lat - dLat * 0.707, lng - dLng * 0.707]
-      );
+      // 12-direction expansion for smooth natural perimeter
+      for (let a = 0; a < 12; a++) {
+        const rad = (a * 2 * Math.PI) / 12;
+        expandedPoints.push([
+          lat + dLat * Math.sin(rad),
+          lng + dLng * Math.cos(rad)
+        ]);
+      }
     }
 
     const hull = this.computeConvexHull(expandedPoints);
     return hull && hull.length >= 3 ? hull : expandedPoints.slice(0, 4);
+  }
+
+  // Sutherland-Hodgman polygon clipping against a perpendicular bisector half-plane
+  private clipPolygonWithHalfPlane(
+    poly: [number, number][],
+    c1: [number, number],
+    c2: [number, number],
+    cosLat: number
+  ): [number, number][] {
+    if (!poly || poly.length < 3) return poly;
+
+    // Vector from c1 to c2 in metric-proportional coords
+    const dx = (c2[1] - c1[1]) * cosLat;
+    const dy = c2[0] - c1[0];
+
+    // Midpoint M
+    const mx = ((c1[1] + c2[1]) / 2) * cosLat;
+    const my = (c1[0] + c2[0]) / 2;
+
+    // Inside test: a point P is on c1's side if dot(P - M, C2 - C1) <= 0
+    const isInside = (p: [number, number]) => {
+      const px = p[1] * cosLat;
+      const py = p[0];
+      const dot = (px - mx) * dx + (py - my) * dy;
+      return dot <= 0.0000001;
+    };
+
+    // Line intersection between edge (p1, p2) and the bisector line
+    const intersect = (p1: [number, number], p2: [number, number]): [number, number] => {
+      const p1x = p1[1] * cosLat, p1y = p1[0];
+      const p2x = p2[1] * cosLat, p2y = p2[0];
+      const d1 = (p1x - mx) * dx + (p1y - my) * dy;
+      const d2 = (p2x - mx) * dx + (p2y - my) * dy;
+      if (Math.abs(d1 - d2) < 1e-12) return p1;
+      const t = d1 / (d1 - d2);
+      return [
+        p1[0] + t * (p2[0] - p1[0]),
+        p1[1] + t * (p2[1] - p1[1])
+      ];
+    };
+
+    const output: [number, number][] = [];
+    for (let i = 0; i < poly.length; i++) {
+      const curr = poly[i];
+      const prev = poly[(i + poly.length - 1) % poly.length];
+
+      const currIn = isInside(curr);
+      const prevIn = isInside(prev);
+
+      if (currIn) {
+        if (!prevIn) output.push(intersect(prev, curr));
+        output.push(curr);
+      } else if (prevIn) {
+        output.push(intersect(prev, curr));
+      }
+    }
+
+    return output;
+  }
+
+  // Generates dedicated, realistic, large zones for all vehicles that:
+  // 1. Cover extensive neighborhood service sectors (~2.5km to ~5.0km span)
+  // 2. Meet seamlessly at shared borders (서로 맞닿아 있음)
+  // 3. Strictly never overlap (침범 0%)
+  private partitionVehicleZones(vehiclePointsList: [number, number][][], bufferKm: number = 1.8): [number, number][][] {
+    const n = vehiclePointsList.length;
+    if (n === 0) return [];
+    if (n === 1) {
+      return [this.generateZonePolygon(vehiclePointsList[0], bufferKm)];
+    }
+
+    // 1. Compute cluster centroid for each vehicle
+    const centroids: ([number, number] | null)[] = vehiclePointsList.map(pts => {
+      if (!pts || pts.length === 0) return null;
+      const avgLat = pts.reduce((s, p) => s + p[0], 0) / pts.length;
+      const avgLng = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+      return [avgLat, avgLng];
+    });
+
+    const validCentroids = centroids.filter((c): c is [number, number] => c !== null);
+    const avgLat = validCentroids.length > 0 
+      ? validCentroids.reduce((s, c) => s + c[0], 0) / validCentroids.length 
+      : 37.8;
+    const cosLat = Math.cos((avgLat * Math.PI) / 180);
+
+    // 2. Expand each vehicle's student stops with generous service buffer
+    const initialPolygons = vehiclePointsList.map((pts, idx) => {
+      if (!pts || pts.length === 0) {
+        if (centroids[idx]) return this.generateZonePolygon([centroids[idx]!], bufferKm);
+        return [];
+      }
+      return this.generateZonePolygon(pts, bufferKm);
+    });
+
+    // 3. Clip each vehicle's polygon against the bisector half-planes of all other vehicles
+    // Mathematically guarantees:
+    // - ZERO overlap between any two vehicle zones (interiors are disjoint)
+    // - Adjacent zones TOUCH seamlessly along the bisector boundary
+    const clippedPolygons: [number, number][][] = [];
+    for (let i = 0; i < n; i++) {
+      let poly = initialPolygons[i];
+      const c1 = centroids[i];
+      if (!c1 || poly.length < 3) {
+        clippedPolygons.push(poly);
+        continue;
+      }
+
+      for (let j = 0; j < n; j++) {
+        if (i === j) continue;
+        const c2 = centroids[j];
+        if (!c2) continue;
+
+        poly = this.clipPolygonWithHalfPlane(poly, c1, c2, cosLat);
+        if (poly.length < 3) break;
+      }
+
+      clippedPolygons.push(this.computeConvexHull(poly));
+    }
+
+    return clippedPolygons;
   }
 
   private clusterPointsKMeans(points: [number, number][], k: number, centerLat: number): [number, number][][] {
@@ -1272,36 +1394,39 @@ export class RoutingService {
     const acadLng = parseFloat(academy.longitude);
 
     // Form clean, non-overlapping vehicle zones encompassing assigned students
-    // IMPORTANT: Never anchor or connect zones to the central kindergarten!
+    // Boundaries touch along shared borders, never overlap (0% invasion), and never anchor to the center kindergarten
+    const vehiclePointsForPartition: [number, number][][] = [];
     for (const vehicle of vehicles) {
       const assignedStudents = newStudents.filter(
         st => st.assignedVehicle && st.assignedVehicle.id === vehicle.id && st.latitude && st.longitude
       );
-      if (assignedStudents.length > 0) {
-        let existingPoints: [number, number][] = [];
-        try {
-          const rawPts = typeof vehicle.polygonCoordinates === 'string' 
-            ? JSON.parse(vehicle.polygonCoordinates) 
-            : vehicle.polygonCoordinates;
-          if (Array.isArray(rawPts)) {
-            existingPoints = rawPts.filter(p => Array.isArray(p) && p.length >= 2 && !isNaN(p[0]) && !isNaN(p[1])) as [number, number][];
-          }
-        } catch (e) {}
-
-        // Filter out academy center point if it was previously included
-        existingPoints = existingPoints.filter(p => {
-          if (isNaN(acadLat) || isNaN(acadLng)) return true;
-          return this.getDistanceKm(p[0], p[1], acadLat, acadLng) > 0.08;
-        });
-
-        const studentPoints: [number, number][] = assignedStudents.map(st => [st.latitude!, st.longitude!]);
-        const pointsToHull = [...existingPoints, ...studentPoints];
-
-        const expandedPolygon = this.generateZonePolygon(pointsToHull);
-        if (expandedPolygon && expandedPolygon.length >= 3) {
-          vehicle.polygonCoordinates = expandedPolygon;
-          await this.vehicleRepository.save(vehicle);
+      let existingPoints: [number, number][] = [];
+      try {
+        let rawPts = vehicle.polygonCoordinates;
+        while (typeof rawPts === 'string') {
+          try { rawPts = JSON.parse(rawPts); } catch(e) { break; }
         }
+        if (Array.isArray(rawPts)) {
+          existingPoints = rawPts.filter(p => Array.isArray(p) && p.length >= 2 && !isNaN(p[0]) && !isNaN(p[1])) as [number, number][];
+        }
+      } catch (e) {}
+
+      // Filter out academy center point if it was previously included
+      existingPoints = existingPoints.filter(p => {
+        if (isNaN(acadLat) || isNaN(acadLng)) return true;
+        return this.getDistanceKm(p[0], p[1], acadLat, acadLng) > 0.08;
+      });
+
+      const studentPoints: [number, number][] = assignedStudents.map(st => [st.latitude!, st.longitude!]);
+      vehiclePointsForPartition.push([...existingPoints, ...studentPoints]);
+    }
+
+    const updatedPolygons = this.partitionVehicleZones(vehiclePointsForPartition, 1.8);
+    for (let i = 0; i < vehicles.length; i++) {
+      const v = vehicles[i];
+      if (updatedPolygons[i] && updatedPolygons[i].length >= 3) {
+        v.polygonCoordinates = updatedPolygons[i];
+        await this.vehicleRepository.save(v);
       }
     }
 
