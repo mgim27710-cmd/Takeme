@@ -319,6 +319,19 @@ export class AuthService {
           const remaining = 5 - user.failedLoginAttempts;
           throw new UnauthorizedException(`OTP 번호가 올바르지 않습니다. (남은 기회: ${remaining}회)`);
         }
+      } else {
+        // Force OTP setup
+        let qrCodeUrl = '';
+        if (!user.otpSecret) {
+          const secret = speakeasy.generateSecret({ name: `Takeme (${email})` });
+          user.otpSecret = secret.base32;
+          await this.usersRepository.save(user);
+          qrCodeUrl = await qrcode.toDataURL(secret.otpauth_url || '');
+        } else {
+          const otpauth_url = `otpauth://totp/Takeme%20(${encodeURIComponent(email)})?secret=${user.otpSecret}`;
+          qrCodeUrl = await qrcode.toDataURL(otpauth_url);
+        }
+        return { success: false, requireOtpSetup: true, userId: user.id, qrCodeUrl };
       }
     }
 
