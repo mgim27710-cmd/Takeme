@@ -8,11 +8,23 @@ import { ChatRoomMember } from '../entities/chat-room-member.entity';
 import { ChatMessage } from '../entities/chat-message.entity';
 import { User } from '../entities/user.entity';
 import { Student } from '../entities/student.entity';
+import { Vehicle } from '../entities/vehicle.entity';
+import { Academy } from '../entities/academy.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ChatRoom, ChatRoomMember, ChatMessage, User, Student])],
+  imports: [
+    TypeOrmModule.forFeature([
+      ChatRoom,
+      ChatRoomMember,
+      ChatMessage,
+      User,
+      Student,
+      Vehicle,
+      Academy,
+    ]),
+  ],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway],
-  exports: [ChatService],
+  exports: [ChatService, ChatGateway],
 })
 export class ChatModule {}

@@ -2403,7 +2403,8 @@ const parseKindergartenExcelSheet = (sheet) => {
       </div>
 
       {/* Sidebar Content Panel */}
-      <div className="bg-white shadow-lg z-10 flex flex-col w-[380px] shrink-0 break-keep">
+      <div className={`bg-white shadow-lg z-10 flex flex-col w-[380px] shrink-0 break-keep ${activeTab === 'messages' ? 'hidden' : ''}`}>
+
         {activeTab === 'status' && (
           <div className="p-6 h-full flex flex-col overflow-y-auto break-keep">
             {/* Header */}
@@ -2603,194 +2604,6 @@ const parseKindergartenExcelSheet = (sheet) => {
                               배정된 원아가 없습니다.
                             </div>
                           )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'messages' && (
-          <div className="p-6 h-full flex flex-col overflow-y-auto">
-            <h2 className="text-xl font-bold text-slate-800 mb-2">메세지 수신 선택</h2>
-            <p className="text-[13px] text-slate-500 mb-4">메세지를 보낼 호차와 수신자를 선택해주세요.</p>
-            
-            {/* 빠른 일괄 선택 버튼 영역 */}
-            <div className="mb-4 bg-slate-50 p-3 rounded-2xl border border-slate-200/80 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-500">빠른 일괄 선택</span>
-                {(msgTargetDriver || msgTargetTeacher || msgTargetStudents.length > 0) && (
-                  <button 
-                    type="button"
-                    onClick={handleResetMsgSelections}
-                    className="text-xs text-slate-400 hover:text-red-500 font-semibold underline transition-colors"
-                  >
-                    선택 초기화
-                  </button>
-                )}
-              </div>
-
-              {/* Row 1: 전체 선택 메인 버튼 */}
-              <button
-                type="button"
-                onClick={handleToggleSelectAllMsg}
-                className={`w-full py-2.5 px-3 rounded-xl text-sm font-bold transition-all flex items-center justify-between border ${
-                  isMsgAllSelected
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                    : 'bg-white hover:bg-blue-50 text-slate-700 border-slate-200 shadow-2xs hover:border-blue-300'
-                }`}
-              >
-                <span>전체 선택 (원 전체 대상)</span>
-                <span className={`text-xs px-2 py-0.5 rounded-md font-bold ${
-                  isMsgAllSelected ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-500'
-                }`}>
-                  {isMsgAllSelected ? '선택 해제' : '선택'}
-                </span>
-              </button>
-
-              {/* Row 2: 기사님 전체 / 교사 전체 / 학부모 전체 */}
-              <div className="grid grid-cols-3 gap-1.5">
-                <button
-                  type="button"
-                  onClick={handleToggleAllDriversMsg}
-                  className={`py-2 px-1.5 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center gap-1 border ${
-                    msgTargetDriver
-                      ? 'bg-blue-50 text-blue-700 border-blue-300 shadow-inner'
-                      : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-2xs'
-                  }`}
-                >
-                  <span>기사님 전체</span>
-                  <span className={`text-[11px] px-1.5 py-0.5 rounded font-bold ${
-                    msgTargetDriver ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400'
-                  }`}>
-                    {msgTargetDriver ? '선택됨' : '선택'}
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleToggleAllTeachersMsg}
-                  className={`py-2 px-1.5 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center gap-1 border ${
-                    msgTargetTeacher
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-300 shadow-inner'
-                      : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-2xs'
-                  }`}
-                >
-                  <span>교사 전체</span>
-                  <span className={`text-[11px] px-1.5 py-0.5 rounded font-bold ${
-                    msgTargetTeacher ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-400'
-                  }`}>
-                    {msgTargetTeacher ? '선택됨' : '선택'}
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleToggleAllParentsMsg}
-                  className={`py-2 px-1.5 rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center gap-1 border ${
-                    isMsgAllParentsSelected
-                      ? 'bg-purple-50 text-purple-700 border-purple-300 shadow-inner'
-                      : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-2xs'
-                  }`}
-                >
-                  <span>학부모 전체</span>
-                  <span className={`text-[11px] px-1.5 py-0.5 rounded font-bold ${
-                    isMsgAllParentsSelected ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-400'
-                  }`}>
-                    {msgTargetStudents.length > 0 ? `${msgTargetStudents.length}명` : '선택'}
-                  </span>
-                </button>
-              </div>
-            </div>
-
-            {/* 호차별 목록 (숫자 순서로 정렬) */}
-            <div className="space-y-3 overflow-y-auto pr-1 flex-1">
-              {sortedBuses.length === 0 ? (
-                <div className="text-slate-400 text-sm text-center py-10">등록된 버스가 없습니다.</div>
-              ) : (
-                sortedBuses.map(bus => {
-                  const isSelected = msgSelectedBusId === bus.id;
-                  const busStudents = students.filter(st => st.assignedBusId === bus.id);
-                  const isAllBusStudentsSelected = busStudents.length > 0 && busStudents.every(s => msgTargetStudents.includes(s.id));
-                  return (
-                    <div 
-                      key={bus.id} 
-                      className={`p-4 border shadow-sm rounded-xl transition-all ${isSelected ? 'border-blue-500 bg-blue-50' : 'border-slate-100 hover:border-blue-200 bg-white'}`}
-                    >
-                      <div 
-                        className="flex items-center gap-4 cursor-pointer"
-                        onClick={() => {
-                          if (isSelected) {
-                            setMsgSelectedBusId(null);
-                          } else {
-                            setMsgSelectedBusId(bus.id);
-                          }
-                        }}
-                      >
-                        <div className="w-4 h-4 rounded-full shadow-inner flex-shrink-0" style={{ backgroundColor: bus.color }}></div>
-                        <div className="flex-1 font-bold text-slate-800 text-base flex items-center justify-between">
-                          <span>{bus.name}</span>
-                          <span className="text-xs font-normal text-slate-400">
-                            {isSelected ? '접기' : '상세 선택'}
-                          </span>
-                        </div>
-                      </div>
-                      
-                      {isSelected && (
-                        <div className="mt-4 border-t border-slate-200 pt-3 space-y-3">
-                          <div className="flex gap-2">
-                            <label className={`flex-1 flex items-center justify-center gap-2 p-2 rounded-lg border-2 cursor-pointer transition-all ${msgTargetDriver ? 'border-blue-500 bg-blue-100' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
-                              <input type="checkbox" className="hidden" checked={msgTargetDriver} onChange={() => setMsgTargetDriver(!msgTargetDriver)} />
-                              <span className={`font-bold text-sm ${msgTargetDriver ? 'text-blue-700' : 'text-slate-600'}`}>기사님</span>
-                            </label>
-                            <label className={`flex-1 flex items-center justify-center gap-2 p-2 rounded-lg border-2 cursor-pointer transition-all ${msgTargetTeacher ? 'border-green-500 bg-green-100' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
-                              <input type="checkbox" className="hidden" checked={msgTargetTeacher} onChange={() => setMsgTargetTeacher(!msgTargetTeacher)} />
-                              <span className={`font-bold text-sm ${msgTargetTeacher ? 'text-green-700' : 'text-slate-600'}`}>지도교사</span>
-                            </label>
-                          </div>
-                          
-                          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-                            <div className="bg-slate-50 px-3 py-2 flex justify-between items-center border-b border-slate-200">
-                              <span className="text-[13px] font-bold text-slate-700">원아 학부모님 ({busStudents.filter(s => msgTargetStudents.includes(s.id)).length}/{busStudents.length})</span>
-                              <button 
-                                type="button"
-                                onClick={() => {
-                                  if (isAllBusStudentsSelected) {
-                                    setMsgTargetStudents(prev => prev.filter(id => !busStudents.some(s => s.id === id)));
-                                  } else {
-                                    const busStudentIds = busStudents.map(s => s.id);
-                                    setMsgTargetStudents(prev => Array.from(new Set([...prev, ...busStudentIds])));
-                                  }
-                                }}
-                                className="text-xs bg-white border border-slate-300 px-2.5 py-1 rounded hover:bg-slate-100 font-bold"
-                              >
-                                {isAllBusStudentsSelected ? '선택 해제' : '전체 선택'}
-                              </button>
-                            </div>
-                            <div className="max-h-40 overflow-y-auto p-2 space-y-1">
-                              {busStudents.map(st => (
-                                <label key={st.id} className={`flex items-center gap-2 p-1.5 rounded cursor-pointer ${msgTargetStudents.includes(st.id) ? 'bg-slate-100' : 'hover:bg-slate-50'}`}>
-                                  <input 
-                                    type="checkbox" 
-                                    checked={msgTargetStudents.includes(st.id)}
-                                    onChange={() => {
-                                      if (msgTargetStudents.includes(st.id)) {
-                                        setMsgTargetStudents(msgTargetStudents.filter(id => id !== st.id));
-                                      } else {
-                                        setMsgTargetStudents([...msgTargetStudents, st.id]);
-                                      }
-                                    }}
-                                    className="w-3.5 h-3.5 rounded text-blue-600"
-                                  />
-                                  <span className="text-[13px] font-bold text-slate-800">{st.name} <span className="font-normal text-slate-500 text-xs">({st.raw?.['보호자 성함'] || '학부모'})</span></span>
-                                </label>
-                              ))}
-                              {busStudents.length === 0 && <div className="text-center text-xs text-slate-400 py-2">배정된 원아가 없습니다.</div>}
-                            </div>
-                          </div>
                         </div>
                       )}
                     </div>
@@ -3764,19 +3577,10 @@ const parseKindergartenExcelSheet = (sheet) => {
 
         {activeTab === 'messages' && (
           <MessagePanel 
-            buses={buses} 
-            students={students} 
+            currentUser={currentUser}
+            selectedAcademyId={selectedAcademyId}
+            socket={socketRef.current}
             isClosing={isMessageClosing}
-            msgSelectedBusId={msgSelectedBusId}
-            msgTargetDriver={msgTargetDriver}
-            msgTargetTeacher={msgTargetTeacher}
-            msgTargetStudents={msgTargetStudents}
-            resetSelections={() => {
-              setMsgSelectedBusId(null);
-              setMsgTargetDriver(false);
-              setMsgTargetTeacher(false);
-              setMsgTargetStudents([]);
-            }}
           />
         )}
 
