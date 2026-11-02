@@ -22,6 +22,7 @@ import * as ExcelJS from 'exceljs';
 
 @Injectable()
 export class RoutingService {
+
   constructor(
     @InjectRepository(Vehicle)
     private vehicleRepository: Repository<Vehicle>,
@@ -88,40 +89,91 @@ export class RoutingService {
     const apiKey = this.configService.get<string>('KAKAO_REST_API_KEY');
     if (!apiKey) throw new BadRequestException('Kakao API Key is missing.');
 
-    try {
-      const response = await firstValueFrom(
-        this.httpService.get('https://dapi.kakao.com/v2/local/search/address.json', {
-          params: { query: address },
-          headers: { Authorization: `KakaoAK ${apiKey}` }
-        })
-      );
-      
-      let documents = response.data?.documents;
-      
-      // Fallback to keyword search if address search fails (e.g., for POIs like "사동슈퍼 앞")
-      if (!documents || documents.length === 0) {
-        console.log('Geocoding address failed, trying keyword fallback for:', address);
-        const keywordResponse = await firstValueFrom(
-          this.httpService.get('https://dapi.kakao.com/v2/local/search/keyword.json', {
-            params: { query: address.replace(/앞|뒤|옆|근처|건너편/g, '').trim() },
+    const cleanCandidates: string[] = [];
+    const raw = String(address).trim();
+    cleanCandidates.push(raw);
+
+    // 1. Remove detailed apartment unit numbers (e.g., "101동 202호", "102동", "304호", "101-202")
+    const withoutUnit = raw
+      .replace(/\s*\b\d+동\s*\d+호\b/g, '')
+      .replace(/\s*\b\d+동\b/g, '')
+      .replace(/\s*\b\d+호\b/g, '')
+      .replace(/\s*\b\d+-\d+\b/g, '')
+      .trim();
+    if (withoutUnit && withoutUnit !== raw) cleanCandidates.push(withoutUnit);
+
+    // 2. Remove parentheses and bracketed contents (e.g. "(마곡동, 마곡엠밸리)")
+    const withoutParens = raw.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
+    if (withoutParens && !cleanCandidates.includes(withoutParens)) cleanCandidates.push(withoutParens);
+
+    // 3. Remove detailed apartment unit from withoutParens
+    const cleanBase = withoutParens
+      .replace(/\s*\b\d+동\s*\d+호\b/g, '')
+      .replace(/\s*\b\d+동\b/g, '')
+      .replace(/\s*\b\d+호\b/g, '')
+      .replace(/\s*\b\d+-\d+\b/g, '')
+      .trim();
+    if (cleanBase && !cleanCandidates.includes(cleanBase)) cleanCandidates.push(cleanBase);
+
+    // 4. Try road address pattern (시/도 + 시/군/구 + 도로명 + 번호)
+    const roadMatch = cleanBase.match(/([가-힣]+(?:시|도)?\s+[가-힣]+(?:구|군|시)\s+[가-힣0-9]+(?:로|길)\s+\d+(?:-\d+)?)/);
+    if (roadMatch && !cleanCandidates.includes(roadMatch[1])) cleanCandidates.push(roadMatch[1]);
+
+    // 5. Try apartment or building name inside parentheses
+    const parenMatch = raw.match(/\(([^)]+)\)/);
+    if (parenMatch) {
+      const insideClean = parenMatch[1]
+        .replace(/\s*\b\d+동\s*\d+호\b/g, '')
+        .replace(/\s*\b\d+동\b/g, '')
+        .replace(/\s*\b\d+호\b/g, '')
+        .replace(/\s*\b\d+-\d+\b/g, '')
+        .trim();
+      if (insideClean && !cleanCandidates.includes(insideClean)) {
+        cleanCandidates.push(insideClean);
+      }
+    }
+
+    for (const query of cleanCandidates) {
+      if (!query) continue;
+      try {
+        const response = await firstValueFrom(
+          this.httpService.get('https://dapi.kakao.com/v2/local/search/address.json', {
+            params: { query },
             headers: { Authorization: `KakaoAK ${apiKey}` }
           })
         );
-        documents = keywordResponse.data?.documents;
-      }
+        const docs = response.data?.documents;
+        if (docs && docs.length > 0) {
+          const x = parseFloat(docs[0].x);
+          const y = parseFloat(docs[0].y);
+          if (!isNaN(x) && !isNaN(y)) {
+            return { lat: y, lng: x };
+          }
+        }
+      } catch (e) {}
 
-      if (documents && documents.length > 0) {
-        const x = parseFloat(documents[0].x);
-        const y = parseFloat(documents[0].y);
-        console.log(`Success geocoding ${address}: lat=${y}, lng=${x}`);
-        return { lat: y, lng: x }; // Kakao returns x as longitude, y as latitude
-      }
-      console.log(`Failed to geocode completely: ${address}`);
-      return null;
-    } catch (e) {
-      console.error('Geocoding error for address:', address, e.message);
-      return null;
+      // Fallback to keyword search
+      try {
+        const kw = query.replace(/앞|뒤|옆|근처|건너편|인근/g, '').trim();
+        const kwResponse = await firstValueFrom(
+          this.httpService.get('https://dapi.kakao.com/v2/local/search/keyword.json', {
+            params: { query: kw },
+            headers: { Authorization: `KakaoAK ${apiKey}` }
+          })
+        );
+        const kwDocs = kwResponse.data?.documents;
+        if (kwDocs && kwDocs.length > 0) {
+          const x = parseFloat(kwDocs[0].x);
+          const y = parseFloat(kwDocs[0].y);
+          if (!isNaN(x) && !isNaN(y)) {
+            return { lat: y, lng: x };
+          }
+        }
+      } catch (e) {}
     }
+
+    console.log(`Failed to geocode completely: ${address}`);
+    return null;
   }
 
   private colorPalette = [
@@ -137,6 +189,17 @@ export class RoutingService {
     '#84cc16'  // lime
   ];
   private colorIndex = 0;
+  private routeUpdateNotifier?: (academyId?: number, message?: string) => void;
+
+  public registerRouteUpdateNotifier(fn: (academyId?: number, message?: string) => void) {
+    this.routeUpdateNotifier = fn;
+  }
+
+  public notifyRouteUpdated(academyId?: number, message?: string) {
+    try {
+      this.routeUpdateNotifier?.(academyId, message);
+    } catch {}
+  }
 
   private getDistinctColor(): string {
     const color = this.colorPalette[this.colorIndex % this.colorPalette.length];
@@ -151,7 +214,7 @@ export class RoutingService {
     if (userId && !isNaN(Number(userId))) {
       return this.academyRepository.findOne({ where: { owner: { id: Number(userId) } } });
     }
-    return this.academyRepository.findOne({ where: {} });
+    return this.academyRepository.findOne({ where: {}, order: { id: 'DESC' } });
   }
 
   async getAllAcademies() {
@@ -194,12 +257,17 @@ export class RoutingService {
       `DELETE FROM operation_logs WHERE "vehicleId" IN (SELECT id FROM vehicles WHERE "academyId" = $1)`,
       [academy.id]
     ).catch(() => {});
-    await this.studentRepository.query(
-      `DELETE FROM pickup_point WHERE "academy_id" = $1`,
-      [academy.id]
-    ).catch(() => {});
-    
-    // Delete students and vehicles belonging to this academy
+    // Preserve existing driver/teacher assignments before recreating vehicles
+    const oldVehicles = await this.vehicleRepository.find({
+      where: { academy: { id: academy.id } },
+      relations: { driverUser: true, teacherUser: true },
+    });
+    const oldStaffByBus = new Map<string, Vehicle>();
+    oldVehicles.forEach((ov, idx) => {
+      oldStaffByBus.set(ov.busNumber || `${idx + 1}호차`, ov);
+    });
+
+    // Delete students and vehicles belonging to this academy (keep pickup_point intact)
     await this.studentRepository.delete({ academy: { id: academy.id } });
     await this.vehicleRepository.delete({ academy: { id: academy.id } });
 
@@ -211,15 +279,21 @@ export class RoutingService {
 
     // 2. Save Vehicles and Assign Colors
     for (const v of vehicles) {
+      const busNum = v.busNumber || `${savedVehicles.length + 1}호차`;
+      const prevV = oldStaffByBus.get(busNum) || oldVehicles[savedVehicles.length];
       const newVehicle = this.vehicleRepository.create({
-        busNumber: v.busNumber || `${savedVehicles.length + 1}호차`,
+        busNumber: busNum,
         plateNumber: v.plateNumber || '',
-        driverName: v.driverName || '미정',
-        driverPhone: v.driverPhone || '000-0000-0000',
-        teacherName: v.teacherName || '미정',
-        teacherPhone: v.teacherPhone || '000-0000-0000',
+        driverName: v.driverName || prevV?.driverName || '미정',
+        driverPhone: v.driverPhone || prevV?.driverPhone || '000-0000-0000',
+        teacherName: v.teacherName || prevV?.teacherName || '미정',
+        teacherPhone: v.teacherPhone || prevV?.teacherPhone || '000-0000-0000',
         capacity: Number(v.capacity) || 25,
         academy: academy,
+        driverUser: prevV?.driverUser || undefined,
+        driverApprovalStatus: prevV?.driverApprovalStatus || 'UNREGISTERED',
+        teacherUser: prevV?.teacherUser || undefined,
+        teacherApprovalStatus: prevV?.teacherApprovalStatus || 'UNREGISTERED',
       });
       const saved = await this.vehicleRepository.save(newVehicle);
       
@@ -232,8 +306,31 @@ export class RoutingService {
       vehiclePointsMap[v.busNumber] = savedVehicles[savedVehicles.length - 1];
     }
 
-    // 3. Geocode Addresses and Associate with Vehicles (with caching & deduplication)
+    // 3. Geocode Addresses and Associate with Vehicles (with caching & parallel batch pre-fetch)
     const geocodeCache = new Map<string, { lat: number, lng: number } | null>();
+
+    const uniqueLocations = new Set<string>();
+    for (const row of parsedData) {
+      const inLocation = row['등원지'] || row['탑승지'] || row['승차지'] || row['승차지(주소)'] || row['주소'] || row['도로명주소'];
+      const outLocation = row['하원지'] || row['하차지'] || row['하차지(주소)'] || row['주소'] || row['도로명주소'];
+      if (inLocation && inLocation.toString().trim()) uniqueLocations.add(inLocation.toString().trim());
+      if (outLocation && outLocation.toString().trim()) uniqueLocations.add(outLocation.toString().trim());
+    }
+
+    const locArray = Array.from(uniqueLocations);
+    const BATCH_SIZE = 15;
+    for (let i = 0; i < locArray.length; i += BATCH_SIZE) {
+      const batch = locArray.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(async (addr) => {
+        try {
+          const res = await this.geocodeAddress(addr);
+          geocodeCache.set(addr, res);
+        } catch (e) {
+          geocodeCache.set(addr, null);
+        }
+      }));
+    }
+
     const geocodeWithCache = async (addr: string) => {
       const cleanAddr = addr.trim();
       if (!cleanAddr) return null;
@@ -255,6 +352,8 @@ export class RoutingService {
       return null;
     };
 
+    const allGeocodedPoints: [number, number][] = [];
+
     for (const row of parsedData) {
       const inBusRaw = row['등원차량'] || row['차량'] || row['호차'] || row['등원_차량'];
       const inBusName = inBusRaw ? inBusRaw.toString().trim() : null;
@@ -265,30 +364,83 @@ export class RoutingService {
       const outLocation = row['하원지'] || row['하차지'] || row['하차지(주소)'] || row['주소'] || row['도로명주소'];
 
       const inTarget = inBusName ? findTargetVehicle(inBusName) : null;
-      if (inTarget && inLocation) {
+      if (inLocation) {
         const coords = await geocodeWithCache(inLocation.toString());
         if (coords) {
-          const exists = inTarget.points.some((p: any) => p[0] === coords.lat && p[1] === coords.lng);
-          if (!exists) inTarget.points.push([coords.lat, coords.lng]);
+          allGeocodedPoints.push([coords.lat, coords.lng]);
+          if (inTarget) {
+            const exists = inTarget.points.some((p: any) => p[0] === coords.lat && p[1] === coords.lng);
+            if (!exists) inTarget.points.push([coords.lat, coords.lng]);
+          }
         }
       }
 
       const outTarget = outBusName ? findTargetVehicle(outBusName) : null;
-      if (outTarget && outLocation) {
+      if (outLocation && outLocation !== inLocation) {
         const coords = await geocodeWithCache(outLocation.toString());
         if (coords) {
-          const exists = outTarget.points.some((p: any) => p[0] === coords.lat && p[1] === coords.lng);
-          if (!exists) outTarget.points.push([coords.lat, coords.lng]);
+          allGeocodedPoints.push([coords.lat, coords.lng]);
+          if (outTarget) {
+            const exists = outTarget.points.some((p: any) => p[0] === coords.lat && p[1] === coords.lng);
+            if (!exists) outTarget.points.push([coords.lat, coords.lng]);
+          }
         }
       }
     }
 
-    // 4. Update DB with polygon points
-    for (const v of savedVehicles) {
+    // Academy center coordinates (or average of points)
+    let centerLat = parseFloat(academy.latitude);
+    let centerLng = parseFloat(academy.longitude);
+    if ((isNaN(centerLat) || isNaN(centerLng)) && allGeocodedPoints.length > 0) {
+      centerLat = allGeocodedPoints.reduce((sum, p) => sum + p[0], 0) / allGeocodedPoints.length;
+      centerLng = allGeocodedPoints.reduce((sum, p) => sum + p[1], 0) / allGeocodedPoints.length;
+    }
+    if (isNaN(centerLat) || isNaN(centerLng)) {
+      centerLat = 37.5665;
+      centerLng = 126.9780;
+    }
+
+    const nVehicles = savedVehicles.length;
+
+    // Check if points were explicitly assigned via vehicle columns
+    const totalPointsAssigned = savedVehicles.reduce((sum, v) => sum + v.points.length, 0);
+
+    // If no vehicle columns were present in Excel, partition allGeocodedPoints among the vehicles using 2D K-Means
+    if (totalPointsAssigned === 0 && allGeocodedPoints.length > 0 && nVehicles > 0) {
+      // Deduplicate points and exclude center academy point if present
+      const pointMap = new Map<string, [number, number]>();
+      for (const pt of allGeocodedPoints) {
+        if (!isNaN(centerLat) && !isNaN(centerLng)) {
+          const dFromCenter = this.getDistanceKm(pt[0], pt[1], centerLat, centerLng);
+          if (dFromCenter < 0.05) continue; // Skip academy point itself
+        }
+        pointMap.set(`${pt[0].toFixed(5)},${pt[1].toFixed(5)}`, pt);
+      }
+      const uniquePoints = Array.from(pointMap.values());
+
+      const clusters = this.clusterPointsKMeans(uniquePoints, nVehicles, centerLat);
+      for (let i = 0; i < nVehicles; i++) {
+        if (clusters[i]) {
+          for (const item of clusters[i]) {
+            savedVehicles[i].points.push(item);
+          }
+        }
+      }
+    }
+
+    // 4. Form dedicated, non-overlapping convex polygon zone for each vehicle
+    // IMPORTANT: Never connect or anchor zones to the central kindergarten point!
+    for (let i = 0; i < nVehicles; i++) {
+      const v = savedVehicles[i];
+      // Generate clean boundary polygon encompassing ONLY this vehicle's student stops
+      v.points = this.generateZonePolygon(v.points);
+      v.polygon = v.points;
+
+      // Update DB with polygon points
       const vehicleToUpdate = await this.vehicleRepository.findOne({ where: { id: v.id } });
       if (vehicleToUpdate) {
         vehicleToUpdate.colorHex = v.color;
-        vehicleToUpdate.polygonCoordinates = v.points;
+        vehicleToUpdate.polygonCoordinates = JSON.stringify(v.points);
         await this.vehicleRepository.save(vehicleToUpdate);
       }
     }
@@ -356,6 +508,8 @@ export class RoutingService {
         color: st.assignedVehicle ? (st.assignedVehicle.colorHex || '#64748b') : '#64748b',
         allergies: st.allergies || parsedRaw['알레르기'] || parsedRaw['알러지'] || '',
         raw: parsedRaw,
+        parentPhone: st.parentUser?.phone || parsedRaw['부모연락처'] || parsedRaw['연락처'] || parsedRaw['보호자연락처'] || parsedRaw['보호자 연락처'] || parsedRaw['전화번호'] || parsedRaw['학부모전화번호'] || '',
+        parentName: st.parentUser?.name || parsedRaw['보호자 성함'] || parsedRaw['학부모 성함'] || parsedRaw['학부모명'] || '',
         schedules: st.schedules,
         isRegistered: !!st.studentUser || !!st.parentUser,
         studentUserId: st.studentUser?.id || null,
@@ -537,7 +691,9 @@ export class RoutingService {
         academy.authCode = code;
       }
     }
-    return await this.academyRepository.save(academy);
+    const savedAcademy = await this.academyRepository.save(academy);
+    this.notifyRouteUpdated(savedAcademy.id);
+    return savedAcademy;
   }
 
   async updateVehicleZone(vehicleId: number, email: string, polygonCoordinates: any[]) {
@@ -641,6 +797,154 @@ export class RoutingService {
     return lower.concat(upper);
   }
 
+  private generateZonePolygon(points: [number, number][]): [number, number][] {
+    if (!points || points.length === 0) return [];
+
+    // Deduplicate points
+    const pointMap = new Map<string, [number, number]>();
+    for (const p of points) {
+      if (Array.isArray(p) && p.length >= 2 && !isNaN(p[0]) && !isNaN(p[1])) {
+        pointMap.set(`${p[0].toFixed(5)},${p[1].toFixed(5)}`, [p[0], p[1]]);
+      }
+    }
+    const uniquePoints = Array.from(pointMap.values());
+    if (uniquePoints.length === 0) return [];
+
+    // If we have >= 3 points, compute convex hull directly to guarantee 0 overlap
+    if (uniquePoints.length >= 3) {
+      const hull = this.computeConvexHull(uniquePoints);
+      if (hull && hull.length >= 3) return hull;
+    }
+
+    // If 1 or 2 points, create a minimal bounding triangle/diamond (~40m) around the point(s)
+    // so Leaflet can render it cleanly as a visible polygon
+    const dLat = 0.0004;
+    const dLng = 0.0005;
+    const minimalPoints: [number, number][] = [];
+    for (const p of uniquePoints) {
+      minimalPoints.push(
+        [p[0] + dLat, p[1]],
+        [p[0], p[1] + dLng],
+        [p[0] - dLat, p[1]],
+        [p[0], p[1] - dLng]
+      );
+    }
+    const hull = this.computeConvexHull(minimalPoints);
+    return hull && hull.length >= 3 ? hull : minimalPoints;
+  }
+
+  private clusterPointsKMeans(points: [number, number][], k: number, centerLat: number): [number, number][][] {
+    if (points.length === 0 || k <= 0) return [];
+    if (k === 1) return [points];
+    if (points.length <= k) {
+      return points.map(p => [p]);
+    }
+
+    const cosLat = Math.cos((centerLat * Math.PI) / 180);
+    const distSq = (a: [number, number], b: [number, number]) => {
+      const dLat = a[0] - b[0];
+      const dLng = (a[1] - b[1]) * cosLat;
+      return dLat * dLat + dLng * dLng;
+    };
+
+    // 1. K-Means++ initialization: pick initial centroids spread widely across the points
+    const centroids: [number, number][] = [];
+    let firstIdx = 0;
+    let maxDistFromCenter = -1;
+    for (let i = 0; i < points.length; i++) {
+      const d = distSq(points[i], [centerLat, points[i][1]]);
+      if (d > maxDistFromCenter) {
+        maxDistFromCenter = d;
+        firstIdx = i;
+      }
+    }
+    centroids.push([...points[firstIdx]]);
+
+    while (centroids.length < k) {
+      let maxDist = -1;
+      let nextCentroidIdx = 0;
+      for (let i = 0; i < points.length; i++) {
+        let minDistToExisting = Infinity;
+        for (const c of centroids) {
+          const d = distSq(points[i], c);
+          if (d < minDistToExisting) {
+            minDistToExisting = d;
+          }
+        }
+        if (minDistToExisting > maxDist) {
+          maxDist = minDistToExisting;
+          nextCentroidIdx = i;
+        }
+      }
+      centroids.push([...points[nextCentroidIdx]]);
+    }
+
+    // 2. Iterative optimization
+    let clusters: [number, number][][] = Array.from({ length: k }, () => []);
+    const maxIterations = 35;
+
+    for (let iter = 0; iter < maxIterations; iter++) {
+      clusters = Array.from({ length: k }, () => []);
+
+      for (const p of points) {
+        let minDist = Infinity;
+        let bestCluster = 0;
+        for (let j = 0; j < k; j++) {
+          const d = distSq(p, centroids[j]);
+          if (d < minDist) {
+            minDist = d;
+            bestCluster = j;
+          }
+        }
+        clusters[bestCluster].push(p);
+      }
+
+      let maxCentroidShift = 0;
+      for (let j = 0; j < k; j++) {
+        if (clusters[j].length > 0) {
+          const sumLat = clusters[j].reduce((s, p) => s + p[0], 0);
+          const sumLng = clusters[j].reduce((s, p) => s + p[1], 0);
+          const newLat = sumLat / clusters[j].length;
+          const newLng = sumLng / clusters[j].length;
+          const shift = distSq(centroids[j], [newLat, newLng]);
+          if (shift > maxCentroidShift) maxCentroidShift = shift;
+          centroids[j] = [newLat, newLng];
+        }
+      }
+
+      if (maxCentroidShift < 1e-10) break;
+    }
+
+    // 3. Balance empty clusters if any
+    for (let j = 0; j < k; j++) {
+      if (clusters[j].length === 0) {
+        let maxClusterIdx = 0;
+        let maxLen = 0;
+        for (let m = 0; m < k; m++) {
+          if (clusters[m].length > maxLen) {
+            maxLen = clusters[m].length;
+            maxClusterIdx = m;
+          }
+        }
+        if (maxLen > 2) {
+          let furthestIdx = 0;
+          let furthestDist = -1;
+          for (let pIdx = 0; pIdx < clusters[maxClusterIdx].length; pIdx++) {
+            const d = distSq(clusters[maxClusterIdx][pIdx], centroids[maxClusterIdx]);
+            if (d > furthestDist) {
+              furthestDist = d;
+              furthestIdx = pIdx;
+            }
+          }
+          const moved = clusters[maxClusterIdx].splice(furthestIdx, 1)[0];
+          clusters[j].push(moved);
+        }
+      }
+    }
+
+    return clusters;
+  }
+
   private isPointInPolygon(point: [number, number], vs: [number, number][]): boolean {
     const x = point[0], y = point[1];
     let inside = false;
@@ -701,18 +1005,15 @@ export class RoutingService {
 
     const newStudents = students.map(st => {
       const vehicle = st.assignedBusId ? vehicleMap.get(st.assignedBusId) : null;
-      let adminDisplayName = st.name;
-      
-      if (multipleNames.has(st.name)) {
-        if (!currentNameIndex[st.name]) currentNameIndex[st.name] = 0;
-        const index = currentNameIndex[st.name];
-        currentNameIndex[st.name]++;
-        adminDisplayName = `${st.name} ${String.fromCharCode(65 + index)}`; // A, B, C...
-      }
-
       let rawObj = st.raw;
       if (typeof rawObj === 'string') {
         try { rawObj = JSON.parse(rawObj); } catch(e) { rawObj = {}; }
+      }
+
+      let adminDisplayName = st.name;
+      const pPhone = (rawObj && (rawObj['부모연락처'] || rawObj['보호자연락처'] || rawObj['보호자 연락처'] || rawObj['연락처'] || rawObj['전화번호'])) || (st as any).parentPhone || '';
+      if (multipleNames.has(st.name)) {
+        adminDisplayName = pPhone ? `${st.name}(${String(pPhone).trim()})` : st.name;
       }
       if (rawObj && typeof rawObj === 'object') {
         const kName = rawObj['유치원명'] || rawObj['소속원명'] || rawObj['학교명'] || academy.name || '';
@@ -745,7 +1046,11 @@ export class RoutingService {
 
     await this.studentRepository.save(newStudents);
 
-    // Expand vehicle zones to encompass all newly assigned students
+    const acadLat = parseFloat(academy.latitude);
+    const acadLng = parseFloat(academy.longitude);
+
+    // Form clean, non-overlapping vehicle zones encompassing assigned students
+    // IMPORTANT: Never anchor or connect zones to the central kindergarten!
     for (const vehicle of vehicles) {
       const assignedStudents = newStudents.filter(
         st => st.assignedVehicle && st.assignedVehicle.id === vehicle.id && st.latitude && st.longitude
@@ -761,35 +1066,16 @@ export class RoutingService {
           }
         } catch (e) {}
 
-        const studentBufferedPoints: [number, number][] = [];
-        const dLat = 0.0008;
-        const dLng = 0.0009;
-        for (const st of assignedStudents) {
-          studentBufferedPoints.push(
-            [st.latitude! + dLat, st.longitude!],
-            [st.latitude! - dLat, st.longitude!],
-            [st.latitude!, st.longitude! + dLng],
-            [st.latitude!, st.longitude! - dLng],
-            [st.latitude!, st.longitude!]
-          );
-        }
+        // Filter out academy center point if it was previously included
+        existingPoints = existingPoints.filter(p => {
+          if (isNaN(acadLat) || isNaN(acadLng)) return true;
+          return this.getDistanceKm(p[0], p[1], acadLat, acadLng) > 0.08;
+        });
 
-        const pointsToHull = [...existingPoints, ...studentBufferedPoints];
-        if (existingPoints.length < 3 && academy.latitude && academy.longitude) {
-          const acadLat = parseFloat(academy.latitude);
-          const acadLng = parseFloat(academy.longitude);
-          if (!isNaN(acadLat) && !isNaN(acadLng)) {
-            pointsToHull.push(
-              [acadLat + dLat, acadLng],
-              [acadLat - dLat, acadLng],
-              [acadLat, acadLng + dLng],
-              [acadLat, acadLng - dLng],
-              [acadLat, acadLng]
-            );
-          }
-        }
+        const studentPoints: [number, number][] = assignedStudents.map(st => [st.latitude!, st.longitude!]);
+        const pointsToHull = [...existingPoints, ...studentPoints];
 
-        const expandedPolygon = this.computeConvexHull(pointsToHull);
+        const expandedPolygon = this.generateZonePolygon(pointsToHull);
         if (expandedPolygon && expandedPolygon.length >= 3) {
           vehicle.polygonCoordinates = JSON.stringify(expandedPolygon);
           await this.vehicleRepository.save(vehicle);
@@ -797,6 +1083,7 @@ export class RoutingService {
       }
     }
 
+    this.notifyRouteUpdated(academy.id);
     return { success: true, count: newStudents.length };
   }
 
@@ -865,7 +1152,8 @@ export class RoutingService {
     }
 
     // AUTO-EXPAND VEHICLE ZONE:
-    // Expand assigned vehicle's polygon to encompass the new student's location so that no student is left outside!
+    // Expand assigned vehicle's polygon to encompass the new student's location
+    // IMPORTANT: Never anchor or connect zones to the central kindergarten!
     let zoneExpanded = false;
     if (vehicle && lat !== undefined && lng !== undefined) {
       let existingPoints: [number, number][] = [];
@@ -878,35 +1166,15 @@ export class RoutingService {
         }
       } catch (e) {}
 
-      // Buffer ~80m around the student coordinates so the boundary comfortably encloses the student
-      const dLat = 0.0008;
-      const dLng = 0.0009;
-      const studentBufferedPoints: [number, number][] = [
-        [lat + dLat, lng],
-        [lat - dLat, lng],
-        [lat, lng + dLng],
-        [lat, lng - dLng],
-        [lat, lng]
-      ];
+      const acadLat = parseFloat(academy.latitude);
+      const acadLng = parseFloat(academy.longitude);
+      existingPoints = existingPoints.filter(p => {
+        if (isNaN(acadLat) || isNaN(acadLng)) return true;
+        return this.getDistanceKm(p[0], p[1], acadLat, acadLng) > 0.08;
+      });
 
-      const pointsToHull: [number, number][] = [...existingPoints, ...studentBufferedPoints];
-
-      // If the vehicle had 0 or very few points, also include academy coordinates
-      if (existingPoints.length < 3 && academy.latitude && academy.longitude) {
-        const acadLat = parseFloat(academy.latitude);
-        const acadLng = parseFloat(academy.longitude);
-        if (!isNaN(acadLat) && !isNaN(acadLng)) {
-          pointsToHull.push(
-            [acadLat + dLat, acadLng],
-            [acadLat - dLat, acadLng],
-            [acadLat, acadLng + dLng],
-            [acadLat, acadLng - dLng],
-            [acadLat, acadLng]
-          );
-        }
-      }
-
-      const expandedPolygon = this.computeConvexHull(pointsToHull);
+      const pointsToHull: [number, number][] = [...existingPoints, [lat, lng]];
+      const expandedPolygon = this.generateZonePolygon(pointsToHull);
       if (expandedPolygon && expandedPolygon.length >= 3) {
         vehicle.polygonCoordinates = JSON.stringify(expandedPolygon);
         await this.vehicleRepository.save(vehicle);
@@ -947,13 +1215,23 @@ export class RoutingService {
       '비고': studentData.note || ''
     };
 
-    // Duplicate name disambiguation (e.g. 홍길동 A, 홍길동 B)
+    // Duplicate name disambiguation (동명이인: 김민수(부모님 전화번호))
     const existingSameName = await this.studentRepository.find({
       where: { name: studentData.name, academy: { id: academy.id } }
     });
     let adminDisplayName = studentData.name;
+    const currentPhone = studentData.parentPhone || studentData.phone || raw['부모연락처'] || raw['보호자연락처'] || '';
     if (existingSameName.length > 0) {
-      adminDisplayName = `${studentData.name} ${String.fromCharCode(65 + existingSameName.length)}`;
+      adminDisplayName = currentPhone ? `${studentData.name}(${String(currentPhone).trim()})` : studentData.name;
+      for (const exist of existingSameName) {
+        if (!exist.adminDisplayName || !exist.adminDisplayName.includes('(')) {
+          const existPhone = (exist as any).parentPhone || (exist.raw && (exist.raw['부모연락처'] || exist.raw['보호자연락처'] || exist.raw['연락처'] || exist.raw['전화번호']));
+          if (existPhone) {
+            exist.adminDisplayName = `${exist.name}(${String(existPhone).trim()})`;
+            await this.studentRepository.save(exist).catch(() => {});
+          }
+        }
+      }
     }
 
     if (studentData.allergies) {
@@ -973,6 +1251,7 @@ export class RoutingService {
     });
 
     const saved = await this.studentRepository.save(student);
+    this.notifyRouteUpdated(academy.id);
 
     return {
       success: true,
@@ -999,6 +1278,7 @@ export class RoutingService {
     if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
 
     await this.studentRepository.delete({ id: studentId, academy: { id: academy.id } });
+    this.notifyRouteUpdated(academy.id);
     return { success: true };
   }
 
@@ -1254,7 +1534,9 @@ export class RoutingService {
       endDate: body.endDate,
       overrideType: OverrideType.ABSENCE,
     });
-    return this.scheduleOverrideRepository.save(override);
+    const saved = await this.scheduleOverrideRepository.save(override);
+    this.notifyRouteUpdated(undefined, `[결석 등록] ${student.name} 원아 결석이 등록되었습니다.`);
+    return saved;
   }
 
   async getAbsences(vehicleId?: number) {
@@ -1272,6 +1554,7 @@ export class RoutingService {
 
   async deleteAbsence(id: number) {
     await this.scheduleOverrideRepository.delete(id);
+    this.notifyRouteUpdated(undefined, `[결석 취소] 원아 결석 처리가 취소되었습니다.`);
     return { success: true };
   }
 
@@ -1358,7 +1641,16 @@ export class RoutingService {
       longitude: body.longitude,
       academy: academy
     });
-    return this.pickupPointRepository.save(point);
+    const saved = await this.pickupPointRepository.save(point);
+    const pushMsg = `[탑승지 추가 알림] 원장님이 새 탑승지 '${body.name}'을(를) 추가했습니다.`;
+    await this.parentMessageRepository.save(
+      this.parentMessageRepository.create({
+        targetRoles: ['TEACHER', 'SHUTTLE_TEACHER'],
+        message: pushMsg,
+      }),
+    ).catch(() => {});
+    this.notifyRouteUpdated(academy.id, pushMsg);
+    return saved;
   }
 
   async getPickupPoints(academyId?: number, userId?: number) {
@@ -1368,7 +1660,20 @@ export class RoutingService {
   }
 
   async deletePickupPoint(id: number) {
+    const existing = await this.pickupPointRepository.findOne({
+      where: { id },
+      relations: { academy: true },
+    }).catch(() => null);
     await this.pickupPointRepository.delete(id);
+    const label = existing?.name ? `'${existing.name}' ` : '';
+    const pushMsg = `[탑승지 삭제 알림] 원장님이 탑승지 ${label}항목을 삭제했습니다.`;
+    await this.parentMessageRepository.save(
+      this.parentMessageRepository.create({
+        targetRoles: ['TEACHER', 'SHUTTLE_TEACHER'],
+        message: pushMsg,
+      }),
+    ).catch(() => {});
+    this.notifyRouteUpdated(existing?.academy?.id, pushMsg);
     return { success: true };
   }
 
@@ -1389,7 +1694,9 @@ export class RoutingService {
       .addOrderBy('comment.createdAt', 'ASC');
 
     if (academy) {
-      qb.where('(post.academyId = :academyId OR post.academyId IS NULL)', { academyId: academy.id });
+      qb.where('post.academyId = :academyId', { academyId: academy.id });
+    } else {
+      qb.where('1 = 0');
     }
 
     if (visibility && visibility !== 'ALL_INCL') {
@@ -1625,21 +1932,108 @@ export class RoutingService {
     if (!academy) return [];
 
     const teachers = await this.userRepository.find({
-      where: {
-        role: UserRole.TEACHER,
-        academy: { id: academy.id }
-      },
+      where: [
+        { role: UserRole.TEACHER, academy: { id: academy.id } },
+        { role: UserRole.HOMEROOM_TEACHER, academy: { id: academy.id } }
+      ],
       order: { createdAt: 'DESC' }
     });
 
     return teachers.map(t => ({
       id: t.id,
-      email: t.email,
-      name: t.name,
+      email: t.email && t.email.includes('@pending.takeme') ? '' : (t.email || ''),
+      name: t.name || '미등록 교사',
+      phone: t.phone || '',
       assignedClass: t.assignedClass || '',
+      approvalStatus: t.approvalStatus || 'APPROVED',
       isLocked: !!t.isLocked,
       createdAt: t.createdAt
     }));
+  }
+
+  async preRegisterTeachers(teachersList: Array<{ name: string; assignedClass?: string; phone?: string }>, academyId?: number, userId?: number) {
+    const academy = await this.getAcademy(academyId, userId);
+    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
+    if (!Array.isArray(teachersList) || teachersList.length === 0) return { count: 0, teachers: [] };
+
+    const results = [];
+    for (const item of teachersList) {
+      const name = item.name ? String(item.name).trim() : '';
+      if (!name) continue;
+      const assignedClass = item.assignedClass ? String(item.assignedClass).trim() : '';
+      const phone = item.phone ? String(item.phone).trim() : null;
+
+      // 동명이인 교사 지원: 성함 및 담당 반명(또는 전화번호)으로 개별 교사 식별
+      let teacher = await this.userRepository.findOne({
+        where: {
+          name,
+          assignedClass: assignedClass || undefined,
+          academy: { id: academy.id }
+        }
+      });
+
+      if (teacher) {
+        if (assignedClass && (!teacher.assignedClass || teacher.assignedClass === '미배정')) {
+          teacher.assignedClass = assignedClass;
+          if (phone && !teacher.phone) teacher.phone = phone;
+          await this.userRepository.save(teacher);
+        }
+      } else {
+        const tempEmail = `teacher_pending_${academy.id}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}@pending.takeme`;
+        teacher = this.userRepository.create({
+          name,
+          email: tempEmail,
+          passwordHash: 'PRE_REGISTERED_TEMP',
+          role: UserRole.TEACHER,
+          assignedClass,
+          academy,
+          academyId: academy.id,
+          approvalStatus: 'UNREGISTERED',
+          phone: phone || null
+        });
+        await this.userRepository.save(teacher);
+      }
+      results.push({
+        id: teacher.id,
+        name: teacher.name,
+        assignedClass: teacher.assignedClass,
+        phone: teacher.phone,
+        approvalStatus: teacher.approvalStatus
+      });
+    }
+
+    return { count: results.length, teachers: results };
+  }
+
+  async approveTeacher(teacherId: number, academyId?: number, userId?: number) {
+    const academy = await this.getAcademy(academyId, userId);
+    const teacher = await this.userRepository.findOne({
+      where: { id: teacherId, academy: academy ? { id: academy.id } : undefined }
+    });
+    if (!teacher) throw new BadRequestException('해당 교사를 찾을 수 없습니다.');
+
+    teacher.approvalStatus = 'APPROVED';
+    await this.userRepository.save(teacher);
+
+    await this.logAudit({
+      action: 'TEACHER_APPROVE',
+      targetType: 'TEACHER',
+      targetId: String(teacher.id),
+      details: `교사(${teacher.name || teacher.email}) 가입 승인 완료`
+    });
+
+    return { success: true, teacherId: teacher.id, approvalStatus: 'APPROVED' };
+  }
+
+  async updateAcademyFromExcel(data: { name?: string; academyId?: number }, academyId?: number, userId?: number) {
+    const academy = await this.getAcademy(data.academyId || academyId, userId);
+    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
+
+    if (data.name && String(data.name).trim()) {
+      academy.name = String(data.name).trim();
+      await this.academyRepository.save(academy);
+    }
+    return { success: true, academyName: academy.name };
   }
 
   async unlockUser(userId?: number, email?: string) {

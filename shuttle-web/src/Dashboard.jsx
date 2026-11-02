@@ -1647,7 +1647,7 @@ const parseKindergartenExcelSheet = (sheet) => {
         }
         const geocoded = await res.json();
         
-        // Point-in-Polygon Assignment
+        // Point-in-Polygon & Explicit Assignment
         const newStudents = [];
         geocoded.forEach((item, idx) => {
           if (!item.coords) return;
@@ -1656,23 +1656,33 @@ const parseKindergartenExcelSheet = (sheet) => {
           let assignedBus = null;
           let minDistance = Infinity;
 
-          for (const bus of buses) {
-            // 1. Check if inside polygon
-            if (bus.turfPolygon && turf.booleanPointInPolygon(pt, bus.turfPolygon)) {
-              assignedBus = bus;
-              minDistance = 0;
-              break;
-            }
-            
-            // 2. Fallback: calculate distance to closest known point of this bus
-            if (bus.points && bus.points.length > 0) {
-              for (const bPt of bus.points) {
-                // Leaflet uses [lat, lng], Turf uses [lng, lat]
-                const busNode = turf.point([bPt[1], bPt[0]]);
-                const dist = turf.distance(pt, busNode);
-                if (dist < minDistance) {
-                  minDistance = dist;
-                  assignedBus = bus;
+          // 1. Check if explicit bus was specified in Excel row
+          const rawRow = addressMap[idx].raw || {};
+          const explicitBusRaw = (rawRow['등원차량'] || rawRow['하원차량'] || rawRow['차량'] || rawRow['호차'] || '').toString().trim();
+          if (explicitBusRaw) {
+            const numOnly = explicitBusRaw.replace(/[^0-9]/g, '');
+            assignedBus = buses.find(b => b.name === explicitBusRaw || (numOnly && (b.name || '').replace(/[^0-9]/g, '') === numOnly)) || null;
+          }
+
+          if (!assignedBus) {
+            for (const bus of buses) {
+              // 2. Check if inside polygon
+              if (bus.turfPolygon && turf.booleanPointInPolygon(pt, bus.turfPolygon)) {
+                assignedBus = bus;
+                minDistance = 0;
+                break;
+              }
+              
+              // 3. Fallback: calculate distance to closest known point of this bus
+              if (bus.points && bus.points.length > 0) {
+                for (const bPt of bus.points) {
+                  // Leaflet uses [lat, lng], Turf uses [lng, lat]
+                  const busNode = turf.point([bPt[1], bPt[0]]);
+                  const dist = turf.distance(pt, busNode);
+                  if (dist < minDistance) {
+                    minDistance = dist;
+                    assignedBus = bus;
+                  }
                 }
               }
             }
