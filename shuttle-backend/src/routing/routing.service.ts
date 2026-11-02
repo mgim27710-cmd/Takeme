@@ -480,11 +480,11 @@ export class RoutingService {
       v.points = this.generateZonePolygon(v.points);
       v.polygon = v.points;
 
-      // Update DB with polygon points
+      // Update DB with polygon points (TypeORM simple-json handles serialization)
       const vehicleToUpdate = await this.vehicleRepository.findOne({ where: { id: v.id } });
       if (vehicleToUpdate) {
         vehicleToUpdate.colorHex = v.color;
-        vehicleToUpdate.polygonCoordinates = JSON.stringify(v.points);
+        vehicleToUpdate.polygonCoordinates = v.points;
         await this.vehicleRepository.save(vehicleToUpdate);
       }
     }
@@ -595,10 +595,11 @@ export class RoutingService {
       relations: { driverUser: true, teacherUser: true } 
     });
     const formattedVehicles = vehicles.map(v => {
-      let parsedPoints = [];
-      try {
-        parsedPoints = typeof v.polygonCoordinates === 'string' ? JSON.parse(v.polygonCoordinates) : (v.polygonCoordinates || []);
-      } catch(e) {}
+      let parsedPoints = v.polygonCoordinates;
+      while (typeof parsedPoints === 'string') {
+        try { parsedPoints = JSON.parse(parsedPoints); } catch(e) { break; }
+      }
+      if (!Array.isArray(parsedPoints)) parsedPoints = [];
       
       return {
         id: v.id,
@@ -934,7 +935,7 @@ export class RoutingService {
     return lower.concat(upper);
   }
 
-  private generateZonePolygon(points: [number, number][]): [number, number][] {
+  private generateZonePolygon(points: [number, number][], bufferKm: number = 0.35): [number, number][] {
     if (!points || points.length === 0) return [];
 
     // Deduplicate points
@@ -947,27 +948,31 @@ export class RoutingService {
     const uniquePoints = Array.from(pointMap.values());
     if (uniquePoints.length === 0) return [];
 
-    // If we have >= 3 points, compute convex hull directly to guarantee 0 overlap
-    if (uniquePoints.length >= 3) {
-      const hull = this.computeConvexHull(uniquePoints);
-      if (hull && hull.length >= 3) return hull;
-    }
+    // Service buffer around student boarding locations (~350m radius)
+    // 1 deg lat ≈ 111.0 km, 1 deg lng ≈ 111.0 * cos(lat) ≈ 88.0 km in Korea
+    const avgLat = uniquePoints.reduce((s, p) => s + p[0], 0) / uniquePoints.length;
+    const dLat = bufferKm / 111.0;
+    const cosLat = Math.cos((avgLat * Math.PI) / 180);
+    const dLng = bufferKm / (111.0 * (cosLat > 0.1 ? cosLat : 0.8));
 
-    // If 1 or 2 points, create a minimal bounding triangle/diamond (~40m) around the point(s)
-    // so Leaflet can render it cleanly as a visible polygon
-    const dLat = 0.0004;
-    const dLng = 0.0005;
-    const minimalPoints: [number, number][] = [];
+    const expandedPoints: [number, number][] = [];
     for (const p of uniquePoints) {
-      minimalPoints.push(
-        [p[0] + dLat, p[1]],
-        [p[0], p[1] + dLng],
-        [p[0] - dLat, p[1]],
-        [p[0], p[1] - dLng]
+      const lat = p[0];
+      const lng = p[1];
+      expandedPoints.push(
+        [lat + dLat, lng],
+        [lat - dLat, lng],
+        [lat, lng + dLng],
+        [lat, lng - dLng],
+        [lat + dLat * 0.707, lng + dLng * 0.707],
+        [lat + dLat * 0.707, lng - dLng * 0.707],
+        [lat - dLat * 0.707, lng + dLng * 0.707],
+        [lat - dLat * 0.707, lng - dLng * 0.707]
       );
     }
-    const hull = this.computeConvexHull(minimalPoints);
-    return hull && hull.length >= 3 ? hull : minimalPoints;
+
+    const hull = this.computeConvexHull(expandedPoints);
+    return hull && hull.length >= 3 ? hull : expandedPoints.slice(0, 4);
   }
 
   private clusterPointsKMeans(points: [number, number][], k: number, centerLat: number): [number, number][][] {

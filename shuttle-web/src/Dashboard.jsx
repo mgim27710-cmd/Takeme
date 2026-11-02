@@ -1328,16 +1328,29 @@ export default function Dashboard() {
 
   const computePolygons = (busArray) => {
     return busArray.map(bus => {
-      if (!bus.points || bus.points.length < 3) return { ...bus, polygon: [] };
+      let pts = bus.points;
+      while (typeof pts === 'string') {
+        try { pts = JSON.parse(pts); } catch(e) { break; }
+      }
+      if (!Array.isArray(pts) || pts.length < 3) {
+        let poly = bus.polygon;
+        while (typeof poly === 'string') {
+          try { poly = JSON.parse(poly); } catch(e) { break; }
+        }
+        if (Array.isArray(poly) && poly.length >= 3) {
+          return { ...bus, points: pts || [], polygon: poly };
+        }
+        return { ...bus, points: pts || [], polygon: [] };
+      }
       
       const turfPoints = turf.featureCollection(
-        bus.points.map(p => turf.point([p[1], p[0]]))
+        pts.map(p => turf.point([p[1], p[0]]))
       );
       const hull = turf.convex(turfPoints);
-      if (!hull) return { ...bus, polygon: [] };
+      if (!hull) return { ...bus, points: pts, polygon: pts };
       
       const leafletCoords = hull.geometry.coordinates[0].map(coord => [coord[1], coord[0]]);
-      return { ...bus, polygon: leafletCoords, turfPolygon: hull };
+      return { ...bus, points: pts, polygon: leafletCoords, turfPolygon: hull };
     });
   };
 
@@ -1787,10 +1800,15 @@ const parseKindergartenExcelSheet = (sheet) => {
       
       const busSet = new Set();
       data.forEach(row => {
-        const b1 = row['등원차량'] || row['차량'] || row['호차'];
-        const b2 = row['하원차량'];
+        const b1 = row['등원차량'] || row['차량'] || row['호차'] || row['등원_차량'];
+        const b2 = row['하원차량'] || row['하원_차량'];
         if (b1) busSet.add(b1.toString().trim());
         if (b2) busSet.add(b2.toString().trim());
+
+        // Check '비고', '노선', '코스' for patterns like "1코스", "2코스", "1호차"
+        const note = (row['비고'] || row['노선'] || row['코스'] || '').toString();
+        const match = note.match(/([1-9]|10)\s*(?:코스|호차|노선)/);
+        if (match) busSet.add(`${match[1]}호차`);
       });
 
       const busList = Array.from(busSet).sort((a, b) => {
@@ -1799,16 +1817,18 @@ const parseKindergartenExcelSheet = (sheet) => {
         return na - nb;
       });
 
-      const count = busList.length > 0 ? busList.length : 1;
+      // If Excel had no vehicle columns, preserve the academy's registered vehicle count (e.g. 8 buses) instead of 1!
+      const existingCount = Array.isArray(buses) && buses.length > 0 ? buses.length : (academy?.vehicleCount || 1);
+      const count = busList.length > 0 ? busList.length : existingCount;
       const vehicles = Array.from({ length: count }).map((_, i) => ({
         id: i + 1,
-        busNumber: busList[i] || `${i + 1}호차`,
-        plateNumber: '',
-        driverName: '미정',
-        driverPhone: '000-0000-0000',
-        teacherName: '미정',
-        teacherPhone: '000-0000-0000',
-        capacity: 25
+        busNumber: busList[i] || (buses[i] ? buses[i].name : `${i + 1}호차`),
+        plateNumber: buses[i]?.plateNumber || '',
+        driverName: buses[i]?.driverName || '미정',
+        driverPhone: buses[i]?.driverPhone || '000-0000-0000',
+        teacherName: buses[i]?.teacherName || '미정',
+        teacherPhone: buses[i]?.teacherPhone || '000-0000-0000',
+        capacity: buses[i]?.capacity || 25
       }));
 
       try {
