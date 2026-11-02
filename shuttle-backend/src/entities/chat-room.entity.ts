@@ -5,6 +5,9 @@ import { ChatMessage } from './chat-message.entity';
 export enum ChatRoomType {
   STAFF = 'STAFF',
   STUDENT = 'STUDENT',
+  DIRECT = 'DIRECT',
+  GROUP = 'GROUP',
+  PAYMENT_SYSTEM = 'PAYMENT_SYSTEM',
 }
 
 @Entity('chat_rooms')
@@ -17,6 +20,9 @@ export class ChatRoom {
 
   @Column({ type: 'varchar', default: ChatRoomType.STAFF })
   type: ChatRoomType;
+
+  @Column({ nullable: true })
+  academyId: number | null;
 
   @OneToMany(() => ChatRoomMember, member => member.room, { cascade: true })
   members: ChatRoomMember[];

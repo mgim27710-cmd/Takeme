@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Param, Req } from '@nestjs/common';
 import { ChatService } from './chat.service';
 
 @Controller('chat')
@@ -54,5 +54,39 @@ export class ChatController {
     const email = req?.user?.email || senderEmail;
     return this.chatService.sendMessageAndBroadcast(Number(roomId), email, text);
   }
-}
 
+  // ============================================================
+  // 결제 및 탑승 신청 엔드포인트
+  // ============================================================
+
+  @Get('payment-context')
+  async getPaymentContext(
+    @Query('academyId') academyId?: string,
+    @Query('email') email?: string,
+    @Req() req?: any,
+  ) {
+    const aId = academyId && !isNaN(Number(academyId)) ? Number(academyId) : (req?.user?.academyId || undefined);
+    const userEmail = req?.user?.email || email;
+    return this.chatService.getPaymentContext(aId, userEmail);
+  }
+
+  @Post('payment-request')
+  async createPaymentRequest(
+    @Body() body: any,
+    @Req() req?: any,
+  ) {
+    const requesterEmail = req?.user?.email || body?.requesterEmail;
+    return this.chatService.createPaymentRequest(body, requesterEmail);
+  }
+
+  @Post('payment-request/:id/decision')
+  async decidePaymentRequest(
+    @Param('id') id: string,
+    @Body('decision') decision: 'APPROVED' | 'REJECTED',
+    @Body('decidedByEmail') decidedByEmail: string,
+    @Req() req?: any,
+  ) {
+    const email = req?.user?.email || decidedByEmail;
+    return this.chatService.decidePaymentRequest(Number(id), decision, email);
+  }
+}

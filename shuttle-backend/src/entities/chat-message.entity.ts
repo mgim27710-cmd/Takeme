@@ -16,6 +16,12 @@ export class ChatMessage {
   @Column({ type: 'text' })
   text: string;
 
+  @Column({ type: 'varchar', default: 'TEXT' })
+  type: string; // 'TEXT' | 'PAYMENT_REQUEST'
+
+  @Column({ type: 'simple-json', nullable: true })
+  payload: any;
+
   @Column({ type: 'simple-array', nullable: true })
   readBy: number[]; // Array of User IDs
 

@@ -1,5 +1,44 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import L from 'leaflet';
 import { API_BASE_URL } from './config';
+
+// Leaflet default icon fix
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+// Mini Map Component for Payment/Boarding Request Card
+function MiniLocationMap({ lat, lng, locationName }) {
+  if (!lat || !lng || isNaN(Number(lat)) || isNaN(Number(lng))) return null;
+  const position = [Number(lat), Number(lng)];
+
+  return (
+    <div className="w-full h-36 rounded-xl overflow-hidden border border-slate-200 shadow-2xs relative z-0 my-2">
+      <MapContainer
+        center={position}
+        zoom={15}
+        scrollWheelZoom={false}
+        zoomControl={false}
+        dragging={false}
+        doubleClickZoom={false}
+        attributionControl={false}
+        style={{ height: '100%', width: '100%' }}
+      >
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <Marker position={position}>
+          {locationName && <Popup>{locationName}</Popup>}
+        </Marker>
+      </MapContainer>
+      <div className="absolute bottom-1 right-1 bg-white/90 backdrop-blur-xs px-2 py-0.5 rounded text-[10px] text-slate-600 font-bold border border-slate-200 z-[400] shadow-2xs pointer-events-none">
+        {locationName || '탑승 위치'}
+      </div>
+    </div>
+  );
+}
 
 export default function MessagePanel({ currentUser, selectedAcademyId, socket, isClosing }) {
   const [rooms, setRooms] = useState([]);
@@ -21,6 +60,27 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   // Participant list popover state
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
 
+  // Payment / Boarding Request Modal State
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isLoadingPaymentContext, setIsLoadingPaymentContext] = useState(false);
+  const [paymentContext, setPaymentContext] = useState({ vehicles: [], students: [], pickupPoints: [] });
+  const [paymentForm, setPaymentForm] = useState({
+    studentSelectMode: 'DROPDOWN',
+    selectedStudentId: '',
+    customStudentName: '',
+    selectedVehicleId: '',
+    locationSelectMode: 'PICKUP_POINT',
+    selectedPickupPointId: '',
+    boardingLocation: '',
+    address: '',
+    latitude: null,
+    longitude: null,
+    requestDate: new Date().toISOString().split('T')[0],
+    note: '이 학생이 탑승을 하고 싶어 하는데 기존에 있던 곳에서 탑승하게 할까요',
+  });
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [isDeciding, setIsDeciding] = useState(null);
+
   const messagesEndRef = useRef(null);
   const activeRoomRef = useRef(null);
   activeRoomRef.current = activeRoom;
@@ -34,6 +94,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     }
   })();
 
+  const isParent = myUser.role === 'PARENT';
   const targetAcademyId = selectedAcademyId || myUser.academyId;
 
   // Initial Load: Fetch rooms
@@ -52,7 +113,10 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
       if (currentActive && Number(currentActive.id) === Number(msgRoomId)) {
         setMessages((prev) => {
-          if (prev.some((m) => m.id === newMsg.id)) return prev;
+          if (prev.some((m) => m.id === newMsg.id)) {
+            // Update existing message if payload status changed
+            return prev.map((m) => (m.id === newMsg.id ? newMsg : m));
+          }
           return [...prev, newMsg];
         });
         scrollToBottom();
@@ -71,6 +135,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           }
           return r;
         }).sort((a, b) => {
+          if (a.type === 'PAYMENT_SYSTEM') return -1;
+          if (b.type === 'PAYMENT_SYSTEM') return 1;
           const tA = a.latestMessage ? new Date(a.latestMessage.createdAt).getTime() : new Date(a.updatedAt || a.createdAt).getTime();
           const tB = b.latestMessage ? new Date(b.latestMessage.createdAt).getTime() : new Date(b.updatedAt || b.createdAt).getTime();
           return tB - tA;
@@ -135,6 +201,9 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         if (activeRoomRef.current) {
           const updated = data.find((r) => r.id === activeRoomRef.current.id);
           if (updated) setActiveRoom(updated);
+        } else if (data.length > 0) {
+          // Default to first room (which is PAYMENT_SYSTEM if present)
+          setActiveRoom(data[0]);
         }
       }
     } catch (e) {
@@ -283,6 +352,200 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     }
   };
 
+  // ============================================================
+  // 결제 및 탑승 신청 관련 핸들러
+  // ============================================================
+
+  const handleOpenPaymentModal = async () => {
+    if (isParent) {
+      return alert('학부모 계정은 결제 신청 기능을 이용할 수 없습니다.');
+    }
+
+    setIsPaymentModalOpen(true);
+    setIsLoadingPaymentContext(true);
+
+    try {
+      const q = new URLSearchParams();
+      if (targetAcademyId) q.append('academyId', String(targetAcademyId));
+      if (myUser?.email) q.append('email', myUser.email);
+      const res = await fetch(`${API_BASE_URL}/chat/payment-context?${q.toString()}`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (res.ok) {
+        const ctx = await res.json();
+        setPaymentContext(ctx);
+
+        // Preselect first vehicle and pickup point if available
+        const firstVehicle = ctx.vehicles?.[0];
+        const firstPickup = ctx.pickupPoints?.[0];
+
+        setPaymentForm((prev) => ({
+          ...prev,
+          selectedVehicleId: firstVehicle ? String(firstVehicle.id) : '',
+          selectedPickupPointId: firstPickup ? String(firstPickup.id) : '',
+          boardingLocation: firstPickup ? firstPickup.name : '',
+          latitude: firstPickup ? firstPickup.latitude : null,
+          longitude: firstPickup ? firstPickup.longitude : null,
+          requestDate: new Date().toISOString().split('T')[0],
+          note: '이 학생이 탑승을 하고 싶어 하는데 기존에 있던 곳에서 탑승하게 할까요',
+        }));
+      }
+    } catch (e) {
+      console.error('Failed to load payment context', e);
+    } finally {
+      setIsLoadingPaymentContext(false);
+    }
+  };
+
+  const handleStudentSelect = (stId) => {
+    if (stId === 'NEW') {
+      setPaymentForm((prev) => ({
+        ...prev,
+        studentSelectMode: 'CUSTOM',
+        selectedStudentId: '',
+        customStudentName: '',
+      }));
+      return;
+    }
+
+    const st = paymentContext.students?.find((s) => String(s.id) === String(stId));
+    if (!st) return;
+
+    setPaymentForm((prev) => ({
+      ...prev,
+      studentSelectMode: 'DROPDOWN',
+      selectedStudentId: String(st.id),
+      customStudentName: st.name,
+      selectedVehicleId: st.assignedBusId ? String(st.assignedBusId) : prev.selectedVehicleId,
+      boardingLocation: st.boardingLocation || prev.boardingLocation,
+      address: st.address || prev.address,
+      latitude: st.lat || prev.latitude,
+      longitude: st.lng || prev.longitude,
+    }));
+  };
+
+  const handlePickupPointSelect = (pId) => {
+    const pt = paymentContext.pickupPoints?.find((p) => String(p.id) === String(pId));
+    if (!pt) return;
+
+    setPaymentForm((prev) => ({
+      ...prev,
+      selectedPickupPointId: String(pt.id),
+      boardingLocation: pt.name,
+      latitude: pt.latitude,
+      longitude: pt.longitude,
+    }));
+  };
+
+  const handleSubmitPaymentRequest = async (e) => {
+    e?.preventDefault();
+
+    const studentName =
+      paymentForm.studentSelectMode === 'CUSTOM'
+        ? paymentForm.customStudentName.trim()
+        : paymentContext.students?.find((s) => String(s.id) === String(paymentForm.selectedStudentId))?.name ||
+          paymentForm.customStudentName.trim();
+
+    if (!studentName) {
+      return alert('원생(학생) 이름을 선택하거나 입력해주세요.');
+    }
+
+    if (!paymentForm.selectedVehicleId) {
+      return alert('담당 차량(호차)을 선택해주세요.');
+    }
+
+    const boardingLocation = paymentForm.boardingLocation.trim();
+    if (!boardingLocation) {
+      return alert('탑승 희망 위치를 선택하거나 입력해주세요.');
+    }
+
+    setIsSubmittingPayment(true);
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/chat/payment-request`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          studentId: paymentForm.selectedStudentId ? Number(paymentForm.selectedStudentId) : undefined,
+          studentName,
+          vehicleId: Number(paymentForm.selectedVehicleId),
+          boardingLocation,
+          address: paymentForm.address.trim() || boardingLocation,
+          latitude: paymentForm.latitude || undefined,
+          longitude: paymentForm.longitude || undefined,
+          requestDate: paymentForm.requestDate,
+          note: paymentForm.note.trim() || '이 학생이 탑승을 하고 싶어 하는데 기존에 있던 곳에서 탑승하게 할까요',
+          requesterEmail: myUser.email,
+        }),
+      });
+
+      if (res.ok) {
+        const createdMsg = await res.json();
+        setIsPaymentModalOpen(false);
+        // If current active room is payment system room, append message
+        if (activeRoom && activeRoom.type === 'PAYMENT_SYSTEM') {
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === createdMsg.id)) return prev;
+            return [...prev, createdMsg];
+          });
+          scrollToBottom();
+        }
+        await fetchRooms();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message || '결제 신청서 발송에 실패했습니다.');
+      }
+    } catch (e) {
+      alert('결제 신청 전송 중 오류가 발생했습니다.');
+    } finally {
+      setIsSubmittingPayment(false);
+    }
+  };
+
+  const handleDecidePaymentRequest = async (messageId, decision) => {
+    if (isDeciding) return;
+    if (isParent) {
+      return alert('학부모 계정은 승인 또는 거절 권한이 없습니다.');
+    }
+
+    const actionText = decision === 'APPROVED' ? '결제 및 탑승을 수락' : '결제 신청을 거절';
+    if (!window.confirm(`${actionText}하시겠습니까?`)) {
+      return;
+    }
+
+    setIsDeciding(messageId);
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/chat/payment-request/${messageId}/decision`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          decision,
+          decidedByEmail: myUser.email,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const updatedMsg = data.message;
+        setMessages((prev) =>
+          prev.map((m) => (m.id === messageId ? updatedMsg || { ...m, payload: { ...m.payload, status: decision } } : m))
+        );
+        fetchRooms();
+        // Dispatch event for Dashboard to update map/stops if mounted
+        window.dispatchEvent(new Event('takeme_route_updated'));
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message || '처리에 실패했습니다.');
+      }
+    } catch (e) {
+      alert('처리 중 오류가 발생했습니다.');
+    } finally {
+      setIsDeciding(null);
+    }
+  };
+
   const getRoleBadge = (role) => {
     switch (role) {
       case 'DRIVER':
@@ -304,6 +567,9 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
   const getRoomTitle = (room) => {
     if (!room) return '';
+    if (room.type === 'PAYMENT_SYSTEM' || room.name === '결제 시스템 방') {
+      return '결제 시스템 방';
+    }
     if (room.name && room.name !== '1:1 대화' && !room.name.includes('(')) {
       return room.name;
     }
@@ -387,23 +653,36 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     const prevDate = prev ? new Date(prev.createdAt).toDateString() : null;
     const currDate = new Date(m.createdAt).toDateString();
     const isNewDate = prevDate !== currDate;
-    return { ...m, isNewDate, fullDateStr: new Date(m.createdAt).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }) };
+    return {
+      ...m,
+      isNewDate,
+      fullDateStr: new Date(m.createdAt).toLocaleDateString('ko-KR', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        weekday: 'long',
+      }),
+    };
   });
 
+  const isCurrentRoomPaymentSystem = activeRoom?.type === 'PAYMENT_SYSTEM' || activeRoom?.name === '결제 시스템 방';
+
   return (
-    <div className={`absolute inset-0 z-[2000] flex bg-slate-100 h-full overflow-hidden transition-all duration-300 ${isClosing ? 'animate-slide-out-right' : 'animate-slide-in-right'}`}>
-      
+    <div
+      className={`absolute inset-0 z-[2000] flex bg-slate-100 h-full overflow-hidden transition-all duration-300 ${
+        isClosing ? 'animate-slide-out-right' : 'animate-slide-in-right'
+      }`}
+    >
       {/* ============================================================ */}
       {/* LEFT COLUMN: 채팅방 목록 (Kakao Style Room List) */}
       {/* ============================================================ */}
       <div className="w-96 h-full border-r border-slate-200 flex flex-col bg-white overflow-hidden flex-shrink-0 shadow-sm">
-        
         {/* Top Header */}
         <div className="p-4 border-b border-slate-200 bg-white flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-xl bg-amber-400 text-slate-900 flex items-center justify-center font-black shadow-xs">
               <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                <path d="M12 3C6.48 3 2 6.58 2 11c0 2.87 1.9 5.38 4.74 6.75-.2.77-.73 2.78-.84 3.22-.13.56.2.55.43.4.17-.12 2.76-1.87 3.86-2.63.59.08 1.19.12 1.81.12 5.52 0 10-3.58 10-8s-4.48-8-10-8z"/>
+                <path d="M12 3C6.48 3 2 6.58 2 11c0 2.87 1.9 5.38 4.74 6.75-.2.77-.73 2.78-.84 3.22-.13.56.2.55.43.4.17-.12 2.76-1.87 3.86-2.63.59.08 1.19.12 1.81.12 5.52 0 10-3.58 10-8s-4.48-8-10-8z" />
               </svg>
             </div>
             <div>
@@ -456,9 +735,12 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           ) : (
             filteredRooms.map((room) => {
               const isSelected = activeRoom && activeRoom.id === room.id;
+              const isPaymentSystem = room.type === 'PAYMENT_SYSTEM' || room.name === '결제 시스템 방';
               const title = getRoomTitle(room);
               const isGroup = (room.members || []).length > 2 || room.type === 'GROUP';
-              const lastText = room.latestMessage?.text || '대화를 시작해보세요.';
+              const lastText = isPaymentSystem
+                ? room.latestMessage?.text || '신규 원생 탑승 및 결제 승인 요청 전용 채널입니다.'
+                : room.latestMessage?.text || '대화를 시작해보세요.';
               const lastTime = formatRoomListTime(room.latestMessage?.createdAt || room.updatedAt || room.createdAt);
 
               // Find other member for role badge in 1:1
@@ -470,33 +752,26 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 <div
                   key={room.id}
                   onClick={() => setActiveRoom(room)}
-                  className={`px-4 py-3 cursor-pointer transition-colors flex items-center gap-3 ${
-                    isSelected ? 'bg-blue-50/90 border-l-4 border-blue-600' : 'hover:bg-slate-50'
+                  className={`p-3.5 flex items-center gap-3 cursor-pointer transition-colors ${
+                    isSelected ? 'bg-blue-50/80 border-l-4 border-blue-600' : 'hover:bg-slate-50'
                   }`}
                 >
-                  {/* Avatar */}
-                  <div className="relative flex-shrink-0">
-                    <div className={`w-11 h-11 rounded-2xl flex items-center justify-center font-bold text-sm shadow-xs ${
-                      isGroup
-                        ? 'bg-gradient-to-tr from-indigo-500 to-purple-600 text-white'
-                        : otherUser?.role === 'DRIVER'
-                        ? 'bg-blue-500 text-white'
-                        : otherUser?.role === 'PARENT'
-                        ? 'bg-amber-500 text-white'
-                        : 'bg-emerald-500 text-white'
-                    }`}>
-                      {isGroup ? (
+                  {/* Room Avatar */}
+                  <div className="relative">
+                    {isPaymentSystem ? (
+                      <div className="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-xs flex-shrink-0">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                         </svg>
-                      ) : (
-                        (otherUser?.name || title)[0] || '대'
-                      )}
-                    </div>
-                    {isGroup && (
-                      <span className="absolute -bottom-1 -right-1 bg-purple-700 text-white text-[9px] font-black px-1 rounded-full shadow-xs">
-                        {(room.members || []).length}
-                      </span>
+                      </div>
+                    ) : isGroup ? (
+                      <div className="w-11 h-11 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-xs shadow-2xs flex-shrink-0">
+                        그룹
+                      </div>
+                    ) : (
+                      <div className="w-11 h-11 rounded-2xl bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-sm shadow-2xs flex-shrink-0">
+                        {otherUser?.name?.[0] || title[0] || '대'}
+                      </div>
                     )}
                   </div>
 
@@ -507,7 +782,12 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         <span className={`text-xs font-bold truncate ${isSelected ? 'text-blue-900' : 'text-slate-800'}`}>
                           {title}
                         </span>
-                        {!isGroup && otherUser && getRoleBadge(otherUser.role)}
+                        {isPaymentSystem && (
+                          <span className="text-[10px] bg-indigo-100 text-indigo-700 font-extrabold px-1.5 py-0.2 rounded-md">
+                            결제/승인
+                          </span>
+                        )}
+                        {!isPaymentSystem && !isGroup && otherUser && getRoleBadge(otherUser.role)}
                       </div>
                       <span className="text-[10px] text-slate-400 flex-shrink-0">{lastTime}</span>
                     </div>
@@ -543,21 +823,44 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     <h3 className="text-base font-extrabold text-slate-800 truncate">
                       {getRoomTitle(activeRoom)}
                     </h3>
-                    <span className="text-xs text-slate-400 font-bold">
-                      {(activeRoom.members || []).length}명 참여중
-                    </span>
+                    {isCurrentRoomPaymentSystem ? (
+                      <span className="text-[11px] bg-indigo-100 text-indigo-800 font-bold px-2 py-0.5 rounded-full">
+                        신규 탑승 및 결제 승인 전용
+                      </span>
+                    ) : (
+                      <span className="text-xs text-slate-400 font-bold">
+                        {(activeRoom.members || []).length}명 참여중
+                      </span>
+                    )}
                   </div>
                   <p className="text-[11px] text-slate-400 truncate">
-                    {(activeRoom.members || [])
-                      .map((m) => m.user)
-                      .filter(Boolean)
-                      .map((u) => `${u.name || u.email}`)
-                      .join(', ')}
+                    {isCurrentRoomPaymentSystem
+                      ? '신규 학생 탑승 요청 및 담당 차량 지도교사 수락/거절 시스템 채널입니다.'
+                      : (activeRoom.members || [])
+                          .map((m) => m.user)
+                          .filter(Boolean)
+                          .map((u) => `${u.name || u.email}`)
+                          .join(', ')}
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
+                {/* 결제 신청 버튼 (학부모는 이용 불가) */}
+                {isCurrentRoomPaymentSystem && !isParent && (
+                  <button
+                    type="button"
+                    onClick={handleOpenPaymentModal}
+                    className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-black rounded-xl shadow-xs transition-all flex items-center gap-1.5"
+                    title="신규 원생 결제 및 탑승 신청서 작성"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                    </svg>
+                    <span>결제 신청</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => setShowParticipantsModal(true)}
@@ -591,7 +894,9 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     </svg>
                   </div>
                   <p className="text-xs font-semibold bg-white/80 px-3 py-1 rounded-full text-slate-600 shadow-xs">
-                    새로운 대화가 시작되었습니다. 첫 메시지를 남겨보세요.
+                    {isCurrentRoomPaymentSystem
+                      ? '결제 및 탑승 승인 내역이 여기에 표시됩니다. 상단 [결제 신청] 버튼으로 신청서를 작성하세요.'
+                      : '새로운 대화가 시작되었습니다. 첫 메시지를 남겨보세요.'}
                   </p>
                 </div>
               ) : (
@@ -599,6 +904,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   const isMine = msg.sender?.email === myUser.email || msg.sender?.id === myUser.id;
                   const senderName = msg.sender?.name || msg.sender?.email || '알 수 없음';
                   const senderRole = msg.sender?.role;
+                  const isPaymentRequest = msg.type === 'PAYMENT_REQUEST' || Boolean(msg.payload);
+                  const payload = msg.payload || {};
 
                   return (
                     <React.Fragment key={msg.id}>
@@ -611,43 +918,208 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         </div>
                       )}
 
-                      {/* Message Bubble Row */}
-                      {isMine ? (
-                        // My Message (Right Aligned)
-                        <div className="flex justify-end items-end gap-1.5 animate-fade-in">
-                          <span className="text-[10px] text-slate-600 select-none pb-1 font-medium">
-                            {formatMessageTime(msg.createdAt)}
-                          </span>
-                          <div className="bg-[#FEE500] text-slate-900 px-3.5 py-2.5 rounded-2xl rounded-tr-xs text-xs font-medium max-w-[70%] break-words shadow-xs">
-                            <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                      {/* PAYMENT REQUEST CARD */}
+                      {isPaymentRequest ? (
+                        <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} my-2 animate-fade-in`}>
+                          {/* Sender Info Header */}
+                          <div className="flex items-center gap-1.5 mb-1 px-1">
+                            <span className="text-xs font-bold text-slate-800">{senderName}</span>
+                            {senderRole && getRoleBadge(senderRole)}
+                            <span className="text-[10px] text-slate-600 ml-1">
+                              {formatMessageTime(msg.createdAt)}
+                            </span>
+                          </div>
+
+                          {/* Card Body */}
+                          <div className="bg-white border-2 border-indigo-200 rounded-2xl shadow-md overflow-hidden max-w-md w-full">
+                            {/* Card Top Title Banner */}
+                            <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-3.5 border-b border-indigo-100 flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-black text-xs shadow-xs">
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                                  </svg>
+                                </div>
+                                <div>
+                                  <h4 className="text-xs font-black text-indigo-950">신규 탑승 및 결제 승인 요청</h4>
+                                  <span className="text-[10px] text-indigo-600 font-medium">담당 차량 지도교사 수락/거절</span>
+                                </div>
+                              </div>
+
+                              {/* Status Badge */}
+                              {payload.status === 'APPROVED' ? (
+                                <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                  ✓ 결제 수락 완료
+                                </span>
+                              ) : payload.status === 'REJECTED' ? (
+                                <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
+                                  ✕ 결제 거절됨
+                                </span>
+                              ) : (
+                                <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
+                                  승인 대기중
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Card Content */}
+                            <div className="p-4 space-y-3">
+                              {/* 1. 메세지 */}
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                                <div className="text-[10px] text-slate-400 font-bold mb-1 flex items-center gap-1">
+                                  <svg className="w-3.5 h-3.5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                  </svg>
+                                  <span>신청 내용</span>
+                                </div>
+                                <p className="text-xs font-bold text-slate-800 leading-relaxed">
+                                  "{payload.note || '이 학생이 탑승을 하고 싶어 하는데 기존에 있던 곳에서 탑승하게 할까요'}"
+                                </p>
+                              </div>
+
+                              {/* Student & Bus Details */}
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                                  <span className="text-[10px] font-bold text-slate-400 block">탑승 학생</span>
+                                  <span className="font-extrabold text-slate-800 text-sm">{payload.studentName}</span>
+                                </div>
+                                <div className="p-2.5 rounded-xl bg-blue-50/60 border border-blue-100">
+                                  <span className="text-[10px] font-bold text-blue-500 block">희망 차량</span>
+                                  <span className="font-extrabold text-blue-900 text-sm">{payload.busNumber}</span>
+                                  <span className="text-[10px] text-blue-600 block truncate">
+                                    교사: {payload.teacherName}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* 2. 날짜 */}
+                              <div className="flex items-center gap-2 text-xs text-slate-700 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                                <svg className="w-4 h-4 text-indigo-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                <span className="text-slate-400 font-bold">탑승 희망 일자:</span>
+                                <span className="font-extrabold text-slate-900">{payload.requestDate}</span>
+                              </div>
+
+                              {/* Location text */}
+                              <div className="flex items-start gap-2 text-xs text-slate-700 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                                <svg className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                                <div>
+                                  <span className="text-slate-400 font-bold mr-1">탑승 위치:</span>
+                                  <span className="font-extrabold text-slate-900">{payload.boardingLocation}</span>
+                                  {payload.address && payload.address !== payload.boardingLocation && (
+                                    <span className="text-[11px] text-slate-500 block mt-0.5">{payload.address}</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* 3. 지도 */}
+                              <MiniLocationMap
+                                lat={payload.latitude}
+                                lng={payload.longitude}
+                                locationName={payload.boardingLocation}
+                              />
+
+                              {/* 4. 결제 거절 / 수락 버튼 */}
+                              {payload.status === 'APPROVED' ? (
+                                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
+                                  <svg className="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                  <div>
+                                    <span>수락 완료: 해당 구역 및 노선에 자동 배정되었습니다.</span>
+                                    {payload.decidedBy && (
+                                      <span className="block text-[10px] text-emerald-600 font-normal">
+                                        승인자: {payload.decidedBy} ({payload.decidedAt ? formatMessageTime(payload.decidedAt) : ''})
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ) : payload.status === 'REJECTED' ? (
+                                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
+                                  <svg className="w-4 h-4 text-rose-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                                  </svg>
+                                  <div>
+                                    <span>탑승 및 결제 요청이 거절되었습니다.</span>
+                                    {payload.decidedBy && (
+                                      <span className="block text-[10px] text-rose-600 font-normal">
+                                        처리자: {payload.decidedBy}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ) : (
+                                <div>
+                                  {isParent ? (
+                                    <div className="text-center py-2.5 px-3 bg-slate-100 rounded-xl text-xs text-slate-500 font-medium">
+                                      담당 차량 지도교사 또는 관리자 승인 대기 중입니다.
+                                    </div>
+                                  ) : (
+                                    <div className="flex gap-2 pt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDecidePaymentRequest(msg.id, 'APPROVED')}
+                                        disabled={isDeciding === msg.id}
+                                        className="flex-1 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                                      >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                        </svg>
+                                        <span>결제 수락 (구역/노선 자동배정)</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDecidePaymentRequest(msg.id, 'REJECTED')}
+                                        disabled={isDeciding === msg.id}
+                                        className="py-2.5 px-4 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 border border-slate-200 active:scale-95 font-bold text-xs rounded-xl transition-all disabled:opacity-50"
+                                      >
+                                        거절
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       ) : (
-                        // Others' Message (Left Aligned)
-                        <div className="flex items-start gap-2 animate-fade-in">
-                          {/* Sender Avatar */}
-                          <div className="w-9 h-9 rounded-xl bg-white text-slate-700 border border-slate-200 flex items-center justify-center font-black text-xs flex-shrink-0 shadow-2xs">
-                            {senderName[0] || '상'}
+                        /* Standard Chat Bubble */
+                        isMine ? (
+                          <div className="flex justify-end items-end gap-1.5 animate-fade-in">
+                            <span className="text-[10px] text-slate-600 select-none pb-1 font-medium">
+                              {formatMessageTime(msg.createdAt)}
+                            </span>
+                            <div className="bg-[#FEE500] text-slate-900 px-3.5 py-2.5 rounded-2xl rounded-tr-xs text-xs font-medium max-w-[70%] break-words shadow-xs">
+                              <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                            </div>
                           </div>
-
-                          <div className="flex flex-col max-w-[70%]">
-                            {/* Sender Name & Role */}
-                            <div className="flex items-center gap-1.5 mb-1 pl-0.5">
-                              <span className="text-xs font-bold text-slate-800">{senderName}</span>
-                              {senderRole && getRoleBadge(senderRole)}
+                        ) : (
+                          <div className="flex items-start gap-2 animate-fade-in">
+                            <div className="w-9 h-9 rounded-xl bg-white text-slate-700 border border-slate-200 flex items-center justify-center font-black text-xs flex-shrink-0 shadow-2xs">
+                              {senderName[0] || '상'}
                             </div>
 
-                            {/* Bubble & Time */}
-                            <div className="flex items-end gap-1.5">
-                              <div className="bg-white text-slate-800 px-3.5 py-2.5 rounded-2xl rounded-tl-xs text-xs font-medium break-words shadow-xs border border-white/80">
-                                <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                            <div className="flex flex-col max-w-[70%]">
+                              <div className="flex items-center gap-1.5 mb-1 pl-0.5">
+                                <span className="text-xs font-bold text-slate-800">{senderName}</span>
+                                {senderRole && getRoleBadge(senderRole)}
                               </div>
-                              <span className="text-[10px] text-slate-600 select-none pb-1 font-medium">
-                                {formatMessageTime(msg.createdAt)}
-                              </span>
+
+                              <div className="flex items-end gap-1.5">
+                                <div className="bg-white text-slate-800 px-3.5 py-2.5 rounded-2xl rounded-tl-xs text-xs font-medium break-words shadow-xs border border-white/80">
+                                  <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                                </div>
+                                <span className="text-[10px] text-slate-600 select-none pb-1 font-medium">
+                                  {formatMessageTime(msg.createdAt)}
+                                </span>
+                              </div>
                             </div>
                           </div>
-                        </div>
+                        )
                       )}
                     </React.Fragment>
                   );
@@ -680,44 +1152,31 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             </div>
           </>
         ) : (
-          // Empty state when no room is selected
-          <div className="h-full flex flex-col items-center justify-center p-8 text-center bg-slate-50">
-            <div className="w-16 h-16 rounded-3xl bg-blue-50 text-blue-600 flex items-center justify-center shadow-inner mb-4">
+          <div className="h-full flex flex-col items-center justify-center p-8 text-center text-slate-400 bg-slate-50/50">
+            <div className="w-16 h-16 rounded-3xl bg-white shadow-md flex items-center justify-center text-slate-300 mb-4">
               <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
             </div>
-            <h3 className="text-lg font-black text-slate-800 mb-2">대화할 채팅방을 선택하세요</h3>
-            <p className="text-xs text-slate-500 max-w-sm mb-6 leading-relaxed">
-              좌측 목록에서 채팅방을 선택하거나, 상단의 <strong className="text-blue-600">[+ 메세지 보내기]</strong> 버튼을 눌러 기사, 교사, 학부모 등 원하는 상대와 새 대화를 시작할 수 있습니다.
+            <h3 className="text-base font-extrabold text-slate-700">선택된 대화방이 없습니다.</h3>
+            <p className="text-xs text-slate-400 mt-1.5 max-w-xs">
+              좌측 목록에서 대화방을 선택하거나 상단의 [+ 메세지 보내기]를 눌러 새로운 대화를 시작하세요.
             </p>
-            <button
-              onClick={handleOpenNewChatModal}
-              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-extrabold text-xs rounded-xl shadow-md transition-all flex items-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-              </svg>
-              <span>새 메세지 보내기</span>
-            </button>
           </div>
         )}
       </div>
 
       {/* ============================================================ */}
-      {/* MODAL: 새 메세지 보내기 (역할별 사용자 선택 & 그룹 톡 지원) */}
+      {/* MODAL: 새 대화 상대 선택 (New Chat Role Categorized Modal) */}
       {/* ============================================================ */}
       {isNewChatModalOpen && (
-        <div className="fixed inset-0 z-[3000] bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[3000] bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh] animate-scale-up">
-            
             {/* Modal Header */}
             <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <div>
-                <h3 className="text-base font-extrabold text-slate-800">새 메세지 보내기</h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  대화 상대를 선택하세요. (다수 선택 시 그룹 채팅방이 개설됩니다)
-                </p>
+                <h3 className="text-base font-extrabold text-slate-800">대화 상대 선택</h3>
+                <p className="text-xs text-slate-400 mt-0.5">메세지를 보낼 상대를 역할별로 선택하세요 (다수 선택 시 그룹 톡).</p>
               </div>
               <button
                 type="button"
@@ -738,7 +1197,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 </svg>
                 <input
                   type="text"
-                  placeholder="이름, 역할, 차량, 반 이름으로 검색..."
+                  placeholder="이름, 역할 또는 이메일 검색..."
                   value={searchUserQuery}
                   onChange={(e) => setSearchUserQuery(e.target.value)}
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -746,10 +1205,10 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
               </div>
             </div>
 
-            {/* Role Categorized User List */}
+            {/* Categorized Users List */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {isLoadingUsers ? (
-                <div className="py-12 text-center text-slate-400 text-xs font-semibold">
+                <div className="py-12 text-center text-xs text-slate-400 font-semibold">
                   사용자 목록을 불러오는 중...
                 </div>
               ) : (
@@ -759,8 +1218,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     <div className="space-y-1.5">
                       <div className="flex items-center gap-1.5 text-xs font-black text-blue-700 bg-blue-50/80 px-2.5 py-1.5 rounded-lg border border-blue-100">
                         <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                         </svg>
                         <span>기사 ({filteredDrivers.length}명)</span>
                       </div>
@@ -925,7 +1383,6 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
             {/* Modal Bottom: Selection Summary & Group Chat Option */}
             <div className="p-4 border-t border-slate-200 bg-slate-50 space-y-3">
-              {/* Group Name input when 2 or more users selected */}
               {selectedUserIds.length > 1 && (
                 <div className="space-y-1">
                   <div className="flex items-center justify-between text-xs font-bold text-purple-800">
@@ -968,7 +1425,238 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
 
+      {/* ============================================================ */}
+      {/* MODAL: 신규 탑승 및 결제 신청서 (Payment Request Modal) */}
+      {/* ============================================================ */}
+      {isPaymentModalOpen && (
+        <div className="fixed inset-0 z-[3000] bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-indigo-200 w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-indigo-100 bg-gradient-to-r from-indigo-50 to-purple-50 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-xs">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-indigo-950">신규 탑승 및 결제 신청</h3>
+                  <p className="text-[11px] text-indigo-600 font-medium">담당 차량 지도교사에게 탑승 승인 및 배정을 요청합니다.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPaymentModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleSubmitPaymentRequest} className="flex-1 overflow-y-auto p-5 space-y-4">
+              {isLoadingPaymentContext ? (
+                <div className="py-12 text-center text-xs text-slate-400 font-semibold">
+                  원생 및 차량 정보를 불러오는 중...
+                </div>
+              ) : (
+                <>
+                  {/* 1. 원생(학생) 선택 */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-black text-slate-800 flex items-center gap-1">
+                        <span>탑승 원생(학생)</span>
+                        <span className="text-red-500">*</span>
+                      </label>
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <button
+                          type="button"
+                          onClick={() => setPaymentForm((prev) => ({ ...prev, studentSelectMode: 'DROPDOWN' }))}
+                          className={`font-bold pb-0.5 border-b-2 transition-colors ${
+                            paymentForm.studentSelectMode === 'DROPDOWN'
+                              ? 'border-indigo-600 text-indigo-600'
+                              : 'border-transparent text-slate-400 hover:text-slate-600'
+                          }`}
+                        >
+                          등록된 원생 선택
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setPaymentForm((prev) => ({ ...prev, studentSelectMode: 'CUSTOM', selectedStudentId: '' }))}
+                          className={`font-bold pb-0.5 border-b-2 transition-colors ${
+                            paymentForm.studentSelectMode === 'CUSTOM'
+                              ? 'border-indigo-600 text-indigo-600'
+                              : 'border-transparent text-slate-400 hover:text-slate-600'
+                          }`}
+                        >
+                          신규 원생 직접 입력
+                        </button>
+                      </div>
+                    </div>
+
+                    {paymentForm.studentSelectMode === 'DROPDOWN' ? (
+                      <select
+                        value={paymentForm.selectedStudentId}
+                        onChange={(e) => handleStudentSelect(e.target.value)}
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      >
+                        <option value="">-- 원생을 선택하세요 --</option>
+                        {(paymentContext.students || []).map((st) => (
+                          <option key={st.id} value={st.id}>
+                            {st.name} ({st.assignedBusNumber ? `${st.assignedBusNumber}` : '미배정'}) - {st.boardingLocation || st.address || '주소 미등록'}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        placeholder="신규 원생 이름 입력 (예: 김민수)"
+                        value={paymentForm.customStudentName}
+                        onChange={(e) => setPaymentForm((prev) => ({ ...prev, customStudentName: e.target.value }))}
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold"
+                      />
+                    )}
+                  </div>
+
+                  {/* 2. 담당 차량(호차) 및 지도교사 선택 */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-black text-slate-800 flex items-center gap-1">
+                      <span>배정 희망 차량 (호차)</span>
+                      <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={paymentForm.selectedVehicleId}
+                      onChange={(e) => setPaymentForm((prev) => ({ ...prev, selectedVehicleId: e.target.value }))}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                      <option value="">-- 차량(호차)을 선택하세요 --</option>
+                      {(paymentContext.vehicles || []).map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.busNumber} (담당 지도교사: {v.teacherName} / 기사: {v.driverName})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 3. 탑승 희망 위치 (기존 탑승지 or 직접 입력) */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-black text-slate-800 flex items-center gap-1">
+                        <span>탑승 희망 위치</span>
+                        <span className="text-red-500">*</span>
+                      </label>
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <button
+                          type="button"
+                          onClick={() => setPaymentForm((prev) => ({ ...prev, locationSelectMode: 'PICKUP_POINT' }))}
+                          className={`font-bold pb-0.5 border-b-2 transition-colors ${
+                            paymentForm.locationSelectMode === 'PICKUP_POINT'
+                              ? 'border-indigo-600 text-indigo-600'
+                              : 'border-transparent text-slate-400 hover:text-slate-600'
+                          }`}
+                        >
+                          기존 탑승지 목록
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setPaymentForm((prev) => ({ ...prev, locationSelectMode: 'CUSTOM' }))}
+                          className={`font-bold pb-0.5 border-b-2 transition-colors ${
+                            paymentForm.locationSelectMode === 'CUSTOM'
+                              ? 'border-indigo-600 text-indigo-600'
+                              : 'border-transparent text-slate-400 hover:text-slate-600'
+                          }`}
+                        >
+                          직접 위치/주소 입력
+                        </button>
+                      </div>
+                    </div>
+
+                    {paymentForm.locationSelectMode === 'PICKUP_POINT' && (paymentContext.pickupPoints || []).length > 0 ? (
+                      <select
+                        value={paymentForm.selectedPickupPointId}
+                        onChange={(e) => handlePickupPointSelect(e.target.value)}
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      >
+                        <option value="">-- 등록된 탑승지를 선택하세요 --</option>
+                        {(paymentContext.pickupPoints || []).map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        placeholder="탑승 위치명 입력 (예: 경동대 메트로폴 정문)"
+                        value={paymentForm.boardingLocation}
+                        onChange={(e) => setPaymentForm((prev) => ({ ...prev, boardingLocation: e.target.value }))}
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold"
+                      />
+                    )}
+
+                    <input
+                      type="text"
+                      placeholder="상세 주소 (선택 입력)"
+                      value={paymentForm.address}
+                      onChange={(e) => setPaymentForm((prev) => ({ ...prev, address: e.target.value }))}
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  {/* 4. 탑승 희망 날짜 */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-black text-slate-800 flex items-center gap-1">
+                      <span>탑승 희망 일자</span>
+                      <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={paymentForm.requestDate}
+                      onChange={(e) => setPaymentForm((prev) => ({ ...prev, requestDate: e.target.value }))}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  {/* 5. 요청 메세지 */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-black text-slate-800">요청 메시지</label>
+                    <textarea
+                      rows={3}
+                      value={paymentForm.note}
+                      onChange={(e) => setPaymentForm((prev) => ({ ...prev, note: e.target.value }))}
+                      placeholder="지도교사에게 전달할 메시지를 입력하세요."
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none font-medium leading-relaxed"
+                    />
+                  </div>
+                </>
+              )}
+
+              {/* Modal Buttons */}
+              <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2 -mx-5 -mb-5 mt-4">
+                <button
+                  type="button"
+                  onClick={() => setIsPaymentModalOpen(false)}
+                  className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingPayment || isLoadingPaymentContext}
+                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-black rounded-xl shadow-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  {isSubmittingPayment ? '신청서 전송 중...' : '결제 신청서 보내기'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -1029,7 +1717,6 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           </div>
         </div>
       )}
-
     </div>
   );
 }

@@ -978,7 +978,7 @@ export class RoutingService {
     return lower.concat(upper);
   }
 
-  private generateZonePolygon(points: [number, number][], bufferKm: number = 1.8): [number, number][] {
+  public generateZonePolygon(points: [number, number][], bufferKm: number = 1.8): [number, number][] {
     if (!points || points.length === 0) return [];
 
     // Deduplicate points
