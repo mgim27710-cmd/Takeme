@@ -1822,17 +1822,18 @@ const parseKindergartenExcelSheet = (sheet) => {
         setBuses(processedBuses);
         localStorage.setItem('takeme_buses', JSON.stringify(geocodedBuses));
         
-        setStudents([]); // clear old students
+        // Reload state to ensure all existing students are retained, merged, and displayed with new zone assignments
+        await loadInitialState(targetAcademyId);
         
         if (showAcademyModal) {
           alert('구역 세팅이 완료되었습니다!\n왼쪽 메뉴의 [버스 정보 관리] 탭에서 기사님과 교사님 정보를 등록해주세요.');
           setSetupStep(2); // Go to Academy Info Input
         } else {
           setIsResettingZones(false);
-          alert('구역 세팅이 완료되었습니다!');
+          alert('구역 매핑이 완료되었습니다!\n기존에 등록된 원생들이 새로운 구역에 자동으로 병합 배차되었습니다.');
         }
       } catch (e) {
-        alert(`구역 리셋에 실패했습니다: ${e.message}`);
+        alert(`구역 매핑 재설정에 실패했습니다: ${e.message}`);
         console.error(e);
       } finally {
         setIsProcessing(false);
@@ -3359,19 +3360,19 @@ const parseKindergartenExcelSheet = (sheet) => {
               </div>
 
               <div className="p-4 bg-red-50 rounded-xl border border-red-100 transition-all">
-                <h3 className="font-bold text-red-700 mb-1">전년도 구역 초기화</h3>
-                <p className="text-xs text-red-600 mb-3 opacity-80 leading-relaxed">현재 설정된 모든 버스와 배차 구역이 영구적으로 삭제됩니다.</p>
+                <h3 className="font-bold text-blue-700 mb-1">구역 매핑 재설정 및 기존 원생 병합</h3>
+                <p className="text-xs text-blue-600 mb-3 opacity-80 leading-relaxed">새로운 엑셀 자료를 기반으로 버스 운행 구역(폴리곤)을 재설정합니다. 기존 등록 원생 및 교사/기사님 정보는 안전하게 보존되며 새 구역으로 자동 병합 배차됩니다.</p>
                 
                 {!isResettingZones ? (
-                  <button onClick={() => setIsResettingZones(true)} className="w-full py-2.5 px-3 bg-white text-red-600 rounded-xl text-sm font-bold border border-red-200 shadow-xs hover:bg-red-600 hover:text-white transition-colors whitespace-nowrap">
-                    구역 리셋 모드 진입
+                  <button onClick={() => setIsResettingZones(true)} className="w-full py-2.5 px-3 bg-white text-blue-600 rounded-xl text-sm font-bold border border-blue-200 shadow-xs hover:bg-blue-600 hover:text-white transition-colors whitespace-nowrap">
+                    구역 매핑 재설정 모드 진입
                   </button>
                 ) : (
-                  <div className="space-y-3 mt-4 pt-4 border-t border-red-200">
-                    <div className="p-3 bg-red-100/50 rounded-lg">
-                      <p className="text-xs text-red-800 font-bold">작성 안내</p>
-                      <p className="text-xs text-red-700 mt-1 leading-relaxed">
-                        다운로드한 양식에서 <b>하이라이트 표시된 필수 항목(등원지, 하원지, 차량)</b>만 채워주시면 됩니다. 해당 장소들을 바탕으로 자동으로 픽업/드랍 구역이 나뉩니다.
+                  <div className="space-y-3 mt-4 pt-4 border-t border-blue-200">
+                    <div className="p-3 bg-blue-100/50 rounded-lg">
+                      <p className="text-xs text-blue-800 font-bold">작성 안내</p>
+                      <p className="text-xs text-blue-700 mt-1 leading-relaxed">
+                        새 엑셀 파일의 <b>등원지, 하원지, 차량</b> 데이터를 바탕으로 운행 구역이 재계산됩니다. 기존에 등록된 원생들은 삭제되지 않고 새로운 구역에 자동으로 병합 배차됩니다.
                       </p>
                     </div>
                     
@@ -3383,12 +3384,12 @@ const parseKindergartenExcelSheet = (sheet) => {
                     <button 
                       onClick={() => resetFileInputRef.current.click()} 
                       disabled={isProcessing}
-                      className="w-full py-2.5 px-3 bg-red-600 text-white rounded-xl text-sm font-bold shadow-xs hover:bg-red-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+                      className="w-full py-2.5 px-3 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-xs hover:bg-blue-700 disabled:opacity-50 transition-colors whitespace-nowrap"
                     >
-                      {isProcessing ? '초기화 및 지오코딩 중...' : '새 엑셀 업로드 및 리셋'}
+                      {isProcessing ? '구역 매핑 및 원생 병합 중...' : '새 엑셀 업로드 및 구역 재매핑'}
                     </button>
                     
-                    <button onClick={() => setIsResettingZones(false)} className="w-full py-2 mt-2 bg-transparent text-red-600 rounded-lg text-xs hover:underline whitespace-nowrap">
+                    <button onClick={() => setIsResettingZones(false)} className="w-full py-2 mt-2 bg-transparent text-blue-600 rounded-lg text-xs hover:underline whitespace-nowrap">
                       취소
                     </button>
                   </div>

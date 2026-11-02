@@ -248,63 +248,75 @@ export class RoutingService {
     const academy = await this.getAcademy(academyId, userId);
     if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
 
-    // 1. Reset Database Data FOR THIS ACADEMY ONLY (Isolated)
-    await this.studentRepository.query(
-      `DELETE FROM student_schedules WHERE "studentId" IN (SELECT id FROM students WHERE "academyId" = $1)`,
-      [academy.id]
-    ).catch(() => {});
-    await this.studentRepository.query(
-      `DELETE FROM operation_logs WHERE "vehicleId" IN (SELECT id FROM vehicles WHERE "academyId" = $1)`,
-      [academy.id]
-    ).catch(() => {});
-    // Preserve existing driver/teacher assignments before recreating vehicles
-    const oldVehicles = await this.vehicleRepository.find({
+    // 1. Preserve existing vehicles, drivers, teachers, and students (Non-destructive update)
+    const existingVehicles = await this.vehicleRepository.find({
       where: { academy: { id: academy.id } },
       relations: { driverUser: true, teacherUser: true },
-    });
-    const oldStaffByBus = new Map<string, Vehicle>();
-    oldVehicles.forEach((ov, idx) => {
-      oldStaffByBus.set(ov.busNumber || `${idx + 1}호차`, ov);
+      order: { id: 'ASC' },
     });
 
-    // Delete students and vehicles belonging to this academy (keep pickup_point intact)
-    await this.studentRepository.delete({ academy: { id: academy.id } });
-    await this.vehicleRepository.delete({ academy: { id: academy.id } });
-
-    academy.vehicleCount = vehicles.length;
-    await this.academyRepository.save(academy);
+    const existingVehicleMap = new Map<string, Vehicle>();
+    existingVehicles.forEach((ev, idx) => {
+      if (ev.busNumber) {
+        existingVehicleMap.set(ev.busNumber, ev);
+        const numOnly = ev.busNumber.replace(/[^0-9]/g, '');
+        if (numOnly) existingVehicleMap.set(numOnly, ev);
+      }
+    });
 
     const savedVehicles: any[] = [];
     const vehiclePointsMap: Record<string, any> = {};
 
-    // 2. Save Vehicles and Assign Colors
-    for (const v of vehicles) {
-      const busNum = v.busNumber || `${savedVehicles.length + 1}호차`;
-      const prevV = oldStaffByBus.get(busNum) || oldVehicles[savedVehicles.length];
-      const newVehicle = this.vehicleRepository.create({
-        busNumber: busNum,
-        plateNumber: v.plateNumber || '',
-        driverName: v.driverName || prevV?.driverName || '미정',
-        driverPhone: v.driverPhone || prevV?.driverPhone || '000-0000-0000',
-        teacherName: v.teacherName || prevV?.teacherName || '미정',
-        teacherPhone: v.teacherPhone || prevV?.teacherPhone || '000-0000-0000',
-        capacity: Number(v.capacity) || 25,
-        academy: academy,
-        driverUser: prevV?.driverUser || undefined,
-        driverApprovalStatus: prevV?.driverApprovalStatus || 'UNREGISTERED',
-        teacherUser: prevV?.teacherUser || undefined,
-        teacherApprovalStatus: prevV?.teacherApprovalStatus || 'UNREGISTERED',
-      });
-      const saved = await this.vehicleRepository.save(newVehicle);
-      
-      savedVehicles.push({
-        id: saved.id,
-        name: saved.busNumber,
-        color: this.getDistinctColor(),
+    // 2. Synchronize Vehicles: Reuse existing vehicles to preserve IDs, driver/teacher user links and approvals
+    for (let i = 0; i < vehicles.length; i++) {
+      const v = vehicles[i];
+      const busNum = v.busNumber || `${i + 1}호차`;
+      const numOnly = busNum.replace(/[^0-9]/g, '');
+      const existing = existingVehicleMap.get(busNum) || (numOnly ? existingVehicleMap.get(numOnly) : undefined) || existingVehicles[i];
+
+      let targetVehicle: Vehicle;
+      if (existing) {
+        // Reuse existing vehicle record to preserve IDs, driver/teacher relations and approval statuses
+        existing.busNumber = busNum;
+        if (v.plateNumber && v.plateNumber.trim()) existing.plateNumber = v.plateNumber;
+        if (v.capacity) existing.capacity = Number(v.capacity) || existing.capacity || 25;
+        if (v.driverName && v.driverName !== '미정') existing.driverName = v.driverName;
+        if (v.driverPhone && v.driverPhone !== '000-0000-0000') existing.driverPhone = v.driverPhone;
+        if (v.teacherName && v.teacherName !== '미정') existing.teacherName = v.teacherName;
+        if (v.teacherPhone && v.teacherPhone !== '000-0000-0000') existing.teacherPhone = v.teacherPhone;
+        if (!existing.colorHex) existing.colorHex = this.getDistinctColor();
+        targetVehicle = await this.vehicleRepository.save(existing);
+      } else {
+        // Create new vehicle if more vehicles needed
+        const newVehicle = this.vehicleRepository.create({
+          busNumber: busNum,
+          plateNumber: v.plateNumber || '',
+          driverName: v.driverName || '미정',
+          driverPhone: v.driverPhone || '000-0000-0000',
+          teacherName: v.teacherName || '미정',
+          teacherPhone: v.teacherPhone || '000-0000-0000',
+          capacity: Number(v.capacity) || 25,
+          academy: academy,
+          colorHex: this.getDistinctColor(),
+          driverApprovalStatus: 'UNREGISTERED',
+          teacherApprovalStatus: 'UNREGISTERED',
+        });
+        targetVehicle = await this.vehicleRepository.save(newVehicle);
+      }
+
+      const vehicleObj = {
+        id: targetVehicle.id,
+        name: targetVehicle.busNumber,
+        color: targetVehicle.colorHex || this.getDistinctColor(),
         points: []
-      });
-      vehiclePointsMap[v.busNumber] = savedVehicles[savedVehicles.length - 1];
+      };
+      savedVehicles.push(vehicleObj);
+      vehiclePointsMap[busNum] = vehicleObj;
+      if (numOnly) vehiclePointsMap[numOnly] = vehicleObj;
     }
+
+    academy.vehicleCount = savedVehicles.length;
+    await this.academyRepository.save(academy);
 
     // 3. Geocode Addresses and Associate with Vehicles (with caching & parallel batch pre-fetch)
     const geocodeCache = new Map<string, { lat: number, lng: number } | null>();
@@ -445,6 +457,95 @@ export class RoutingService {
       }
     }
 
+    // 5. Merge existing students into newly mapped vehicle zones
+    const existingStudents = await this.studentRepository.find({
+      where: { academy: { id: academy.id } },
+      relations: { assignedVehicle: true }
+    });
+
+    if (existingStudents.length > 0) {
+      const currentVehicles = await this.vehicleRepository.find({
+        where: { academy: { id: academy.id } }
+      });
+
+      const vehiclePolyList = currentVehicles.map(v => {
+        let pts: [number, number][] = [];
+        try {
+          pts = typeof v.polygonCoordinates === 'string' ? JSON.parse(v.polygonCoordinates) : (v.polygonCoordinates || []);
+        } catch (e) {}
+        return { vehicle: v, points: pts };
+      });
+
+      for (const student of existingStudents) {
+        let targetVehicle: Vehicle | null = null;
+        let sLat = student.latitude;
+        let sLng = student.longitude;
+
+        if ((sLat === undefined || sLat === null || isNaN(sLat) || sLng === undefined || sLng === null || isNaN(sLng)) && (student.boardingLocation || student.address)) {
+          const addr = student.boardingLocation || student.address;
+          const coords = await geocodeWithCache(addr);
+          if (coords) {
+            sLat = coords.lat;
+            sLng = coords.lng;
+            student.latitude = sLat;
+            student.longitude = sLng;
+          }
+        }
+
+        if (sLat !== undefined && sLat !== null && !isNaN(sLat) && sLng !== undefined && sLng !== null && !isNaN(sLng)) {
+          // 1. Check if student coordinate is inside any vehicle polygon
+          for (const vp of vehiclePolyList) {
+            if (vp.points.length >= 3 && this.isPointInPolygon([sLat, sLng], vp.points)) {
+              targetVehicle = vp.vehicle;
+              break;
+            }
+          }
+
+          // 2. Fallback: closest vehicle polygon by minimum distance to polygon points
+          if (!targetVehicle) {
+            let minDistance = Infinity;
+            for (const vp of vehiclePolyList) {
+              if (vp.points.length > 0) {
+                for (const pt of vp.points) {
+                  const dist = this.getDistanceKm(sLat, sLng, pt[0], pt[1]);
+                  if (dist < minDistance) {
+                    minDistance = dist;
+                    targetVehicle = vp.vehicle;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // 3. Fallback: retain current vehicle or assign to first vehicle
+        if (!targetVehicle) {
+          targetVehicle = student.assignedVehicle || (currentVehicles.length > 0 ? currentVehicles[0] : null);
+        }
+
+        if (targetVehicle) {
+          student.assignedVehicle = targetVehicle;
+          if (student.raw && typeof student.raw === 'object') {
+            student.raw['등원차량'] = targetVehicle.busNumber;
+            student.raw['하원차량'] = targetVehicle.busNumber;
+          }
+        }
+      }
+
+      await this.studentRepository.save(existingStudents);
+
+      // Synchronize student_schedules to the newly assigned vehicles
+      for (const st of existingStudents) {
+        if (st.assignedVehicle) {
+          await this.studentRepository.query(
+            `UPDATE student_schedules SET "assignedVehicleId" = $1 WHERE "studentId" = $2`,
+            [st.assignedVehicle.id, st.id]
+          ).catch(() => {});
+        }
+      }
+    }
+
+    this.notifyRouteUpdated(academy.id);
     return savedVehicles;
   }
 
