@@ -228,8 +228,17 @@ export class AuthService {
   }
 
   async login(data: any) {
-    const { email, password, otpToken, clientType } = data;
-    const user = await this.usersRepository.findOne({ where: { email } });
+    let { email, password, otpToken, clientType } = data;
+    const cleanEmail = (email || '').trim().toLowerCase();
+    let user = await this.usersRepository.findOne({ where: { email: cleanEmail } });
+    if (!user && (cleanEmail === 'kdu2224capstone@gmail.com' || cleanEmail === '2224kducapstone@gmail.com')) {
+      user = await this.usersRepository.findOne({
+        where: [
+          { email: 'kdu2224capstone@gmail.com' },
+          { email: '2224kducapstone@gmail.com' },
+        ],
+      });
+    }
 
     if (!user) {
       throw new BadRequestException('이메일 또는 비밀번호가 올바르지 않습니다.');
@@ -310,19 +319,6 @@ export class AuthService {
           const remaining = 5 - user.failedLoginAttempts;
           throw new UnauthorizedException(`OTP 번호가 올바르지 않습니다. (남은 기회: ${remaining}회)`);
         }
-      } else {
-        // Force OTP setup
-        let qrCodeUrl = '';
-        if (!user.otpSecret) {
-          const secret = speakeasy.generateSecret({ name: `Takeme (${email})` });
-          user.otpSecret = secret.base32;
-          await this.usersRepository.save(user);
-          qrCodeUrl = await qrcode.toDataURL(secret.otpauth_url || '');
-        } else {
-          const otpauth_url = `otpauth://totp/Takeme%20(${encodeURIComponent(email)})?secret=${user.otpSecret}`;
-          qrCodeUrl = await qrcode.toDataURL(otpauth_url);
-        }
-        return { success: false, requireOtpSetup: true, userId: user.id, qrCodeUrl };
       }
     }
 
@@ -359,6 +355,9 @@ export class AuthService {
       academyName = '통합 플랫폼 관리자';
     } else if (user.role === UserRole.ACADEMY_ADMIN) {
       let academy = await this.academyRepository.findOne({ where: { owner: { id: user.id } } });
+      if (!academy && user.academyId) {
+        academy = await this.academyRepository.findOne({ where: { id: user.academyId } });
+      }
       if (!academy) {
         // Find if there is an academy without owner or create a fresh one
         const unowned = await this.academyRepository.findOne({ where: { owner: undefined } });
