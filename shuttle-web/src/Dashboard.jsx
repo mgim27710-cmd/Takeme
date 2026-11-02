@@ -91,12 +91,39 @@ export default function Dashboard() {
     }
   })();
   const isAuthenticated = Boolean(currentUser && currentUser.id && currentUser.role);
+  const isWebAdmin = currentUser.role === 'ACADEMY_ADMIN' || currentUser.role === 'SUPER_ADMIN';
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isAuthenticated || !isWebAdmin) {
+      localStorage.removeItem('takeme_token');
+      localStorage.removeItem('takeme_refresh_token');
+      localStorage.removeItem('takeme_user');
       navigate('/', { replace: true });
     }
-  }, [isAuthenticated, navigate]);
+  }, [isAuthenticated, isWebAdmin, navigate]);
+
+  // 동시 접속 감지 주기적 세션 체크 (10초 주기)
+  useEffect(() => {
+    if (!isAuthenticated || !isWebAdmin) return;
+    const sessionTimer = setInterval(async () => {
+      const token = localStorage.getItem('takeme_token');
+      if (!token) return;
+      try {
+        const res = await fetch(`${API_BASE_URL}/auth/session-check`);
+        if (res.status === 401) {
+          localStorage.removeItem('takeme_token');
+          localStorage.removeItem('takeme_refresh_token');
+          localStorage.removeItem('takeme_user');
+          alert('다른 기기 또는 브라우저에서 로그인되어 현재 접속이 종료되었습니다. 다시 로그인해 주세요.');
+          window.location.href = '/';
+        }
+      } catch (err) {
+        // network error
+      }
+    }, 10000);
+
+    return () => clearInterval(sessionTimer);
+  }, [isAuthenticated, isWebAdmin]);
   const isSuperAdmin = currentUser.role === 'SUPER_ADMIN';
   const [allAcademies, setAllAcademies] = useState([]);
   const [selectedAcademyId, setSelectedAcademyId] = useState(

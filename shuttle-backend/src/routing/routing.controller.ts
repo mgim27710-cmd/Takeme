@@ -1,8 +1,10 @@
-import { Controller, Post, Body, Get, Param, Query, Res, Delete, Headers, Put } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Query, Res, Delete, Headers, Put, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { RoutingService } from './routing.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('routing')
+@UseGuards(JwtAuthGuard)
 export class RoutingController {
   constructor(private readonly routingService: RoutingService) {}
 

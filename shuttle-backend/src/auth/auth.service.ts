@@ -228,7 +228,7 @@ export class AuthService {
   }
 
   async login(data: any) {
-    const { email, password, otpToken } = data;
+    const { email, password, otpToken, clientType } = data;
     const user = await this.usersRepository.findOne({ where: { email } });
 
     if (!user) {
@@ -261,6 +261,31 @@ export class AuthService {
       await this.usersRepository.save(user);
       const remaining = 5 - user.failedLoginAttempts;
       throw new BadRequestException(`이메일 또는 비밀번호가 올바르지 않습니다. (남은 기회: ${remaining}회)`);
+    }
+
+    // 2-1. 플랫폼/클라이언트 역할 제한 검증 (웹 vs 모바일 앱)
+    if (clientType === 'web') {
+      if (user.role !== UserRole.ACADEMY_ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+        user.failedLoginAttempts = 0;
+        await this.usersRepository.save(user);
+        return {
+          success: false,
+          isAppAccount: true,
+          role: user.role,
+          message: '본 계정은 앱기반 계정입니다.',
+        };
+      }
+    } else if (clientType === 'app') {
+      if (user.role === UserRole.ACADEMY_ADMIN || user.role === UserRole.SUPER_ADMIN) {
+        user.failedLoginAttempts = 0;
+        await this.usersRepository.save(user);
+        return {
+          success: false,
+          isWebAccount: true,
+          role: user.role,
+          message: '본 계정은 웹기반 계정입니다.',
+        };
+      }
     }
 
     if (user.role === UserRole.ACADEMY_ADMIN) {

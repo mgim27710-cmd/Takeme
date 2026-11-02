@@ -1,10 +1,17 @@
-import { Controller, Post, Body, Delete, Query, BadRequestException, Req } from '@nestjs/common';
+import { Controller, Post, Get, Body, Delete, Query, BadRequestException, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthService } from './auth.service';
+import { JwtAuthGuard } from './jwt-auth.guard';
 
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  @Get('session-check')
+  @UseGuards(JwtAuthGuard)
+  sessionCheck(@Req() req: any) {
+    return { ok: true, userId: req.user?.sub, sessionId: req.user?.sessionId };
+  }
 
   @Post('email/send')
   sendEmail(@Req() req: Request, @Body('email') email: string, @Body('type') type?: 'register' | 'withdraw') {

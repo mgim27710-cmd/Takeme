@@ -149,11 +149,12 @@ class ApiService {
   // ----------------------------------------------------
   // AUTH
   // ----------------------------------------------------
-  Future<Map<String, dynamic>> login(String email, String password, {String? otpToken}) async {
-    final url = Uri.parse('${AppConfig.apiHost}/auth/login');
+  Future<Map<String, dynamic>> login(String email, String password, {String? otpToken, String? clientType = 'app'}) async {
+    final url = Uri.parse('/auth/login');
     final body = {
       'email': email.trim(),
       'password': password,
+      'clientType': clientType ?? 'app',
     };
     if (otpToken != null && otpToken.isNotEmpty) {
       body['otpToken'] = otpToken.trim();
@@ -162,7 +163,14 @@ class ApiService {
     final res = await http.post(url, headers: _headers(), body: jsonEncode(body));
     final data = jsonDecode(utf8.decode(res.bodyBytes));
 
+    if (data['isWebAccount'] == true) {
+      return {'success': false, 'isWebAccount': true, 'message': data['message'] ?? '본 계정은 웹기반 계정입니다.', 'data': data};
+    }
+
     if (res.statusCode == 200 || res.statusCode == 201) {
+      if (data['user'] != null && (data['user']['role'] == 'ACADEMY_ADMIN' || data['user']['role'] == 'SUPER_ADMIN')) {
+        return {'success': false, 'isWebAccount': true, 'message': '본 계정은 웹기반 계정입니다.', 'data': data};
+      }
       if (data['accessToken'] != null && data['user'] != null) {
         final user = UserModel.fromJson(data['user'], token: data['accessToken']);
         await setAuth(data['accessToken'], user, refreshToken: data['refreshToken']);

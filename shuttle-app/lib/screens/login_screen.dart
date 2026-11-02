@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'teacher/homeroom_teacher_home_screen.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -44,6 +45,12 @@ class _LoginScreenState extends State<LoginScreen> {
     final user = ApiService().currentUser;
     if (user == null) return;
 
+    if (user.role == 'ACADEMY_ADMIN' || user.role == 'SUPER_ADMIN') {
+      ApiService().logout();
+      _showWebAccountNoticeDialog();
+      return;
+    }
+
     if (user.role == 'DRIVER') {
       Navigator.pushReplacement(
         context,
@@ -72,12 +79,99 @@ class _LoginScreenState extends State<LoginScreen> {
           MaterialPageRoute(builder: (_) => const StaffDashboardScreen()),
         );
       }
-    } else {
+    } else if (user.role == 'PARENT' || user.role == 'STUDENT') {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const ParentHomeScreen()),
       );
+    } else {
+      ApiService().logout();
+      _showWebAccountNoticeDialog();
     }
+  }
+
+  void _showWebAccountNoticeDialog() {
+    int remainingSeconds = 10;
+    Timer? countdownTimer;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDlgState) {
+            countdownTimer ??= Timer.periodic(const Duration(seconds: 1), (timer) {
+              if (remainingSeconds <= 1) {
+                timer.cancel();
+                if (Navigator.canPop(ctx)) {
+                  Navigator.pop(ctx);
+                }
+              } else {
+                setDlgState(() {
+                  remainingSeconds--;
+                });
+              }
+            });
+
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Text('계정 구분 안내', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const Icon(Icons.computer, size: 48, color: Color(0xFF2563EB)),
+                  const SizedBox(height: 12),
+                  const Text(
+                    '본 계정은 웹기반 계정입니다.',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '원장님(관리자) 계정은 PC 웹 브라우저를 통해 관리자 시스템으로 접속해 주세요.',
+                    style: TextStyle(fontSize: 13, color: Colors.black54, height: 1.4),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFBFDBFE)),
+                    ),
+                    child: Text(
+                      '$remainingSeconds초 후 로그인 화면으로 돌아갑니다.',
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2563EB), fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      countdownTimer?.cancel();
+                      Navigator.pop(ctx);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2563EB),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: const Text('로그인 화면으로 돌아가기', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    ).then((_) {
+      countdownTimer?.cancel();
+    });
   }
 
   Future<void> _handleLogin() async {
@@ -99,7 +193,19 @@ class _LoginScreenState extends State<LoginScreen> {
       final res = await ApiService().login(email, password);
       setState(() => _isLoading = false);
 
+      if (res['isWebAccount'] == true || res['message']?.contains('웹기반 계정') == true) {
+        await ApiService().logout();
+        _showWebAccountNoticeDialog();
+        return;
+      }
+
       if (res['success'] == true) {
+        final user = ApiService().currentUser;
+        if (user != null && (user.role == 'ACADEMY_ADMIN' || user.role == 'SUPER_ADMIN')) {
+          await ApiService().logout();
+          _showWebAccountNoticeDialog();
+          return;
+        }
         _handleLoginSuccess();
       } else {
         final data = res['data'];

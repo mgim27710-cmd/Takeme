@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { API_BASE_URL } from './config';
 
@@ -14,6 +14,20 @@ export default function Landing() {
   const [otpToken, setOtpToken] = useState('');
   const [qrCodeUrl, setQrCodeUrl] = useState('');
   const [userId, setUserId] = useState(null);
+  const [appAccountCountdown, setAppAccountCountdown] = useState(10);
+
+  useEffect(() => {
+    if (mode !== 'app-account-notice') return;
+    if (appAccountCountdown <= 0) {
+      setMode('login');
+      setPassword('');
+      return;
+    }
+    const timer = setTimeout(() => {
+      setAppAccountCountdown(prev => prev - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [mode, appAccountCountdown]);
   
   // Teacher Registration Specific State
   const [authCode, setAuthCode] = useState('');
@@ -297,9 +311,18 @@ export default function Landing() {
     const res = await fetch(`${API_BASE_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, otpToken: mode === 'otp' ? otpToken : undefined })
+      body: JSON.stringify({ email, password, otpToken: mode === 'otp' ? otpToken : undefined, clientType: 'web' })
     });
     const data = await res.json();
+
+    if (data.isAppAccount || (data.user && data.user.role !== 'ACADEMY_ADMIN' && data.user.role !== 'SUPER_ADMIN')) {
+      localStorage.removeItem('takeme_token');
+      localStorage.removeItem('takeme_refresh_token');
+      localStorage.removeItem('takeme_user');
+      setAppAccountCountdown(10);
+      setMode('app-account-notice');
+      return;
+    }
     
     if (res.ok) {
       if (data.requireOtp) {
@@ -557,6 +580,38 @@ export default function Landing() {
             <input type="text" placeholder="앱에 표시된 6자리 번호" maxLength={6} value={otpToken} onChange={e=>setOtpToken(e.target.value)} className="form-input text-center tracking-widest font-mono text-xl" required />
             <button type="submit" className="btn-primary w-full py-3 font-bold">연동 완료하기</button>
           </form>
+        )}
+
+        {mode === 'app-account-notice' && (
+          <div className="space-y-6 text-center py-4">
+            <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-xl font-extrabold text-slate-800 tracking-tight">
+                본 계정은 앱기반 계정입니다.
+              </h2>
+              <p className="text-xs text-slate-500 leading-relaxed px-4">
+                기사, 교사(담임/동승), 학부모 계정은 모바일 앱(Takeme)을 통해 로그인해 주시기 바랍니다.
+              </p>
+            </div>
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl space-y-1">
+              <p className="text-3xl font-black text-blue-600">{appAccountCountdown}초</p>
+              <p className="text-xs text-slate-500">{appAccountCountdown}초 후 로그인 화면으로 자동 이동합니다.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('login');
+                setPassword('');
+              }}
+              className="btn-primary w-full py-3 text-base font-bold shadow-md shadow-blue-500/20"
+            >
+              즉시 로그인 화면으로 돌아가기
+            </button>
+          </div>
         )}
 
         {mode === 'signup' && (
