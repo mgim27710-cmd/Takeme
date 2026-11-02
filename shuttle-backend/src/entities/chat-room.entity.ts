@@ -21,7 +21,7 @@ export class ChatRoom {
   @Column({ type: 'varchar', default: ChatRoomType.STAFF })
   type: ChatRoomType;
 
-  @Column({ nullable: true })
+  @Column({ type: 'int', nullable: true })
   academyId: number | null;
 
   @OneToMany(() => ChatRoomMember, member => member.room, { cascade: true })
