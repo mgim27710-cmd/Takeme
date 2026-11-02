@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import '../../driver/driver_navigator.dart';
 import '../../driver/geo.dart';
@@ -57,25 +58,27 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   Future<void> _confirmStop() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(_nav.testMode ? '테스트 종료' : '운행 종료',
-            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20)),
-        content: Text(
-          _nav.testMode ? '테스트 주행을 끝낼까요?' : '운행을 종료하고 위치 전송을 멈출까요?',
-          style: const TextStyle(fontSize: 18),
+      builder: (ctx) => PointerInterceptor(
+        child: AlertDialog(
+          title: Text(_nav.testMode ? '테스트 종료' : '운행 종료',
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20)),
+          content: Text(
+            _nav.testMode ? '테스트 주행을 끝낼까요?' : '운행을 종료하고 위치 전송을 멈출까요?',
+            style: const TextStyle(fontSize: 18),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              style: TextButton.styleFrom(minimumSize: const Size(88, 48)),
+              child: const Text('계속 운행', style: TextStyle(fontSize: 18)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: TextButton.styleFrom(minimumSize: const Size(88, 48)),
+              child: const Text('종료', style: TextStyle(fontSize: 18, color: _C.red, fontWeight: FontWeight.w800)),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            style: TextButton.styleFrom(minimumSize: const Size(88, 48)),
-            child: const Text('계속 운행', style: TextStyle(fontSize: 18)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(minimumSize: const Size(88, 48)),
-            child: const Text('종료', style: TextStyle(fontSize: 18, color: _C.red, fontWeight: FontWeight.w800)),
-          ),
-        ],
       ),
     );
     if (ok == true) await _nav.stop();
@@ -88,14 +91,16 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     }
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('시뮬레이션 위치를 서버로 보낼까요?'),
-        content: const Text('학부모 앱·관리자 웹에서 버스가 움직이는 것처럼 보이고, '
-            '정류장 도착 알림이 실제 학부모에게 갈 수 있습니다. 테스트 계정으로만 사용하세요.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('보내기')),
-        ],
+      builder: (ctx) => PointerInterceptor(
+        child: AlertDialog(
+          title: const Text('시뮬레이션 위치를 서버로 보낼까요?'),
+          content: const Text('학부모 앱·관리자 웹에서 버스가 움직이는 것처럼 보이고, '
+              '정류장 도착 알림이 실제 학부모에게 갈 수 있습니다. 테스트 계정으로만 사용하세요.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('보내기')),
+          ],
+        ),
       ),
     );
     if (ok == true) setState(() => _nav.simSendToServer = true);
@@ -184,11 +189,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   PopupMenuItem<String> _menuItem(String v, IconData icon, String text) => PopupMenuItem(
         value: v,
         height: 52,
-        child: Row(children: [
-          Icon(icon, color: _C.slate600),
-          const SizedBox(width: 12),
-          Flexible(child: Text(text, style: const TextStyle(fontSize: 17))),
-        ]),
+        child: PointerInterceptor(
+          child: Row(children: [
+            Icon(icon, color: _C.slate600),
+            const SizedBox(width: 12),
+            Flexible(child: Text(text, style: const TextStyle(fontSize: 17))),
+          ]),
+        ),
       );
 
   // ───────────────────────── 운행 전 ─────────────────────────
@@ -198,44 +205,46 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     return Column(
       children: [
         Expanded(child: _mapArea()),
-        Container(
-          constraints: BoxConstraints(maxHeight: maxPanel),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            boxShadow: [BoxShadow(color: Color(0x1A000000), blurRadius: 12, offset: Offset(0, -2))],
-          ),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _todaySummary(),
-                if (_nav.setupNotice != null) ...[
+        PointerInterceptor(
+          child: Container(
+            constraints: BoxConstraints(maxHeight: maxPanel),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              boxShadow: [BoxShadow(color: Color(0x1A000000), blurRadius: 12, offset: Offset(0, -2))],
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _todaySummary(),
+                  if (_nav.setupNotice != null) ...[
+                    const SizedBox(height: 10),
+                    _notice(_nav.setupNotice!, Icons.info_outline, _C.orange, _C.orangeBg),
+                  ],
+                  if (_nav.gpsError != null) ...[
+                    const SizedBox(height: 10),
+                    _notice('${_nav.gpsError} · 유치원 위치에서 출발하는 경로로 계산합니다.', Icons.gps_off, _C.red,
+                        const Color(0xFFFEF2F2)),
+                  ],
+                  const SizedBox(height: 14),
+                  const Text('경로 선택',
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: _C.slate600)),
+                  const SizedBox(height: 8),
+                  _planCard(RouteMode.safe, Icons.shield_outlined),
                   const SizedBox(height: 10),
-                  _notice(_nav.setupNotice!, Icons.info_outline, _C.orange, _C.orangeBg),
+                  _planCard(RouteMode.fast, Icons.bolt),
+                  const SizedBox(height: 8),
+                  _compareNote(),
+                  const SizedBox(height: 16),
+                  _startButton(),
+                  if (_nav.actionError != null) ...[
+                    const SizedBox(height: 10),
+                    Text(_nav.actionError!, style: const TextStyle(color: _C.red, fontSize: 16)),
+                  ],
                 ],
-                if (_nav.gpsError != null) ...[
-                  const SizedBox(height: 10),
-                  _notice('${_nav.gpsError} · 유치원 위치에서 출발하는 경로로 계산합니다.', Icons.gps_off, _C.red,
-                      const Color(0xFFFEF2F2)),
-                ],
-                const SizedBox(height: 14),
-                const Text('경로 선택',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: _C.slate600)),
-                const SizedBox(height: 8),
-                _planCard(RouteMode.safe, Icons.shield_outlined),
-                const SizedBox(height: 10),
-                _planCard(RouteMode.fast, Icons.bolt),
-                const SizedBox(height: 8),
-                _compareNote(),
-                const SizedBox(height: 16),
-                _startButton(),
-                if (_nav.actionError != null) ...[
-                  const SizedBox(height: 10),
-                  Text(_nav.actionError!, style: const TextStyle(color: _C.red, fontSize: 16)),
-                ],
-              ],
+              ),
             ),
           ),
         ),
@@ -390,9 +399,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   Widget _drivingLayout() {
     return Column(
       children: [
-        _guideBanner(),
+        PointerInterceptor(child: _guideBanner()),
         Expanded(child: _mapArea()),
-        _bottomBar(),
+        PointerInterceptor(child: _bottomBar()),
       ],
     );
   }
@@ -565,23 +574,27 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           Positioned(
             top: 12,
             left: 56,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(color: _C.slate800, borderRadius: BorderRadius.circular(20)),
-              child: const Text('시뮬레이션 주행 중',
-                  style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
+            child: PointerInterceptor(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(color: _C.slate800, borderRadius: BorderRadius.circular(20)),
+                child: const Text('시뮬레이션 주행 중',
+                    style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
+              ),
             ),
           ),
         // 지도 버튼: 오른쪽 가운데 아래 (안내·출처·확대 버튼과 겹치지 않게)
         Positioned(
           right: 12,
           bottom: 24,
-          child: Column(
-            children: [
-              _mapButton(Icons.my_location, '내 위치로', _nav.position == null ? null : _nav.centerOnMe),
-              const SizedBox(height: 12),
-              _mapButton(Icons.zoom_out_map, '전체 경로 보기', () => _nav.setFollow(false)),
-            ],
+          child: PointerInterceptor(
+            child: Column(
+              children: [
+                _mapButton(Icons.my_location, '내 위치로', _nav.position == null ? null : _nav.centerOnMe),
+                const SizedBox(height: 12),
+                _mapButton(Icons.zoom_out_map, '전체 경로 보기', () => _nav.setFollow(false)),
+              ],
+            ),
           ),
         ),
       ],
@@ -589,19 +602,21 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   }
 
   Widget _mapButton(IconData icon, String tooltip, VoidCallback? onTap) {
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: Colors.white,
-        shape: const CircleBorder(),
-        elevation: 3,
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: SizedBox(
-            width: 56,
-            height: 56,
-            child: Icon(icon, color: onTap == null ? _C.slate200 : _C.blue, size: 28, semanticLabel: tooltip),
+    return PointerInterceptor(
+      child: Tooltip(
+        message: tooltip,
+        child: Material(
+          color: Colors.white,
+          shape: const CircleBorder(),
+          elevation: 3,
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onTap,
+            child: SizedBox(
+              width: 56,
+              height: 56,
+              child: Icon(icon, color: onTap == null ? _C.slate200 : _C.blue, size: 28, semanticLabel: tooltip),
+            ),
           ),
         ),
       ),
