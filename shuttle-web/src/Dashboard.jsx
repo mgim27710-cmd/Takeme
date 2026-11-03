@@ -91,20 +91,22 @@ export default function Dashboard() {
     }
   })();
   const isAuthenticated = Boolean(currentUser && currentUser.id && currentUser.role);
+  const isTeacherRole = currentUser.role === 'TEACHER' || currentUser.role === 'HOMEROOM_TEACHER' || currentUser.role === 'SHUTTLE_TEACHER';
   const isWebAdmin = currentUser.role === 'ACADEMY_ADMIN' || currentUser.role === 'SUPER_ADMIN';
+  const isWebAllowedUser = isWebAdmin || isTeacherRole;
 
   useEffect(() => {
-    if (!isAuthenticated || !isWebAdmin) {
+    if (!isAuthenticated || !isWebAllowedUser) {
       localStorage.removeItem('takeme_token');
       localStorage.removeItem('takeme_refresh_token');
       localStorage.removeItem('takeme_user');
       navigate('/', { replace: true });
     }
-  }, [isAuthenticated, isWebAdmin, navigate]);
+  }, [isAuthenticated, isWebAllowedUser, navigate]);
 
   // 동시 접속 감지 주기적 세션 체크 (10초 주기)
   useEffect(() => {
-    if (!isAuthenticated || !isWebAdmin) return;
+    if (!isAuthenticated || !isWebAllowedUser) return;
     const sessionTimer = setInterval(async () => {
       const token = localStorage.getItem('takeme_token');
       if (!token) return;
@@ -1469,7 +1471,7 @@ export default function Dashboard() {
         setShowAcademyModal(false);
       } else {
         setBuses([]);
-        if (currentUser.role !== 'TEACHER' && (!data.academy || !data.academy.id)) {
+        if (!isTeacherRole && (!data.academy || !data.academy.id)) {
           setShowAcademyModal(true);
           setSetupStep(1);
         } else {
@@ -2649,7 +2651,7 @@ const parseKindergartenExcelSheet = (sheet) => {
   }
 
   // Dedicated Teacher Dashboard Mode
-  if (currentUser.role === 'TEACHER') {
+  if (isTeacherRole) {
     return (
       <TeacherDashboard
         currentUser={currentUser}

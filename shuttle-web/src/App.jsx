@@ -65,6 +65,14 @@ function App() {
             </ProtectedRoute>
           } 
         />
+        <Route 
+          path="/teacher-dashboard" 
+          element={
+            <ProtectedRoute>
+              <ErrorBoundary><Dashboard /></ErrorBoundary>
+            </ProtectedRoute>
+          } 
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

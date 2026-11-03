@@ -274,14 +274,21 @@ export class AuthService {
 
     // 2-1. 플랫폼/클라이언트 역할 제한 검증 (웹 vs 모바일 앱)
     if (clientType === 'web') {
-      if (user.role !== UserRole.ACADEMY_ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+      const isWebAllowed = 
+        user.role === UserRole.ACADEMY_ADMIN || 
+        user.role === UserRole.SUPER_ADMIN || 
+        user.role === UserRole.TEACHER || 
+        user.role === UserRole.HOMEROOM_TEACHER || 
+        user.role === UserRole.SHUTTLE_TEACHER;
+
+      if (!isWebAllowed) {
         user.failedLoginAttempts = 0;
         await this.usersRepository.save(user);
         return {
           success: false,
           isAppAccount: true,
           role: user.role,
-          message: '본 계정은 앱기반 계정입니다.',
+          message: '본 계정은 모바일 앱 전용 계정입니다. (기사 및 학부모 계정)',
         };
       }
     } else if (clientType === 'app') {

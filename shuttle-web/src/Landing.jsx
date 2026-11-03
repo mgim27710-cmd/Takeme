@@ -315,7 +315,15 @@ export default function Landing() {
     });
     const data = await res.json();
 
-    if (data.isAppAccount || (data.user && data.user.role !== 'ACADEMY_ADMIN' && data.user.role !== 'SUPER_ADMIN')) {
+    const isWebAllowed = data.user && (
+      data.user.role === 'ACADEMY_ADMIN' ||
+      data.user.role === 'SUPER_ADMIN' ||
+      data.user.role === 'TEACHER' ||
+      data.user.role === 'HOMEROOM_TEACHER' ||
+      data.user.role === 'SHUTTLE_TEACHER'
+    );
+
+    if (data.isAppAccount || (data.user && !isWebAllowed)) {
       localStorage.removeItem('takeme_token');
       localStorage.removeItem('takeme_refresh_token');
       localStorage.removeItem('takeme_user');
@@ -594,7 +602,7 @@ export default function Landing() {
                 본 계정은 앱기반 계정입니다.
               </h2>
               <p className="text-xs text-slate-500 leading-relaxed px-4">
-                기사, 교사(담임/동승), 학부모 계정은 모바일 앱(Takeme)을 통해 로그인해 주시기 바랍니다.
+                기사 및 학부모 계정은 모바일 앱(Takeme)을 통해 로그인해 주시기 바랍니다. (원장님 및 담임/동승 교사는 웹에서도 이용 가능합니다.)
               </p>
             </div>
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl space-y-1">
