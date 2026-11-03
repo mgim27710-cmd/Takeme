@@ -680,14 +680,14 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         {/* Top Header */}
         <div className="p-4 border-b border-slate-200 bg-white flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-amber-400 text-slate-900 flex items-center justify-center font-black shadow-xs">
-              <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                <path d="M12 3C6.48 3 2 6.58 2 11c0 2.87 1.9 5.38 4.74 6.75-.2.77-.73 2.78-.84 3.22-.13.56.2.55.43.4.17-.12 2.76-1.87 3.86-2.63.59.08 1.19.12 1.81.12 5.52 0 10-3.58 10-8s-4.48-8-10-8z" />
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold shadow-xs">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
             </div>
             <div>
               <h2 className="text-base font-extrabold text-slate-800 tracking-tight leading-none">메세지함</h2>
-              <span className="text-[11px] text-slate-400 font-medium">실시간 카톡형 소통</span>
+              <span className="text-[11px] text-slate-400 font-medium">실시간 원내 메신저</span>
             </div>
           </div>
 
@@ -885,7 +885,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             </div>
 
             {/* Kakao-style Messages Viewport */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-[#BACEE0]">
+            <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-100">
               {messages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500">
                   <div className="p-3 bg-white/70 backdrop-blur-xs rounded-full shadow-xs mb-2">
@@ -1093,7 +1093,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                             <span className="text-[10px] text-slate-600 select-none pb-1 font-medium">
                               {formatMessageTime(msg.createdAt)}
                             </span>
-                            <div className="bg-[#FEE500] text-slate-900 px-3.5 py-2.5 rounded-2xl rounded-tr-xs text-xs font-medium max-w-[70%] break-words shadow-xs">
+                            <div className="bg-blue-600 text-white px-3.5 py-2.5 rounded-2xl rounded-tr-xs text-xs font-medium max-w-[70%] break-words shadow-xs">
                               <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
                             </div>
                           </div>
