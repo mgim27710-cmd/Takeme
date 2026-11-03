@@ -19,6 +19,8 @@ export default function ClassManager({
 }) {
   const [newClassName, setNewClassName] = useState('');
   const [unassignedSearch, setUnassignedSearch] = useState('');
+  const [classSearchKeyword, setClassSearchKeyword] = useState('');
+  const [globalStudentSearch, setGlobalStudentSearch] = useState('');
   const [selectedUnassignedIds, setSelectedUnassignedIds] = useState([]);
   const [bulkTargetClass, setBulkTargetClass] = useState('');
   const [dragOverClass, setDragOverClass] = useState(null); // className or '__UNASSIGNED__'
@@ -46,6 +48,20 @@ export default function ClassManager({
     return Array.from(set).sort();
   }, [customClasses, students, teachers]);
 
+  const filteredClassNames = useMemo(() => {
+    if (!classSearchKeyword.trim()) return allClassNames;
+    const kw = classSearchKeyword.trim().toLowerCase();
+    return allClassNames.filter(c => c.toLowerCase().includes(kw));
+  }, [allClassNames, classSearchKeyword]);
+
+  const matchesStudentSearch = (st) => {
+    if (!globalStudentSearch.trim()) return true;
+    const q = globalStudentSearch.trim().toLowerCase();
+    const name = (st.name || '').toLowerCase();
+    const phone = (st.phone || st.raw?.['부모연락처'] || st.raw?.['보호자연락처'] || st.raw?.['학부모전화번호'] || '').toLowerCase();
+    return name.includes(q) || phone.includes(q);
+  };
+
   // Set default bulk target class
   useEffect(() => {
     if (allClassNames.length > 0 && !bulkTargetClass) {
@@ -63,14 +79,14 @@ export default function ClassManager({
 
   // Filtered Unassigned Students by search keyword
   const filteredUnassignedStudents = useMemo(() => {
-    if (!unassignedSearch.trim()) return unassignedStudents;
-    const kw = unassignedSearch.toLowerCase().trim();
+    const kw = (globalStudentSearch.trim() || unassignedSearch.trim()).toLowerCase();
+    if (!kw) return unassignedStudents;
     return unassignedStudents.filter(st => {
-      const name = st.name || '';
-      const phone = st.raw?.['부모연락처'] || st.raw?.['보호자연락처'] || st.raw?.['학부모전화번호'] || '';
-      return name.toLowerCase().includes(kw) || phone.includes(kw);
+      const name = (st.name || '').toLowerCase();
+      const phone = (st.phone || st.raw?.['부모연락처'] || st.raw?.['보호자연락처'] || st.raw?.['학부모전화번호'] || '').toLowerCase();
+      return name.includes(kw) || phone.includes(kw);
     });
-  }, [unassignedStudents, unassignedSearch]);
+  }, [unassignedStudents, unassignedSearch, globalStudentSearch]);
 
   // Group assigned students by class
   const classStudentMap = useMemo(() => {
@@ -384,31 +400,80 @@ export default function ClassManager({
         </div>
       </div>
 
-      {/* Action Sub-Bar: 새 반 개설 폼 */}
+      {/* Action Sub-Bar: 새 반 개설 폼 및 반/원아 검색 */}
       <div className="bg-white/80 backdrop-blur-xs px-8 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4 shrink-0 shadow-2xs">
-        <form onSubmit={handleCreateClass} className="flex items-center gap-2 flex-1 max-w-xl">
-          <div className="relative flex-1">
+        <div className="flex flex-wrap items-center gap-3 flex-1">
+          {/* 새 반 만들기 */}
+          <form onSubmit={handleCreateClass} className="flex items-center gap-2 w-72">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={newClassName}
+                onChange={(e) => setNewClassName(e.target.value)}
+                placeholder="새 반 이름 입력..."
+                className="w-full pl-8 pr-3 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
+              />
+              <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            </div>
+            <button
+              type="submit"
+              disabled={!newClassName.trim() || isProcessing}
+              className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1 disabled:opacity-50 shrink-0"
+            >
+              <span>+ 생성</span>
+            </button>
+          </form>
+
+          {/* 반 검색 */}
+          <div className="relative w-56">
             <input
               type="text"
-              value={newClassName}
-              onChange={(e) => setNewClassName(e.target.value)}
-              placeholder="새 반 이름 입력 (예: 기쁨반, 심화 B반, 7세 슬기반)"
-              className="w-full pl-9 pr-3 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
+              value={classSearchKeyword}
+              onChange={(e) => setClassSearchKeyword(e.target.value)}
+              placeholder="반 검색 (예: 햇살반)..."
+              className="w-full pl-8 pr-7 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
             />
-            <svg className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
+            {classSearchKeyword && (
+              <button
+                type="button"
+                onClick={() => setClassSearchKeyword('')}
+                className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+              >
+                ×
+              </button>
+            )}
           </div>
-          <button
-            type="submit"
-            disabled={!newClassName.trim() || isProcessing}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5 disabled:opacity-50 shrink-0"
-          >
-            <span>+ 새 반 만들기</span>
-          </button>
-        </form>
 
-        <div className="text-xs text-slate-500 font-medium">
+          {/* 학생 검색 */}
+          <div className="relative w-64">
+            <input
+              type="text"
+              value={globalStudentSearch}
+              onChange={(e) => setGlobalStudentSearch(e.target.value)}
+              placeholder="학생 검색 (이름/연락처)..."
+              className="w-full pl-8 pr-7 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
+            />
+            <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+            {globalStudentSearch && (
+              <button
+                type="button"
+                onClick={() => setGlobalStudentSearch('')}
+                className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="text-xs text-slate-500 font-medium hidden xl:block">
           원아 카드를 마우스로 끌어서 원하는 반 영역에 떨어뜨려 배정하세요.
         </div>
       </div>
@@ -582,8 +647,9 @@ export default function ClassManager({
           </div>
 
           {/* ================= COLUMNS 2..N: 개설된 반 목록 (Class Kanban Columns) ================= */}
-          {allClassNames.map(className => {
-            const classStudents = classStudentMap[className] || [];
+          {filteredClassNames.map(className => {
+            const allInClass = classStudentMap[className] || [];
+            const classStudents = allInClass.filter(matchesStudentSearch);
             const assignedTeacher = classTeacherMap[className];
             const isDropTarget = dragOverClass === className;
 

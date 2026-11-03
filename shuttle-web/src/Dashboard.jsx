@@ -432,6 +432,8 @@ export default function Dashboard() {
   // Student Filter & Grouping Accordion State
   const [studentFilterMode, setStudentFilterMode] = useState('ALL'); // 'ALL', 'CLASS', 'AGE', 'BUS'
   const [studentSortBy, setStudentSortBy] = useState('NAME'); // 'NAME' (이름순), 'AGE' (나이순), 'CLASS' (반 순서)
+  const [studentSearchKeyword, setStudentSearchKeyword] = useState('');
+  const [studentClassFilter, setStudentClassFilter] = useState('ALL');
   const [collapsedGroups, setCollapsedGroups] = useState({});
   const [expandedStudentDetailIds, setExpandedStudentDetailIds] = useState(new Set());
 
@@ -518,10 +520,31 @@ export default function Dashboard() {
     });
   }, [studentSortBy]);
 
+  // Filter students based on search keyword and class filter
+  const filteredStudents = useMemo(() => {
+    return students.filter(st => {
+      // 1. Class Filter
+      if (studentClassFilter !== 'ALL') {
+        const raw = getStudentRaw(st);
+        const cls = String(raw['반명'] || raw['반'] || '').trim();
+        if (cls !== studentClassFilter) return false;
+      }
+      // 2. Student Search Keyword (Name or Phone)
+      if (studentSearchKeyword.trim()) {
+        const kw = studentSearchKeyword.trim().toLowerCase();
+        const name = (st.name || '').toLowerCase();
+        const raw = getStudentRaw(st);
+        const phone = String(st.phone || raw['학부모전화번호'] || raw['연락처'] || raw['부모연락처'] || raw['보호자연락처'] || '').toLowerCase();
+        if (!name.includes(kw) && !phone.includes(kw)) return false;
+      }
+      return true;
+    });
+  }, [students, studentSearchKeyword, studentClassFilter]);
+
   const getGroupedStudents = () => {
     if (studentFilterMode === 'CLASS') {
       const groups = {};
-      students.forEach(st => {
+      filteredStudents.forEach(st => {
         const raw = getStudentRaw(st);
         const val = raw['반명'];
         const key = val !== undefined && val !== null && String(val).trim() ? String(val).trim() : '반 미지정';
@@ -536,7 +559,7 @@ export default function Dashboard() {
     }
     if (studentFilterMode === 'AGE') {
       const groups = {};
-      students.forEach(st => {
+      filteredStudents.forEach(st => {
         const raw = getStudentRaw(st);
         const rawAge = raw['연령'] !== undefined && raw['연령'] !== null ? raw['연령'] : raw['학년'];
         const key = rawAge !== undefined && rawAge !== null && String(rawAge).trim() ? String(rawAge).trim() : '연령 미입력';
@@ -556,7 +579,7 @@ export default function Dashboard() {
       });
       groups['배정 대기'] = { bus: null, list: [] };
 
-      students.forEach(st => {
+      filteredStudents.forEach(st => {
         const bus = buses.find(b => b.id === st.assignedBusId);
         const key = bus ? bus.name : '배정 대기';
         if (!groups[key]) groups[key] = { bus, list: [] };
@@ -2660,6 +2683,7 @@ const parseKindergartenExcelSheet = (sheet) => {
         students={students}
         availableClasses={availableClasses}
         selectedAcademyId={selectedAcademyId}
+        socket={socketRef.current}
         onLogout={handleLogout}
         onRefreshData={() => {
           loadInitialState(selectedAcademyId);
@@ -3340,9 +3364,44 @@ const parseKindergartenExcelSheet = (sheet) => {
                   <h3 className="font-bold text-slate-700 text-sm">등록 원아 목록</h3>
                   <div className="flex items-center gap-1.5">
                     <span className="text-[13px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                      총 {students.length}명
+                      총 {students.length}명 {filteredStudents.length !== students.length ? `(검색 ${filteredStudents.length}명)` : ''}
                     </span>
                   </div>
+                </div>
+
+                {/* Student Search and Class Filter Bar */}
+                <div className="flex items-center gap-1.5 mb-2 shrink-0">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      value={studentSearchKeyword}
+                      onChange={(e) => setStudentSearchKeyword(e.target.value)}
+                      placeholder="원아명, 전화번호 검색..."
+                      className="w-full pl-7 pr-6 py-1.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white transition"
+                    />
+                    <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    {studentSearchKeyword && (
+                      <button
+                        type="button"
+                        onClick={() => setStudentSearchKeyword('')}
+                        className="absolute right-2 top-1 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                  <select
+                    value={studentClassFilter}
+                    onChange={(e) => setStudentClassFilter(e.target.value)}
+                    className="w-24 py-1.5 px-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700 shrink-0"
+                  >
+                    <option value="ALL">전체 반</option>
+                    {availableClasses.map(cls => (
+                      <option key={cls} value={cls}>{cls}</option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Filter Mode Selector: 전체 / 반별 / 연령별 / 차량별 */}
@@ -3429,7 +3488,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                 <div className="flex-1 overflow-y-auto space-y-2 pr-1">
                   {studentFilterMode === 'ALL' ? (
                     // Flat List with Student Detail Toggle (+)
-                    sortStudentsList(students).map(st => {
+                    sortStudentsList(filteredStudents).map(st => {
                       const isExpanded = expandedStudentDetailIds.has(st.id);
                       const bus = buses.find(b => b.id === st.assignedBusId);
                       const isNotRiding = Boolean(st.isNotRiding || st.raw?.['미탑승'] || st.raw?.['차량미탑승']);
