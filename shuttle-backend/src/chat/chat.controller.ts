@@ -166,4 +166,21 @@ export class ChatController {
     }
     return this.chatService.decidePaymentRequest(Number(id), decision, email);
   }
+
+  @Post('payment-request/:id/re-request')
+  async reRequestPayment(
+    @Param('id') id: string,
+    @Body() body: {
+      suggestedLocation: { boardingLocation: string; address?: string; latitude: number; longitude: number };
+      note: string;
+      proposerEmail?: string;
+    },
+    @Req() req?: any,
+  ) {
+    const email = this.extractEmail(req, body?.proposerEmail);
+    if (!email) {
+      throw new BadRequestException('신청자/제안자 이메일 정보가 필요합니다.');
+    }
+    return this.chatService.reRequestPayment(Number(id), body, email);
+  }
 }

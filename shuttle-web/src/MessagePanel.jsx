@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { API_BASE_URL } from './config';
 
@@ -11,8 +11,56 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
+// Custom Pins for Director (Red), Teacher Proposal (Green), and Default (Blue)
+const redPinIcon = L.divIcon({
+  className: 'custom-red-pin',
+  html: '<div style="background-color:#ef4444;color:white;border:2px solid white;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,0.4);font-size:11px;font-weight:900;">원장</div>',
+  iconSize: [30, 30],
+  iconAnchor: [15, 15],
+});
+
+const greenPinIcon = L.divIcon({
+  className: 'custom-green-pin',
+  html: '<div style="background-color:#10b981;color:white;border:2px solid white;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,0.4);font-size:11px;font-weight:900;">교사</div>',
+  iconSize: [30, 30],
+  iconAnchor: [15, 15],
+});
+
+const bluePinIcon = L.divIcon({
+  className: 'custom-blue-pin',
+  html: '<div style="background-color:#3b82f6;color:white;border:2px solid white;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,0.4);font-size:11px;font-weight:900;">탑승</div>',
+  iconSize: [30, 30],
+  iconAnchor: [15, 15],
+});
+
+// Map Click Event Listener Component
+function MapClickMarker({ position, onMapClick, icon }) {
+  useMapEvents({
+    click(e) {
+      if (onMapClick) {
+        onMapClick(e.latlng.lat, e.latlng.lng);
+      }
+    },
+  });
+
+  return position && position[0] && position[1] ? (
+    <Marker position={position} icon={icon || bluePinIcon} />
+  ) : null;
+}
+
+// Map Center Updater
+function MapRecenter({ center }) {
+  const map = useMap();
+  useEffect(() => {
+    if (center && center[0] && center[1] && !isNaN(center[0]) && !isNaN(center[1])) {
+      map.setView(center, map.getZoom());
+    }
+  }, [center, map]);
+  return null;
+}
+
 // Mini Map Component for Payment/Boarding Request Card
-function MiniLocationMap({ lat, lng, locationName }) {
+function MiniLocationMap({ lat, lng, locationName, icon }) {
   if (!lat || !lng || isNaN(Number(lat)) || isNaN(Number(lng))) return null;
   const position = [Number(lat), Number(lng)];
 
@@ -29,7 +77,7 @@ function MiniLocationMap({ lat, lng, locationName }) {
         style={{ height: '100%', width: '100%' }}
       >
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-        <Marker position={position}>
+        <Marker position={position} icon={icon || bluePinIcon}>
           {locationName && <Popup>{locationName}</Popup>}
         </Marker>
       </MapContainer>
@@ -40,7 +88,48 @@ function MiniLocationMap({ lat, lng, locationName }) {
   );
 }
 
-export default function MessagePanel({ currentUser, selectedAcademyId, socket, isClosing }) {
+// Comparison Map Component for Counter-Proposal (Original vs Suggested)
+function ComparisonLocationMap({ original, suggested }) {
+  if (!original?.latitude || !suggested?.latitude) return null;
+  const pos1 = [Number(original.latitude), Number(original.longitude)];
+  const pos2 = [Number(suggested.latitude), Number(suggested.longitude)];
+  const center = [(pos1[0] + pos2[0]) / 2, (pos1[1] + pos2[1]) / 2];
+
+  return (
+    <div className="w-full h-44 rounded-xl overflow-hidden border-2 border-indigo-200 shadow-2xs relative z-0 my-2">
+      <MapContainer
+        center={center}
+        zoom={14}
+        scrollWheelZoom={false}
+        zoomControl={false}
+        dragging={false}
+        doubleClickZoom={false}
+        attributionControl={false}
+        style={{ height: '100%', width: '100%' }}
+      >
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <Marker position={pos1} icon={redPinIcon}>
+          <Popup>원장 지정: {original.boardingLocation}</Popup>
+        </Marker>
+        <Marker position={pos2} icon={greenPinIcon}>
+          <Popup>지도교사 제안: {suggested.boardingLocation}</Popup>
+        </Marker>
+      </MapContainer>
+      <div className="absolute bottom-1 left-1 right-1 flex items-center justify-between bg-white/95 backdrop-blur-xs px-2.5 py-1 rounded-lg text-[10px] border border-slate-200 z-[400] shadow-2xs font-extrabold">
+        <span className="flex items-center gap-1 text-red-600">
+          <span className="w-2 h-2 rounded-full bg-red-500"></span>
+          원장: {original.boardingLocation}
+        </span>
+        <span className="flex items-center gap-1 text-emerald-600">
+          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+          교사 제안: {suggested.boardingLocation}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export default function MessagePanel({ currentUser, selectedAcademyId, socket, isClosing, initialStudent, onClearInitialStudent }) {
   const [rooms, setRooms] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -69,17 +158,24 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     selectedStudentId: '',
     customStudentName: '',
     selectedVehicleId: '',
-    locationSelectMode: 'PICKUP_POINT',
+    locationType: 'PIN', // 'PIN' | 'ADDRESS'
+    locationSelectMode: 'MAP_PIN', // 'MAP_PIN' | 'ADDRESS_SEARCH'
     selectedPickupPointId: '',
     boardingLocation: '',
     address: '',
-    latitude: null,
-    longitude: null,
+    latitude: 37.842,
+    longitude: 127.123,
     requestDate: new Date().toISOString().split('T')[0],
-    note: '이 학생이 탑승을 하고 싶어 하는데 기존에 있던 곳에서 탑승하게 할까요',
+    note: '학부모 상담 후 신규 탑승지 지정 및 결제 승인 요청',
   });
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [isDeciding, setIsDeciding] = useState(null);
+
+  // Counter-Proposal (지도교사 재결제 요청) Modal State
+  const [counterModalMsg, setCounterModalMsg] = useState(null);
+  const [counterLocation, setCounterLocation] = useState({ lat: 37.842, lng: 127.123, boardingLocation: '', address: '' });
+  const [counterNote, setCounterNote] = useState('');
+  const [isSubmittingCounter, setIsSubmittingCounter] = useState(false);
 
   const messagesEndRef = useRef(null);
   const activeRoomRef = useRef(null);
@@ -356,6 +452,34 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   // 결제 및 탑승 신청 관련 핸들러
   // ============================================================
 
+  // Auto open modal when initialStudent prop is provided (e.g. from Director Dashboard consultation)
+  useEffect(() => {
+    if (initialStudent) {
+      handleOpenPaymentModalWithStudent(initialStudent);
+      if (onClearInitialStudent) onClearInitialStudent();
+    }
+  }, [initialStudent]);
+
+  const handleOpenPaymentModalWithStudent = async (student) => {
+    await handleOpenPaymentModal();
+    if (student) {
+      const sLat = student.latitude || student.lat || 37.842;
+      const sLng = student.longitude || student.lng || 127.123;
+      setPaymentForm(prev => ({
+        ...prev,
+        studentSelectMode: 'DROPDOWN',
+        selectedStudentId: String(student.id),
+        customStudentName: student.name,
+        selectedVehicleId: student.assignedBusId ? String(student.assignedBusId) : prev.selectedVehicleId,
+        boardingLocation: student.boardingLocation || student.address || '상담 신규 탑승지',
+        address: student.address || '',
+        latitude: sLat,
+        longitude: sLng,
+        note: `[학부모 상담] ${student.name} 원아 신규 탑승지 지정 및 결제 승인 요청`,
+      }));
+    }
+  };
+
   const handleOpenPaymentModal = async () => {
     if (isParent) {
       return alert('학부모 계정은 결제 신청 기능을 이용할 수 없습니다.');
@@ -376,25 +500,219 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         const ctx = await res.json();
         setPaymentContext(ctx);
 
-        // Preselect first vehicle and pickup point if available
         const firstVehicle = ctx.vehicles?.[0];
-        const firstPickup = ctx.pickupPoints?.[0];
+        const defaultLat = 37.842;
+        const defaultLng = 127.123;
 
         setPaymentForm((prev) => ({
           ...prev,
           selectedVehicleId: firstVehicle ? String(firstVehicle.id) : '',
-          selectedPickupPointId: firstPickup ? String(firstPickup.id) : '',
-          boardingLocation: firstPickup ? firstPickup.name : '',
-          latitude: firstPickup ? firstPickup.latitude : null,
-          longitude: firstPickup ? firstPickup.longitude : null,
+          locationType: 'PIN',
+          locationSelectMode: 'MAP_PIN',
+          boardingLocation: prev.boardingLocation || '신규 지정 탑승지 (지도 핀)',
+          latitude: prev.latitude || defaultLat,
+          longitude: prev.longitude || defaultLng,
           requestDate: new Date().toISOString().split('T')[0],
-          note: '이 학생이 탑승을 하고 싶어 하는데 기존에 있던 곳에서 탑승하게 할까요',
+          note: prev.note || '학부모 상담 후 신규 탑승지 지정 및 결제 승인 요청',
         }));
       }
     } catch (e) {
       console.error('Failed to load payment context', e);
     } finally {
       setIsLoadingPaymentContext(false);
+    }
+  };
+
+  // Map Click Handler in Director Payment Modal
+  const handleMapClickForPayment = async (lat, lng) => {
+    setPaymentForm((prev) => ({
+      ...prev,
+      latitude: lat,
+      longitude: lng,
+      locationType: 'PIN',
+    }));
+
+    // Reverse geocode to get real road address
+    try {
+      const res = await fetch(`${API_BASE_URL}/routing/reverse-geocode?lat=${lat}&lng=${lng}`, {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.address) {
+          setPaymentForm((prev) => ({
+            ...prev,
+            address: data.address,
+            boardingLocation: data.roadAddress || data.address,
+          }));
+        }
+      }
+    } catch (e) {
+      console.warn('Reverse geocode error', e);
+    }
+  };
+
+  // Daum Postcode Search in Director Payment Modal
+  const handleOpenPostcodeForPayment = () => {
+    const trigger = () => {
+      new window.daum.Postcode({
+        oncomplete: async (data) => {
+          const fullAddress = data.roadAddress || data.jibunAddress;
+          setPaymentForm((prev) => ({
+            ...prev,
+            address: fullAddress,
+            boardingLocation: fullAddress,
+            locationType: 'ADDRESS',
+          }));
+          // Geocode address to coordinates
+          try {
+            const geoRes = await fetch(`${API_BASE_URL}/routing/geocode-bulk`, {
+              method: 'POST',
+              headers: getAuthHeaders(),
+              body: JSON.stringify({ addresses: [fullAddress] }),
+            });
+            if (geoRes.ok) {
+              const geocoded = await geoRes.json();
+              const coords = geocoded[0]?.coords;
+              if (coords) {
+                setPaymentForm((prev) => ({
+                  ...prev,
+                  latitude: coords.lat,
+                  longitude: coords.lng,
+                }));
+              }
+            }
+          } catch (e) {
+            console.warn('Geocoding error', e);
+          }
+        },
+      }).open();
+    };
+
+    if (window.daum && window.daum.Postcode) {
+      trigger();
+    } else {
+      const script = document.createElement('script');
+      script.src = '//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
+      script.onload = trigger;
+      document.head.appendChild(script);
+    }
+  };
+
+  // Manual Address Search Button
+  const handleSearchAddressForPayment = async () => {
+    const query = paymentForm.address.trim() || paymentForm.boardingLocation.trim();
+    if (!query) return alert('검색할 주소를 입력해주세요.');
+
+    try {
+      const geoRes = await fetch(`${API_BASE_URL}/routing/geocode-bulk`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ addresses: [query] }),
+      });
+      if (geoRes.ok) {
+        const geocoded = await geoRes.json();
+        const coords = geocoded[0]?.coords;
+        if (coords) {
+          setPaymentForm((prev) => ({
+            ...prev,
+            latitude: coords.lat,
+            longitude: coords.lng,
+            locationType: 'ADDRESS',
+          }));
+          alert(`'${query}' 주소 위치로 핀을 이동했습니다.`);
+        } else {
+          alert('해당 주소의 좌표를 찾을 수 없습니다. 지도를 직접 클릭하여 핀을 지정해주세요.');
+        }
+      }
+    } catch (e) {
+      alert('주소 검색 중 오류가 발생했습니다.');
+    }
+  };
+
+  // Open Counter-Proposal Modal (지도교사가 다른 위치 핀 찍어 재결제 요청)
+  const handleOpenCounterModal = (msg) => {
+    setCounterModalMsg(msg);
+    const p = msg.payload || {};
+    const initLat = Number(p.latitude) || 37.842;
+    const initLng = Number(p.longitude) || 127.123;
+    setCounterLocation({
+      lat: initLat,
+      lng: initLng,
+      boardingLocation: `${p.boardingLocation || '탑승지'} 인근 제안`,
+      address: p.address || '',
+    });
+    setCounterNote('대형 통학버스 안전 진입 및 회차를 위해 탑승 위치 변경을 제안합니다.');
+  };
+
+  // Map Click in Counter-Proposal Modal
+  const handleMapClickForCounter = async (lat, lng) => {
+    setCounterLocation(prev => ({ ...prev, lat, lng }));
+    try {
+      const res = await fetch(`${API_BASE_URL}/routing/reverse-geocode?lat=${lat}&lng=${lng}`, {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.address) {
+          setCounterLocation(prev => ({
+            ...prev,
+            address: data.address,
+            boardingLocation: data.roadAddress || data.address,
+          }));
+        }
+      }
+    } catch (e) {
+      console.warn('Reverse geocode error', e);
+    }
+  };
+
+  // Submit Counter-Proposal (원장에게 재결제 요청 보내기)
+  const handleSubmitCounterProposal = async () => {
+    if (!counterModalMsg) return;
+    if (!counterLocation.lat || !counterLocation.lng) {
+      return alert('지도에서 변경할 탑승지 위치를 핀으로 찍어주세요.');
+    }
+    if (!counterLocation.boardingLocation.trim()) {
+      return alert('새로 제안하는 탑승지 명칭을 입력해주세요.');
+    }
+    if (!counterNote.trim()) {
+      return alert('원장님께 전달할 재결제 요청 사유를 입력해주세요.');
+    }
+
+    setIsSubmittingCounter(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/chat/payment-request/${counterModalMsg.id}/re-request`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          suggestedLocation: {
+            boardingLocation: counterLocation.boardingLocation.trim(),
+            address: counterLocation.address || counterLocation.boardingLocation.trim(),
+            latitude: counterLocation.lat,
+            longitude: counterLocation.lng,
+          },
+          note: counterNote.trim(),
+          proposerEmail: myUser.email,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        alert('원장님께 새로운 탑승 위치로 재결제 요청을 발송했습니다.\n원장님께서 승인하시면 해당 위치로 확정됩니다.');
+        setCounterModalMsg(null);
+        if (data.message) {
+          setMessages(prev => prev.map(m => m.id === counterModalMsg.id ? data.message : m));
+        }
+        fetchRooms();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message || '재결제 요청 전송에 실패했습니다.');
+      }
+    } catch (e) {
+      alert('재결제 요청 전송 중 오류가 발생했습니다.');
+    } finally {
+      setIsSubmittingCounter(false);
     }
   };
 
@@ -474,8 +792,9 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           address: paymentForm.address.trim() || boardingLocation,
           latitude: paymentForm.latitude || undefined,
           longitude: paymentForm.longitude || undefined,
+          locationType: paymentForm.locationType || 'PIN',
           requestDate: paymentForm.requestDate,
-          note: paymentForm.note.trim() || '이 학생이 탑승을 하고 싶어 하는데 기존에 있던 곳에서 탑승하게 할까요',
+          note: paymentForm.note.trim() || '학부모 상담 후 신규 탑승지 지정 및 결제 승인 요청',
           requesterEmail: myUser.email,
         }),
       });
@@ -951,6 +1270,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                 <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
                                   ✓ 결제 수락 완료
                                 </span>
+                              ) : payload.status === 'RE_REQUESTED' ? (
+                                <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-300 animate-pulse flex items-center gap-1">
+                                  <span className="w-2 h-2 rounded-full bg-purple-600"></span>
+                                  위치 변경 재결제 요청
+                                </span>
                               ) : payload.status === 'REJECTED' ? (
                                 <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
                                   ✕ 결제 거절됨
@@ -964,16 +1288,34 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
                             {/* Card Content */}
                             <div className="p-4 space-y-3">
+                              {/* Counter Proposal Banner if RE_REQUESTED */}
+                              {payload.status === 'RE_REQUESTED' && (
+                                <div className="bg-gradient-to-r from-purple-50 to-indigo-50 p-3.5 rounded-2xl border-2 border-purple-200 space-y-2">
+                                  <div className="flex items-center gap-1.5 text-xs font-black text-purple-900">
+                                    <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                    <span>지도교사 위치 변경 재결제 요청</span>
+                                  </div>
+                                  <p className="text-xs font-bold text-purple-950 bg-white/80 p-2.5 rounded-xl border border-purple-100 leading-relaxed">
+                                    "{payload.counterProposal?.note || payload.counterNote || '통학버스 운행 여건에 따른 탑승 위치 변경 제안'}"
+                                  </p>
+                                  <div className="text-[10px] text-purple-700 font-semibold text-right">
+                                    제안 지도교사: {payload.counterProposal?.proposedBy || payload.counterProposedBy || '담당 지도교사'}
+                                  </div>
+                                </div>
+                              )}
+
                               {/* 1. 메세지 */}
                               <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
                                 <div className="text-[10px] text-slate-400 font-bold mb-1 flex items-center gap-1">
                                   <svg className="w-3.5 h-3.5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                                   </svg>
-                                  <span>신청 내용</span>
+                                  <span>원장 원래 신청 내용</span>
                                 </div>
                                 <p className="text-xs font-bold text-slate-800 leading-relaxed">
-                                  "{payload.note || '이 학생이 탑승을 하고 싶어 하는데 기존에 있던 곳에서 탑승하게 할까요'}"
+                                  "{payload.note || '학부모 상담 후 신규 탑승지 지정 및 결제 승인 요청'}"
                                 </p>
                               </div>
 
@@ -1002,26 +1344,51 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                               </div>
 
                               {/* Location text */}
-                              <div className="flex items-start gap-2 text-xs text-slate-700 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-                                <svg className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                                </svg>
-                                <div>
-                                  <span className="text-slate-400 font-bold mr-1">탑승 위치:</span>
-                                  <span className="font-extrabold text-slate-900">{payload.boardingLocation}</span>
-                                  {payload.address && payload.address !== payload.boardingLocation && (
-                                    <span className="text-[11px] text-slate-500 block mt-0.5">{payload.address}</span>
-                                  )}
+                              {payload.status === 'RE_REQUESTED' && payload.counterProposal ? (
+                                <div className="grid grid-cols-2 gap-2 text-xs">
+                                  <div className="p-2.5 rounded-xl bg-red-50/50 border border-red-200">
+                                    <span className="text-[10px] font-bold text-red-500 block">원장 지정 원래 탑승지</span>
+                                    <span className="font-extrabold text-slate-900 block truncate" title={payload.counterProposal.originalLocation?.boardingLocation}>
+                                      {payload.counterProposal.originalLocation?.boardingLocation}
+                                    </span>
+                                  </div>
+                                  <div className="p-2.5 rounded-xl bg-emerald-50/60 border border-emerald-300">
+                                    <span className="text-[10px] font-bold text-emerald-700 block">지도교사 제안 탑승지</span>
+                                    <span className="font-extrabold text-emerald-950 block truncate" title={payload.counterProposal.suggestedLocation?.boardingLocation}>
+                                      {payload.counterProposal.suggestedLocation?.boardingLocation}
+                                    </span>
+                                  </div>
                                 </div>
-                              </div>
+                              ) : (
+                                <div className="flex items-start gap-2 text-xs text-slate-700 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                                  <svg className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                  </svg>
+                                  <div>
+                                    <span className="text-slate-400 font-bold mr-1">탑승 위치:</span>
+                                    <span className="font-extrabold text-slate-900">{payload.boardingLocation}</span>
+                                    {payload.address && payload.address !== payload.boardingLocation && (
+                                      <span className="text-[11px] text-slate-500 block mt-0.5">{payload.address}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
 
-                              {/* 3. 지도 */}
-                              <MiniLocationMap
-                                lat={payload.latitude}
-                                lng={payload.longitude}
-                                locationName={payload.boardingLocation}
-                              />
+                              {/* 3. 지도 (Single Pin or Comparison Pins) */}
+                              {payload.status === 'RE_REQUESTED' && payload.counterProposal ? (
+                                <ComparisonLocationMap
+                                  original={payload.counterProposal.originalLocation}
+                                  suggested={payload.counterProposal.suggestedLocation}
+                                />
+                              ) : (
+                                <MiniLocationMap
+                                  lat={payload.latitude}
+                                  lng={payload.longitude}
+                                  locationName={payload.boardingLocation}
+                                  icon={payload.status === 'APPROVED' ? greenPinIcon : bluePinIcon}
+                                />
+                              )}
 
                               {/* 4. 결제 거절 / 수락 버튼 */}
                               {payload.status === 'APPROVED' ? (
@@ -1058,27 +1425,69 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     <div className="text-center py-2.5 px-3 bg-slate-100 rounded-xl text-xs text-slate-500 font-medium">
                                       담당 차량 지도교사 또는 관리자 승인 대기 중입니다.
                                     </div>
+                                  ) : payload.status === 'RE_REQUESTED' ? (
+                                    /* Action for Director/Admin on Counter-Proposal */
+                                    <div className="space-y-1.5 pt-1">
+                                      <div className="flex gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDecidePaymentRequest(msg.id, 'APPROVED')}
+                                          disabled={isDeciding === msg.id}
+                                          className="flex-1 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                                        >
+                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                          </svg>
+                                          <span>지도교사 제안 위치로 최종 수락</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDecidePaymentRequest(msg.id, 'REJECTED')}
+                                          disabled={isDeciding === msg.id}
+                                          className="py-2.5 px-4 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 border border-slate-200 active:scale-95 font-bold text-xs rounded-xl transition-all disabled:opacity-50"
+                                        >
+                                          거절
+                                        </button>
+                                      </div>
+                                      <p className="text-[10px] text-center text-slate-400 font-medium">
+                                        원장님께서 수락하시면 지도교사가 제안한 위치로 최종 노선/구역이 확정됩니다.
+                                      </p>
+                                    </div>
                                   ) : (
-                                    <div className="flex gap-2 pt-1">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDecidePaymentRequest(msg.id, 'APPROVED')}
-                                        disabled={isDeciding === msg.id}
-                                        className="flex-1 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
-                                      >
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                        </svg>
-                                        <span>결제 수락 (구역/노선 자동배정)</span>
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDecidePaymentRequest(msg.id, 'REJECTED')}
-                                        disabled={isDeciding === msg.id}
-                                        className="py-2.5 px-4 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 border border-slate-200 active:scale-95 font-bold text-xs rounded-xl transition-all disabled:opacity-50"
-                                      >
-                                        거절
-                                      </button>
+                                    /* Action for Guide Teacher/Admin on PENDING */
+                                    <div className="space-y-1.5 pt-1">
+                                      <div className="flex gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDecidePaymentRequest(msg.id, 'APPROVED')}
+                                          disabled={isDeciding === msg.id}
+                                          className="flex-1 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                                        >
+                                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                          </svg>
+                                          <span>결제 수락 (구역 자동배정)</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenCounterModal(msg)}
+                                          className="py-2.5 px-3 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 active:scale-95 font-extrabold text-xs rounded-xl transition-all flex items-center gap-1"
+                                          title="다른 위치를 지도에서 핀으로 찍어 원장에게 재결제 요청"
+                                        >
+                                          <svg className="w-3.5 h-3.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                          </svg>
+                                          <span>다른 위치 핀 찍어 재결제 요청</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDecidePaymentRequest(msg.id, 'REJECTED')}
+                                          disabled={isDeciding === msg.id}
+                                          className="py-2.5 px-3 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 border border-slate-200 active:scale-95 font-bold text-xs rounded-xl transition-all disabled:opacity-50"
+                                        >
+                                          거절
+                                        </button>
+                                      </div>
                                     </div>
                                   )}
                                 </div>
@@ -1545,70 +1954,133 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     </select>
                   </div>
 
-                  {/* 3. 탑승 희망 위치 (기존 탑승지 or 직접 입력) */}
-                  <div className="space-y-1.5">
+                  {/* 3. 탑승 희망 위치 등록 (핀으로 찍기 vs 주소로 등록하기) */}
+                  <div className="space-y-2 border-2 border-indigo-100 rounded-2xl p-3.5 bg-indigo-50/20">
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-black text-slate-800 flex items-center gap-1">
-                        <span>탑승 희망 위치</span>
+                        <span>탑승 희망 위치 등록 방식</span>
                         <span className="text-red-500">*</span>
                       </label>
-                      <div className="flex items-center gap-2 text-[11px]">
+                      <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-indigo-200 text-xs font-bold shadow-2xs">
                         <button
                           type="button"
-                          onClick={() => setPaymentForm((prev) => ({ ...prev, locationSelectMode: 'PICKUP_POINT' }))}
-                          className={`font-bold pb-0.5 border-b-2 transition-colors ${
-                            paymentForm.locationSelectMode === 'PICKUP_POINT'
-                              ? 'border-indigo-600 text-indigo-600'
-                              : 'border-transparent text-slate-400 hover:text-slate-600'
+                          onClick={() => setPaymentForm((prev) => ({ ...prev, locationSelectMode: 'MAP_PIN', locationType: 'PIN' }))}
+                          className={`px-3 py-1 rounded-lg transition-all flex items-center gap-1 ${
+                            paymentForm.locationSelectMode === 'MAP_PIN'
+                              ? 'bg-indigo-600 text-white shadow-xs'
+                              : 'text-slate-500 hover:text-slate-800'
                           }`}
                         >
-                          기존 탑승지 목록
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                          </svg>
+                          <span>1. 핀으로 찍기</span>
                         </button>
-                        <span className="text-slate-300">|</span>
                         <button
                           type="button"
-                          onClick={() => setPaymentForm((prev) => ({ ...prev, locationSelectMode: 'CUSTOM' }))}
-                          className={`font-bold pb-0.5 border-b-2 transition-colors ${
-                            paymentForm.locationSelectMode === 'CUSTOM'
-                              ? 'border-indigo-600 text-indigo-600'
-                              : 'border-transparent text-slate-400 hover:text-slate-600'
+                          onClick={() => setPaymentForm((prev) => ({ ...prev, locationSelectMode: 'ADDRESS_SEARCH', locationType: 'ADDRESS' }))}
+                          className={`px-3 py-1 rounded-lg transition-all flex items-center gap-1 ${
+                            paymentForm.locationSelectMode === 'ADDRESS_SEARCH'
+                              ? 'bg-indigo-600 text-white shadow-xs'
+                              : 'text-slate-500 hover:text-slate-800'
                           }`}
                         >
-                          직접 위치/주소 입력
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                          </svg>
+                          <span>2. 주소로 등록하기</span>
                         </button>
                       </div>
                     </div>
 
-                    {paymentForm.locationSelectMode === 'PICKUP_POINT' && (paymentContext.pickupPoints || []).length > 0 ? (
-                      <select
-                        value={paymentForm.selectedPickupPointId}
-                        onChange={(e) => handlePickupPointSelect(e.target.value)}
-                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      >
-                        <option value="">-- 등록된 탑승지를 선택하세요 --</option>
-                        {(paymentContext.pickupPoints || []).map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
+                    {paymentForm.locationSelectMode === 'MAP_PIN' ? (
+                      /* Mode 1: 핀으로 찍기 (Interactive Leaflet Map) */
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-[11px] text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100">
+                          <span className="font-bold">지도를 마우스로 클릭하여 탑승 희망 위치에 핀을 꽂으세요.</span>
+                          <span>좌표: {paymentForm.latitude?.toFixed(4)}, {paymentForm.longitude?.toFixed(4)}</span>
+                        </div>
+                        <div className="w-full h-48 rounded-2xl overflow-hidden border border-slate-300 relative shadow-inner">
+                          <MapContainer
+                            center={[paymentForm.latitude || 37.842, paymentForm.longitude || 127.123]}
+                            zoom={15}
+                            style={{ height: '100%', width: '100%' }}
+                          >
+                            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                            <MapRecenter center={[paymentForm.latitude, paymentForm.longitude]} />
+                            <MapClickMarker
+                              position={[paymentForm.latitude, paymentForm.longitude]}
+                              onMapClick={handleMapClickForPayment}
+                              icon={bluePinIcon}
+                            />
+                          </MapContainer>
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="탑승 위치명 입력 (예: 경동대 메트로폴 정문 앞)"
+                          value={paymentForm.boardingLocation}
+                          onChange={(e) => setPaymentForm((prev) => ({ ...prev, boardingLocation: e.target.value }))}
+                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold"
+                        />
+                        {paymentForm.address && (
+                          <p className="text-[11px] text-slate-500 pl-1 font-medium">
+                            변환 도로명 주소: {paymentForm.address}
+                          </p>
+                        )}
+                      </div>
                     ) : (
-                      <input
-                        type="text"
-                        placeholder="탑승 위치명 입력 (예: 경동대 메트로폴 정문)"
-                        value={paymentForm.boardingLocation}
-                        onChange={(e) => setPaymentForm((prev) => ({ ...prev, boardingLocation: e.target.value }))}
-                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold"
-                      />
+                      /* Mode 2: 주소로 등록하기 (도로명 주소 검색 및 지오코딩) */
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            placeholder="도로명 주소 입력 (예: 경기도 양주시 화합로...)"
+                            value={paymentForm.address}
+                            onChange={(e) => setPaymentForm((prev) => ({ ...prev, address: e.target.value }))}
+                            className="flex-1 p-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleOpenPostcodeForPayment}
+                            className="px-3 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs shrink-0 flex items-center gap-1"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                            <span>우편번호 검색</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleSearchAddressForPayment}
+                            className="px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold shrink-0"
+                          >
+                            위치 찾기
+                          </button>
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="상세 탑승 위치명 (예: 현대아파트 101동 정문 앞)"
+                          value={paymentForm.boardingLocation}
+                          onChange={(e) => setPaymentForm((prev) => ({ ...prev, boardingLocation: e.target.value }))}
+                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold"
+                        />
+                        {paymentForm.latitude && paymentForm.longitude && (
+                          <div className="w-full h-36 rounded-xl overflow-hidden border border-slate-300 relative shadow-inner">
+                            <MapContainer
+                              center={[paymentForm.latitude, paymentForm.longitude]}
+                              zoom={15}
+                              style={{ height: '100%', width: '100%' }}
+                            >
+                              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                              <MapRecenter center={[paymentForm.latitude, paymentForm.longitude]} />
+                              <Marker position={[paymentForm.latitude, paymentForm.longitude]} icon={bluePinIcon}>
+                                <Popup>{paymentForm.boardingLocation || paymentForm.address}</Popup>
+                              </Marker>
+                            </MapContainer>
+                          </div>
+                        )}
+                      </div>
                     )}
-
-                    <input
-                      type="text"
-                      placeholder="상세 주소 (선택 입력)"
-                      value={paymentForm.address}
-                      onChange={(e) => setPaymentForm((prev) => ({ ...prev, address: e.target.value }))}
-                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    />
                   </div>
 
                   {/* 4. 탑승 희망 날짜 */}
@@ -1657,6 +2129,157 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* 지도교사 위치 수정 및 재결제 요청 모달 (Counter-Proposal) */}
+      {/* ============================================================ */}
+      {counterModalMsg && (
+        <div className="fixed inset-0 z-[3100] bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl border border-indigo-200 w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
+            {/* Header */}
+            <div className="p-4 border-b border-indigo-100 bg-gradient-to-r from-amber-500 to-indigo-600 text-white flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black flex items-center gap-2">
+                  <span>탑승 위치 변경 및 재결제 요청</span>
+                  <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-bold">지도교사 위치 역제안</span>
+                </h3>
+                <p className="text-[11px] text-amber-100 mt-0.5">
+                  통학버스 운행/회차 여건에 맞추어 다른 위치를 핀으로 찍어 원장님께 재결제를 요청합니다.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCounterModalMsg(null)}
+                className="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {/* 원아 & 차량 정보 */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 flex items-center justify-between text-xs">
+                <div>
+                  <span className="text-[10px] text-slate-400 font-bold block">탑승 원아</span>
+                  <span className="font-extrabold text-slate-800 text-sm">{counterModalMsg.payload?.studentName}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 font-bold block">담당 차량</span>
+                  <span className="font-extrabold text-indigo-700 text-sm">{counterModalMsg.payload?.busNumber}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] text-red-500 font-bold block">원장 원래 요청 위치</span>
+                  <span className="font-bold text-slate-700 max-w-[140px] truncate block" title={counterModalMsg.payload?.boardingLocation}>
+                    {counterModalMsg.payload?.boardingLocation}
+                  </span>
+                </div>
+              </div>
+
+              {/* Map with instructions */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                    <span>변경할 탑승지 위치를 지도에서 핀으로 찍으세요</span>
+                    <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-1.5 py-0.2 rounded border border-emerald-200">
+                      초록 핀 클릭
+                    </span>
+                  </label>
+                  <span className="text-[11px] text-slate-400">지도를 클릭하면 핀이 이동합니다</span>
+                </div>
+
+                <div className="w-full h-56 rounded-2xl overflow-hidden border border-slate-300 relative shadow-inner">
+                  <MapContainer
+                    center={[counterLocation.lat || 37.842, counterLocation.lng || 127.123]}
+                    zoom={15}
+                    style={{ height: '100%', width: '100%' }}
+                  >
+                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    <MapRecenter center={[counterLocation.lat, counterLocation.lng]} />
+                    <MapClickMarker
+                      position={[counterLocation.lat, counterLocation.lng]}
+                      onMapClick={handleMapClickForCounter}
+                      icon={greenPinIcon}
+                    />
+                    {counterModalMsg.payload?.latitude && counterModalMsg.payload?.longitude && (
+                      <Marker
+                        position={[Number(counterModalMsg.payload.latitude), Number(counterModalMsg.payload.longitude)]}
+                        icon={redPinIcon}
+                      >
+                        <Popup>원장 원래 요청 위치</Popup>
+                      </Marker>
+                    )}
+                  </MapContainer>
+                  <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-[400]">
+                    <span className="bg-red-500/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow">
+                      빨간 핀: 원장 원래 위치
+                    </span>
+                    <span className="bg-emerald-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow">
+                      초록 핀: 지도교사 제안 위치
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Location title input */}
+              <div className="space-y-1">
+                <label className="text-xs font-black text-slate-800">
+                  새로 제안하는 탑승지 명칭
+                </label>
+                <input
+                  type="text"
+                  value={counterLocation.boardingLocation}
+                  onChange={e => setCounterLocation(prev => ({ ...prev, boardingLocation: e.target.value }))}
+                  placeholder="예: 현대아파트 대로변 버스정류장 앞"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                {counterLocation.address && (
+                  <p className="text-[11px] text-slate-500 pl-1">
+                    도로명 주소: {counterLocation.address}
+                  </p>
+                )}
+              </div>
+
+              {/* Reason / Note */}
+              <div className="space-y-1">
+                <label className="text-xs font-black text-slate-800 flex items-center gap-1">
+                  <span>재결제 요청 사유 (원장님께 전달)</span>
+                  <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={counterNote}
+                  onChange={e => setCounterNote(e.target.value)}
+                  placeholder="해당 위치로 탑승지를 변경해야 하는 사유를 입력하세요 (예: 골목길 진입 불가, 회차 공간 협소 등)"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none font-medium leading-relaxed"
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
+              <button
+                type="button"
+                disabled={isSubmittingCounter}
+                onClick={() => setCounterModalMsg(null)}
+                className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                disabled={isSubmittingCounter || !counterLocation.lat || !counterLocation.boardingLocation.trim()}
+                onClick={handleSubmitCounterProposal}
+                className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-indigo-600 hover:opacity-95 active:scale-95 text-white text-xs font-black rounded-xl shadow-xs transition-all disabled:opacity-40 flex items-center gap-1.5"
+              >
+                {isSubmittingCounter ? '재결제 요청 전송 중...' : '원장에게 재결제 요청 보내기'}
+              </button>
+            </div>
           </div>
         </div>
       )}

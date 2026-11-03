@@ -2382,6 +2382,37 @@ export class RoutingService {
     return results;
   }
 
+  async reverseGeocode(lat: number, lng: number): Promise<{ address: string; roadAddress?: string }> {
+    if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
+      return { address: '위치 정보 없음' };
+    }
+    const apiKey = this.configService.get<string>('KAKAO_REST_API_KEY');
+    if (apiKey) {
+      try {
+        const response = await firstValueFrom(
+          this.httpService.get('https://dapi.kakao.com/v2/local/geo/coord2address.json', {
+            params: { x: lng, y: lat },
+            headers: { Authorization: `KakaoAK ${apiKey}` },
+          })
+        );
+        const doc = response.data?.documents?.[0];
+        if (doc) {
+          const road = doc.road_address?.address_name;
+          const jibun = doc.address?.address_name;
+          const building = doc.road_address?.building_name;
+          const display = building ? `${road || jibun} (${building})` : (road || jibun);
+          return {
+            address: display || `지정 좌표 (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
+            roadAddress: road || undefined,
+          };
+        }
+      } catch (err) {
+        // Kakao reverse geocode error fallback
+      }
+    }
+    return { address: `지정 좌표 (${lat.toFixed(5)}, ${lng.toFixed(5)})` };
+  }
+
   async updateVehicle(id: number, data: Partial<Vehicle>) {
     const vehicle = await this.vehicleRepository.findOne({ where: { id } });
     if (!vehicle) throw new BadRequestException('차량을 찾을 수 없습니다.');

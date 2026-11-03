@@ -351,6 +351,14 @@ export class RoutingController {
     return this.routingService.geocodeBulk(body.addresses);
   }
 
+  @Get('reverse-geocode')
+  async reverseGeocode(
+    @Query('lat') lat: string,
+    @Query('lng') lng: string,
+  ) {
+    return this.routingService.reverseGeocode(parseFloat(lat), parseFloat(lng));
+  }
+
   @Post('vehicle/:id')
   async updateVehicle(@Body() body: any, @Param('id') id: string) {
     return this.routingService.updateVehicle(Number(id), body);

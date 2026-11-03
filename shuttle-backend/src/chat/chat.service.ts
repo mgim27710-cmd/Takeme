@@ -480,6 +480,7 @@ export class ChatService {
       address: data.address || data.boardingLocation || '',
       latitude: data.latitude ? Number(data.latitude) : (studentObj?.latitude || vehicle.academy?.latitude || 37.842),
       longitude: data.longitude ? Number(data.longitude) : (studentObj?.longitude || vehicle.academy?.longitude || 127.123),
+      locationType: (data as any).locationType || 'PIN',
       requestDate: data.requestDate || new Date().toISOString().split('T')[0],
       note: data.note || '이 학생이 탑승을 하고 싶어 하는데 기존에 있던 곳에서 탑승하게 할까요',
       status: 'PENDING',
@@ -537,7 +538,7 @@ export class ChatService {
       throw new ForbiddenException('다른 유치원의 결제 신청을 처리할 수 없습니다.');
     }
 
-    if (message.payload?.status && message.payload.status !== 'PENDING') {
+    if (message.payload?.status && message.payload.status !== 'PENDING' && message.payload.status !== 'RE_REQUESTED') {
       throw new BadRequestException('이미 처리가 완료된 결제 신청 건입니다.');
     }
 
@@ -559,24 +560,31 @@ export class ChatService {
         });
       }
 
+      const finalLocation = payload.counterProposal?.suggestedLocation || payload;
+      const finalLat = Number(finalLocation.latitude || payload.latitude);
+      const finalLng = Number(finalLocation.longitude || payload.longitude);
+      const finalBoardingLocation = finalLocation.boardingLocation || payload.boardingLocation;
+      const finalAddress = finalLocation.address || payload.address || finalBoardingLocation;
+
       if (!student) {
         const academy = vehicle.academy || (await this.academyRepo.findOne({ where: { id: decider.academyId } }));
         student = this.studentRepo.create({
           name: payload.studentName,
           adminDisplayName: payload.studentName,
-          address: payload.address || payload.boardingLocation,
-          boardingLocation: payload.boardingLocation,
-          latitude: Number(payload.latitude),
-          longitude: Number(payload.longitude),
+          address: finalAddress,
+          boardingLocation: finalBoardingLocation,
+          latitude: finalLat,
+          longitude: finalLng,
           academy,
           approvalStatus: 'APPROVED',
         });
       }
 
       student.assignedVehicle = vehicle;
-      student.boardingLocation = payload.boardingLocation;
-      if (payload.latitude) student.latitude = Number(payload.latitude);
-      if (payload.longitude) student.longitude = Number(payload.longitude);
+      student.boardingLocation = finalBoardingLocation;
+      student.address = finalAddress;
+      if (finalLat) student.latitude = finalLat;
+      if (finalLng) student.longitude = finalLng;
       student.approvalStatus = 'APPROVED';
       const savedStudent = await this.studentRepo.save(student);
 
@@ -624,10 +632,13 @@ export class ChatService {
       await this.messageRepo.save(message);
 
       // 5. Send automated confirmation chat message in the room
+      const isCounterApproved = Boolean(payload.counterProposal);
       const confirmationMsg = this.messageRepo.create({
         room: message.room,
         sender: decider,
-        text: `✓ [결제 수락 완료] ${payload.studentName} 원아가 ${payload.busNumber} 운행 구역 및 노선에 자동 배정되었습니다. (담당: ${decider.name || '선생님'})`,
+        text: isCounterApproved
+          ? `✓ [재결제 수락 완료] 지도교사 제안 탑승지(${finalBoardingLocation})로 최종 승인되었습니다. (${payload.studentName} 원아 -> ${payload.busNumber})`
+          : `✓ [결제 수락 완료] ${payload.studentName} 원아가 ${payload.busNumber} 운행 구역 및 노선에 자동 배정되었습니다. (담당: ${decider.name || '선생님'})`,
         type: 'TEXT',
         readBy: [decider.id],
       });
@@ -655,6 +666,95 @@ export class ChatService {
       this.chatGateway.broadcastMessageToRoom(message.room.id, message);
       this.chatGateway.broadcastMessageToRoom(message.room.id, savedReject);
     }
+
+    return { success: true, message };
+  }
+
+  async reRequestPayment(
+    messageId: number,
+    data: {
+      suggestedLocation: {
+        boardingLocation: string;
+        address?: string;
+        latitude: number;
+        longitude: number;
+      };
+      note: string;
+    },
+    proposerEmail: string,
+  ) {
+    if (!proposerEmail) throw new BadRequestException('제안자 정보가 필요합니다.');
+    const proposer = await this.userRepo.findOne({ where: { email: proposerEmail } });
+    if (!proposer) throw new BadRequestException('제안자 계정을 찾을 수 없습니다.');
+
+    if (proposer.role === UserRole.PARENT) {
+      throw new ForbiddenException('학부모 계정은 재결제 요청 권한이 없습니다.');
+    }
+
+    const message = await this.messageRepo.findOne({
+      where: { id: Number(messageId) },
+      relations: { room: true, sender: true },
+    });
+    if (!message || message.type !== 'PAYMENT_REQUEST') {
+      throw new BadRequestException('결제 신청 메시지를 찾을 수 없습니다.');
+    }
+
+    if (message.payload?.status && message.payload.status === 'APPROVED') {
+      throw new BadRequestException('이미 승인 완료된 결제 건은 위치를 변경할 수 없습니다.');
+    }
+
+    const payload = message.payload || {};
+    const originalLocation = {
+      boardingLocation: payload.boardingLocation || '원장 지정 탑승지',
+      address: payload.address || payload.boardingLocation || '',
+      latitude: Number(payload.latitude) || 37.842,
+      longitude: Number(payload.longitude) || 127.123,
+    };
+
+    const suggested = data.suggestedLocation || {};
+    const newLat = Number(suggested.latitude) || originalLocation.latitude;
+    const newLng = Number(suggested.longitude) || originalLocation.longitude;
+    const newBoardingLocation = suggested.boardingLocation || '지도교사 제안 탑승지';
+    const newAddress = suggested.address || newBoardingLocation;
+
+    payload.status = 'RE_REQUESTED';
+    payload.counterProposal = {
+      originalLocation,
+      suggestedLocation: {
+        boardingLocation: newBoardingLocation,
+        address: newAddress,
+        latitude: newLat,
+        longitude: newLng,
+      },
+      note: data.note || '운행 편의 및 안전을 위해 탑승 위치 변경을 제안합니다.',
+      proposedBy: proposer.name || proposer.email,
+      proposedAt: new Date().toISOString(),
+    };
+
+    // Update target coordinates to suggested ones
+    payload.boardingLocation = newBoardingLocation;
+    payload.address = newAddress;
+    payload.latitude = newLat;
+    payload.longitude = newLng;
+    payload.counterNote = data.note;
+    payload.counterProposedBy = proposer.name || proposer.email;
+
+    message.payload = payload;
+    message.text = `[탑승지 변경 재결제 요청] ${payload.studentName} 원아 - ${payload.busNumber} 탑승 위치 수정 제안`;
+    await this.messageRepo.save(message);
+
+    // Send notification chat message in the room
+    const notifyMsg = this.messageRepo.create({
+      room: message.room,
+      sender: proposer,
+      text: `🔄 [탑승지 변경 재결제 요청] ${payload.studentName} 원아 탑승지를 ${proposer.name} 지도교사가 수정 제안하였습니다.\n(사유: ${data.note || '위치 변경'})`,
+      type: 'TEXT',
+      readBy: [proposer.id],
+    });
+    const savedNotify = await this.messageRepo.save(notifyMsg);
+
+    this.chatGateway.broadcastMessageToRoom(message.room.id, message);
+    this.chatGateway.broadcastMessageToRoom(message.room.id, savedNotify);
 
     return { success: true, message };
   }
