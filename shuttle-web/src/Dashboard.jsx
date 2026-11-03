@@ -2037,6 +2037,54 @@ const parseKindergartenExcelSheet = (sheet) => {
     }
   };
 
+  const handleExpandZonesToStudents = async () => {
+    if (!window.confirm(
+      '현재 매핑된 구역을 기반으로 근처 학생들 위치까지 구역을 확장하고 차량 배차를 자동 재배정하시겠습니까?\n\n' +
+      '• 차량 정원(25명)을 초과하지 않도록 균형 있게 자동 배차됩니다.\n' +
+      '• 각 차량의 구역 폴리곤이 학생 위치를 포함하도록 자연스럽게 확장됩니다.\n' +
+      '• 구역 간 경계는 서로 겹치지 않고 정확하게 맞닿게 유지됩니다.'
+    )) {
+      return;
+    }
+
+    try {
+      setIsProcessing(true);
+      const targetAcademyId = selectedAcademyId || currentUser?.academyId;
+      const res = await fetch(`${API_BASE_URL}/routing/expand-zones-to-students`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+          'x-academy-id': String(targetAcademyId || '')
+        },
+        body: JSON.stringify({ academyId: targetAcademyId })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || '구역 확장 처리에 실패했습니다.');
+      }
+
+      const data = await res.json();
+      await loadInitialState(targetAcademyId);
+
+      const summaryText = (data.vehicles || [])
+        .map(v => `${v.busNumber}: ${v.studentCount}명`)
+        .join(', ');
+
+      alert(
+        `구역 확장 및 학생 재배차가 완료되었습니다!\n\n` +
+        `• 재배차 원아 수: 총 ${data.count || 0}명\n` +
+        `• 차량별 배차 현황: ${summaryText || '완료'}`
+      );
+    } catch (e) {
+      console.error(e);
+      alert(`구역 확장 및 재배차 중 오류가 발생했습니다: ${e.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleArchiveCurrentMapping = async () => {
     const title = window.prompt('전년도 구역 매핑으로 저장할 제목을 입력해주세요:', `${new Date().getFullYear() - 1}학년도 구역 매핑`);
     if (title === null) return;
@@ -2881,6 +2929,20 @@ const parseKindergartenExcelSheet = (sheet) => {
                       className="flex-1 py-2 px-3 bg-blue-600 text-white rounded-xl text-xs font-bold shadow-xs hover:bg-blue-700 disabled:opacity-50 transition-colors whitespace-nowrap flex items-center justify-center gap-1.5"
                     >
                       {isProcessing ? '구역 매핑 처리 중...' : '새 엑셀 업로드'}
+                    </button>
+                  </div>
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={handleExpandZonesToStudents}
+                      disabled={isProcessing}
+                      className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap disabled:opacity-50"
+                      title="현재 매핑된 구역을 등록된 원아 위치 기준으로 확장하고 차량 배차를 자동 재배정합니다"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                      </svg>
+                      {isProcessing ? '구역 확장 및 재배차 중...' : '구역 확장 및 자동 재배차'}
                     </button>
                   </div>
                 </div>

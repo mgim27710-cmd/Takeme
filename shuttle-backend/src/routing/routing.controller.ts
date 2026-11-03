@@ -163,6 +163,17 @@ export class RoutingController {
     return this.routingService.initializeZones(body.vehicles, body.parsedData, academyId, userId);
   }
 
+  @Post('expand-zones-to-students')
+  async expandZonesToStudents(
+    @Body() body: { academyId?: number },
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const academyId = body?.academyId || (academyIdHeader ? Number(academyIdHeader) : undefined);
+    const userId = userIdHeader ? Number(userIdHeader) : undefined;
+    return this.routingService.expandZonesToStudents(academyId, userId);
+  }
+
   @Get('yearly-zone-mappings')
   async getYearlyZoneMappings(
     @Query('academyId') academyIdQuery?: string,

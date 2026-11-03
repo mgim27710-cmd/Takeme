@@ -788,108 +788,284 @@ export class RoutingService {
       }
     }
 
-    // 5. Merge existing students into newly mapped vehicle zones
-    const existingStudents = await this.studentRepository.find({
-      where: { academy: { id: academy.id } },
-      relations: { assignedVehicle: true }
-    });
-
-    if (existingStudents.length > 0) {
-      const currentVehicles = await this.vehicleRepository.find({
-        where: { academy: { id: academy.id } }
+    // 5. Expand newly mapped vehicle zones toward registered students and auto-dispatch
+    try {
+      await this.expandZonesToStudents(academy.id, userId);
+      const reloadedVehicles = await this.vehicleRepository.find({
+        where: { academy: { id: academy.id } },
+        order: { id: 'ASC' }
       });
-
-      const vehiclePolyList = currentVehicles.map(v => {
-        let pts: [number, number][] = [];
-        try {
-          pts = typeof v.polygonCoordinates === 'string' ? JSON.parse(v.polygonCoordinates) : (v.polygonCoordinates || []);
-        } catch (e) {}
-        return { vehicle: v, points: pts };
-      });
-
-      for (const student of existingStudents) {
-        let targetVehicle: Vehicle | null = null;
-        let sLat = student.latitude;
-        let sLng = student.longitude;
-
-        // Check if student raw data already has explicit vehicle designation
-        const rawObj = student.raw || {};
-        const explicitBus = rawObj['등원차량'] || rawObj['하원차량'] || rawObj['차량'] || rawObj['호차'];
-        if (explicitBus) {
-          const numOnly = String(explicitBus).replace(/[^0-9]/g, '');
-          targetVehicle = currentVehicles.find(v => v.busNumber === explicitBus || (numOnly && v.busNumber.replace(/[^0-9]/g, '') === numOnly)) || null;
-        }
-
-        if (!targetVehicle && (sLat === undefined || sLat === null || isNaN(sLat) || sLng === undefined || sLng === null || isNaN(sLng)) && (student.address || student.boardingLocation)) {
-          const addr = student.address || student.boardingLocation;
-          const coords = await geocodeWithCache(addr);
-          if (coords) {
-            sLat = coords.lat;
-            sLng = coords.lng;
-            student.latitude = sLat;
-            student.longitude = sLng;
+      for (const v of savedVehicles) {
+        const found = reloadedVehicles.find(rv => rv.id === v.id);
+        if (found) {
+          let pts = found.polygonCoordinates;
+          while (typeof pts === 'string') {
+            try { pts = JSON.parse(pts); } catch (e) { break; }
           }
-        }
-
-        if (sLat !== undefined && sLat !== null && !isNaN(sLat) && sLng !== undefined && sLng !== null && !isNaN(sLng)) {
-          // 1. Check if student coordinate is inside any vehicle polygon
-          for (const vp of vehiclePolyList) {
-            if (vp.points.length >= 3 && this.isPointInPolygon([sLat, sLng], vp.points)) {
-              targetVehicle = vp.vehicle;
-              break;
-            }
-          }
-
-          // 2. Fallback: closest vehicle polygon by minimum distance to polygon points
-          if (!targetVehicle) {
-            let minDistance = Infinity;
-            for (const vp of vehiclePolyList) {
-              if (vp.points.length > 0) {
-                for (const pt of vp.points) {
-                  const dist = this.getDistanceKm(sLat, sLng, pt[0], pt[1]);
-                  if (dist < minDistance) {
-                    minDistance = dist;
-                    targetVehicle = vp.vehicle;
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        // 3. Fallback: retain current vehicle or assign to first vehicle
-        if (!targetVehicle) {
-          targetVehicle = student.assignedVehicle || (currentVehicles.length > 0 ? currentVehicles[0] : null);
-        }
-
-        if (targetVehicle) {
-          student.assignedVehicle = targetVehicle;
-          if (student.raw && typeof student.raw === 'object') {
-            student.raw['등원차량'] = targetVehicle.busNumber;
-            student.raw['하원차량'] = targetVehicle.busNumber;
-            if (academy.name && academy.name.trim()) {
-              student.raw['유치원명'] = academy.name.trim();
-              student.raw['학교명'] = academy.name.trim();
-            }
-          }
+          v.points = Array.isArray(pts) ? pts : [];
+          v.polygon = v.points;
         }
       }
-
-      await this.studentRepository.save(existingStudents);
-
-      // Synchronize student_schedules to the newly assigned vehicles
-      for (const st of existingStudents) {
-        if (st.assignedVehicle) {
-          await this.studentRepository.query(
-            `UPDATE student_schedules SET "assignedVehicleId" = $1 WHERE "studentId" = $2`,
-            [st.assignedVehicle.id, st.id]
-          ).catch(() => {});
-        }
-      }
+    } catch (err: any) {
+      console.warn('[initializeZones] Auto-expansion to students failed:', err?.message || err);
     }
 
     this.notifyRouteUpdated(academy.id);
     return savedVehicles;
+  }
+
+  async expandZonesToStudents(academyId?: number, userId?: number) {
+    const academy = await this.getAcademy(academyId, userId);
+    if (!academy) {
+      throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
+    }
+
+    const vehicles = await this.vehicleRepository.find({
+      where: { academy: { id: academy.id } },
+      order: { id: 'ASC' }
+    });
+
+    if (!vehicles || vehicles.length === 0) {
+      return { success: false, message: '등록된 차량이 없습니다.', count: 0, vehicles: [] };
+    }
+
+    // Load any past snapshot seed polygons in case some vehicles currently lack distinct polygons
+    let pastMap: any[] = [];
+    try {
+      const pastMapping = await this.yearlyZoneMappingRepository.findOne({
+        where: { academy: { id: academy.id } },
+        order: { id: 'DESC' }
+      });
+      if (pastMapping && pastMapping.vehicleMappings) {
+        pastMap = typeof pastMapping.vehicleMappings === 'string'
+          ? JSON.parse(pastMapping.vehicleMappings)
+          : pastMapping.vehicleMappings;
+      }
+    } catch (e) {}
+
+    interface VehicleZoneState {
+      vehicle: Vehicle;
+      polygon: [number, number][];
+      centroid: [number, number];
+      allPoints: [number, number][];
+      assignedStudents: any[];
+    }
+
+    const vehicleStates: VehicleZoneState[] = vehicles.map(v => {
+      let poly: [number, number][] = [];
+      try {
+        let rawPts = v.polygonCoordinates;
+        while (typeof rawPts === 'string') {
+          try { rawPts = JSON.parse(rawPts); } catch (e) { break; }
+        }
+        if (Array.isArray(rawPts)) {
+          poly = rawPts.filter(p => Array.isArray(p) && p.length >= 2 && !isNaN(p[0]) && !isNaN(p[1])) as [number, number][];
+        }
+      } catch (e) {}
+
+      // Fallback to snapshot points if poly is empty
+      if (poly.length === 0 && pastMap.length > 0) {
+        const snap = pastMap.find(m => m.busNumber === v.busNumber || m.vehicleId === v.id);
+        if (snap && Array.isArray(snap.polygonCoordinates) && snap.polygonCoordinates.length > 0) {
+          poly = snap.polygonCoordinates;
+        }
+      }
+
+      let cLat = 0, cLng = 0;
+      if (poly.length > 0) {
+        cLat = poly.reduce((s, p) => s + p[0], 0) / poly.length;
+        cLng = poly.reduce((s, p) => s + p[1], 0) / poly.length;
+      }
+
+      return {
+        vehicle: v,
+        polygon: poly,
+        centroid: [cLat, cLng],
+        allPoints: [...poly],
+        assignedStudents: []
+      };
+    });
+
+    // Check if any two vehicles share identical centroids, and recover distinct seeds if available
+    for (let i = 0; i < vehicleStates.length; i++) {
+      for (let j = i + 1; j < vehicleStates.length; j++) {
+        const vi = vehicleStates[i];
+        const vj = vehicleStates[j];
+        if (vi.centroid[0] !== 0 && vj.centroid[0] !== 0) {
+          const dCent = this.getDistanceKm(vi.centroid[0], vi.centroid[1], vj.centroid[0], vj.centroid[1]);
+          if (dCent < 0.001 && pastMap.length > 0) {
+            const snapI = pastMap.find(m => m.busNumber === vi.vehicle.busNumber);
+            const snapJ = pastMap.find(m => m.busNumber === vj.vehicle.busNumber);
+            if (snapI?.polygonCoordinates?.length > 0) {
+              vi.polygon = snapI.polygonCoordinates;
+              vi.centroid = [
+                vi.polygon.reduce((s, p) => s + p[0], 0) / vi.polygon.length,
+                vi.polygon.reduce((s, p) => s + p[1], 0) / vi.polygon.length
+              ];
+              vi.allPoints = [...vi.polygon];
+            }
+            if (snapJ?.polygonCoordinates?.length > 0) {
+              vj.polygon = snapJ.polygonCoordinates;
+              vj.centroid = [
+                vj.polygon.reduce((s, p) => s + p[0], 0) / vj.polygon.length,
+                vj.polygon.reduce((s, p) => s + p[1], 0) / vj.polygon.length
+              ];
+              vj.allPoints = [...vj.polygon];
+            }
+          }
+        }
+      }
+    }
+
+    const students = await this.studentRepository.find({
+      where: { academy: { id: academy.id } },
+      relations: { assignedVehicle: true }
+    });
+
+    if (students.length === 0) {
+      return { success: true, count: 0, vehicles: vehicles.map(v => ({ id: v.id, busNumber: v.busNumber, studentCount: 0 })) };
+    }
+
+    // Geocode any students missing coordinates
+    for (const student of students) {
+      if ((student.latitude === undefined || student.latitude === null || isNaN(student.latitude) ||
+           student.longitude === undefined || student.longitude === null || isNaN(student.longitude)) &&
+          (student.address || student.boardingLocation)) {
+        const addr = student.address || student.boardingLocation;
+        const coords = await this.geocodeAddress(addr);
+        if (coords) {
+          student.latitude = coords.lat;
+          student.longitude = coords.lng;
+        }
+      }
+    }
+
+    const validStudents = students.filter(s => s.latitude !== undefined && s.latitude !== null && !isNaN(s.latitude) &&
+                                               s.longitude !== undefined && s.longitude !== null && !isNaN(s.longitude));
+
+    // Balanced soft capacity limit so buses don't overload, while respecting vehicle capacity
+    const nVehicles = vehicleStates.length;
+    const maxSoftCapacity = Math.min(25, Math.ceil(validStudents.length / nVehicles) + 4);
+
+    interface StudentChoice {
+      student: Student;
+      coords: [number, number];
+      rankings: { vState: VehicleZoneState; dist: number }[];
+    }
+
+    const studentChoices: StudentChoice[] = validStudents.map(s => {
+      const sLat = Number(s.latitude);
+      const sLng = Number(s.longitude);
+      const rankings = vehicleStates.map(vState => {
+        let minDist = Infinity;
+        if (vState.polygon.length >= 3 && this.isPointInPolygon([sLat, sLng], vState.polygon)) {
+          minDist = 0;
+        } else {
+          for (const pt of vState.polygon) {
+            const d = this.getDistanceKm(sLat, sLng, pt[0], pt[1]);
+            if (d < minDist) minDist = d;
+          }
+        }
+        if (minDist === Infinity && vState.centroid[0] !== 0) {
+          minDist = this.getDistanceKm(sLat, sLng, vState.centroid[0], vState.centroid[1]);
+        }
+        return { vState, dist: minDist };
+      });
+      rankings.sort((a, b) => a.dist - b.dist);
+      return { student: s, coords: [sLat, sLng], rankings };
+    });
+
+    // Students closer to an existing mapped zone claim it first
+    studentChoices.sort((a, b) => a.rankings[0].dist - b.rankings[0].dist);
+
+    const vehicleCountMap = new Map<number, number>();
+    vehicleStates.forEach(vs => vehicleCountMap.set(vs.vehicle.id, 0));
+
+    for (const choice of studentChoices) {
+      let chosenVState: VehicleZoneState | null = null;
+
+      // Pass 1: Assign to closest vehicle within balanced soft capacity
+      for (const r of choice.rankings) {
+        if ((vehicleCountMap.get(r.vState.vehicle.id) || 0) < maxSoftCapacity) {
+          chosenVState = r.vState;
+          break;
+        }
+      }
+
+      // Pass 2: Fallback to closest vehicle within hard capacity (capacity column or 25)
+      if (!chosenVState) {
+        for (const r of choice.rankings) {
+          const cap = r.vState.vehicle.capacity || 25;
+          if ((vehicleCountMap.get(r.vState.vehicle.id) || 0) < cap) {
+            chosenVState = r.vState;
+            break;
+          }
+        }
+      }
+
+      // Pass 3: Ultimate fallback to closest vehicle
+      if (!chosenVState) {
+        chosenVState = choice.rankings[0].vState;
+      }
+
+      const curCount = vehicleCountMap.get(chosenVState.vehicle.id) || 0;
+      vehicleCountMap.set(chosenVState.vehicle.id, curCount + 1);
+      chosenVState.assignedStudents.push(choice.student);
+      chosenVState.allPoints.push(choice.coords);
+    }
+
+    // Compute expanded, non-overlapping zone polygons for all vehicles
+    const pointsList = vehicleStates.map(vs => vs.allPoints);
+    const expandedPolygons = this.partitionVehicleZones(pointsList, 1.2);
+
+    // Save expanded polygons to DB
+    for (let i = 0; i < vehicleStates.length; i++) {
+      const vs = vehicleStates[i];
+      const poly = expandedPolygons[i];
+      if (poly && poly.length >= 3) {
+        vs.vehicle.polygonCoordinates = poly;
+        await this.vehicleRepository.save(vs.vehicle);
+      }
+    }
+
+    // Save student assignments and update raw metadata
+    for (const vs of vehicleStates) {
+      for (const st of vs.assignedStudents) {
+        st.assignedVehicle = vs.vehicle;
+        st.color = vs.vehicle.colorHex;
+        if (!st.raw || typeof st.raw !== 'object') st.raw = {};
+        st.raw['등원차량'] = vs.vehicle.busNumber;
+        st.raw['하원차량'] = vs.vehicle.busNumber;
+        if (academy.name && academy.name.trim()) {
+          st.raw['유치원명'] = academy.name.trim();
+          st.raw['학교명'] = academy.name.trim();
+        }
+        await this.studentRepository.save(st);
+
+        // Update schedule assignedVehicleId
+        await this.studentRepository.query(
+          `UPDATE student_schedules SET "assignedVehicleId" = $1 WHERE "studentId" = $2`,
+          [vs.vehicle.id, st.id]
+        ).catch(() => {});
+      }
+    }
+
+    // Notify connected clients via websocket
+    this.notifyRouteUpdated(academy.id);
+
+    const vehicleSummary = vehicleStates.map((vs, idx) => ({
+      id: vs.vehicle.id,
+      busNumber: vs.vehicle.busNumber,
+      studentCount: vs.assignedStudents.length,
+      capacity: vs.vehicle.capacity || 25,
+      vertices: (expandedPolygons[idx] || []).length
+    }));
+
+    return {
+      success: true,
+      count: validStudents.length,
+      vehicles: vehicleSummary
+    };
   }
 
   async getInitialState(academyId?: number, userId?: number) {
