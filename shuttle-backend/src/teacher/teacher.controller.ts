@@ -108,8 +108,8 @@ export class TeacherController {
   }
 
   @Get('staff')
-  async getStaffList() {
-    return this.teacherService.getStaffList();
+  async getStaffList(@AuthEmail() email: string) {
+    return this.teacherService.getStaffList(email);
   }
 
   @Post('send-message')

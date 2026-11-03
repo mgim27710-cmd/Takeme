@@ -560,9 +560,20 @@ export class TeacherService {
     return { success: true, studentName: student.adminDisplayName || student.name };
   }
 
-  async getStaffList() {
-    const admin = await this.userRepository.findOne({ where: { role: UserRole.ACADEMY_ADMIN } });
-    const vehicles = await this.vehicleRepository.find({ relations: { driverUser: true, teacherUser: true } });
+  async getStaffList(email?: string) {
+    let academyId: number | undefined;
+    if (email) {
+      const u = await this.userRepository.findOne({ where: { email }, relations: { academy: true } });
+      if (u?.academy?.id) academyId = u.academy.id;
+    }
+
+    const admin = academyId
+      ? await this.userRepository.findOne({ where: { academy: { id: academyId }, role: UserRole.ACADEMY_ADMIN } })
+      : await this.userRepository.findOne({ where: { role: UserRole.ACADEMY_ADMIN } });
+
+    const vehicles = academyId
+      ? await this.vehicleRepository.find({ where: { academy: { id: academyId } }, relations: { driverUser: true, teacherUser: true }, order: { id: 'ASC' } })
+      : await this.vehicleRepository.find({ relations: { driverUser: true, teacherUser: true }, order: { id: 'ASC' } });
     return {
       admin: admin ? { id: admin.id, name: admin.name, role: admin.role } : null,
       vehicles: vehicles.map(v => ({
