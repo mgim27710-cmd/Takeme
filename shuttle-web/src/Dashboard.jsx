@@ -2848,17 +2848,23 @@ const parseKindergartenExcelSheet = (sheet) => {
                   </p>
                 </div>
 
-                <a href="/전년도_자료_입력_시트_양식.xlsx" download="전년도_자료_입력_시트_양식.xlsx" className="w-full py-3 mb-3 bg-white text-slate-700 rounded-xl text-sm font-bold border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors flex items-center justify-center">
-                  ⬇️ 전년도 양식 다운로드
+                <a href="/전년도_자료_입력_시트_양식_최종.xlsx" download="전년도_자료_입력_시트_양식_최종.xlsx" className="w-full py-3 mb-3 bg-white text-slate-700 rounded-xl text-sm font-bold border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors flex items-center justify-center gap-2">
+                  <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  전년도 양식 다운로드 (최종)
                 </a>
                 
                 <input type="file" accept=".xlsx, .xls" className="hidden" ref={setupFileInputRef} onChange={handleZoneResetUpload} />
                 <button 
                   onClick={() => setupFileInputRef.current.click()}
                   disabled={isProcessing}
-                  className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors shadow-md disabled:opacity-50"
+                  className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {isProcessing ? '구역 세팅 중...' : '⬆️ 엑셀 업로드 및 시작하기'}
+                  <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                  </svg>
+                  {isProcessing ? '구역 세팅 중...' : '엑셀 업로드 및 시작하기'}
                 </button>
               </>
             )}
@@ -3087,10 +3093,13 @@ const parseKindergartenExcelSheet = (sheet) => {
                   </div>
                   <div className="flex gap-2">
                     <a 
-                      href="/전년도_자료_입력_시트_양식.xlsx" 
-                      download="전년도_자료_입력_시트_양식.xlsx" 
-                      className="flex-1 py-2 px-3 bg-white text-slate-700 rounded-xl text-xs border border-slate-200 shadow-xs hover:bg-slate-50 transition-colors flex items-center justify-center font-bold whitespace-nowrap"
+                      href="/전년도_자료_입력_시트_양식_최종.xlsx" 
+                      download="전년도_자료_입력_시트_양식_최종.xlsx" 
+                      className="flex-1 py-2 px-3 bg-white text-slate-700 rounded-xl text-xs border border-slate-200 shadow-xs hover:bg-slate-50 transition-colors flex items-center justify-center font-bold whitespace-nowrap gap-1"
                     >
+                      <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
                       양식 다운로드
                     </a>
                     <button 
