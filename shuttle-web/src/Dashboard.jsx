@@ -1424,7 +1424,7 @@ export default function Dashboard() {
         setShowAcademyModal(false);
       } else {
         setBuses([]);
-        if (currentUser.role !== 'TEACHER') {
+        if (currentUser.role !== 'TEACHER' && (!data.academy || !data.academy.id)) {
           setShowAcademyModal(true);
           setSetupStep(1);
         } else {
@@ -1932,7 +1932,7 @@ const parseKindergartenExcelSheet = (sheet) => {
       const targetAcademyId = selectedAcademyId || currentUser?.academyId;
       const res = await fetch(`${API_BASE_URL}/routing/yearly-zone-mappings?academyId=${targetAcademyId || ''}`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+          'Authorization': `Bearer ${localStorage.getItem('takeme_token') || localStorage.getItem('token') || ''}`,
           'x-academy-id': String(targetAcademyId || '')
         }
       });
@@ -1963,7 +1963,7 @@ const parseKindergartenExcelSheet = (sheet) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+          'Authorization': `Bearer ${localStorage.getItem('takeme_token') || localStorage.getItem('token') || ''}`,
           'x-academy-id': String(targetAcademyId || '')
         },
         body: JSON.stringify({ academyId: targetAcademyId })
@@ -1971,6 +1971,8 @@ const parseKindergartenExcelSheet = (sheet) => {
       const result = await res.json();
       if (res.ok && result.success) {
         alert(result.message || '구역 매핑이 전년도 DB에 보관되었으며, 활성 구역이 초기화되었습니다.');
+        setActiveTab('status');
+        setIsResettingZones(true);
         await loadInitialState(targetAcademyId);
         await fetchYearlyZoneMappings();
       } else {
@@ -1995,7 +1997,7 @@ const parseKindergartenExcelSheet = (sheet) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+          'Authorization': `Bearer ${localStorage.getItem('takeme_token') || localStorage.getItem('token') || ''}`,
           'x-academy-id': String(targetAcademyId || '')
         },
         body: JSON.stringify({
@@ -2030,7 +2032,7 @@ const parseKindergartenExcelSheet = (sheet) => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+          'Authorization': `Bearer ${localStorage.getItem('takeme_token') || localStorage.getItem('token') || ''}`,
           'x-academy-id': String(targetAcademyId || '')
         },
         body: JSON.stringify({ academyId: targetAcademyId })
@@ -2061,7 +2063,7 @@ const parseKindergartenExcelSheet = (sheet) => {
       const res = await fetch(`${API_BASE_URL}/routing/yearly-zone-mappings/${mappingId}?academyId=${targetAcademyId || ''}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+          'Authorization': `Bearer ${localStorage.getItem('takeme_token') || localStorage.getItem('token') || ''}`,
           'x-academy-id': String(targetAcademyId || '')
         }
       });
@@ -2723,7 +2725,7 @@ const parseKindergartenExcelSheet = (sheet) => {
       {/* Sidebar Content Panel */}
       <div className={`bg-white shadow-lg z-10 flex flex-col w-[380px] shrink-0 break-keep ${activeTab === 'messages' ? 'hidden' : ''}`}>
 
-        {activeTab === 'status' && (
+        {(activeTab === 'status' || activeTab === 'buses') && (
           <div className="p-6 h-full flex flex-col overflow-y-auto break-keep">
             {/* Header */}
             <div className="mb-4">
@@ -2733,19 +2735,38 @@ const parseKindergartenExcelSheet = (sheet) => {
 
             {/* Action Buttons: Integrated Zone Mapping & Pickup Points */}
             <div className="space-y-2.5 mb-4">
-              <button
-                onClick={() => setIsResettingZones(!isResettingZones)}
-                className={`w-full py-2.5 px-3 rounded-xl text-sm font-bold border transition-all flex items-center justify-center gap-2 shadow-xs whitespace-nowrap ${
-                  isResettingZones
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-inner'
-                    : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:border-blue-300'
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                </svg>
-                {isResettingZones ? '구역 매핑 패널 닫기' : '구역 매핑 재설정 및 수정'}
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setIsResettingZones(!isResettingZones)}
+                  className={`w-full py-2.5 px-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 shadow-xs whitespace-nowrap ${
+                    isResettingZones
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-inner'
+                      : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:border-blue-300'
+                  }`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l4-4m0 0l4 4m-4-4v12" />
+                  </svg>
+                  {isResettingZones ? '엑셀 매핑 닫기' : '구역 매핑 엑셀'}
+                </button>
+
+                <button
+                  onClick={() => {
+                    setIsZoneEditingMode(!isZoneEditingMode);
+                    if (isZoneEditingMode) setEditingZoneBusId(null);
+                  }}
+                  className={`w-full py-2.5 px-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 shadow-xs whitespace-nowrap ${
+                    isZoneEditingMode
+                      ? 'bg-amber-500 text-white border-amber-500 shadow-inner'
+                      : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100 hover:border-amber-300'
+                  }`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                  {isZoneEditingMode ? '구역 수정 종료' : '구역 매핑 수정'}
+                </button>
+              </div>
 
               {/* Integrated Zone Remapping Panel */}
               {isResettingZones && (
@@ -2792,7 +2813,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                       </svg>
-                      매핑 초기화
+                      구역 매핑 초기화
                     </button>
                   </div>
                   <div className="flex gap-2">
@@ -3621,54 +3642,6 @@ const parseKindergartenExcelSheet = (sheet) => {
             <h2 className="text-xl font-bold text-slate-800 mb-6">환경설정</h2>
             
             <div className="space-y-4">
-              <div className="p-4 bg-blue-50 rounded-xl border border-blue-100 transition-all">
-                <h3 className="font-bold text-blue-700 mb-1">구역 맵핑(Zone) 수정</h3>
-                <p className="text-xs text-blue-600 mb-3 opacity-80 leading-relaxed">지도에서 직접 각 호차의 배차 구역을 정밀하게 다듬습니다.</p>
-                <button onClick={() => {
-                  setIsZoneEditingMode(!isZoneEditingMode);
-                  if (isZoneEditingMode) setEditingZoneBusId(null);
-                }} className={`w-full py-2.5 px-3 bg-white rounded-xl text-sm font-bold border shadow-xs transition-colors whitespace-nowrap ${isZoneEditingMode ? 'border-blue-600 text-blue-700 bg-blue-100' : 'text-blue-600 border-blue-200 hover:bg-blue-600 hover:text-white'}`}>
-                  {isZoneEditingMode ? '구역 수정 모드 종료' : '구역 수정 모드 진입'}
-                </button>
-              </div>
-
-              <div className="p-4 bg-red-50 rounded-xl border border-red-100 transition-all">
-                <h3 className="font-bold text-blue-700 mb-1">구역 매핑 재설정 및 기존 원생 병합</h3>
-                <p className="text-xs text-blue-600 mb-3 opacity-80 leading-relaxed">새로운 엑셀 자료를 기반으로 버스 운행 구역(폴리곤)을 재설정합니다. [차량 및 구역 관리] 탭에서도 즉시 설정하실 수 있습니다.</p>
-                
-                {!isResettingZones ? (
-                  <button onClick={() => { setActiveTab('buses'); setIsResettingZones(true); }} className="w-full py-2.5 px-3 bg-white text-blue-600 rounded-xl text-sm font-bold border border-blue-200 shadow-xs hover:bg-blue-600 hover:text-white transition-colors whitespace-nowrap">
-                    [차량 및 구역 관리]에서 매핑 수정하기
-                  </button>
-                ) : (
-                  <div className="space-y-3 mt-4 pt-4 border-t border-blue-200">
-                    <div className="p-3 bg-blue-100/50 rounded-lg">
-                      <p className="text-xs text-blue-800 font-bold">작성 안내</p>
-                      <p className="text-xs text-blue-700 mt-1 leading-relaxed">
-                        새 엑셀 파일의 <b>등원지, 하원지, 차량</b> 데이터를 바탕으로 운행 구역이 재계산됩니다. 기존에 등록된 원생들은 삭제되지 않고 새로운 구역에 자동으로 병합 배차됩니다.
-                      </p>
-                    </div>
-                    
-                    <a href="/전년도_자료_입력_시트_양식.xlsx" download="전년도_자료_입력_시트_양식.xlsx" className="w-full py-2.5 px-3 bg-white text-slate-700 rounded-xl text-sm border border-slate-200 shadow-xs hover:bg-slate-50 transition-colors flex items-center justify-center font-medium whitespace-nowrap">
-                      전년도 양식 다운로드
-                    </a>
-                    
-                    <input type="file" accept=".xlsx, .xls" className="hidden" ref={resetFileInputRef} onChange={handleZoneResetUpload} />
-                    <button 
-                      onClick={() => resetFileInputRef.current.click()} 
-                      disabled={isProcessing}
-                      className="w-full py-2.5 px-3 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-xs hover:bg-blue-700 disabled:opacity-50 transition-colors whitespace-nowrap"
-                    >
-                      {isProcessing ? '구역 매핑 및 원생 병합 중...' : '새 엑셀 업로드 및 구역 재매핑'}
-                    </button>
-                    
-                    <button onClick={() => setIsResettingZones(false)} className="w-full py-2 mt-2 bg-transparent text-blue-600 rounded-lg text-xs hover:underline whitespace-nowrap">
-                      취소
-                    </button>
-                  </div>
-                )}
-              </div>
-
               <div className="p-4 bg-orange-50 rounded-xl border border-orange-100 transition-all">
                 <h3 className="font-bold text-orange-700 mb-1">유치원 위치 변경</h3>
                 <p className="text-xs text-orange-600 mb-3 opacity-80 leading-relaxed">유치원이 이전한 경우 새 주소와 이름을 입력하세요.</p>
