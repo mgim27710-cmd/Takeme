@@ -969,80 +969,93 @@ export class RoutingService {
     const validStudents = students.filter(s => s.latitude !== undefined && s.latitude !== null && !isNaN(s.latitude) &&
                                                s.longitude !== undefined && s.longitude !== null && !isNaN(s.longitude));
 
-    // Balanced soft capacity limit so buses don't overload, while respecting vehicle capacity
-    const nVehicles = vehicleStates.length;
-    const maxSoftCapacity = Math.min(25, Math.ceil(validStudents.length / nVehicles) + 4);
+    // Vehicle matching helper
+    const matchVehicle = (val: any): VehicleZoneState | null => {
+      if (!val) return null;
+      const str = String(val).trim();
+      let found = vehicleStates.find(vs => vs.vehicle.busNumber === str || String(vs.vehicle.id) === str);
+      if (found) return found;
+      const digits = str.replace(/[^0-9]/g, '');
+      if (digits) {
+        found = vehicleStates.find(vs => vs.vehicle.busNumber.replace(/[^0-9]/g, '') === digits);
+        if (found) return found;
+      }
+      return null;
+    };
 
-    interface StudentChoice {
-      student: Student;
-      coords: [number, number];
-      rankings: { vState: VehicleZoneState; dist: number }[];
-    }
+    // Assign students to vehicle zones:
+    // 1. High priority: explicit vehicle in raw metadata (호차, 차량, 등원차량) or currently assignedVehicle
+    // 2. If no explicit bus, check if student coordinate is already inside a vehicle's polygon
+    // 3. Proximity to vehicle polygon / centroid
+    for (const st of validStudents) {
+      const sLat = Number(st.latitude);
+      const sLng = Number(st.longitude);
 
-    const studentChoices: StudentChoice[] = validStudents.map(s => {
-      const sLat = Number(s.latitude);
-      const sLng = Number(s.longitude);
-      const rankings = vehicleStates.map(vState => {
-        let minDist = Infinity;
-        if (vState.polygon.length >= 3 && this.isPointInPolygon([sLat, sLng], vState.polygon)) {
-          minDist = 0;
-        } else {
-          for (const pt of vState.polygon) {
-            const d = this.getDistanceKm(sLat, sLng, pt[0], pt[1]);
-            if (d < minDist) minDist = d;
-          }
-        }
-        if (minDist === Infinity && vState.centroid[0] !== 0) {
-          minDist = this.getDistanceKm(sLat, sLng, vState.centroid[0], vState.centroid[1]);
-        }
-        return { vState, dist: minDist };
-      });
-      rankings.sort((a, b) => a.dist - b.dist);
-      return { student: s, coords: [sLat, sLng], rankings };
-    });
-
-    // Students closer to an existing mapped zone claim it first
-    studentChoices.sort((a, b) => a.rankings[0].dist - b.rankings[0].dist);
-
-    const vehicleCountMap = new Map<number, number>();
-    vehicleStates.forEach(vs => vehicleCountMap.set(vs.vehicle.id, 0));
-
-    for (const choice of studentChoices) {
-      let chosenVState: VehicleZoneState | null = null;
-
-      // Pass 1: Assign to closest vehicle within balanced soft capacity
-      for (const r of choice.rankings) {
-        if ((vehicleCountMap.get(r.vState.vehicle.id) || 0) < maxSoftCapacity) {
-          chosenVState = r.vState;
-          break;
+      let parsedRaw: any = {};
+      if (st.raw) {
+        if (typeof st.raw === 'string') {
+          try { parsedRaw = JSON.parse(st.raw); } catch (e) { parsedRaw = {}; }
+        } else if (typeof st.raw === 'object') {
+          parsedRaw = st.raw;
         }
       }
 
-      // Pass 2: Fallback to closest vehicle within hard capacity (capacity column or 25)
-      if (!chosenVState) {
-        for (const r of choice.rankings) {
-          const cap = r.vState.vehicle.capacity || 25;
-          if ((vehicleCountMap.get(r.vState.vehicle.id) || 0) < cap) {
-            chosenVState = r.vState;
+      let chosenVs: VehicleZoneState | null = null;
+
+      // Check explicit raw bus first (raw['호차'] > raw['차량'] > st.assignedVehicle > raw['등원차량'])
+      const explicitBusStr = parsedRaw['호차'] || parsedRaw['차량'] || (st.assignedVehicle ? st.assignedVehicle.busNumber : null) || parsedRaw['등원차량'];
+      if (explicitBusStr) {
+        chosenVs = matchVehicle(explicitBusStr);
+      }
+
+      // If not resolved by explicit bus, check containment inside vehicle polygons
+      if (!chosenVs) {
+        for (const vs of vehicleStates) {
+          if (vs.polygon.length >= 3 && this.isPointInPolygon([sLat, sLng], vs.polygon)) {
+            chosenVs = vs;
             break;
           }
         }
       }
 
-      // Pass 3: Ultimate fallback to closest vehicle
-      if (!chosenVState) {
-        chosenVState = choice.rankings[0].vState;
+      // If still not resolved, assign to nearest vehicle
+      if (!chosenVs) {
+        let minDist = Infinity;
+        for (const vs of vehicleStates) {
+          let dist = Infinity;
+          if (vs.polygon.length > 0) {
+            for (const pt of vs.polygon) {
+              const d = this.getDistanceKm(sLat, sLng, pt[0], pt[1]);
+              if (d < dist) dist = d;
+            }
+          } else if (vs.centroid[0] !== 0) {
+            dist = this.getDistanceKm(sLat, sLng, vs.centroid[0], vs.centroid[1]);
+          }
+          if (dist < minDist) {
+            minDist = dist;
+            chosenVs = vs;
+          }
+        }
       }
 
-      const curCount = vehicleCountMap.get(chosenVState.vehicle.id) || 0;
-      vehicleCountMap.set(chosenVState.vehicle.id, curCount + 1);
-      chosenVState.assignedStudents.push(choice.student);
-      chosenVState.allPoints.push(choice.coords);
+      if (!chosenVs) {
+        chosenVs = vehicleStates[0];
+      }
+
+      chosenVs.assignedStudents.push(st);
+      chosenVs.allPoints.push([sLat, sLng]);
     }
 
-    // Compute expanded, non-overlapping zone polygons for all vehicles
-    const pointsList = vehicleStates.map(vs => vs.allPoints);
-    const expandedPolygons = this.partitionVehicleZones(pointsList, 1.2);
+    // Now auto-expand each vehicle's zone to encompass all its assigned students!
+    // ("할당은 되어 있는데 학생 위치까지 구역을 넓혀 줘야지 자동으로")
+    // Buffer = 0.8km ensures full envelope coverage while bisector clipping guarantees 0% overlap
+    const studentPointsList = vehicleStates.map(vs => {
+      const pts = vs.assignedStudents.map(s => [Number(s.latitude), Number(s.longitude)] as [number, number]);
+      if (pts.length > 0) return pts;
+      return vs.polygon.length > 0 ? vs.polygon : [];
+    });
+
+    const expandedPolygons = this.partitionVehicleZones(studentPointsList, 0.8);
 
     // Save expanded polygons to DB
     for (let i = 0; i < vehicleStates.length; i++) {
@@ -1062,6 +1075,8 @@ export class RoutingService {
         if (!st.raw || typeof st.raw !== 'object') st.raw = {};
         st.raw['등원차량'] = vs.vehicle.busNumber;
         st.raw['하원차량'] = vs.vehicle.busNumber;
+        st.raw['호차'] = vs.vehicle.busNumber;
+        st.raw['차량'] = vs.vehicle.busNumber;
         if (academy.name && academy.name.trim()) {
           st.raw['유치원명'] = academy.name.trim();
           st.raw['학교명'] = academy.name.trim();
