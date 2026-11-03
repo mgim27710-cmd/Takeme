@@ -17,6 +17,7 @@ import { PickupPoint } from '../entities/pickup-point.entity';
 import { BoardPost } from '../entities/board-post.entity';
 import { BoardComment } from '../entities/board-comment.entity';
 import { AuditLog } from '../entities/audit-log.entity';
+import { YearlyZoneMapping } from '../entities/yearly-zone-mapping.entity';
 
 @Module({
   imports: [
@@ -24,7 +25,7 @@ import { AuditLog } from '../entities/audit-log.entity';
       Vehicle, Student, StudentSchedule, Academy, User,
       OperationLog, ParentMessage, ScheduleOverride,
       AcademyHoliday, Notification, PickupPoint,
-      BoardPost, BoardComment, AuditLog
+      BoardPost, BoardComment, AuditLog, YearlyZoneMapping
     ]),
     HttpModule
   ],

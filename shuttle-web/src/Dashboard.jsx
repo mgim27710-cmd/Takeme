@@ -375,6 +375,12 @@ export default function Dashboard() {
   const [showPickupPoints, setShowPickupPoints] = useState(false);
   const [isAddingPickupPoint, setIsAddingPickupPoint] = useState(false);
   
+  // Yearly Zone Mapping State (전년도 구역 매핑 이력 및 보관함)
+  const [yearlyZoneMappings, setYearlyZoneMappings] = useState([]);
+  const [showYearlyMappingModal, setShowYearlyMappingModal] = useState(false);
+  const [selectedYearlyMapping, setSelectedYearlyMapping] = useState(null);
+  const [isLoadingYearlyMappings, setIsLoadingYearlyMappings] = useState(false);
+  
   // Log Viewer State
   const [logTab, setLogTab] = useState('LOG'); // 'LOG', 'ABSENCE', 'HOLIDAY'
 
@@ -1920,6 +1926,159 @@ const parseKindergartenExcelSheet = (sheet) => {
     return leafletCoords;
   };
 
+  const fetchYearlyZoneMappings = async () => {
+    try {
+      setIsLoadingYearlyMappings(true);
+      const targetAcademyId = selectedAcademyId || currentUser?.academyId;
+      const res = await fetch(`${API_BASE_URL}/routing/yearly-zone-mappings?academyId=${targetAcademyId || ''}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+          'x-academy-id': String(targetAcademyId || '')
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setYearlyZoneMappings(Array.isArray(data) ? data : []);
+      }
+    } catch (e) {
+      console.error('Failed to fetch yearly zone mappings', e);
+    } finally {
+      setIsLoadingYearlyMappings(false);
+    }
+  };
+
+  const handleResetZones = async () => {
+    if (!window.confirm(
+      '현재 지도 구역 매핑을 전년도 구역 매핑 DB에 안전하게 보관하고, 지도의 구역을 초기화하시겠습니까?\n\n' +
+      '• 관리자 및 기사/교사 계정 정보는 안전하게 보존됩니다.\n' +
+      '• 초기화 후 새 엑셀 시트를 업로드하여 새로운 구역 정보를 저장할 수 있습니다.'
+    )) {
+      return;
+    }
+
+    try {
+      setIsProcessing(true);
+      const targetAcademyId = selectedAcademyId || currentUser?.academyId;
+      const res = await fetch(`${API_BASE_URL}/routing/reset-zones`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+          'x-academy-id': String(targetAcademyId || '')
+        },
+        body: JSON.stringify({ academyId: targetAcademyId })
+      });
+      const result = await res.json();
+      if (res.ok && result.success) {
+        alert(result.message || '구역 매핑이 전년도 DB에 보관되었으며, 활성 구역이 초기화되었습니다.');
+        await loadInitialState(targetAcademyId);
+        await fetchYearlyZoneMappings();
+      } else {
+        alert(result.message || '초기화 처리 중 오류가 발생했습니다.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('초기화 요청 중 오류가 발생했습니다.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleArchiveCurrentMapping = async () => {
+    const title = window.prompt('전년도 구역 매핑으로 저장할 제목을 입력해주세요:', `${new Date().getFullYear() - 1}학년도 구역 매핑`);
+    if (title === null) return;
+
+    try {
+      setIsProcessing(true);
+      const targetAcademyId = selectedAcademyId || currentUser?.academyId;
+      const res = await fetch(`${API_BASE_URL}/routing/yearly-zone-mappings/archive`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+          'x-academy-id': String(targetAcademyId || '')
+        },
+        body: JSON.stringify({
+          academyId: targetAcademyId,
+          academicYear: '전년도',
+          title: title.trim() || '전년도 구역 매핑 이력'
+        })
+      });
+      const result = await res.json();
+      if (res.ok && result) {
+        alert('현재 구역 매핑이 전년도 구역 매핑 DB에 성공적으로 보관되었습니다.');
+        await fetchYearlyZoneMappings();
+      } else {
+        alert('보관할 활성 구역 매핑이 없거나 저장에 실패했습니다.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('보관 처리 중 오류가 발생했습니다.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleRestoreYearlyMapping = async (mappingId, title) => {
+    if (!window.confirm(`'${title}' 구역 매핑을 현재 지도에 복원하시겠습니까?\n\n• 복원 전 현재 구역 매핑은 자동 백업됩니다.\n• 계정 및 차량 ID는 안전하게 보존됩니다.`)) {
+      return;
+    }
+    try {
+      setIsProcessing(true);
+      const targetAcademyId = selectedAcademyId || currentUser?.academyId;
+      const res = await fetch(`${API_BASE_URL}/routing/yearly-zone-mappings/${mappingId}/restore`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+          'x-academy-id': String(targetAcademyId || '')
+        },
+        body: JSON.stringify({ academyId: targetAcademyId })
+      });
+      const result = await res.json();
+      if (res.ok && result.success) {
+        alert(result.message || '전년도 구역 매핑이 성공적으로 복원되었습니다.');
+        setShowYearlyMappingModal(false);
+        await loadInitialState(targetAcademyId);
+        await fetchYearlyZoneMappings();
+      } else {
+        alert(result.message || '복원 처리 중 오류가 발생했습니다.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('복원 요청 중 오류가 발생했습니다.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDeleteYearlyMapping = async (mappingId, title) => {
+    if (!window.confirm(`'${title}' 전년도 구역 매핑 이력을 삭제하시겠습니까?`)) {
+      return;
+    }
+    try {
+      const targetAcademyId = selectedAcademyId || currentUser?.academyId;
+      const res = await fetch(`${API_BASE_URL}/routing/yearly-zone-mappings/${mappingId}?academyId=${targetAcademyId || ''}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+          'x-academy-id': String(targetAcademyId || '')
+        }
+      });
+      const result = await res.json();
+      if (res.ok && result.success) {
+        alert('삭제되었습니다.');
+        await fetchYearlyZoneMappings();
+        if (selectedYearlyMapping?.id === mappingId) {
+          setSelectedYearlyMapping(null);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      alert('삭제 중 오류가 발생했습니다.');
+    }
+  };
+
   const handleSelectEditBus = (busId) => {
     setEditingZoneBusId(busId);
     setIsAddingPoint(false);
@@ -2240,6 +2399,165 @@ const parseKindergartenExcelSheet = (sheet) => {
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans relative">
+      {/* Yearly Zone Mapping History Modal */}
+      {showYearlyMappingModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-150">
+            {/* Header */}
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-slate-50 to-blue-50/40">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-base">전년도 구역 매핑 보관함</h3>
+                  <p className="text-xs text-slate-500">과거 구역 매핑 내역을 확인하거나 필요 시 현재 지도로 복원할 수 있습니다.</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleArchiveCurrentMapping}
+                  disabled={isProcessing}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shadow-xs"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                  </svg>
+                  현재 구역 보관하기
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowYearlyMappingModal(false)}
+                  className="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 overflow-y-auto space-y-3.5 flex-1 bg-slate-50/50">
+              {isLoadingYearlyMappings ? (
+                <div className="py-12 text-center text-slate-400 text-sm">
+                  전년도 구역 매핑 내역을 불러오는 중입니다...
+                </div>
+              ) : yearlyZoneMappings.length === 0 ? (
+                <div className="py-12 px-4 text-center rounded-xl bg-white border border-dashed border-slate-200">
+                  <p className="text-sm font-bold text-slate-600 mb-1">보관된 전년도 구역 매핑이 없습니다</p>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    '현재 구역 보관하기' 버튼을 누르거나, 새 엑셀 시트 업로드 및 매핑 초기화 시 이전 구역 매핑이 자동으로 이곳에 안전하게 보관됩니다.
+                  </p>
+                </div>
+              ) : (
+                yearlyZoneMappings.map(item => (
+                  <div key={item.id} className="p-4 bg-white rounded-xl border border-slate-200 shadow-2xs hover:border-blue-300 transition-all space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                            {item.academicYear || '전년도'}
+                          </span>
+                          <h4 className="font-bold text-slate-800 text-sm">{item.title}</h4>
+                        </div>
+                        <p className="text-xs text-slate-400">
+                          보관 일시: {new Date(item.archivedAt).toLocaleString('ko-KR')} · 차량 {item.totalVehicles || item.vehicleMappings?.length || 0}대 · 배정 원아 {item.totalStudents || 0}명
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleRestoreYearlyMapping(item.id, item.title)}
+                          disabled={isProcessing}
+                          className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold border border-blue-200 transition-colors flex items-center gap-1"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          구역 복원
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedYearlyMapping(selectedYearlyMapping?.id === item.id ? null : item)}
+                          className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-bold border border-slate-200 transition-colors"
+                        >
+                          {selectedYearlyMapping?.id === item.id ? '상세 닫기' : '상세 보기'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteYearlyMapping(item.id, item.title)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                          title="삭제"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Vehicle pill summary */}
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {Array.isArray(item.vehicleMappings) && item.vehicleMappings.map((vm, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold bg-slate-50 border border-slate-200 text-slate-700"
+                        >
+                          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: vm.colorHex || '#3b82f6' }} />
+                          {vm.busNumber} ({vm.studentCount || 0}명)
+                        </span>
+                      ))}
+                    </div>
+
+                    {/* Expandable Details */}
+                    {selectedYearlyMapping?.id === item.id && (
+                      <div className="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs space-y-2">
+                        <p className="font-bold text-slate-700">호차별 상세 정보:</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {item.vehicleMappings.map((vm, idx) => (
+                            <div key={idx} className="p-2 bg-white rounded-md border border-slate-200">
+                              <div className="flex items-center justify-between font-bold text-slate-800">
+                                <span className="flex items-center gap-1.5">
+                                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: vm.colorHex || '#3b82f6' }} />
+                                  {vm.busNumber} {vm.plateNumber ? `(${vm.plateNumber})` : ''}
+                                </span>
+                                <span className="text-blue-600">{vm.studentCount || 0}명</span>
+                              </div>
+                              <p className="text-slate-500 text-2xs mt-1">
+                                기사: {vm.driverName || '미정'} · 교사: {vm.teacherName || '미정'}
+                              </p>
+                              <p className="text-slate-400 text-2xs">
+                                폴리곤 꼭짓점: {Array.isArray(vm.polygonCoordinates) ? vm.polygonCoordinates.length : 0}개 지점
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-white">
+              <span className="text-xs text-slate-400">
+                초기화 또는 새 엑셀 시트 업로드 시 기존 매핑이 이 보관함에 자동으로 백업됩니다.
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowYearlyMappingModal(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Academy Registration Modal Overlay */}
       {showAcademyModal && (
         <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center">
@@ -2450,6 +2768,33 @@ const parseKindergartenExcelSheet = (sheet) => {
                     새 엑셀 파일의 <b>등원지, 하원지, 차량</b> 데이터를 바탕으로 운행 구역(폴리곤)을 재계산합니다. <b>기존에 등록된 원생 및 선생님 정보는 보존</b>되며 새 구역으로 자동 병합 배차됩니다.
                   </p>
                   <input type="file" accept=".xlsx, .xls" className="hidden" ref={resetFileInputRef} onChange={handleZoneResetUpload} />
+                  <div className="pt-2 border-t border-blue-200/60 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        fetchYearlyZoneMappings();
+                        setShowYearlyMappingModal(true);
+                      }}
+                      className="flex-1 py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold border border-indigo-200 transition-colors flex items-center justify-center gap-1 shadow-2xs whitespace-nowrap"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      전년도 구역 매핑 이력
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleResetZones}
+                      disabled={isProcessing}
+                      className="py-1.5 px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold border border-rose-200 transition-colors flex items-center justify-center gap-1 shadow-2xs whitespace-nowrap disabled:opacity-50"
+                      title="현재 구역 매핑을 전년도 DB에 보관하고 지도를 초기화합니다"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                      매핑 초기화
+                    </button>
+                  </div>
                   <div className="flex gap-2">
                     <a 
                       href="/전년도_자료_입력_시트_양식.xlsx" 

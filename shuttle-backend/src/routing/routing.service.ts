@@ -17,6 +17,7 @@ import { PickupPoint } from '../entities/pickup-point.entity';
 import { BoardPost } from '../entities/board-post.entity';
 import { BoardComment } from '../entities/board-comment.entity';
 import { AuditLog } from '../entities/audit-log.entity';
+import { YearlyZoneMapping } from '../entities/yearly-zone-mapping.entity';
 import { Between } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 
@@ -50,6 +51,8 @@ export class RoutingService {
     private boardCommentRepository: Repository<BoardComment>,
     @InjectRepository(AuditLog)
     private auditLogRepository: Repository<AuditLog>,
+    @InjectRepository(YearlyZoneMapping)
+    private yearlyZoneMappingRepository: Repository<YearlyZoneMapping>,
     private httpService: HttpService,
     private configService: ConfigService,
   ) {}
@@ -283,9 +286,230 @@ export class RoutingService {
     return results;
   }
 
+  async archiveCurrentZoneMapping(
+    academyId?: number,
+    userId?: number,
+    academicYear = '전년도',
+    title = '전년도 구역 매핑 이력',
+    description?: string
+  ): Promise<YearlyZoneMapping | null> {
+    const academy = await this.getAcademy(academyId, userId);
+    if (!academy) return null;
+
+    const vehicles = await this.vehicleRepository.find({
+      where: { academy: { id: academy.id } },
+      relations: { driverUser: true, teacherUser: true },
+      order: { id: 'ASC' }
+    });
+
+    if (vehicles.length === 0) return null;
+
+    const students = await this.studentRepository.find({
+      where: { academy: { id: academy.id } },
+      relations: { assignedVehicle: true }
+    });
+
+    const vehicleMappings = vehicles.map(v => {
+      let poly: any = [];
+      try {
+        poly = typeof v.polygonCoordinates === 'string' ? JSON.parse(v.polygonCoordinates) : (v.polygonCoordinates || []);
+      } catch (e) {
+        poly = [];
+      }
+
+      const assignedStudents = students.filter(s => s.assignedVehicle?.id === v.id);
+      return {
+        vehicleId: v.id,
+        busNumber: v.busNumber,
+        plateNumber: v.plateNumber,
+        driverName: v.driverName,
+        driverUserId: v.driverUser?.id,
+        teacherName: v.teacherName,
+        teacherUserId: v.teacherUser?.id,
+        capacity: v.capacity,
+        colorHex: v.colorHex,
+        polygonCoordinates: poly,
+        studentCount: assignedStudents.length,
+        studentsSummary: assignedStudents.slice(0, 50).map(s => ({
+          id: s.id,
+          name: s.name,
+          address: s.address,
+          boardingLocation: s.boardingLocation
+        }))
+      };
+    });
+
+    const hasAnyPolygon = vehicleMappings.some(vm => vm.polygonCoordinates && vm.polygonCoordinates.length > 0);
+    if (!hasAnyPolygon) {
+      return null;
+    }
+
+    const archive = this.yearlyZoneMappingRepository.create({
+      academy,
+      academicYear: academicYear || '전년도',
+      title: title || '전년도 구역 매핑 이력',
+      description: description || `호차 ${vehicles.length}대, 원아 ${students.length}명 매핑 스냅샷`,
+      vehicleMappings,
+      totalStudents: students.length,
+      totalVehicles: vehicles.length,
+      archivedAt: new Date()
+    });
+
+    return await this.yearlyZoneMappingRepository.save(archive);
+  }
+
+  async getYearlyZoneMappings(academyId?: number, userId?: number) {
+    const academy = await this.getAcademy(academyId, userId);
+    if (!academy) return [];
+    return this.yearlyZoneMappingRepository.find({
+      where: { academy: { id: academy.id } },
+      order: { id: 'DESC' }
+    });
+  }
+
+  async restoreYearlyZoneMapping(mappingId: number, academyId?: number, userId?: number) {
+    const academy = await this.getAcademy(academyId, userId);
+    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
+
+    const archive = await this.yearlyZoneMappingRepository.findOne({
+      where: { id: mappingId, academy: { id: academy.id } }
+    });
+    if (!archive) throw new BadRequestException('전년도 구역 매핑 데이터를 찾을 수 없습니다.');
+
+    // 1. Snapshot current active mapping before restoring
+    await this.archiveCurrentZoneMapping(
+      academy.id,
+      undefined,
+      '복원 전 활성 구역',
+      `${new Date().toLocaleDateString('ko-KR')} 복원 전 활성 구역 백업`,
+      '전년도 구역 매핑 복원 직전의 활성 구역 스냅샷입니다.'
+    );
+
+    const vehicles = await this.vehicleRepository.find({
+      where: { academy: { id: academy.id } },
+      order: { id: 'ASC' }
+    });
+
+    const vehicleMap = new Map<string, Vehicle>();
+    vehicles.forEach(v => {
+      vehicleMap.set(v.busNumber, v);
+      const numOnly = v.busNumber.replace(/[^0-9]/g, '');
+      if (numOnly) vehicleMap.set(numOnly, v);
+    });
+
+    for (const vm of archive.vehicleMappings) {
+      const numOnly = vm.busNumber?.replace(/[^0-9]/g, '');
+      const targetVehicle = vehicleMap.get(vm.busNumber) || (numOnly ? vehicleMap.get(numOnly) : undefined);
+      if (targetVehicle) {
+        targetVehicle.polygonCoordinates = vm.polygonCoordinates;
+        if (vm.colorHex) targetVehicle.colorHex = vm.colorHex;
+        await this.vehicleRepository.save(targetVehicle);
+      }
+    }
+
+    const existingStudents = await this.studentRepository.find({
+      where: { academy: { id: academy.id } },
+      relations: { assignedVehicle: true }
+    });
+
+    const updatedVehicles = await this.vehicleRepository.find({
+      where: { academy: { id: academy.id } }
+    });
+
+    const vehiclePolyList = updatedVehicles.map(v => {
+      let pts: [number, number][] = [];
+      try {
+        pts = typeof v.polygonCoordinates === 'string' ? JSON.parse(v.polygonCoordinates) : (v.polygonCoordinates || []);
+      } catch (e) {}
+      return { vehicle: v, points: pts };
+    });
+
+    for (const student of existingStudents) {
+      let targetVehicle: Vehicle | null = null;
+      const sLat = student.latitude;
+      const sLng = student.longitude;
+
+      if (sLat && sLng && !isNaN(sLat) && !isNaN(sLng)) {
+        for (const vp of vehiclePolyList) {
+          if (vp.points.length >= 3 && this.isPointInPolygon([sLat, sLng], vp.points)) {
+            targetVehicle = vp.vehicle;
+            break;
+          }
+        }
+      }
+      if (targetVehicle) {
+        student.assignedVehicle = targetVehicle;
+      }
+    }
+    await this.studentRepository.save(existingStudents);
+
+    this.notifyRouteUpdated(academy.id);
+    return {
+      success: true,
+      message: `'${archive.title}'(${archive.academicYear}) 구역 매핑이 성공적으로 복원되었습니다.`
+    };
+  }
+
+  async deleteYearlyZoneMapping(mappingId: number, academyId?: number, userId?: number) {
+    const academy = await this.getAcademy(academyId, userId);
+    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
+
+    const archive = await this.yearlyZoneMappingRepository.findOne({
+      where: { id: mappingId, academy: { id: academy.id } }
+    });
+    if (!archive) throw new BadRequestException('해당 구역 매핑 이력을 찾을 수 없습니다.');
+
+    await this.yearlyZoneMappingRepository.remove(archive);
+    return { success: true, message: '전년도 구역 매핑 내역이 삭제되었습니다.' };
+  }
+
+  async resetActiveZones(academyId?: number, userId?: number) {
+    const academy = await this.getAcademy(academyId, userId);
+    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
+
+    // 1. Archive current active mapping before clearing
+    await this.archiveCurrentZoneMapping(
+      academy.id,
+      undefined,
+      '전년도',
+      '전년도 구역 매핑 이력',
+      '구역 매핑 초기화 전 자동 보관된 매핑 내역입니다.'
+    );
+
+    // 2. Clear polygon coordinates on all vehicles (Preserve vehicle ID, driver, teacher, and approval statuses!)
+    const vehicles = await this.vehicleRepository.find({
+      where: { academy: { id: academy.id } }
+    });
+
+    for (const v of vehicles) {
+      v.polygonCoordinates = null;
+      await this.vehicleRepository.save(v);
+    }
+
+    this.notifyRouteUpdated(academy.id);
+
+    return {
+      success: true,
+      message: '현재 구역 매핑이 전년도 구역 매핑 DB에 저장되었으며, 활성 구역 매핑이 초기화되었습니다. 새로운 엑셀 시트를 업로드하여 새 구역을 설정할 수 있습니다.'
+    };
+  }
+
   async initializeZones(vehicles: any[], parsedData: any[], academyId?: number, userId?: number) {
     const academy = await this.getAcademy(academyId, userId);
     if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
+
+    // 0. Auto-archive current active zone mapping before applying the new Excel sheet
+    try {
+      await this.archiveCurrentZoneMapping(
+        academy.id,
+        undefined,
+        '전년도',
+        '전년도 구역 매핑 (새 엑셀 업로드 전 자동 보관)',
+        '새 엑셀 업로드 및 구역 재매핑 전 자동 백업된 구역 매핑입니다.'
+      );
+    } catch (e: any) {
+      console.warn('Auto-archiving previous zone mapping skipped:', e?.message);
+    }
 
     // 1. Preserve existing vehicles, drivers, teachers, and students (Non-destructive update)
     const existingVehicles = await this.vehicleRepository.find({

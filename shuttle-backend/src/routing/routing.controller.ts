@@ -163,6 +163,63 @@ export class RoutingController {
     return this.routingService.initializeZones(body.vehicles, body.parsedData, academyId, userId);
   }
 
+  @Get('yearly-zone-mappings')
+  async getYearlyZoneMappings(
+    @Query('academyId') academyIdQuery?: string,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const academyId = academyIdQuery ? Number(academyIdQuery) : (academyIdHeader ? Number(academyIdHeader) : undefined);
+    const userId = userIdHeader ? Number(userIdHeader) : undefined;
+    return this.routingService.getYearlyZoneMappings(academyId, userId);
+  }
+
+  @Post('yearly-zone-mappings/archive')
+  async archiveZoneMapping(
+    @Body() body: { academyId?: number; academicYear?: string; title?: string; description?: string },
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const academyId = body.academyId || (academyIdHeader ? Number(academyIdHeader) : undefined);
+    const userId = userIdHeader ? Number(userIdHeader) : undefined;
+    return this.routingService.archiveCurrentZoneMapping(academyId, userId, body.academicYear, body.title, body.description);
+  }
+
+  @Post('yearly-zone-mappings/:id/restore')
+  async restoreZoneMapping(
+    @Param('id') id: string,
+    @Body() body: { academyId?: number },
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const academyId = body?.academyId || (academyIdHeader ? Number(academyIdHeader) : undefined);
+    const userId = userIdHeader ? Number(userIdHeader) : undefined;
+    return this.routingService.restoreYearlyZoneMapping(Number(id), academyId, userId);
+  }
+
+  @Delete('yearly-zone-mappings/:id')
+  async deleteZoneMapping(
+    @Param('id') id: string,
+    @Query('academyId') academyIdQuery?: string,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const academyId = academyIdQuery ? Number(academyIdQuery) : (academyIdHeader ? Number(academyIdHeader) : undefined);
+    const userId = userIdHeader ? Number(userIdHeader) : undefined;
+    return this.routingService.deleteYearlyZoneMapping(Number(id), academyId, userId);
+  }
+
+  @Post('reset-zones')
+  async resetZones(
+    @Body() body: { academyId?: number },
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const academyId = body?.academyId || (academyIdHeader ? Number(academyIdHeader) : undefined);
+    const userId = userIdHeader ? Number(userIdHeader) : undefined;
+    return this.routingService.resetActiveZones(academyId, userId);
+  }
+
   @Post('vehicle/:id/zone')
   async updateVehicleZone(
     @Param('id') id: string, 
