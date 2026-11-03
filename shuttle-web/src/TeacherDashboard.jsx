@@ -232,11 +232,9 @@ export default function TeacherDashboard({
 
   // Shuttle Ride Request & Payment States
   const [rideRequests, setRideRequests] = useState({});
-  const [shuttleRideModalStudent, setShuttleRideModalStudent] = useState(null);
-  const [shuttleRideTargetVehicleId, setShuttleRideTargetVehicleId] = useState(null);
-  const [shuttleRideBoardingLocation, setShuttleRideBoardingLocation] = useState('');
-  const [shuttleRideNote, setShuttleRideNote] = useState('');
-  const [isSendingRideRequest, setIsSendingRideRequest] = useState(false);
+  const [quickRequestModal, setQuickRequestModal] = useState(null); // { student, targetBus, distanceLabel }
+  const [isSendingQuickRequest, setIsSendingQuickRequest] = useState(false);
+  const [isDecidingRequest, setIsDecidingRequest] = useState(null);
 
   // Helper: Non-shuttle student check
   const checkIsNonShuttle = (st) => {
@@ -330,6 +328,9 @@ export default function TeacherDashboard({
             driverName: msg.payload.driverName,
             boardingLocation: msg.payload.boardingLocation,
             note: msg.payload.note,
+            counterProposal: msg.payload.counterProposal,
+            counterNote: msg.payload.counterNote,
+            counterProposedBy: msg.payload.counterProposedBy,
             createdAt: msg.createdAt,
             updatedAt: msg.updatedAt
           };
@@ -363,6 +364,9 @@ export default function TeacherDashboard({
             driverName: msg.payload.driverName,
             boardingLocation: msg.payload.boardingLocation,
             note: msg.payload.note,
+            counterProposal: msg.payload.counterProposal,
+            counterNote: msg.payload.counterNote,
+            counterProposedBy: msg.payload.counterProposedBy,
             createdAt: msg.createdAt,
             updatedAt: msg.updatedAt
           }
@@ -389,13 +393,8 @@ export default function TeacherDashboard({
     };
   }, [socket, onRefreshData]);
 
-  // Handle open shuttle ride request modal
-  const handleOpenShuttleRideModal = (student) => {
-    setShuttleRideModalStudent(student);
-    const defaultLocation = student.address || (student.raw && student.raw['도로명주소']) || '원아 거주지 부근';
-    setShuttleRideBoardingLocation(defaultLocation);
-    setShuttleRideNote(`오늘 ${student.name} 원아 셔틀 하원 탑승 희망합니다. 하차 위치(${defaultLocation}) 부근 하차 가능 여부 확인 및 결제 승인 부탁드립니다.`);
-
+  // 1-Click: Automatically detect closest vehicle for student's drop-off address and prompt confirmation
+  const handlePromptShuttleRideRequest = (student) => {
     const sorted = [...buses]
       .map(b => ({
         bus: b,
@@ -403,30 +402,31 @@ export default function TeacherDashboard({
       }))
       .sort((a, b) => a.distance - b.distance);
 
-    if (sorted.length > 0) {
-      setShuttleRideTargetVehicleId(sorted[0].bus.id);
-    } else {
-      setShuttleRideTargetVehicleId(null);
-    }
+    const autoBus = sorted.length > 0 ? sorted[0].bus : null;
+    const distanceLabel = sorted[0]?.label || '';
+
+    setQuickRequestModal({
+      student,
+      targetBus: autoBus,
+      distanceLabel
+    });
   };
 
-  // Submit payment request to shuttle teacher
-  const handleSubmitShuttleRideRequest = async () => {
-    if (!shuttleRideModalStudent) return;
-    if (!shuttleRideTargetVehicleId) {
-      alert('하차 가능한 버스(지도교사)를 선택해주세요.');
-      return;
-    }
-    if (!shuttleRideBoardingLocation.trim()) {
-      alert('하차 희망 위치를 입력해주세요.');
+  // Execute quick ride request
+  const handleExecuteQuickRideRequest = async () => {
+    if (!quickRequestModal || !quickRequestModal.student) return;
+    const { student, targetBus } = quickRequestModal;
+
+    if (!targetBus) {
+      alert('배차 가능한 셔틀 차량 정보가 없습니다. 원장님께 문의해주세요.');
       return;
     }
 
-    setIsSendingRideRequest(true);
+    setIsSendingQuickRequest(true);
     try {
       const token = localStorage.getItem('takeme_token');
       const email = localTeacherUser?.email || currentUser?.email;
-      const targetVehicle = buses.find(b => b.id === Number(shuttleRideTargetVehicleId));
+      const dropoffLocation = student.address || (student.raw && student.raw['도로명주소']) || '원아 등록 거주지';
 
       const res = await fetch(`${API_BASE_URL}/chat/payment-request`, {
         method: 'POST',
@@ -435,15 +435,15 @@ export default function TeacherDashboard({
           ...(token ? { Authorization: `Bearer ${token}` } : {})
         },
         body: JSON.stringify({
-          studentId: shuttleRideModalStudent.id,
-          studentName: shuttleRideModalStudent.name,
-          vehicleId: Number(shuttleRideTargetVehicleId),
-          boardingLocation: shuttleRideBoardingLocation.trim(),
-          address: shuttleRideModalStudent.address || shuttleRideBoardingLocation.trim(),
-          latitude: shuttleRideModalStudent.latitude || shuttleRideModalStudent.lat,
-          longitude: shuttleRideModalStudent.longitude || shuttleRideModalStudent.lng,
+          studentId: student.id,
+          studentName: student.name,
+          vehicleId: Number(targetBus.id),
+          boardingLocation: dropoffLocation,
+          address: student.address || dropoffLocation,
+          latitude: student.latitude || student.lat,
+          longitude: student.longitude || student.lng,
           requestDate: new Date().toISOString().split('T')[0],
-          note: shuttleRideNote.trim() || `${shuttleRideModalStudent.name} 원아 오늘 하원 셔틀 탑승 요청`,
+          note: `오늘 ${student.name} 원아 셔틀 하원 탑승 희망 (하차 결제 신청)`,
           requesterEmail: email
         })
       });
@@ -452,29 +452,66 @@ export default function TeacherDashboard({
         const data = await res.json();
         setRideRequests(prev => ({
           ...prev,
-          [shuttleRideModalStudent.id]: {
+          [student.id]: {
             messageId: data.id,
             status: 'PENDING',
-            vehicleId: targetVehicle?.id,
-            busNumber: targetVehicle?.name || targetVehicle?.busNumber,
-            teacherName: targetVehicle?.teacherName || targetVehicle?.teacherUser?.name || '담당 지도교사',
-            driverName: targetVehicle?.driverName || '기사님',
-            boardingLocation: shuttleRideBoardingLocation.trim(),
-            note: shuttleRideNote.trim()
+            vehicleId: targetBus.id,
+            busNumber: targetBus.name || targetBus.busNumber,
+            teacherName: targetBus.teacherName || targetBus.teacherUser?.name || '담당 지도교사',
+            driverName: targetBus.driverName || '기사님',
+            boardingLocation: dropoffLocation,
+            note: `오늘 ${student.name} 원아 셔틀 하원 탑승 희망`
           }
         }));
 
-        alert(`[${shuttleRideModalStudent.name}] 원아의 탑승 및 결제 요청 메시지가 ${targetVehicle?.name || '해당 차량'} 지도교사님께 발송되었습니다.\n지도교사 승인이 완료되면 학생 카드가 초록색으로 자동 변경됩니다.`);
-        setShuttleRideModalStudent(null);
+        alert(`[${student.name}] 원아의 탑승 결제 요청이 ${targetBus.name} ${targetBus.teacherName || ''} 지도교사님께 자동으로 발송되었습니다.\n지도교사 수락 시 카드가 초록색으로 변경됩니다.`);
+        setQuickRequestModal(null);
       } else {
         const err = await res.json().catch(() => ({}));
-        alert(err.message || '결제 메시지 발송에 실패했습니다.');
+        alert(err.message || '결제 요청 전송에 실패했습니다.');
       }
     } catch (e) {
       console.error(e);
       alert('서버 연결 중 오류가 발생했습니다.');
     } finally {
-      setIsSendingRideRequest(false);
+      setIsSendingQuickRequest(false);
+    }
+  };
+
+  // Homeroom Teacher accepts or rejects the Guide Teacher's counter-proposal (재결제 새로운 위치 요청)
+  const handleDecidePaymentRequest = async (messageId, decision) => {
+    if (!messageId || isDecidingRequest) return;
+    const actionText = decision === 'APPROVED' ? '지도교사가 새로 제안한 위치로 탑승을 수락' : '탑승 요청을 반려하고 원래대로 픽업';
+    if (!window.confirm(`${actionText}하시겠습니까?`)) return;
+
+    setIsDecidingRequest(messageId);
+    try {
+      const token = localStorage.getItem('takeme_token');
+      const email = localTeacherUser?.email || currentUser?.email;
+      const res = await fetch(`${API_BASE_URL}/chat/payment-request/${messageId}/decision`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          decision,
+          decidedByEmail: email
+        })
+      });
+
+      if (res.ok) {
+        alert(decision === 'APPROVED' ? '새로 제안된 위치로 셔틀 탑승이 최종 확정되었습니다!' : '탑승 요청이 반려 처리되었습니다.');
+        fetchRideRequests();
+        if (onRefreshData) onRefreshData();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message || '처리 중 오류가 발생했습니다.');
+      }
+    } catch (e) {
+      alert('서버 연결 중 오류가 발생했습니다.');
+    } finally {
+      setIsDecidingRequest(null);
     }
   };
 
@@ -1334,6 +1371,42 @@ export default function TeacherDashboard({
                     </div>
                   )}
 
+                  {/* Re-request Notice Banner for Teacher */}
+                  {Object.entries(rideRequests).some(([_, r]) => r && r.status === 'RE_REQUESTED') && (
+                    <div className="bg-purple-50 border-2 border-purple-300 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-xs">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-extrabold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-md border border-purple-200">
+                              지도교사 새 위치 제안 도착
+                            </span>
+                            <span className="text-xs text-purple-700 font-bold">
+                              {Object.entries(rideRequests).filter(([_, r]) => r && r.status === 'RE_REQUESTED').length}건 확인 필요
+                            </span>
+                          </div>
+                          <p className="text-xs text-purple-900 mt-1 font-semibold leading-relaxed">
+                            지도교사님이 안전한 승하차를 위해 새로운 위치를 제안했습니다. 아래 보라색 원아 카드에서 새 위치를 확인하시고 [새 위치로 수락] 또는 [픽업 유지]를 선택해주세요.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveNavTab('messages')}
+                        className="self-end sm:self-center px-3.5 py-2 bg-purple-600 hover:bg-purple-700 active:scale-95 text-white text-xs font-black rounded-xl transition shadow-xs shrink-0 flex items-center gap-1.5"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        </svg>
+                        <span>메시지함 지도 비교</span>
+                      </button>
+                    </div>
+                  )}
+
                   {displayedStudents.length === 0 ? (
                     <div className="text-center py-12 text-slate-400">
                       <p className="text-sm font-semibold">해당하는 원아가 없습니다.</p>
@@ -1346,6 +1419,7 @@ export default function TeacherDashboard({
                         const rideReq = rideRequests[student.id];
                         const isRidePending = rideReq && rideReq.status === 'PENDING';
                         const isRideApproved = rideReq && rideReq.status === 'APPROVED';
+                        const isRideReRequested = rideReq && rideReq.status === 'RE_REQUESTED';
 
                         const isAbsent = effectiveStatus === 'ABSENT' || effectiveStatus === '결석';
                         const isPickup = (effectiveStatus === 'SELF_PICKUP' || effectiveStatus === '부모님직접픽업') && !isRideApproved;
@@ -1367,6 +1441,8 @@ export default function TeacherDashboard({
                             className={`rounded-2xl p-4 border transition-all flex flex-col justify-between ${
                               isRideApproved
                                 ? 'bg-emerald-50/80 border-2 border-emerald-500 ring-2 ring-emerald-100 shadow-md'
+                                : isRideReRequested
+                                ? 'bg-purple-50/90 border-2 border-purple-400 ring-2 ring-purple-100 shadow-md animate-pulse-subtle'
                                 : isRidePending
                                 ? 'bg-amber-50/90 border-2 border-amber-400 ring-2 ring-amber-100 shadow-md'
                                 : isAbsent
@@ -1422,6 +1498,11 @@ export default function TeacherDashboard({
                                     </svg>
                                     탑승 승인 완료
                                   </span>
+                                ) : isRideReRequested ? (
+                                  <span className="text-[11px] font-black px-2.5 py-1 rounded-full shrink-0 border bg-purple-100 text-purple-800 border-purple-300 flex items-center gap-1 animate-pulse">
+                                    <span className="w-2 h-2 rounded-full bg-purple-600"></span>
+                                    새 위치 제안됨 (재결제 요청)
+                                  </span>
                                 ) : isRidePending ? (
                                   <span className="text-[11px] font-black px-2.5 py-1 rounded-full shrink-0 border bg-amber-100 text-amber-800 border-amber-300 flex items-center gap-1 animate-pulse">
                                     <span className="w-2 h-2 rounded-full bg-amber-500"></span>
@@ -1440,7 +1521,7 @@ export default function TeacherDashboard({
                                 )}
                               </div>
 
-                              {/* Card Middle Info Box: APPROVED vs PENDING vs Normal */}
+                              {/* Card Middle Info Box: APPROVED vs RE_REQUESTED vs PENDING vs Normal */}
                               {isRideApproved ? (
                                 <div className="bg-emerald-100/70 rounded-xl p-2.5 my-2.5 text-xs space-y-1.5 border border-emerald-300 shadow-2xs">
                                   <div className="flex items-center justify-between">
@@ -1466,6 +1547,52 @@ export default function TeacherDashboard({
                                     <span className="font-semibold text-emerald-950 truncate max-w-[170px]" title={rideReq?.boardingLocation || student.address}>
                                       {rideReq?.boardingLocation || student.address || '원아 거주지'}
                                     </span>
+                                  </div>
+                                </div>
+                              ) : isRideReRequested ? (
+                                <div className="bg-purple-50 rounded-xl p-3 my-2.5 text-xs space-y-2 border-2 border-purple-300 shadow-2xs">
+                                  <div className="flex items-center gap-1.5 font-black text-purple-900">
+                                    <svg className="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                    <span>지도교사 새 위치 제안</span>
+                                  </div>
+                                  <div className="bg-white p-2 rounded-lg border border-purple-200">
+                                    <span className="text-[10px] text-purple-600 font-bold block">새 하차 희망 위치:</span>
+                                    <span className="font-black text-purple-950 block">
+                                      {rideReq.counterProposal?.suggestedLocation?.boardingLocation || rideReq.boardingLocation}
+                                    </span>
+                                    {rideReq.counterProposal?.note && (
+                                      <p className="text-[11px] text-slate-600 mt-1 italic">
+                                        사유: "{rideReq.counterProposal.note}"
+                                      </p>
+                                    )}
+                                  </div>
+                                  <div className="flex gap-1.5 pt-1">
+                                    <button
+                                      type="button"
+                                      disabled={isDecidingRequest === rideReq.messageId}
+                                      onClick={() => handleDecidePaymentRequest(rideReq.messageId, 'APPROVED')}
+                                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-black text-[11px] shadow-2xs transition disabled:opacity-50"
+                                    >
+                                      새 위치로 수락
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isDecidingRequest === rideReq.messageId}
+                                      onClick={() => handleDecidePaymentRequest(rideReq.messageId, 'REJECTED')}
+                                      className="py-1.5 px-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 border border-slate-200 rounded-lg font-bold text-[11px] transition disabled:opacity-50"
+                                    >
+                                      픽업 유지
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setActiveNavTab('messages')}
+                                      className="py-1.5 px-2 bg-purple-100 hover:bg-purple-200 text-purple-800 rounded-lg font-bold text-[11px] transition"
+                                      title="메시지함에서 지도 확인"
+                                    >
+                                      지도비교
+                                    </button>
                                   </div>
                                 </div>
                               ) : isRidePending ? (
@@ -1552,7 +1679,12 @@ export default function TeacherDashboard({
                                         handleUpdateBoardStatus(student.id, 'WAITING');
                                         return;
                                       }
-                                      handleOpenShuttleRideModal(student);
+                                      if (isRideReRequested) {
+                                        // Open messages or prompt
+                                        setActiveNavTab('messages');
+                                        return;
+                                      }
+                                      handlePromptShuttleRideRequest(student);
                                       return;
                                     }
                                     handleUpdateBoardStatus(student.id, 'WAITING');
@@ -1977,26 +2109,28 @@ export default function TeacherDashboard({
       )}
 
       {/* ======================================================== */}
-      {/* 5. Shuttle Ride Payment Request Modal (결제보내기 셀) */}
+      {/* 5. 1-Step Confirmation Modal ("1번 더 물어보고 신청하기") */}
       {/* ======================================================== */}
-      {shuttleRideModalStudent && (
+      {quickRequestModal && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full max-h-[90vh] overflow-hidden shadow-2xl flex flex-col border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl flex flex-col border border-slate-200 animate-scale-up">
             {/* Header */}
             <div className="px-6 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex items-center justify-between shrink-0">
-              <div>
-                <h3 className="text-base font-black flex items-center gap-2">
-                  <span>셔틀 탑승 신청 및 결제 요청</span>
-                  <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-bold">지도교사 승인 요청</span>
-                </h3>
-                <p className="text-xs text-blue-100 mt-0.5">
-                  원아 집 근처에 하차 가능한 셔틀 지도교사님께 오늘 탑승 여부 결제 메시지를 발송합니다.
-                </p>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center font-black">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-sm font-black">셔틀 탑승 결제 신청 확인</h3>
+                  <p className="text-[11px] text-blue-100">하차 위치 기준 담당 차량으로 자동 매칭됩니다.</p>
+                </div>
               </div>
               <button
                 type="button"
-                onClick={() => setShuttleRideModalStudent(null)}
-                className="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10 transition"
+                onClick={() => setQuickRequestModal(null)}
+                className="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -2005,145 +2139,74 @@ export default function TeacherDashboard({
             </div>
 
             {/* Body */}
-            <div className="p-6 overflow-y-auto space-y-4">
-              {/* Student Info Card */}
-              <div className="bg-blue-50/70 border border-blue-200/80 rounded-2xl p-4 flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-base font-extrabold text-blue-950">{shuttleRideModalStudent.name}</span>
-                    <span className="text-xs font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
-                      {shuttleRideModalStudent.raw?.['반명'] || teacherClass || '원아'}
-                    </span>
-                    <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded font-bold">
-                      평소 직접 픽업
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-600 mt-1 truncate max-w-sm">
-                    주소: {shuttleRideModalStudent.address || '주소 미등록'}
-                  </p>
+            <div className="p-6 space-y-4">
+              <div className="bg-blue-50/70 border border-blue-200 rounded-2xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500">신청 원아:</span>
+                  <span className="text-sm font-black text-blue-950">
+                    {quickRequestModal.student.name} ({quickRequestModal.student.raw?.['반명'] || teacherClass || '원아'})
+                  </span>
                 </div>
-                <div className="text-right">
-                  <span className="text-[11px] text-slate-400 block">학부모 연락처</span>
-                  <span className="text-xs font-bold text-slate-700">
-                    {shuttleRideModalStudent.raw?.['학부모전화번호'] || shuttleRideModalStudent.raw?.['연락처'] || '미등록'}
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500">하차 희망 위치:</span>
+                  <span className="text-xs font-bold text-slate-800 truncate max-w-[200px]" title={quickRequestModal.student.address}>
+                    {quickRequestModal.student.address || '원아 등록 주소'}
                   </span>
                 </div>
               </div>
 
-              {/* Recommended Bus & Guide Teacher List */}
-              <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-2">
-                  하차 가능 셔틀 차량 및 담당 지도교사 선택 (원아 위치 근접순)
-                </label>
-                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                  {buses
-                    .map(b => ({
-                      bus: b,
-                      ...getBusProximityInfo(b, shuttleRideModalStudent, students)
-                    }))
-                    .sort((a, b) => a.distance - b.distance)
-                    .map(({ bus, distance, label }, idx) => {
-                      const isSelected = shuttleRideTargetVehicleId === bus.id;
-                      const isClosest = idx === 0 && distance < 999999;
-                      return (
-                        <div
-                          key={bus.id}
-                          onClick={() => setShuttleRideTargetVehicleId(bus.id)}
-                          className={`p-3 rounded-2xl border-2 cursor-pointer transition-all flex items-center justify-between ${
-                            isSelected
-                              ? 'border-blue-600 bg-blue-50/50 shadow-xs'
-                              : 'border-slate-200 hover:border-slate-300 bg-white'
-                          }`}
-                        >
-                          <div className="flex items-center gap-3">
-                            <input
-                              type="radio"
-                              name="targetVehicle"
-                              checked={isSelected}
-                              onChange={() => setShuttleRideTargetVehicleId(bus.id)}
-                              className="w-4 h-4 text-blue-600 focus:ring-blue-500"
-                            />
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-extrabold text-sm text-slate-900">{bus.name}</span>
-                                <span className="text-xs text-slate-500 font-medium">({bus.licensePlate || '배차'})</span>
-                                {isClosest && (
-                                  <span className="text-[10px] bg-emerald-100 text-emerald-800 font-extrabold px-1.5 py-0.5 rounded border border-emerald-200">
-                                    가장 가까운 구역
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
-                                <span>지도교사: <strong className="text-slate-700">{bus.teacherName || bus.teacherUser?.name || '지도교사'}</strong></span>
-                                <span>•</span>
-                                <span>기사님: <strong className="text-slate-700">{bus.driverName || '기사님'}</strong></span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="text-right">
-                            <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 block mb-0.5">
-                              {label}
-                            </span>
-                            <span className="text-[11px] text-slate-400">
-                              {bus.departureTime || (bus.name?.includes('2') ? '16:30 하원' : '15:30 하원')}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
+              {quickRequestModal.targetBus ? (
+                <div className="bg-indigo-50/80 border-2 border-indigo-200 rounded-2xl p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-indigo-900">자동 매칭 차량:</span>
+                    <span className="text-sm font-black text-indigo-700 bg-white px-2.5 py-0.5 rounded-lg border border-indigo-200 shadow-2xs">
+                      {quickRequestModal.targetBus.name} {quickRequestModal.targetBus.licensePlate ? `(${quickRequestModal.targetBus.licensePlate})` : ''}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500 font-bold">담당 지도교사:</span>
+                    <span className="font-extrabold text-slate-800">
+                      {quickRequestModal.targetBus.teacherName || quickRequestModal.targetBus.teacherUser?.name || '담당 지도교사'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500 font-bold">거리 근접도:</span>
+                    <span className="font-extrabold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      {quickRequestModal.distanceLabel || '가장 가까운 하차 구역'}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 font-bold">
+                  배차 가능한 차량을 찾을 수 없습니다. 원장님께 배차 등록을 문의해주세요.
+                </div>
+              )}
 
-              {/* Drop-off Location */}
-              <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                  하차 희망 위치 (상세 하차지)
-                </label>
-                <input
-                  type="text"
-                  value={shuttleRideBoardingLocation}
-                  onChange={e => setShuttleRideBoardingLocation(e.target.value)}
-                  placeholder="예: 현대아파트 101동 정문 앞 or 유치원 앞 하차"
-                  className="w-full px-3.5 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
-                />
-              </div>
-
-              {/* Request Note */}
-              <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                  지도교사 전달 메시지 (결제 요청 비고)
-                </label>
-                <textarea
-                  rows={3}
-                  value={shuttleRideNote}
-                  onChange={e => setShuttleRideNote(e.target.value)}
-                  placeholder="지도교사님께 전달할 요청 사항을 입력하세요."
-                  className="w-full px-3.5 py-2 text-xs font-medium bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition resize-none"
-                />
-              </div>
+              <p className="text-xs text-slate-600 font-medium leading-relaxed text-center px-2">
+                위 원아의 하차 위치를 담당하는 <strong className="text-indigo-600">{quickRequestModal.targetBus?.name} {quickRequestModal.targetBus?.teacherName || ''} 지도교사님</strong>께 오늘 하원 셔틀 탑승 및 결제를 신청하시겠습니까?
+              </p>
             </div>
 
             {/* Footer */}
-            <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2 shrink-0">
               <button
                 type="button"
-                disabled={isSendingRideRequest}
-                onClick={() => setShuttleRideModalStudent(null)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition"
+                disabled={isSendingQuickRequest}
+                onClick={() => setQuickRequestModal(null)}
+                className="px-4 py-2.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition"
               >
                 취소
               </button>
               <button
                 type="button"
-                disabled={isSendingRideRequest || !shuttleRideTargetVehicleId || !shuttleRideBoardingLocation.trim()}
-                onClick={handleSubmitShuttleRideRequest}
-                className="px-5 py-2 text-xs font-black text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-xl shadow-md shadow-blue-500/20 transition flex items-center gap-1.5"
+                disabled={isSendingQuickRequest || !quickRequestModal.targetBus}
+                onClick={handleExecuteQuickRideRequest}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-black rounded-xl shadow-md shadow-blue-500/20 transition flex items-center gap-1.5 disabled:opacity-50"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                 </svg>
-                <span>{isSendingRideRequest ? '메시지 발송 중...' : '결제 메시지 보내기'}</span>
+                <span>{isSendingQuickRequest ? '신청 전송 중...' : '신청하기'}</span>
               </button>
             </div>
           </div>
