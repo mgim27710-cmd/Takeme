@@ -1130,6 +1130,8 @@ export class RoutingService {
         name: v.busNumber,
         color: v.colorHex || this.getDistinctColor(),
         points: parsedPoints,
+        polygon: parsedPoints,
+        polygonCoordinates: parsedPoints,
         busNumber: v.busNumber,
         plateNumber: v.plateNumber,
         driverName: v.driverName,
