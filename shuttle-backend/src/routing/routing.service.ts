@@ -278,16 +278,42 @@ export class RoutingService {
 
   async getAcademy(academyId?: number, userId?: number): Promise<Academy | null> {
     if (academyId && !isNaN(Number(academyId))) {
-      return this.academyRepository.findOne({ where: { id: Number(academyId) } });
+      const acad = await this.academyRepository.findOne({
+        where: { id: Number(academyId) },
+        relations: { owner: true }
+      });
+      if (acad) return acad;
     }
     if (userId && !isNaN(Number(userId))) {
-      return this.academyRepository.findOne({ where: { owner: { id: Number(userId) } } });
+      const acad = await this.academyRepository.findOne({
+        where: { owner: { id: Number(userId) } },
+        relations: { owner: true }
+      });
+      if (acad) return acad;
+
+      const user = await this.userRepository.findOne({
+        where: { id: Number(userId) },
+        relations: { academy: true }
+      });
+      if (user?.academy) return user.academy;
     }
-    return this.academyRepository.findOne({ where: {}, order: { id: 'DESC' } });
+    return null;
   }
 
-  async getAllAcademies() {
+  async getAllAcademies(reqUser?: any) {
+    let whereCondition: any = {};
+    if (reqUser && reqUser.role !== 'SUPER_ADMIN') {
+      const targetAcademyId = reqUser.academyId;
+      if (targetAcademyId) {
+        whereCondition = { id: targetAcademyId };
+      } else if (reqUser.sub) {
+        whereCondition = { owner: { id: reqUser.sub } };
+      } else {
+        return [];
+      }
+    }
     const academies = await this.academyRepository.find({
+      where: whereCondition,
       relations: { owner: true },
       order: { id: 'ASC' }
     });
@@ -2377,7 +2403,7 @@ export class RoutingService {
 
   async getHolidays(academyId?: number, userId?: number) {
     const academy = await this.getAcademy(academyId, userId);
-    if (!academy) return this.academyHolidayRepository.find({ order: { startDate: 'DESC' } });
+    if (!academy) return [];
     return this.academyHolidayRepository.find({ 
       where: { academy: { id: academy.id } },
       order: { startDate: 'DESC' } 
@@ -2397,10 +2423,18 @@ export class RoutingService {
     return { success: true };
   }
 
-  async getAdminMessages() {
+  async getAdminMessages(academyId?: number, userId?: number) {
+    const academy = await this.getAcademy(academyId, userId);
+    if (!academy) return [];
+
     return this.parentMessageRepository.createQueryBuilder('msg')
-      .where('msg.targetRoles LIKE :role', { role: '%ACADEMY_ADMIN%' })
       .leftJoinAndSelect('msg.student', 'student')
+      .leftJoinAndSelect('msg.receiverUser', 'receiverUser')
+      .where('msg.targetRoles LIKE :role', { role: '%ACADEMY_ADMIN%' })
+      .andWhere('(student.academyId = :academyId OR receiverUser.academyId = :academyId OR receiverUser.id = :userId)', {
+        academyId: academy.id,
+        userId: userId || 0
+      })
       .orderBy('msg.createdAt', 'DESC')
       .getMany();
   }

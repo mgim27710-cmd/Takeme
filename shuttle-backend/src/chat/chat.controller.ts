@@ -37,14 +37,36 @@ export class ChatController {
     return undefined;
   }
 
+  private extractTokenPayload(req: any): any {
+    if (req?.user) return req.user;
+    const authHeader = req?.headers?.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const parts = authHeader.substring(7).split('.');
+        if (parts.length === 3) {
+          return JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+        }
+      } catch (e) {}
+    }
+    return undefined;
+  }
+
   @Get('users')
   async getUsers(
     @Query('academyId') academyId?: string,
     @Query('email') email?: string,
     @Req() req?: any,
   ) {
-    const aId = academyId && !isNaN(Number(academyId)) ? Number(academyId) : (req?.user?.academyId || undefined);
+    const payload = this.extractTokenPayload(req);
+    const isSuper = payload?.role === 'SUPER_ADMIN';
     const userEmail = this.extractEmail(req, email);
+
+    let aId: number | undefined;
+    if (isSuper) {
+      aId = academyId && !isNaN(Number(academyId)) ? Number(academyId) : (payload?.academyId || undefined);
+    } else {
+      aId = payload?.academyId ? Number(payload.academyId) : undefined;
+    }
     return this.chatService.getAcademyUsers(aId, userEmail);
   }
 
@@ -106,8 +128,16 @@ export class ChatController {
     @Query('email') email?: string,
     @Req() req?: any,
   ) {
-    const aId = academyId && !isNaN(Number(academyId)) ? Number(academyId) : (req?.user?.academyId || undefined);
+    const payload = this.extractTokenPayload(req);
+    const isSuper = payload?.role === 'SUPER_ADMIN';
     const userEmail = this.extractEmail(req, email);
+
+    let aId: number | undefined;
+    if (isSuper) {
+      aId = academyId && !isNaN(Number(academyId)) ? Number(academyId) : (payload?.academyId || undefined);
+    } else {
+      aId = payload?.academyId ? Number(payload.academyId) : undefined;
+    }
     return this.chatService.getPaymentContext(aId, userEmail);
   }
 

@@ -372,28 +372,25 @@ export class AuthService {
         academy = await this.academyRepository.findOne({ where: { id: user.academyId } });
       }
       if (!academy) {
-        // Find if there is an academy without owner or create a fresh one
-        const unowned = await this.academyRepository.findOne({ where: { owner: undefined } });
-        if (unowned && !unowned.owner) {
-          unowned.owner = user;
-          await this.academyRepository.save(unowned);
-          academy = unowned;
-        } else {
-          let authCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-          while (await this.academyRepository.findOne({ where: { authCode } })) {
-            authCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-          }
-          academy = this.academyRepository.create({
-            name: user.name ? `${user.name} 유치원` : '신규 유치원',
-            owner: user,
-            authCode,
-            vehicleCount: 0
-          });
-          await this.academyRepository.save(academy);
+        let authCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+        while (await this.academyRepository.findOne({ where: { authCode } })) {
+          authCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         }
+        academy = this.academyRepository.create({
+          name: user.name ? `${user.name} 유치원` : '신규 유치원',
+          owner: user,
+          authCode,
+          vehicleCount: 0
+        });
+        await this.academyRepository.save(academy);
       }
       academyId = academy.id;
       academyName = academy.name;
+      if (user.academyId !== academy.id) {
+        user.academyId = academy.id;
+        user.academy = academy;
+        await this.usersRepository.save(user);
+      }
     } else if (user.role === UserRole.STUDENT || user.role === UserRole.PARENT) {
       const student = await this.studentRepository.findOne({
         where: user.role === UserRole.STUDENT ? { studentUser: { id: user.id } } : { parentUser: { id: user.id } },
@@ -608,6 +605,9 @@ export class AuthService {
           vehicleCount: 0,
         });
         await this.academyRepository.save(academy);
+        savedUser.academyId = academy.id;
+        savedUser.academy = academy;
+        await this.usersRepository.save(savedUser);
       } else if (userRole === UserRole.STUDENT || userRole === UserRole.PARENT) {
         if (!targetAcademy) throw new BadRequestException('소속 유치원 정보를 찾을 수 없습니다.');
         const student = await this.studentRepository.createQueryBuilder('student')

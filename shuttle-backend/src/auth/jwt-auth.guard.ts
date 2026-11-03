@@ -36,7 +36,7 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     // 1. Database User validation & Single Session / Lock check
-    const user = await this.usersRepository.findOne({ where: { id: payload.sub } });
+    const user = await this.usersRepository.findOne({ where: { id: payload.sub }, relations: { academy: true } });
     if (!user) {
       throw new UnauthorizedException('존재하지 않는 사용자입니다.');
     }
@@ -53,6 +53,9 @@ export class JwtAuthGuard implements CanActivate {
 
     req.user = payload;
     req.dbUser = user;
+    if (user.academyId && !req.user.academyId) {
+      req.user.academyId = user.academyId;
+    }
 
     // 4. Role-based Access Control (RBAC)
     const roles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [

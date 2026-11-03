@@ -127,8 +127,19 @@ export default function Dashboard() {
   const isSuperAdmin = currentUser.role === 'SUPER_ADMIN';
   const [allAcademies, setAllAcademies] = useState([]);
   const [selectedAcademyId, setSelectedAcademyId] = useState(
-    Number(localStorage.getItem('takeme_selected_academy_id')) || currentUser.academyId || null
+    isSuperAdmin
+      ? (Number(localStorage.getItem('takeme_selected_academy_id')) || currentUser.academyId || null)
+      : (currentUser.academyId || null)
   );
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      localStorage.removeItem('takeme_selected_academy_id');
+      if (currentUser?.academyId && selectedAcademyId !== currentUser.academyId) {
+        setSelectedAcademyId(currentUser.academyId);
+      }
+    }
+  }, [isSuperAdmin, currentUser?.academyId]);
 
   const [buses, setBuses] = useState([]);
   const [students, setStudents] = useState([]); // Array of { name, address, lat, lng, assignedBusId, color }

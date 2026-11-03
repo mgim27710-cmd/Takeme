@@ -34,11 +34,14 @@ export class ChatService {
     if (currentUserEmail) {
       currentUser = await this.userRepo.findOne({ where: { email: currentUserEmail } });
     }
+    const targetAcademyId = academyId || currentUser?.academyId;
+    if (!targetAcademyId) {
+      return { drivers: [], teachers: [], parents: [], admins: [] };
+    }
 
     // 1. 차량 정보 조회 (기사 및 동승교사 매핑)
-    const vehicleWhere = academyId ? { academy: { id: academyId } } : {};
     const vehicles = await this.vehicleRepo.find({
-      where: vehicleWhere,
+      where: { academy: { id: targetAcademyId } },
       relations: { driverUser: true, teacherUser: true },
     });
 
@@ -58,9 +61,8 @@ export class ChatService {
     }
 
     // 2. 원생 정보 조회 (학부모 매핑)
-    const studentWhere = academyId ? { academy: { id: academyId } } : {};
     const students = await this.studentRepo.find({
-      where: studentWhere,
+      where: { academy: { id: targetAcademyId } },
       relations: { parentUser: true, studentUser: true },
     });
 
@@ -75,16 +77,14 @@ export class ChatService {
       }
     }
 
-    // 3. 사용자 목록 조회
-    const userQuery = this.userRepo.createQueryBuilder('u');
-    if (academyId) {
-      const vIds = vehicleUserIds.size > 0 ? Array.from(vehicleUserIds) : [0];
-      const pIds = parentUserIds.size > 0 ? Array.from(parentUserIds) : [0];
-      userQuery.where(
-        '(u.academyId = :academyId OR u.id IN (:...vIds) OR u.id IN (:...pIds) OR u.role = :superRole)',
-        { academyId, vIds, pIds, superRole: UserRole.SUPER_ADMIN }
+    // 3. 사용자 목록 조회 (해당 유치원 소속 사용자만 엄격 격리)
+    const vIds = vehicleUserIds.size > 0 ? Array.from(vehicleUserIds) : [0];
+    const pIds = parentUserIds.size > 0 ? Array.from(parentUserIds) : [0];
+    const userQuery = this.userRepo.createQueryBuilder('u')
+      .where(
+        '(u.academyId = :targetAcademyId OR u.id IN (:...vIds) OR u.id IN (:...pIds))',
+        { targetAcademyId, vIds, pIds }
       );
-    }
     const allUsers = await userQuery.getMany();
 
     const drivers: any[] = [];
@@ -187,6 +187,10 @@ export class ChatService {
       .leftJoinAndSelect('room.members', 'allMembers')
       .leftJoinAndSelect('allMembers.user', 'memberUser');
 
+    if (targetAcademyId) {
+      query.andWhere('(room.academyId = :targetAcademyId OR room.academyId IS NULL)', { targetAcademyId });
+    }
+
     const rooms = await query.getMany();
 
     for (const room of rooms) {
@@ -265,12 +269,16 @@ export class ChatService {
     if (isDirect) {
       const u1 = userIds[0];
       const u2 = userIds[1];
-      const existingRooms = await this.roomRepo.createQueryBuilder('room')
+      const existingQuery = this.roomRepo.createQueryBuilder('room')
         .innerJoin('room.members', 'm1', 'm1.userId = :u1', { u1 })
         .innerJoin('room.members', 'm2', 'm2.userId = :u2', { u2 })
         .leftJoinAndSelect('room.members', 'allMembers')
-        .leftJoinAndSelect('allMembers.user', 'user')
-        .getMany();
+        .leftJoinAndSelect('allMembers.user', 'user');
+
+      if (creator.academyId) {
+        existingQuery.andWhere('(room.academyId = :cadId OR room.academyId IS NULL)', { cadId: creator.academyId });
+      }
+      const existingRooms = await existingQuery.getMany();
 
       for (const r of existingRooms) {
         if (r.members && r.members.length === 2 && r.type !== ChatRoomType.PAYMENT_SYSTEM) {
@@ -294,6 +302,7 @@ export class ChatService {
     const room = this.roomRepo.create({
       name: roomName,
       type: roomType,
+      academyId: creator.academyId || null,
     });
     const savedRoom = await this.roomRepo.save(room);
 
@@ -349,21 +358,22 @@ export class ChatService {
       if (u?.academyId) aId = u.academyId;
     }
 
-    const vehicleWhere = aId ? { academy: { id: aId } } : {};
+    if (!aId) {
+      return { vehicles: [], students: [], pickupPoints: [] };
+    }
+
     const vehicles = await this.vehicleRepo.find({
-      where: vehicleWhere,
+      where: { academy: { id: aId } },
       relations: { driverUser: true, teacherUser: true },
     });
 
-    const studentWhere = aId ? { academy: { id: aId } } : {};
     const students = await this.studentRepo.find({
-      where: studentWhere,
+      where: { academy: { id: aId } },
       relations: { assignedVehicle: true },
     });
 
-    const pickupWhere = aId ? { academy: { id: aId } } : {};
     const pickupPoints = await this.pickupPointRepo.find({
-      where: pickupWhere,
+      where: { academy: { id: aId } },
     });
 
     return {
@@ -423,6 +433,10 @@ export class ChatService {
       relations: { teacherUser: true, driverUser: true, academy: true },
     });
     if (!vehicle) throw new BadRequestException('지정된 차량을 찾을 수 없습니다.');
+
+    if (vehicle.academy?.id && requester.academyId && vehicle.academy.id !== requester.academyId) {
+      throw new ForbiddenException('다른 유치원의 차량에는 신청할 수 없습니다.');
+    }
 
     let studentName = data.studentName;
     let studentObj: Student | null = null;
@@ -517,6 +531,10 @@ export class ChatService {
     });
     if (!message || message.type !== 'PAYMENT_REQUEST') {
       throw new BadRequestException('결제 신청 메시지를 찾을 수 없습니다.');
+    }
+
+    if (decider.role !== UserRole.SUPER_ADMIN && message.room?.academyId && decider.academyId && message.room.academyId !== decider.academyId) {
+      throw new ForbiddenException('다른 유치원의 결제 신청을 처리할 수 없습니다.');
     }
 
     if (message.payload?.status && message.payload.status !== 'PENDING') {
