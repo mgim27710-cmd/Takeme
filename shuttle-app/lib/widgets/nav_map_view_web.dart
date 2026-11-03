@@ -15,6 +15,9 @@ class NavMapControllerWeb implements NavMapController {
   final List<String> _pending = [];
   StreamSubscription<html.MessageEvent>? _sub;
 
+  @override
+  VoidCallback? onUserDrag;
+
   NavMapControllerWeb({required this.viewId}) {
     _initIframe();
   }
@@ -34,12 +37,13 @@ class NavMapControllerWeb implements NavMapController {
 
     _sub = html.window.onMessage.listen((event) {
       final data = event.data;
-      if (data is Map && data['type'] == 'ready') {
-        _ready = true;
-        _flushPending();
-      } else if (data is String && data.contains('"type":"ready"')) {
-        _ready = true;
-        _flushPending();
+      if (data is Map) {
+        if (data['type'] == 'ready') {
+          _ready = true;
+          _flushPending();
+        } else if (data['type'] == 'drag') {
+          onUserDrag?.call();
+        }
       }
     });
 
@@ -80,32 +84,44 @@ class NavMapControllerWeb implements NavMapController {
   @override
   void setRoutes({
     List<GeoPoint>? primary,
+    List<TrafficSegment>? traffic,
     List<GeoPoint>? alternate,
     required List<Map<String, dynamic>> stops,
     GeoPoint? academy,
     bool fit = true,
   }) {
-    _run('window.setRoutes(${_pts(primary)}, ${_pts(alternate)}, ${jsonEncode(stops)}, '
+    final t = jsonEncode(traffic?.map((e) => e.toJson()).toList());
+    _run('window.setRoutes(${_pts(primary)}, $t, ${_pts(alternate)}, ${jsonEncode(stops)}, '
         '${jsonEncode(academy?.toJson())}, $fit);');
   }
 
   @override
-  void setMyLocation(GeoPoint p) => _run('window.setMyLocation(${p.lat}, ${p.lng});');
+  void moveMe(GeoPoint p, {double? heading, bool follow = false, bool navigating = false}) =>
+      _run('window.moveMe(${p.lat}, ${p.lng}, ${heading ?? "null"}, $follow, $navigating);');
 
   @override
-  void moveBus(GeoPoint p, {bool follow = true}) => _run('window.moveBus(${p.lat}, ${p.lng}, $follow);');
-
-  @override
-  void hideBus() => _run('window.hideBus();');
-
-  @override
-  void centerOn(GeoPoint p, {int zoom = 17}) => _run('window.centerOn(${p.lat}, ${p.lng}, $zoom);');
+  void centerOn(GeoPoint p, {int zoom = 16}) => _run('window.centerOn(${p.lat}, ${p.lng}, $zoom);');
 
   @override
   void markStopPassed(int index) => _run('window.markStop($index);');
 
   @override
   void fitAll() => _run('window.fitAll();');
+
+  @override
+  void setHeadingUp(bool enabled) => _run('window.setHeadingUp($enabled);');
+
+  @override
+  void resetZoom() => _run('window.resetZoom();');
+
+  @override
+  void setMyLocation(GeoPoint p) => moveMe(p);
+
+  @override
+  void moveBus(GeoPoint p, {bool follow = true}) => moveMe(p, follow: follow);
+
+  @override
+  void hideBus() {}
 
   @override
   void setInteractive(bool interactive) {
