@@ -403,6 +403,7 @@ export default function Dashboard() {
 
   // Student Addition Modal State
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
+  const [editingStudentId, setEditingStudentId] = useState(null);
   const [studentForm, setStudentForm] = useState({
     name: '',
     address: '',
@@ -1371,30 +1372,36 @@ export default function Dashboard() {
   });
 
   const computePolygons = (busArray) => {
-    return busArray.map(bus => {
-      let pts = bus.points;
-      while (typeof pts === 'string') {
-        try { pts = JSON.parse(pts); } catch(e) { break; }
+    return (busArray || []).map(bus => {
+      let poly = bus.polygon || bus.polygonCoordinates || bus.points;
+      while (typeof poly === 'string') {
+        try { poly = JSON.parse(poly); } catch(e) { break; }
       }
-      if (!Array.isArray(pts) || pts.length < 3) {
-        let poly = bus.polygon;
-        while (typeof poly === 'string') {
-          try { poly = JSON.parse(poly); } catch(e) { break; }
+      if (Array.isArray(poly) && poly.length >= 3) {
+        try {
+          const closedCoords = poly.map(p => [p[1], p[0]]);
+          if (closedCoords[0][0] !== closedCoords[closedCoords.length - 1][0] ||
+              closedCoords[0][1] !== closedCoords[closedCoords.length - 1][1]) {
+            closedCoords.push(closedCoords[0]);
+          }
+          const turfPoly = turf.polygon([closedCoords]);
+          return {
+            ...bus,
+            points: poly,
+            polygon: poly,
+            polygonCoordinates: poly,
+            turfPolygon: turfPoly
+          };
+        } catch (e) {
+          return {
+            ...bus,
+            points: poly,
+            polygon: poly,
+            polygonCoordinates: poly
+          };
         }
-        if (Array.isArray(poly) && poly.length >= 3) {
-          return { ...bus, points: pts || [], polygon: poly };
-        }
-        return { ...bus, points: pts || [], polygon: [] };
       }
-      
-      const turfPoints = turf.featureCollection(
-        pts.map(p => turf.point([p[1], p[0]]))
-      );
-      const hull = turf.convex(turfPoints);
-      if (!hull) return { ...bus, points: pts, polygon: pts };
-      
-      const leafletCoords = hull.geometry.coordinates[0].map(coord => [coord[1], coord[0]]);
-      return { ...bus, points: pts, polygon: leafletCoords, turfPolygon: hull };
+      return { ...bus, points: [], polygon: [], polygonCoordinates: [] };
     });
   };
 
@@ -1734,90 +1741,128 @@ const parseKindergartenExcelSheet = (sheet) => {
         }
 
         const addressMap = data.map((row, idx) => {
-          const name = row['학생이름/영문이름'] || row['이름'] || row['원생명'] || row['학생명'] || row['원생이름'] || `원생${idx + 1}`;
-          const roadAddress = row['도로명주소'] || row['주소'] || '';
-          const stopLocation = row['탑승차량_승차지'] || row['승차지'] || row['등원지'] || row['탑승지'] || row['승차지(주소)'] || '';
+          const name = row['학생이름/영문이름'] || row['이름'] || row['원아명'] || row['원생명'] || row['학생명'] || row['원생이름'] || `원생${idx + 1}`;
+          const roadAddress = (row['도로명주소'] || row['주소'] || '').toString().trim();
+          const stopLocation = (row['탑승차량_승차지'] || row['승차지'] || row['등원지'] || row['탑승지'] || row['승차지(주소)'] || '').toString().trim();
           const address = roadAddress || stopLocation;
           const boardingLocation = stopLocation || roadAddress;
           return {
             name: name.toString().trim(),
-            address: address.toString().trim(),
-            boardingLocation: boardingLocation.toString().trim(),
+            address: address,
+            boardingLocation: boardingLocation,
             raw: row
           };
-        }).filter(item => item.address);
+        }).filter(item => item.name);
 
         if (addressMap.length === 0) {
-          alert('유효한 주소(등원지, 탑승지, 주소 등)가 입력된 원아 행을 찾을 수 없습니다.');
+          alert('엑셀 파일에서 등록할 원아 데이터를 찾을 수 없습니다.');
           setIsProcessing(false);
           return;
         }
 
-        const res = await fetch(`${API_BASE_URL}/routing/geocode-bulk`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ addresses: addressMap.map(a => a.address) })
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.message || '지오코딩 처리 실패');
-        }
-        const geocoded = await res.json();
-        const defaultLat = academy?.lat ? parseFloat(academy.lat) : (academy?.latitude ? parseFloat(academy.latitude) : 37.8083);
-        const defaultLng = academy?.lng ? parseFloat(academy.lng) : (academy?.longitude ? parseFloat(academy.longitude) : 127.0717);
-
-        // Point-in-Polygon & Explicit Assignment
-        const newStudents = [];
-        geocoded.forEach((item, idx) => {
-          const lat = item.coords?.lat !== undefined && !isNaN(item.coords?.lat) ? item.coords.lat : defaultLat;
-          const lng = item.coords?.lng !== undefined && !isNaN(item.coords?.lng) ? item.coords.lng : defaultLng;
-          
-          const pt = turf.point([lng, lat]);
-          let assignedBus = null;
-          let minDistance = Infinity;
-
-          // 1. Check if explicit bus was specified in Excel row
-          const rawRow = addressMap[idx].raw || {};
-          const explicitBusRaw = (rawRow['등원차량'] || rawRow['하원차량'] || rawRow['차량'] || rawRow['호차'] || '').toString().trim();
-          if (explicitBusRaw) {
-            const numOnly = explicitBusRaw.replace(/[^0-9]/g, '');
-            assignedBus = buses.find(b => b.name === explicitBusRaw || (numOnly && (b.name || '').replace(/[^0-9]/g, '') === numOnly)) || null;
+        const validAddressesToGeocode = Array.from(new Set(addressMap.map(a => a.address).filter(Boolean)));
+        let geocodeLookup = new Map();
+        if (validAddressesToGeocode.length > 0) {
+          const res = await fetch(`${API_BASE_URL}/routing/geocode-bulk`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ addresses: validAddressesToGeocode })
+          });
+          if (res.ok) {
+            const list = await res.json();
+            list.forEach(item => {
+              if (item.coords && !isNaN(item.coords.lat) && !isNaN(item.coords.lng)) {
+                geocodeLookup.set(item.address, item.coords);
+              }
+            });
           }
+        }
 
-          if (!assignedBus) {
+        let successCount = 0;
+        let failedCount = 0;
+        const newStudents = [];
+
+        addressMap.forEach((item, idx) => {
+          const coords = item.address ? geocodeLookup.get(item.address) : null;
+          const isGeocoded = Boolean(coords && coords.lat && coords.lng);
+
+          let lat = null;
+          let lng = null;
+          let address = '';
+          let boardingLocation = '';
+          let assignedBus = null;
+
+          if (isGeocoded) {
+            lat = coords.lat;
+            lng = coords.lng;
+            address = item.address;
+            boardingLocation = item.boardingLocation || address;
+            successCount++;
+
+            const pt = turf.point([lng, lat]);
+            // 1. Point in polygon (구역 내 위치한 학생은 해당 구역 차량에 즉시 배정)
             for (const bus of buses) {
-              // 2. Check if inside polygon
               if (bus.turfPolygon && turf.booleanPointInPolygon(pt, bus.turfPolygon)) {
                 assignedBus = bus;
-                minDistance = 0;
                 break;
               }
-              
-              // 3. Fallback: calculate distance to closest known point of this bus
-              if (bus.points && bus.points.length > 0) {
-                for (const bPt of bus.points) {
-                  // Leaflet uses [lat, lng], Turf uses [lng, lat]
-                  const busNode = turf.point([bPt[1], bPt[0]]);
-                  const dist = turf.distance(pt, busNode);
-                  if (dist < minDistance) {
-                    minDistance = dist;
-                    assignedBus = bus;
+            }
+
+            // 2. 구역 밖인 경우: 엑셀에 명시된 차량이 있으면 해당 차량으로 배정 (구역 확장 대상)
+            if (!assignedBus) {
+              const rawRow = item.raw || {};
+              const explicitBusRaw = (rawRow['등원차량'] || rawRow['하원차량'] || rawRow['차량'] || rawRow['호차'] || '').toString().trim();
+              if (explicitBusRaw) {
+                const numOnly = explicitBusRaw.replace(/[^0-9]/g, '');
+                assignedBus = buses.find(b => b.name === explicitBusRaw || (numOnly && (b.name || '').replace(/[^0-9]/g, '') === numOnly)) || null;
+              }
+            }
+
+            // 3. Proximity fallback
+            if (!assignedBus) {
+              let minDistance = Infinity;
+              for (const bus of buses) {
+                if (bus.points && bus.points.length > 0) {
+                  for (const bPt of bus.points) {
+                    const busNode = turf.point([bPt[1], bPt[0]]);
+                    const dist = turf.distance(pt, busNode);
+                    if (dist < minDistance) {
+                      minDistance = dist;
+                      assignedBus = bus;
+                    }
                   }
                 }
               }
+            }
+          } else {
+            // Geocoding failed: remove road address, mark for manual input
+            failedCount++;
+            address = '';
+            boardingLocation = '';
+            lat = null;
+            lng = null;
+            assignedBus = null;
+          }
+
+          const rawObj = { ...(item.raw || {}) };
+          if (!isGeocoded) {
+            rawObj['주소입력필요'] = true;
+            if (item.address) {
+              rawObj['실패주소'] = item.address;
             }
           }
 
           newStudents.push({
             id: idx + 1,
-            name: addressMap[idx].name,
-            address: item.address,
-            boardingLocation: addressMap[idx].boardingLocation,
+            name: item.name,
+            address: address,
+            boardingLocation: boardingLocation,
             lat: lat,
             lng: lng,
+            addressNeedsInput: !isGeocoded,
             assignedBusId: assignedBus ? assignedBus.id : null,
-            color: assignedBus ? assignedBus.color : '#64748b', // Slate for unassigned
-            raw: addressMap[idx].raw
+            color: assignedBus ? (assignedBus.color || '#64748b') : '#64748b',
+            raw: rawObj
           });
         });
 
@@ -1849,7 +1894,14 @@ const parseKindergartenExcelSheet = (sheet) => {
           setStudents(newStudents);
         }
         
-        alert(`총 ${newStudents.length}명의 원생 등록 및 구역 배차가 완료되었습니다!`);
+        alert(
+          `총 ${newStudents.length}명의 원아 등록이 완료되었습니다!\n\n` +
+          `• 정상 배차: ${successCount}명\n` +
+          `• 주소 수동 입력 필요: ${failedCount}명\n\n` +
+          (failedCount > 0 
+            ? '※ 주소 읽기에 실패한 원아는 목록에 [빨간색 테두리]로 표시됩니다. 클릭하여 올바른 도로명 주소를 수동으로 입력해 주세요.'
+            : '모든 원아의 주소가 정상적으로 지도 구역에 배차되었습니다.')
+        );
       } catch (err) {
         alert(`원생 명단 처리 중 에러가 발생했습니다: ${err.message}`);
         console.error(err);
@@ -2396,14 +2448,21 @@ const parseKindergartenExcelSheet = (sheet) => {
         academyId: targetAcademyId
       };
 
-      const res = await fetch(`${API_BASE_URL}/routing/add-student`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const res = editingStudentId
+        ? await fetch(`${API_BASE_URL}/routing/student/${editingStudentId}${targetAcademyId ? `?academyId=${targetAcademyId}` : ''}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          })
+        : await fetch(`${API_BASE_URL}/routing/add-student`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.message || '원생 등록 실패');
+        throw new Error(errData.message || (editingStudentId ? '원생 정보 수정 실패' : '원생 등록 실패'));
       }
 
       const resData = await res.json();
@@ -2426,8 +2485,13 @@ const parseKindergartenExcelSheet = (sheet) => {
       const busInfo = busName 
         ? `[${busName}]에 배정되었으며, 차량 운행 구역이 원아 위치까지 자동으로 확장되었습니다!`
         : '(구역 미배정)';
-      alert(`'${studentForm.name}' 원아가 성공적으로 추가되었습니다!\n${busInfo}`);
+      alert(
+        editingStudentId
+          ? `'${studentForm.name}' 원아 정보 및 주소가 성공적으로 수정되었습니다!\n${busInfo}`
+          : `'${studentForm.name}' 원아가 성공적으로 추가되었습니다!\n${busInfo}`
+      );
       setShowAddStudentModal(false);
+      setEditingStudentId(null);
       setStudentForm({
         name: '',
         address: '',
@@ -2449,10 +2513,59 @@ const parseKindergartenExcelSheet = (sheet) => {
       });
     } catch (err) {
       console.error(err);
-      alert(`원생 추가 중 오류가 발생했습니다: ${err.message}`);
+      alert(`원생 처리 중 오류가 발생했습니다: ${err.message}`);
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleOpenAddStudentModal = () => {
+    setEditingStudentId(null);
+    setStudentForm({
+      name: '',
+      address: '',
+      inLocation: '',
+      outLocation: '',
+      className: '',
+      kindergartenName: academy?.name || '',
+      age: '',
+      gender: '남',
+      parentName: '',
+      parentPhone: '',
+      teacherName: '',
+      departureType: '정규하원',
+      assignedBusId: '',
+      inTime: '',
+      outTime: '',
+      allergies: '',
+      note: ''
+    });
+    setShowAddStudentModal(true);
+  };
+
+  const handleOpenEditStudentModal = (student) => {
+    setEditingStudentId(student.id);
+    const raw = student.raw || {};
+    setStudentForm({
+      name: student.realName || student.name || '',
+      address: student.address || raw['주소'] || raw['실패주소'] || '',
+      inLocation: student.boardingLocation || raw['등원지'] || raw['탑승지'] || student.address || '',
+      outLocation: raw['하원지'] || student.boardingLocation || student.address || '',
+      className: raw['반명'] || raw['반'] || '',
+      kindergartenName: raw['유치원명'] || raw['소속원명'] || raw['학교명'] || academy?.name || '',
+      age: raw['연령'] !== undefined && raw['연령'] !== null ? String(raw['연령']) : (raw['학년'] ? String(raw['학년']) : ''),
+      gender: raw['성별'] || '남',
+      parentName: raw['보호자 성함'] || raw['학부모 성함'] || raw['학부모명'] || student.parentName || '',
+      parentPhone: raw['부모연락처'] || raw['보호자연락처'] || raw['보호자 연락처'] || student.parentPhone || '',
+      teacherName: raw['담임명'] || '',
+      departureType: raw['하원구분'] || raw['하원정보'] || '정규하원',
+      assignedBusId: student.assignedBusId ? String(student.assignedBusId) : '',
+      inTime: raw['등원시간'] || '',
+      outTime: raw['하원시간'] || '',
+      allergies: student.allergies || raw['알레르기'] || '',
+      note: raw['비고'] || ''
+    });
+    setShowAddStudentModal(true);
   };
 
   const handleDeleteStudent = async (student) => {
@@ -3121,7 +3234,7 @@ const parseKindergartenExcelSheet = (sheet) => {
 
             {/* Primary Action Button: 원생 추가 */}
             <button
-              onClick={() => setShowAddStudentModal(true)}
+              onClick={handleOpenAddStudentModal}
               className="w-full py-2.5 px-3 mb-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 text-sm active:scale-[0.99]"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3251,13 +3364,19 @@ const parseKindergartenExcelSheet = (sheet) => {
                     sortStudentsList(students).map(st => {
                       const isExpanded = expandedStudentDetailIds.has(st.id);
                       const bus = buses.find(b => b.id === st.assignedBusId);
+                      const needsAddress = !st.address || !st.lat || !st.lng || st.addressNeedsInput || st.raw?.['주소입력필요'];
                       return (
-                        <div key={st.id} className="p-2.5 bg-white border border-slate-200 rounded-xl shadow-xs hover:shadow-md transition-all group">
+                        <div key={st.id} className={`p-2.5 rounded-xl shadow-xs hover:shadow-md transition-all group ${needsAddress ? 'bg-red-50/30 border-2 border-red-500 ring-2 ring-red-100' : 'bg-white border border-slate-200'}`}>
                           <div className="flex items-center justify-between mb-1">
                             <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: st.color || bus?.color || '#64748b' }}></div>
+                              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b') }}></div>
                               <span className="font-bold text-slate-800 text-sm shrink-0">{st.name}</span>
                               <div className="flex items-center gap-1 overflow-hidden truncate">
+                                {needsAddress && (
+                                  <span className="text-xs bg-red-100 text-red-700 font-extrabold px-1.5 py-0.5 rounded border border-red-300 shrink-0 animate-pulse">
+                                    주소 입력 필요
+                                  </span>
+                                )}
                                 {st.raw?.['반명'] && (
                                   <span className="text-xs bg-blue-50 text-blue-600 font-semibold px-1.5 py-0.5 rounded border border-blue-100 shrink-0">
                                     {st.raw['반명']}
@@ -3283,6 +3402,16 @@ const parseKindergartenExcelSheet = (sheet) => {
                             <div className="flex items-center gap-1 shrink-0 ml-1">
                               <button
                                 type="button"
+                                onClick={(e) => { e.stopPropagation(); handleOpenEditStudentModal(st); }}
+                                className="w-5 h-5 flex items-center justify-center rounded-md bg-slate-100 hover:bg-blue-100 text-slate-500 hover:text-blue-600 text-xs transition-colors"
+                                title="원아 정보 및 주소 수정"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                              </button>
+                              <button
+                                type="button"
                                 onClick={(e) => { e.stopPropagation(); toggleStudentDetail(st.id); }}
                                 className="w-5 h-5 flex items-center justify-center rounded-md bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-black transition-colors"
                                 title={isExpanded ? '상세 접기' : '상세 정보 펼쳐보기 (+)'}
@@ -3301,17 +3430,35 @@ const parseKindergartenExcelSheet = (sheet) => {
                             </div>
                           </div>
 
-                          <div className="text-[13px] text-slate-600 truncate mb-1" title={st.address}>
-                            {st.address}
-                          </div>
+                          {needsAddress ? (
+                            <div className="my-1.5 p-1.5 bg-red-50 rounded-lg border border-red-200 flex items-center justify-between gap-1.5">
+                              <div className="flex items-center gap-1 text-xs text-red-600 font-bold truncate">
+                                <svg className="w-3.5 h-3.5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                                <span className="truncate">도로명 주소 필요 {st.raw?.['실패주소'] ? `(${st.raw['실패주소']})` : ''}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleOpenEditStudentModal(st); }}
+                                className="px-2 py-0.5 text-xs bg-red-600 hover:bg-red-700 text-white font-bold rounded shadow-2xs transition active:scale-95 shrink-0"
+                              >
+                                주소 입력
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="text-[13px] text-slate-600 truncate mb-1" title={st.address}>
+                              {st.address}
+                            </div>
+                          )}
 
                           <div className="flex justify-between items-center text-xs">
                             <span className="text-slate-400 text-xs">
                               {st.raw?.['보호자 성함'] ? `${st.raw?.['보호자 성함']} ` : ''}
                               {maskPhoneNumber(st.raw?.['부모연락처'] || st.raw?.['보호자연락처'] || st.raw?.['보호자 연락처'])}
                             </span>
-                            <span className="font-bold text-xs px-2 py-0.5 rounded-md" style={{ color: st.color || bus?.color || '#64748b', backgroundColor: `${st.color || bus?.color || '#64748b'}15` }}>
-                              {bus ? bus.name : '배정 대기'}
+                            <span className="font-bold text-xs px-2 py-0.5 rounded-md" style={{ color: needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b'), backgroundColor: needsAddress ? '#fee2e2' : `${st.color || bus?.color || '#64748b'}15` }}>
+                              {needsAddress ? '배정 대기(주소 필요)' : (bus ? bus.name : '배정 대기')}
                             </span>
                           </div>
 
@@ -3402,13 +3549,19 @@ const parseKindergartenExcelSheet = (sheet) => {
                                 group.list.map(st => {
                                   const isExpanded = expandedStudentDetailIds.has(st.id);
                                   const bus = buses.find(b => b.id === st.assignedBusId);
+                                  const needsAddress = !st.address || !st.lat || !st.lng || st.addressNeedsInput || st.raw?.['주소입력필요'];
                                   return (
-                                    <div key={st.id} className="p-2.5 bg-white border border-slate-200 rounded-xl shadow-xs hover:shadow-md transition-all group">
+                                    <div key={st.id} className={`p-2.5 rounded-xl shadow-xs hover:shadow-md transition-all group ${needsAddress ? 'bg-red-50/30 border-2 border-red-500 ring-2 ring-red-100' : 'bg-white border border-slate-200'}`}>
                                       <div className="flex items-center justify-between mb-1">
                                         <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                                          <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: st.color || bus?.color || '#64748b' }}></div>
+                                          <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b') }}></div>
                                           <span className="font-bold text-slate-800 text-sm shrink-0">{st.name}</span>
                                           <div className="flex items-center gap-1 overflow-hidden truncate">
+                                            {needsAddress && (
+                                              <span className="text-xs bg-red-100 text-red-700 font-extrabold px-1.5 py-0.5 rounded border border-red-300 shrink-0 animate-pulse">
+                                                주소 입력 필요
+                                              </span>
+                                            )}
                                             {studentFilterMode !== 'CLASS' && st.raw?.['반명'] && (
                                               <span className="text-xs bg-blue-50 text-blue-600 font-semibold px-1.5 py-0.5 rounded border border-blue-100 shrink-0">
                                                 {st.raw['반명']}
@@ -3434,6 +3587,16 @@ const parseKindergartenExcelSheet = (sheet) => {
                                         <div className="flex items-center gap-1 shrink-0 ml-1">
                                           <button
                                             type="button"
+                                            onClick={(e) => { e.stopPropagation(); handleOpenEditStudentModal(st); }}
+                                            className="w-5 h-5 flex items-center justify-center rounded-md bg-slate-100 hover:bg-blue-100 text-slate-500 hover:text-blue-600 text-xs transition-colors"
+                                            title="원아 정보 및 주소 수정"
+                                          >
+                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                            </svg>
+                                          </button>
+                                          <button
+                                            type="button"
                                             onClick={(e) => { e.stopPropagation(); toggleStudentDetail(st.id); }}
                                             className="w-5 h-5 flex items-center justify-center rounded-md bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-black transition-colors"
                                             title={isExpanded ? '상세 접기' : '상세 정보 펼쳐보기 (+)'}
@@ -3452,9 +3615,27 @@ const parseKindergartenExcelSheet = (sheet) => {
                                         </div>
                                       </div>
 
-                                      <div className="text-[13px] text-slate-600 truncate mb-1" title={st.address}>
-                                        {st.address}
-                                      </div>
+                                      {needsAddress ? (
+                                        <div className="my-1.5 p-1.5 bg-red-50 rounded-lg border border-red-200 flex items-center justify-between gap-1.5">
+                                          <div className="flex items-center gap-1 text-xs text-red-600 font-bold truncate">
+                                            <svg className="w-3.5 h-3.5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                            </svg>
+                                            <span className="truncate">도로명 주소 필요 {st.raw?.['실패주소'] ? `(${st.raw['실패주소']})` : ''}</span>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => { e.stopPropagation(); handleOpenEditStudentModal(st); }}
+                                            className="px-2 py-0.5 text-xs bg-red-600 hover:bg-red-700 text-white font-bold rounded shadow-2xs transition active:scale-95 shrink-0"
+                                          >
+                                            주소 입력
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <div className="text-[13px] text-slate-600 truncate mb-1" title={st.address}>
+                                          {st.address}
+                                        </div>
+                                      )}
 
                                       <div className="flex justify-between items-center text-xs">
                                         <span className="text-slate-400 text-xs">
@@ -3462,8 +3643,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                                           {maskPhoneNumber(st.raw?.['부모연락처'] || st.raw?.['보호자연락처'] || st.raw?.['보호자 연락처'])}
                                         </span>
                                         {studentFilterMode !== 'BUS' && (
-                                          <span className="font-bold text-xs px-2 py-0.5 rounded-md" style={{ color: st.color || bus?.color || '#64748b', backgroundColor: `${st.color || bus?.color || '#64748b'}15` }}>
-                                            {bus ? bus.name : '배정 대기'}
+                                          <span className="font-bold text-xs px-2 py-0.5 rounded-md" style={{ color: needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b'), backgroundColor: needsAddress ? '#fee2e2' : `${st.color || bus?.color || '#64748b'}15` }}>
+                                            {needsAddress ? '배정 대기(주소 필요)' : (bus ? bus.name : '배정 대기')}
                                           </span>
                                         )}
                                       </div>
@@ -3535,7 +3716,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                 </p>
                 <div className="flex gap-2">
                   <button 
-                    onClick={() => setShowAddStudentModal(true)}
+                    onClick={handleOpenAddStudentModal}
                     className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 shadow-sm transition text-center"
                   >
                     원생 추가하기
@@ -4484,12 +4665,18 @@ const parseKindergartenExcelSheet = (sheet) => {
             {/* Header */}
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
               <div>
-                <h3 className="text-lg font-bold text-slate-800">원아 직접 추가</h3>
-                <p className="text-xs text-slate-500 mt-0.5">유치원 엑셀 양식 항목을 작성하여 원아를 등록합니다. (추가 시 차량 구역 자동 확장)</p>
+                <h3 className="text-lg font-bold text-slate-800">
+                  {editingStudentId ? '원아 정보 및 주소 수정' : '원아 직접 추가'}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {editingStudentId
+                    ? '올바른 도로명 주소를 입력하고 저장하면 지도 구역이 자동으로 확장됩니다.'
+                    : '유치원 엑셀 양식 항목을 작성하여 원아를 등록합니다. (추가 시 차량 구역 자동 확장)'}
+                </p>
               </div>
               <button
                 type="button"
-                onClick={() => setShowAddStudentModal(false)}
+                onClick={() => { setShowAddStudentModal(false); setEditingStudentId(null); }}
                 className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4746,7 +4933,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-2.5">
                 <button
                   type="button"
-                  onClick={() => setShowAddStudentModal(false)}
+                  onClick={() => { setShowAddStudentModal(false); setEditingStudentId(null); }}
                   className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
                 >
                   취소
@@ -4759,10 +4946,10 @@ const parseKindergartenExcelSheet = (sheet) => {
                   {isProcessing ? (
                     <>
                       <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                      <span>등록 중...</span>
+                      <span>{editingStudentId ? '수정 중...' : '등록 중...'}</span>
                     </>
                   ) : (
-                    <span>원생 등록하기</span>
+                    <span>{editingStudentId ? '수정 저장 (구역 자동 확장)' : '원생 등록하기'}</span>
                   )}
                 </button>
               </div>

@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
@@ -241,8 +241,8 @@ export class RoutingService {
       }
     }
 
-    console.warn(`[geocodeAddress] 주소 변환 기준점 적용: ${address} -> fallback center`);
-    return { lat: cCoords.lat, lng: cCoords.lng };
+    console.warn(`[geocodeAddress] 주소 변환 실패: ${address} -> null 반환 (임의 기본좌표 사용 금지)`);
+    return null;
   }
 
   private colorPalette = [
@@ -1002,23 +1002,24 @@ export class RoutingService {
 
       let chosenVs: VehicleZoneState | null = null;
 
-      // Check explicit raw bus first (raw['호차'] > raw['차량'] > st.assignedVehicle > raw['등원차량'])
-      const explicitBusStr = parsedRaw['호차'] || parsedRaw['차량'] || (st.assignedVehicle ? st.assignedVehicle.busNumber : null) || parsedRaw['등원차량'];
-      if (explicitBusStr) {
-        chosenVs = matchVehicle(explicitBusStr);
-      }
-
-      // If not resolved by explicit bus, check containment inside vehicle polygons
-      if (!chosenVs) {
-        for (const vs of vehicleStates) {
-          if (vs.polygon.length >= 3 && this.isPointInPolygon([sLat, sLng], vs.polygon)) {
-            chosenVs = vs;
-            break;
-          }
+      // 1. Check containment inside existing vehicle polygons first!
+      // If student is located inside an existing vehicle zone, assign to that vehicle immediately.
+      for (const vs of vehicleStates) {
+        if (vs.polygon.length >= 3 && this.isPointInPolygon([sLat, sLng], vs.polygon)) {
+          chosenVs = vs;
+          break;
         }
       }
 
-      // If still not resolved, assign to nearest vehicle
+      // 2. If outside existing polygons, check explicit raw bus (호차, 차량, assignedVehicle, 등원차량)
+      if (!chosenVs) {
+        const explicitBusStr = parsedRaw['호차'] || parsedRaw['차량'] || (st.assignedVehicle ? st.assignedVehicle.busNumber : null) || parsedRaw['등원차량'];
+        if (explicitBusStr) {
+          chosenVs = matchVehicle(explicitBusStr);
+        }
+      }
+
+      // 3. If still not resolved, assign to nearest vehicle
       if (!chosenVs) {
         let minDist = Infinity;
         for (const vs of vehicleStates) {
@@ -1050,9 +1051,9 @@ export class RoutingService {
     // ("할당은 되어 있는데 학생 위치까지 구역을 넓혀 줘야지 자동으로")
     // Buffer = 0.8km ensures full envelope coverage while bisector clipping guarantees 0% overlap
     const studentPointsList = vehicleStates.map(vs => {
-      const pts = vs.assignedStudents.map(s => [Number(s.latitude), Number(s.longitude)] as [number, number]);
-      if (pts.length > 0) return pts;
-      return vs.polygon.length > 0 ? vs.polygon : [];
+      const studentPts = vs.assignedStudents.map(s => [Number(s.latitude), Number(s.longitude)] as [number, number]);
+      const basePts = vs.polygon.length > 0 ? vs.polygon : [];
+      return [...basePts, ...studentPts];
     });
 
     const expandedPolygons = this.partitionVehicleZones(studentPointsList, 0.8);
@@ -1164,10 +1165,11 @@ export class RoutingService {
         id: st.id,
         name: st.adminDisplayName || st.name,
         realName: st.name,
-        address: st.address,
-        boardingLocation: st.boardingLocation,
+        address: st.address || '',
+        boardingLocation: st.boardingLocation || '',
         lat: st.latitude,
         lng: st.longitude,
+        addressNeedsInput: !st.address || st.latitude === null || st.latitude === undefined || isNaN(st.latitude) || !st.longitude || isNaN(st.longitude) || !!parsedRaw['주소입력필요'],
         assignedBusId: st.assignedVehicle ? st.assignedVehicle.id : null,
         color: st.assignedVehicle ? (st.assignedVehicle.colorHex || '#64748b') : '#64748b',
         allergies: st.allergies || parsedRaw['알레르기'] || parsedRaw['알러지'] || '',
@@ -1857,13 +1859,23 @@ export class RoutingService {
       }
 
       const allergyVal = rawObj ? (rawObj['알레르기'] || rawObj['알러지'] || rawObj['특이사항(알레르기)'] || '') : '';
+      const hasCoords = st.lat !== undefined && st.lat !== null && !isNaN(parseFloat(st.lat)) &&
+                        st.lng !== undefined && st.lng !== null && !isNaN(parseFloat(st.lng));
+      const sLat = hasCoords ? parseFloat(st.lat) : (null as any);
+      const sLng = hasCoords ? parseFloat(st.lng) : (null as any);
+      const sAddr = hasCoords ? (st.address || '') : '';
+      if (!hasCoords && rawObj) {
+        rawObj['주소입력필요'] = true;
+        if (st.address && !rawObj['실패주소']) rawObj['실패주소'] = st.address;
+      }
+
       return this.studentRepository.create({
         name: st.name,
         adminDisplayName,
-        address: st.address,
-        boardingLocation: st.boardingLocation || st.address,
-        latitude: st.lat !== undefined && st.lat !== null ? parseFloat(st.lat) : undefined,
-        longitude: st.lng !== undefined && st.lng !== null ? parseFloat(st.lng) : undefined,
+        address: sAddr,
+        boardingLocation: hasCoords ? (st.boardingLocation || sAddr) : '',
+        latitude: sLat,
+        longitude: sLng,
         allergies: allergyVal || st.allergies || '',
         raw: rawObj || st.raw,
         assignedVehicle: vehicle || undefined,
@@ -1873,48 +1885,114 @@ export class RoutingService {
 
     await this.studentRepository.save(newStudents);
 
-    const acadLat = parseFloat(academy.latitude);
-    const acadLng = parseFloat(academy.longitude);
-
-    // Form clean, non-overlapping vehicle zones encompassing assigned students
-    // Boundaries touch along shared borders, never overlap (0% invasion), and never anchor to the center kindergarten
-    const vehiclePointsForPartition: [number, number][][] = [];
-    for (const vehicle of vehicles) {
-      const assignedStudents = newStudents.filter(
-        st => st.assignedVehicle && st.assignedVehicle.id === vehicle.id && st.latitude && st.longitude
-      );
-      let existingPoints: [number, number][] = [];
-      try {
-        let rawPts = vehicle.polygonCoordinates;
-        while (typeof rawPts === 'string') {
-          try { rawPts = JSON.parse(rawPts); } catch(e) { break; }
-        }
-        if (Array.isArray(rawPts)) {
-          existingPoints = rawPts.filter(p => Array.isArray(p) && p.length >= 2 && !isNaN(p[0]) && !isNaN(p[1])) as [number, number][];
-        }
-      } catch (e) {}
-
-      // Filter out academy center point if it was previously included
-      existingPoints = existingPoints.filter(p => {
-        if (isNaN(acadLat) || isNaN(acadLng)) return true;
-        return this.getDistanceKm(p[0], p[1], acadLat, acadLng) > 0.08;
-      });
-
-      const studentPoints: [number, number][] = assignedStudents.map(st => [st.latitude!, st.longitude!]);
-      vehiclePointsForPartition.push([...existingPoints, ...studentPoints]);
+    // Auto-expand vehicle zones to envelop all geocoded students
+    try {
+      await this.expandZonesToStudents(academy.id, userId);
+    } catch (e: any) {
+      console.warn('[saveStudents] Auto zone expansion failed:', e?.message || e);
     }
 
-    const updatedPolygons = this.partitionVehicleZones(vehiclePointsForPartition, 1.8);
-    for (let i = 0; i < vehicles.length; i++) {
-      const v = vehicles[i];
-      if (updatedPolygons[i] && updatedPolygons[i].length >= 3) {
-        v.polygonCoordinates = updatedPolygons[i];
-        await this.vehicleRepository.save(v);
+    this.notifyRouteUpdated(academy.id);
+
+    const successCount = newStudents.filter(s => s.latitude && s.longitude).length;
+    const failedAddressCount = newStudents.length - successCount;
+    return {
+      success: true,
+      totalCount: newStudents.length,
+      successCount,
+      failedAddressCount,
+      count: newStudents.length,
+      message: `총 ${newStudents.length}명 등록 완료 (정상 배차: ${successCount}명, 주소 수동 입력 필요: ${failedAddressCount}명)`
+    };
+  }
+
+  async updateStudent(studentId: number, data: any, academyId?: number, userId?: number) {
+    const academy = await this.getAcademy(academyId, userId);
+    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
+
+    const student = await this.studentRepository.findOne({
+      where: { id: studentId, academy: { id: academy.id } },
+      relations: { assignedVehicle: true, academy: true }
+    });
+    if (!student) throw new NotFoundException('원아를 찾을 수 없습니다.');
+
+    if (data.name !== undefined) student.name = data.name;
+    if (data.adminDisplayName !== undefined) student.adminDisplayName = data.adminDisplayName;
+
+    let parsedRaw: any = {};
+    if (student.raw) {
+      if (typeof student.raw === 'string') {
+        try { parsedRaw = JSON.parse(student.raw); } catch (e) { parsedRaw = {}; }
+      } else if (typeof student.raw === 'object') {
+        parsedRaw = { ...student.raw };
+      }
+    }
+
+    if (data.address !== undefined) {
+      const trimmedAddress = String(data.address || '').trim();
+      student.address = trimmedAddress;
+      student.boardingLocation = trimmedAddress;
+      if (trimmedAddress) {
+        const coords = await this.geocodeAddress(trimmedAddress);
+        if (coords) {
+          student.latitude = coords.lat;
+          student.longitude = coords.lng;
+          delete parsedRaw['주소입력필요'];
+          delete parsedRaw['실패주소'];
+        } else {
+          student.latitude = null as any;
+          student.longitude = null as any;
+          parsedRaw['주소입력필요'] = true;
+          parsedRaw['실패주소'] = trimmedAddress;
+        }
+      } else {
+        student.latitude = null as any;
+        student.longitude = null as any;
+        parsedRaw['주소입력필요'] = true;
+      }
+    }
+
+    if (data.className !== undefined) parsedRaw['반명'] = data.className;
+    if (data.age !== undefined) parsedRaw['연령'] = data.age;
+    if (data.gender !== undefined) parsedRaw['성별'] = data.gender;
+    if (data.parentName !== undefined) parsedRaw['보호자 성함'] = data.parentName;
+    if (data.parentPhone !== undefined) {
+      parsedRaw['부모연락처'] = data.parentPhone;
+      parsedRaw['보호자연락처'] = data.parentPhone;
+    }
+    if (data.allergies !== undefined) {
+      student.allergies = data.allergies;
+      parsedRaw['알레르기'] = data.allergies;
+    }
+    if (data.note !== undefined) parsedRaw['비고'] = data.note;
+
+    if (data.assignedBusId) {
+      const vehicle = await this.vehicleRepository.findOne({
+        where: { id: Number(data.assignedBusId), academy: { id: academy.id } }
+      });
+      if (vehicle) {
+        student.assignedVehicle = vehicle;
+        parsedRaw['등원차량'] = vehicle.busNumber;
+        parsedRaw['하원차량'] = vehicle.busNumber;
+        parsedRaw['호차'] = vehicle.busNumber;
+        parsedRaw['차량'] = vehicle.busNumber;
+      }
+    }
+
+    student.raw = parsedRaw;
+    await this.studentRepository.save(student);
+
+    // If student now has valid coordinates, auto-expand vehicle zone!
+    if (student.latitude && student.longitude) {
+      try {
+        await this.expandZonesToStudents(academy.id, userId);
+      } catch (e: any) {
+        console.warn('Auto zone expansion on student update:', e?.message || e);
       }
     }
 
     this.notifyRouteUpdated(academy.id);
-    return { success: true, count: newStudents.length };
+    return { success: true, student };
   }
 
   async addStudent(studentData: any, academyId?: number, userId?: number) {
@@ -2092,6 +2170,16 @@ export class RoutingService {
     });
 
     const saved = await this.studentRepository.save(student);
+
+    if (lat !== undefined && lng !== undefined) {
+      try {
+        await this.expandZonesToStudents(academy.id, userId);
+        zoneExpanded = true;
+      } catch (e: any) {
+        console.warn('Auto zone expansion on addStudent:', e?.message || e);
+      }
+    }
+
     this.notifyRouteUpdated(academy.id);
 
     return {
