@@ -418,6 +418,9 @@ export default function Dashboard() {
     teacherName: '',
     departureType: '정규하원',
     assignedBusId: '',
+    assignedDepartureBusId: '',
+    isNotRiding: false,
+    dropoffLocation: '',
     inTime: '',
     outTime: '',
     allergies: '',
@@ -2394,7 +2397,7 @@ const parseKindergartenExcelSheet = (sheet) => {
       alert('원아 이름을 입력해주세요.');
       return;
     }
-    if (!studentForm.address.trim()) {
+    if (!studentForm.isNotRiding && !studentForm.address.trim()) {
       alert('도로명 주소를 입력해주세요.');
       return;
     }
@@ -2403,21 +2406,31 @@ const parseKindergartenExcelSheet = (sheet) => {
     try {
       const targetAcademyId = selectedAcademyId || currentUser.academyId;
 
-      // 1. Geocode address via backend geocode-bulk endpoint
-      const geoRes = await fetch(`${API_BASE_URL}/routing/geocode-bulk`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ addresses: [studentForm.address.trim()] })
-      });
-      if (!geoRes.ok) throw new Error('주소 좌표 변환(지오코딩)에 실패했습니다.');
-      const geocoded = await geoRes.json();
-      const coords = geocoded[0]?.coords;
+      // 1. Geocode address via backend geocode-bulk endpoint if address is provided
+      let coords = null;
+      if (!studentForm.isNotRiding && studentForm.address.trim()) {
+        try {
+          const geoRes = await fetch(`${API_BASE_URL}/routing/geocode-bulk`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ addresses: [studentForm.address.trim()] })
+          });
+          if (geoRes.ok) {
+            const geocoded = await geoRes.json();
+            coords = geocoded[0]?.coords || null;
+          }
+        } catch (geoErr) {
+          console.warn('Geocoding error:', geoErr);
+        }
+      }
 
-      let assignedBusId = studentForm.assignedBusId ? Number(studentForm.assignedBusId) : null;
+      let assignedBusId = studentForm.isNotRiding ? null : (studentForm.assignedBusId ? Number(studentForm.assignedBusId) : null);
+      let assignedDepartureBusId = studentForm.isNotRiding ? null : (studentForm.assignedDepartureBusId ? Number(studentForm.assignedDepartureBusId) : null);
       let assignedBus = buses.find(b => b.id === assignedBusId);
+      let assignedDepartureBus = buses.find(b => b.id === assignedDepartureBusId);
 
       // 2. Auto-assign vehicle by zone polygon if not manually selected
-      if (!assignedBusId && coords) {
+      if (!studentForm.isNotRiding && !assignedBusId && coords) {
         const pt = turf.point([coords.lng, coords.lat]);
         let minDistance = Infinity;
 
@@ -2443,15 +2456,18 @@ const parseKindergartenExcelSheet = (sheet) => {
 
       // 3. Prepare payload matching all 17 Excel columns
       const inLoc = studentForm.inLocation?.trim() || studentForm.address.trim();
-      const outLoc = studentForm.outLocation?.trim() || studentForm.address.trim();
+      const outLoc = studentForm.dropoffLocation?.trim() || studentForm.outLocation?.trim() || studentForm.address.trim();
 
       const payload = {
         name: studentForm.name.trim(),
         address: studentForm.address.trim(),
         boardingLocation: inLoc,
+        dropoffLocation: outLoc,
         lat: coords ? coords.lat : undefined,
         lng: coords ? coords.lng : undefined,
         assignedBusId: assignedBusId,
+        assignedDepartureBusId: assignedDepartureBusId,
+        isNotRiding: Boolean(studentForm.isNotRiding),
         className: studentForm.className.trim(),
         kindergartenName: studentForm.kindergartenName?.trim() || academy?.name || '',
         schoolName: studentForm.kindergartenName?.trim() || academy?.name || '',
@@ -2463,8 +2479,8 @@ const parseKindergartenExcelSheet = (sheet) => {
         departureType: studentForm.departureType || '정규하원',
         inLocation: inLoc,
         outLocation: outLoc,
-        inBus: assignedBus?.name || '',
-        outBus: assignedBus?.name || '',
+        inBus: studentForm.isNotRiding ? '' : (assignedBus?.name || ''),
+        outBus: studentForm.isNotRiding ? '' : (assignedDepartureBus?.name || assignedBus?.name || ''),
         inTime: studentForm.inTime.trim(),
         outTime: studentForm.outTime.trim(),
         allergies: studentForm.allergies.trim(),
@@ -2559,6 +2575,9 @@ const parseKindergartenExcelSheet = (sheet) => {
       teacherName: '',
       departureType: '정규하원',
       assignedBusId: '',
+      assignedDepartureBusId: '',
+      isNotRiding: false,
+      dropoffLocation: '',
       inTime: '',
       outTime: '',
       allergies: '',
@@ -2584,6 +2603,9 @@ const parseKindergartenExcelSheet = (sheet) => {
       teacherName: raw['담임명'] || '',
       departureType: raw['하원구분'] || raw['하원정보'] || '정규하원',
       assignedBusId: student.assignedBusId ? String(student.assignedBusId) : '',
+      assignedDepartureBusId: student.assignedDepartureBusId ? String(student.assignedDepartureBusId) : '',
+      isNotRiding: Boolean(student.isNotRiding || raw['미탑승'] || raw['차량미탑승']),
+      dropoffLocation: student.dropoffLocation || raw['하차지'] || raw['하원지'] || '',
       inTime: raw['등원시간'] || '',
       outTime: raw['하원시간'] || '',
       allergies: student.allergies || raw['알레르기'] || '',
@@ -3399,7 +3421,9 @@ const parseKindergartenExcelSheet = (sheet) => {
                     sortStudentsList(students).map(st => {
                       const isExpanded = expandedStudentDetailIds.has(st.id);
                       const bus = buses.find(b => b.id === st.assignedBusId);
-                      const needsAddress = !st.address || !st.lat || !st.lng || st.addressNeedsInput || st.raw?.['주소입력필요'];
+                      const isNotRiding = Boolean(st.isNotRiding || st.raw?.['미탑승'] || st.raw?.['차량미탑승']);
+                      const needsAddress = !isNotRiding && (!st.address || !st.lat || !st.lng || st.addressNeedsInput || st.raw?.['주소입력필요']);
+                      const depBus = st.assignedDepartureBusId ? buses.find(b => b.id === st.assignedDepartureBusId) : null;
                       return (
                         <div key={st.id} className={`p-2.5 rounded-xl shadow-xs hover:shadow-md transition-all group ${needsAddress ? 'bg-red-50/30 border-2 border-red-500 ring-2 ring-red-100' : 'bg-white border border-slate-200'}`}>
                           <div className="flex items-center justify-between mb-1">
@@ -3492,8 +3516,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                               {st.raw?.['보호자 성함'] ? `${st.raw?.['보호자 성함']} ` : ''}
                               {maskPhoneNumber(st.raw?.['부모연락처'] || st.raw?.['보호자연락처'] || st.raw?.['보호자 연락처'])}
                             </span>
-                            <span className="font-bold text-xs px-2 py-0.5 rounded-md" style={{ color: needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b'), backgroundColor: needsAddress ? '#fee2e2' : `${st.color || bus?.color || '#64748b'}15` }}>
-                              {needsAddress ? '배정 대기(주소 필요)' : (bus ? bus.name : '배정 대기')}
+                            <span className="font-bold text-xs px-2 py-0.5 rounded-md" style={{ color: isNotRiding ? '#64748b' : (needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b')), backgroundColor: isNotRiding ? '#f1f5f9' : (needsAddress ? '#fee2e2' : `${st.color || bus?.color || '#64748b'}15`) }}>
+                              {isNotRiding ? '도보/자차(미탑승)' : (needsAddress ? '배정 대기(주소 필요)' : (bus && depBus && bus.id !== depBus.id ? `등: ${bus.name} / 하: ${depBus.name}` : (bus ? bus.name : (depBus ? `하원: ${depBus.name}` : '배정 대기'))))}
                             </span>
                           </div>
 
@@ -3584,7 +3608,9 @@ const parseKindergartenExcelSheet = (sheet) => {
                                 group.list.map(st => {
                                   const isExpanded = expandedStudentDetailIds.has(st.id);
                                   const bus = buses.find(b => b.id === st.assignedBusId);
-                                  const needsAddress = !st.address || !st.lat || !st.lng || st.addressNeedsInput || st.raw?.['주소입력필요'];
+                                  const isNotRiding = Boolean(st.isNotRiding || st.raw?.['미탑승'] || st.raw?.['차량미탑승']);
+                                  const needsAddress = !isNotRiding && (!st.address || !st.lat || !st.lng || st.addressNeedsInput || st.raw?.['주소입력필요']);
+                                  const depBus = st.assignedDepartureBusId ? buses.find(b => b.id === st.assignedDepartureBusId) : null;
                                   return (
                                     <div key={st.id} className={`p-2.5 rounded-xl shadow-xs hover:shadow-md transition-all group ${needsAddress ? 'bg-red-50/30 border-2 border-red-500 ring-2 ring-red-100' : 'bg-white border border-slate-200'}`}>
                                       <div className="flex items-center justify-between mb-1">
@@ -3678,8 +3704,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                                           {maskPhoneNumber(st.raw?.['부모연락처'] || st.raw?.['보호자연락처'] || st.raw?.['보호자 연락처'])}
                                         </span>
                                         {studentFilterMode !== 'BUS' && (
-                                          <span className="font-bold text-xs px-2 py-0.5 rounded-md" style={{ color: needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b'), backgroundColor: needsAddress ? '#fee2e2' : `${st.color || bus?.color || '#64748b'}15` }}>
-                                            {needsAddress ? '배정 대기(주소 필요)' : (bus ? bus.name : '배정 대기')}
+                                          <span className="font-bold text-xs px-2 py-0.5 rounded-md" style={{ color: isNotRiding ? '#64748b' : (needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b')), backgroundColor: isNotRiding ? '#f1f5f9' : (needsAddress ? '#fee2e2' : `${st.color || bus?.color || '#64748b'}15`) }}>
+                                            {isNotRiding ? '도보/자차(미탑승)' : (needsAddress ? '배정 대기(주소 필요)' : (bus && depBus && bus.id !== depBus.id ? `등: ${bus.name} / 하: ${depBus.name}` : (bus ? bus.name : (depBus ? `하원: ${depBus.name}` : '배정 대기'))))}
                                           </span>
                                         )}
                                       </div>
@@ -4482,16 +4508,42 @@ const parseKindergartenExcelSheet = (sheet) => {
             return visiblePickupPoints.map(p => {
             const ptIcon = L.divIcon({
               className: 'pickup-marker',
-              html: `<div style="font-size: 24px; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">🚏</div>`,
+              html: `<div style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;background:#f97316;color:white;border-radius:50%;font-weight:bold;font-size:12px;box-shadow:0 2px 4px rgba(0,0,0,0.3);">BUS</div>`,
               iconSize: [24, 24],
               iconAnchor: [12, 24]
             });
             return (
               <Marker key={`pickup-${p.id}`} position={[p.latitude, p.longitude]} icon={ptIcon}>
                 <Popup>
-                  <div className="text-left p-1 w-40 max-h-48 overflow-y-auto">
+                  <div className="text-left p-1 w-48 max-h-56 overflow-y-auto">
                     <div className="font-bold text-sm text-slate-800 border-b pb-1 mb-1">{p.name}</div>
                     
+                    {(() => {
+                      const boardingStudents = students.filter(st => (st.boardingLocation || st.address) === p.name);
+                      const servingBusIds = new Set();
+                      boardingStudents.forEach(st => {
+                        if (st.assignedBusId) servingBusIds.add(st.assignedBusId);
+                        if (st.assignedDepartureBusId) servingBusIds.add(st.assignedDepartureBusId);
+                      });
+                      const servingBuses = buses.filter(b => servingBusIds.has(b.id));
+                      return (
+                        <div className="mb-2 pb-1 border-b border-slate-100 text-xs">
+                          <span className="font-bold text-slate-500 block mb-1">경유 호차:</span>
+                          {servingBuses.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {servingBuses.map(b => (
+                                <span key={b.id} className="px-1.5 py-0.5 rounded text-[11px] font-bold text-white shadow-xs" style={{ backgroundColor: b.color || '#3b82f6' }}>
+                                  {b.name}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 text-[11px]">배정 호차 없음</span>
+                          )}
+                        </div>
+                      );
+                    })()}
+
                     <div className="text-xs text-slate-600 mb-2">
                       <div className="font-bold text-slate-500 mb-1">
                         탑승원아 ({(() => {
@@ -4844,19 +4896,30 @@ const parseKindergartenExcelSheet = (sheet) => {
 
               {/* Section 3: 주소 및 탑승 장소 */}
               <div className="pt-2 border-t border-slate-100">
-                <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
-                  주소 및 승하차 위치
-                </h4>
+                <div className="flex items-center justify-between mb-2.5">
+                  <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                    주소 및 승하차 위치
+                  </h4>
+                  <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 cursor-pointer select-none bg-slate-50 px-2 py-1 rounded border border-slate-200 hover:bg-slate-100">
+                    <input
+                      type="checkbox"
+                      checked={studentForm.isNotRiding}
+                      onChange={e => setStudentForm({ ...studentForm, isNotRiding: e.target.checked })}
+                      className="w-3.5 h-3.5 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
+                    />
+                    차량 미탑승 (도보/자차)
+                  </label>
+                </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    도로명 주소 <span className="text-red-500">*</span>
+                    도로명 주소 {!studentForm.isNotRiding && <span className="text-red-500">*</span>}
                   </label>
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      required
-                      placeholder="주소 검색 버튼을 눌러 도로명 주소를 선택하세요"
+                      required={!studentForm.isNotRiding}
+                      placeholder={studentForm.isNotRiding ? "도보/자차 등원생 (주소 선택사항)" : "주소 검색 버튼을 눌러 도로명 주소를 선택하세요"}
                       value={studentForm.address}
                       onChange={e => setStudentForm({ ...studentForm, address: e.target.value })}
                       className="flex-1 px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
@@ -4874,26 +4937,28 @@ const parseKindergartenExcelSheet = (sheet) => {
                 <div className="grid grid-cols-2 gap-3 mt-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      등원지 (미입력 시 도로명 주소 적용)
+                      등원 탑승지 (미입력 시 도로명 주소 적용)
                     </label>
                     <input
                       type="text"
-                      placeholder="예: 101동 앞 정문"
+                      disabled={studentForm.isNotRiding}
+                      placeholder={studentForm.isNotRiding ? "미탑승" : "예: 101동 앞 정문"}
                       value={studentForm.inLocation}
                       onChange={e => setStudentForm({ ...studentForm, inLocation: e.target.value })}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      하원지 (미입력 시 도로명 주소 적용)
+                      하원 하차지 (미입력 시 도로명 주소 적용)
                     </label>
                     <input
                       type="text"
-                      placeholder="예: 101동 앞 정문"
-                      value={studentForm.outLocation}
-                      onChange={e => setStudentForm({ ...studentForm, outLocation: e.target.value })}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      disabled={studentForm.isNotRiding}
+                      placeholder={studentForm.isNotRiding ? "미탑승" : "예: 101동 앞 정문"}
+                      value={studentForm.dropoffLocation || studentForm.outLocation}
+                      onChange={e => setStudentForm({ ...studentForm, dropoffLocation: e.target.value, outLocation: e.target.value })}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
                     />
                   </div>
                 </div>
@@ -4903,15 +4968,16 @@ const parseKindergartenExcelSheet = (sheet) => {
               <div className="pt-2 border-t border-slate-100">
                 <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
-                  배차 및 운행 일정
+                  배차 및 운행 일정 {studentForm.isNotRiding && <span className="text-xs text-slate-400 font-normal">(도보/자차 등원생 - 배차 제외)</span>}
                 </h4>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3 mb-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">배정 차량</label>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">등원 배정 차량</label>
                     <select
+                      disabled={studentForm.isNotRiding}
                       value={studentForm.assignedBusId}
                       onChange={e => setStudentForm({ ...studentForm, assignedBusId: e.target.value })}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white"
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white disabled:bg-slate-100 disabled:text-slate-400"
                     >
                       <option value="">자동 배정 (구역 기반)</option>
                       {sortedBuses.map(b => (
@@ -4919,6 +4985,23 @@ const parseKindergartenExcelSheet = (sheet) => {
                       ))}
                     </select>
                   </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">하원 배정 차량</label>
+                    <select
+                      disabled={studentForm.isNotRiding}
+                      value={studentForm.assignedDepartureBusId}
+                      onChange={e => setStudentForm({ ...studentForm, assignedDepartureBusId: e.target.value })}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                    >
+                      <option value="">등원 차량과 동일 (또는 자동 배정)</option>
+                      {sortedBuses.map(b => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">등원 시간</label>
                     <input
@@ -5033,9 +5116,44 @@ const parseKindergartenExcelSheet = (sheet) => {
                 <label className="block text-xs font-bold text-slate-600 mb-1">차량 정원 (명)</label>
                 <input type="number" value={editingBus.capacity || 25} onChange={e => setEditingBus({...editingBus, capacity: e.target.value})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="25" />
               </div>
-              <div className="flex gap-3 mt-6">
-                <button type="button" onClick={() => setEditingBus(null)} className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200">취소</button>
-                <button type="submit" disabled={isProcessing} className="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50">저장하기</button>
+              <div className="pt-3 border-t border-slate-100 flex justify-between items-center mt-6">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!editingBus) return;
+                    if (!window.confirm(`[${editingBus.busNumber || editingBus.name}] 차량을 삭제하시겠습니까?\n\n이 차량에 배정된 원아들과 구역은 주변 차량들이 자동으로 확장하여 인계받습니다.`)) return;
+                    setIsProcessing(true);
+                    try {
+                      const targetAcademyId = selectedAcademyId || currentUser.academyId;
+                      const res = await fetch(`${API_BASE_URL}/routing/vehicle/${editingBus.id}?academyId=${targetAcademyId}&userId=${currentUser.id}`, {
+                        method: 'DELETE'
+                      });
+                      if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err.message || '차량 삭제에 실패했습니다.');
+                      }
+                      alert('차량이 삭제되었으며 주변 차량으로 구역과 원아가 자동 확장되었습니다.');
+                      setEditingBus(null);
+                      const stateRes = await fetch(`${API_BASE_URL}/routing/initial-state?academyId=${targetAcademyId}`);
+                      if (stateRes.ok) {
+                        const stateData = await stateRes.json();
+                        if (Array.isArray(stateData.buses)) setBuses(computePolygons(stateData.buses));
+                        if (Array.isArray(stateData.students)) setStudents(stateData.students);
+                      }
+                    } catch (err) {
+                      alert(err.message);
+                    } finally {
+                      setIsProcessing(false);
+                    }
+                  }}
+                  className="px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-red-200"
+                >
+                  차량 삭제 (주변 구역 자동 확장)
+                </button>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setEditingBus(null)} className="px-4 py-2 bg-slate-100 text-slate-600 font-bold text-xs rounded-lg hover:bg-slate-200">취소</button>
+                  <button type="submit" disabled={isProcessing} className="px-4 py-2 bg-blue-600 text-white font-bold text-xs rounded-lg hover:bg-blue-700 disabled:opacity-50">저장하기</button>
+                </div>
               </div>
             </form>
           </div>

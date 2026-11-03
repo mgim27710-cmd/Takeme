@@ -112,6 +112,20 @@ export class TeacherController {
     return this.teacherService.getStaffList(email);
   }
 
+  @Get('walk-in-students')
+  async getWalkInStudents(@AuthEmail() email: string) {
+    return this.teacherService.getWalkInStudents(email);
+  }
+
+  @Post('request-ride')
+  async requestRide(
+    @AuthEmail() email: string,
+    @Body('studentId') studentId: number
+  ) {
+    if (!studentId) throw new BadRequestException('원아 ID가 필요합니다.');
+    return this.teacherService.requestRide(email, Number(studentId));
+  }
+
   @Post('send-message')
   @Post('message')
   async sendMessage(

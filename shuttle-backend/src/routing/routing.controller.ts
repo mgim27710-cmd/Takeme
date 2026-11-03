@@ -309,6 +309,18 @@ export class RoutingController {
     return this.routingService.updateStudent(Number(id), body || {}, academyId, userId);
   }
 
+  @Delete('vehicle/:id')
+  async deleteVehicle(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+    @Query('academyId') academyIdQuery?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, academyIdHeader || academyIdQuery, userIdHeader);
+    return this.routingService.deleteVehicle(Number(id), academyId, userId);
+  }
+
   @Post('pickup-point')
   async createPickupPoint(
     @Req() req: any,

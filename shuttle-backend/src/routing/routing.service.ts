@@ -1159,7 +1159,7 @@ export class RoutingService {
     
     const dbStudents = await this.studentRepository.find({ 
       where: { academy: { id: academy.id } },
-      relations: { assignedVehicle: true, studentUser: true, parentUser: true, schedules: { assignedVehicle: true } } 
+      relations: { assignedVehicle: true, assignedDepartureVehicle: true, studentUser: true, parentUser: true, schedules: { assignedVehicle: true } } 
     });
     const formattedStudents = dbStudents.map(st => {
       let parsedRaw: any = {};
@@ -1167,16 +1167,23 @@ export class RoutingService {
         parsedRaw = typeof st.raw === 'string' ? JSON.parse(st.raw) : (st.raw || {});
       } catch(e) {}
 
+      const isNotRiding = Boolean(st.isNotRiding || parsedRaw['미탑승'] || parsedRaw['차량미탑승']);
+      const needsAddress = !isNotRiding && (!st.address || st.latitude === null || st.latitude === undefined || isNaN(st.latitude) || !st.longitude || isNaN(st.longitude) || !!parsedRaw['주소입력필요']);
+
       return {
         id: st.id,
         name: st.adminDisplayName || st.name,
         realName: st.name,
         address: st.address || '',
         boardingLocation: st.boardingLocation || '',
+        dropoffLocation: st.dropoffLocation || parsedRaw['하차지'] || parsedRaw['하원지'] || '',
         lat: st.latitude,
         lng: st.longitude,
-        addressNeedsInput: !st.address || st.latitude === null || st.latitude === undefined || isNaN(st.latitude) || !st.longitude || isNaN(st.longitude) || !!parsedRaw['주소입력필요'],
+        isNotRiding,
+        addressNeedsInput: needsAddress,
         assignedBusId: st.assignedVehicle ? st.assignedVehicle.id : null,
+        assignedDepartureBusId: st.assignedDepartureVehicle ? st.assignedDepartureVehicle.id : null,
+        assignedDepartureBusName: st.assignedDepartureVehicle ? st.assignedDepartureVehicle.busNumber : (parsedRaw['하원차량'] || ''),
         color: st.assignedVehicle ? (st.assignedVehicle.colorHex || '#64748b') : '#64748b',
         allergies: st.allergies || parsedRaw['알레르기'] || parsedRaw['알러지'] || '',
         raw: parsedRaw,
@@ -1875,16 +1882,27 @@ export class RoutingService {
         if (st.address && !rawObj['실패주소']) rawObj['실패주소'] = st.address;
       }
 
+      let depVehicle = st.assignedDepartureBusId ? vehicleMap.get(st.assignedDepartureBusId) : null;
+      if (!depVehicle && rawObj && rawObj['하원차량']) {
+        const dBusNum = String(rawObj['하원차량']).trim();
+        depVehicle = vehicles.find(v => v.busNumber === dBusNum || v.busNumber.replace(/[^0-9]/g, '') === dBusNum.replace(/[^0-9]/g, '')) || null;
+      }
+      const isNotRiding = Boolean(st.isNotRiding || (rawObj && (rawObj['미탑승'] || rawObj['차량미탑승'])));
+      const dropLocation = st.dropoffLocation || (rawObj && (rawObj['하차지'] || rawObj['하원지'])) || '';
+
       return this.studentRepository.create({
         name: st.name,
         adminDisplayName,
         address: sAddr,
         boardingLocation: hasCoords ? (st.boardingLocation || sAddr) : '',
+        dropoffLocation: dropLocation,
         latitude: sLat,
         longitude: sLng,
+        isNotRiding,
         allergies: allergyVal || st.allergies || '',
         raw: rawObj || st.raw,
-        assignedVehicle: vehicle || undefined,
+        assignedVehicle: isNotRiding ? undefined : (vehicle || undefined),
+        assignedDepartureVehicle: isNotRiding ? undefined : (depVehicle || undefined),
         academy: academy
       });
     });
@@ -1972,6 +1990,22 @@ export class RoutingService {
     }
     if (data.note !== undefined) parsedRaw['비고'] = data.note;
 
+    if (data.isNotRiding !== undefined) {
+      student.isNotRiding = Boolean(data.isNotRiding);
+      parsedRaw['차량미탑승'] = student.isNotRiding;
+      if (student.isNotRiding) {
+        delete parsedRaw['주소입력필요'];
+        delete parsedRaw['실패주소'];
+        student.assignedVehicle = null as any;
+        student.assignedDepartureVehicle = null as any;
+      }
+    }
+
+    if (data.dropoffLocation !== undefined) {
+      student.dropoffLocation = data.dropoffLocation;
+      parsedRaw['하차지'] = data.dropoffLocation;
+    }
+
     if (data.assignedBusId) {
       const vehicle = await this.vehicleRepository.findOne({
         where: { id: Number(data.assignedBusId), academy: { id: academy.id } }
@@ -1979,9 +2013,24 @@ export class RoutingService {
       if (vehicle) {
         student.assignedVehicle = vehicle;
         parsedRaw['등원차량'] = vehicle.busNumber;
-        parsedRaw['하원차량'] = vehicle.busNumber;
         parsedRaw['호차'] = vehicle.busNumber;
         parsedRaw['차량'] = vehicle.busNumber;
+      }
+    } else if (data.assignedBusId === null) {
+      student.assignedVehicle = null as any;
+    }
+
+    if (data.assignedDepartureBusId !== undefined) {
+      if (data.assignedDepartureBusId) {
+        const dVehicle = await this.vehicleRepository.findOne({
+          where: { id: Number(data.assignedDepartureBusId), academy: { id: academy.id } }
+        });
+        if (dVehicle) {
+          student.assignedDepartureVehicle = dVehicle;
+          parsedRaw['하원차량'] = dVehicle.busNumber;
+        }
+      } else {
+        student.assignedDepartureVehicle = null as any;
       }
     }
 
@@ -2162,16 +2211,26 @@ export class RoutingService {
     if (studentData.allergies) {
       raw['알레르기'] = studentData.allergies;
     }
+    let depVehicle: Vehicle | null = null;
+    if (studentData.assignedDepartureBusId) {
+      depVehicle = vehicles.find(v => v.id === Number(studentData.assignedDepartureBusId)) || null;
+    }
+    const isNotRiding = Boolean(studentData.isNotRiding || raw['미탑승'] || raw['차량미탑승']);
+    const dropoffLocation = studentData.dropoffLocation || studentData.outLocation || raw['하차지'] || raw['하원지'] || '';
+
     const student = this.studentRepository.create({
       name: studentData.name,
       adminDisplayName,
       address: studentData.address,
       boardingLocation: studentData.inLocation || studentData.boardingLocation || studentData.address,
+      dropoffLocation,
       latitude: lat,
       longitude: lng,
+      isNotRiding,
       allergies: studentData.allergies || studentData.raw?.['알레르기'] || '',
       raw,
-      assignedVehicle: vehicle || undefined,
+      assignedVehicle: isNotRiding ? undefined : (vehicle || undefined),
+      assignedDepartureVehicle: isNotRiding ? undefined : (depVehicle || undefined),
       academy
     });
 
@@ -2215,6 +2274,90 @@ export class RoutingService {
     await this.studentRepository.delete({ id: studentId, academy: { id: academy.id } });
     this.notifyRouteUpdated(academy.id);
     return { success: true };
+  }
+
+  async deleteVehicle(vehicleId: number, academyId?: number, userId?: number) {
+    const academy = await this.getAcademy(academyId, userId);
+    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
+
+    const vehicleToDelete = await this.vehicleRepository.findOne({
+      where: { id: vehicleId, academy: { id: academy.id } }
+    });
+    if (!vehicleToDelete) throw new NotFoundException('삭제할 차량을 찾을 수 없습니다.');
+
+    // 1. Find all remaining vehicles of this academy
+    const remainingVehicles = await this.vehicleRepository.find({
+      where: { academy: { id: academy.id } },
+      order: { id: 'ASC' }
+    });
+    const otherVehicles = remainingVehicles.filter(v => v.id !== vehicleId);
+
+    // 2. Reassign students of the deleted vehicle to the closest remaining vehicle
+    const studentsOfVehicle = await this.studentRepository.find({
+      where: [
+        { academy: { id: academy.id }, assignedVehicle: { id: vehicleId } },
+        { academy: { id: academy.id }, assignedDepartureVehicle: { id: vehicleId } }
+      ]
+    });
+
+    if (otherVehicles.length > 0 && studentsOfVehicle.length > 0) {
+      for (const st of studentsOfVehicle) {
+        if (st.latitude && st.longitude) {
+          let closestVeh = otherVehicles[0];
+          let minDist = Infinity;
+          for (const ov of otherVehicles) {
+            let pts: [number, number][] = [];
+            try {
+              pts = typeof ov.polygonCoordinates === 'string' ? JSON.parse(ov.polygonCoordinates) : (ov.polygonCoordinates || []);
+            } catch (e) {}
+            if (pts.length > 0) {
+              for (const pt of pts) {
+                const d = this.getDistanceKm(st.latitude, st.longitude, pt[0], pt[1]);
+                if (d < minDist) {
+                  minDist = d;
+                  closestVeh = ov;
+                }
+              }
+            }
+          }
+          if (st.assignedVehicle?.id === vehicleId) {
+            st.assignedVehicle = closestVeh;
+            if (st.raw && typeof st.raw === 'object') st.raw['등원차량'] = closestVeh.busNumber;
+          }
+          if (st.assignedDepartureVehicle?.id === vehicleId) {
+            st.assignedDepartureVehicle = closestVeh;
+            if (st.raw && typeof st.raw === 'object') st.raw['하원차량'] = closestVeh.busNumber;
+          }
+        } else {
+          if (st.assignedVehicle?.id === vehicleId) st.assignedVehicle = otherVehicles[0];
+          if (st.assignedDepartureVehicle?.id === vehicleId) st.assignedDepartureVehicle = otherVehicles[0];
+        }
+        await this.studentRepository.save(st);
+      }
+    }
+
+    // 3. Delete vehicle from DB
+    await this.vehicleRepository.delete({ id: vehicleId, academy: { id: academy.id } });
+
+    // 4. Update academy vehicleCount
+    academy.vehicleCount = otherVehicles.length;
+    await this.academyRepository.save(academy);
+
+    // 5. Expand remaining vehicles' zones to absorb the reassigned students & area!
+    if (otherVehicles.length > 0) {
+      try {
+        await this.expandZonesToStudents(academy.id, userId);
+      } catch (e: any) {
+        console.warn('Auto zone expansion after vehicle deletion:', e?.message || e);
+      }
+    }
+
+    this.notifyRouteUpdated(academy.id);
+    return {
+      success: true,
+      message: `${vehicleToDelete.busNumber} 차량이 삭제되었으며, 해당 구역과 원아들이 주변 차량들로 자연스럽게 확장 배정되었습니다.`,
+      remainingCount: otherVehicles.length
+    };
   }
 
   async geocodeBulk(addresses: string[]) {

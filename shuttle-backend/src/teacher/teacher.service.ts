@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Optional } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import { Student } from '../entities/student.entity';
@@ -52,13 +52,32 @@ export class TeacherService {
   }
 
   private async getTodayStudentsForVehicle(vehicleId: number): Promise<Student[]> {
+    const nowHour = new Date().getHours();
+    const isDeparture = nowHour >= 12; // 12:00 PM onwards is dropoff / departure (하원)
+
+    // 1번 선택지 A 반영: 하원 시점에는 assignedDepartureVehicle 우선 조회 (미설정 시 assignedVehicle)
     const defaultStudents = await this.studentRepository.find({ 
-      where: { assignedVehicle: { id: vehicleId } } 
+      where: isDeparture
+        ? [
+            { assignedDepartureVehicle: { id: vehicleId } },
+            { assignedVehicle: { id: vehicleId } }
+          ]
+        : { assignedVehicle: { id: vehicleId } },
+      relations: { assignedVehicle: true, assignedDepartureVehicle: true }
     });
+
     const overrides = await this.getActiveOverridesForToday();
     
+    // 5번 선택지 A 반영: 주소 입력을 하지 않았는데 미탑승 체크도 아닌 학생은 기사/교사 명단에서 아예 제외!
+    const validStudents = defaultStudents.filter(s => {
+      if (s.isNotRiding) return false; // 미탑승(도보/자차) 원아는 기본 운행 명단에서 제외
+      const hasCoords = s.latitude !== null && s.latitude !== undefined && !isNaN(Number(s.latitude));
+      if (!s.address || !hasCoords) return false; // 주소 미입력 원아는 제외!
+      return true;
+    });
+
     // Students originally in this vehicle, but who are NOT absent and have NOT moved to another vehicle today
-    const currentStudents = defaultStudents.filter(s => {
+    const currentStudents = validStudents.filter(s => {
       const override = overrides.find(o => o.student.id === s.id);
       if (!override) return true;
       if (override.overrideType === OverrideType.ABSENCE) return false;
@@ -66,7 +85,7 @@ export class TeacherService {
       return true;
     });
 
-    // Students originally in ANOTHER vehicle, but who MOVED INTO this vehicle today
+    // Students originally in ANOTHER vehicle (or walk-in students), who MOVED INTO this vehicle today
     const movedInStudentIds = overrides
       .filter(o => o.overrideType === OverrideType.CHANGE_LOCATION && o.newVehicleId === vehicleId)
       .map(o => o.student.id);
@@ -75,11 +94,56 @@ export class TeacherService {
       ? await this.studentRepository.createQueryBuilder('s').where('s.id IN (:...ids)', { ids: movedInStudentIds }).getMany() 
       : [];
 
-    // Filter out moved-in students who might already be in defaultStudents just in case
     const movedInFiltered = movedInStudents.filter((s: Student) => !currentStudents.find((cs: Student) => cs.id === s.id));
     movedInFiltered.forEach((s: Student) => (s as any).isOverride = true);
 
     return [...currentStudents, ...movedInFiltered];
+  }
+
+  async getWalkInStudents(email: string) {
+    const user = await this.userRepository.findOne({ where: { email }, relations: { academy: true } });
+    if (!user) throw new BadRequestException('User not found');
+    const academyId = user.academy?.id;
+    if (!academyId) return [];
+
+    const walkIns = await this.studentRepository.find({
+      where: { academy: { id: academyId }, isNotRiding: true },
+      order: { name: 'ASC' }
+    });
+
+    return walkIns.map(s => ({
+      id: s.id,
+      name: s.adminDisplayName || s.name,
+      address: s.address,
+      allergies: s.allergies || '',
+      isNotRiding: true
+    }));
+  }
+
+  async requestRide(email: string, studentId: number) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('User not found');
+    const vehicle = await this.findAssignedVehicle(user.id);
+    if (!vehicle) throw new BadRequestException('배정된 차량을 찾을 수 없습니다.');
+
+    const student = await this.studentRepository.findOne({ where: { id: studentId } });
+    if (!student) throw new NotFoundException('원아를 찾을 수 없습니다.');
+
+    const today = new Date().toISOString().split('T')[0];
+    const override = this.scheduleOverrideRepository.create({
+      student,
+      startDate: today,
+      endDate: today,
+      overrideType: OverrideType.CHANGE_LOCATION,
+      newVehicleId: vehicle.id,
+      reason: '지도교사 당일 탑승 희망 승인',
+    });
+    await this.scheduleOverrideRepository.save(override);
+
+    return {
+      success: true,
+      message: `'${student.adminDisplayName || student.name}' 원아의 당일 탑승 희망이 승인되어 오늘 운행 명단에 추가되었습니다.`
+    };
   }
 
   async getMyVehicle(email: string) {
