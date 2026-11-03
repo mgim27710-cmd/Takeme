@@ -87,35 +87,30 @@ export class RoutingService {
     return notifications;
   }
 
-  public async geocodeAddress(address: string): Promise<{ lat: number, lng: number } | null> {
+  public async geocodeAddress(
+    address: string,
+    defaultRegion = '경기도 양주시',
+    centerCoords?: { lat: number, lng: number }
+  ): Promise<{ lat: number, lng: number } | null> {
     if (!address) return null;
     const apiKey = this.configService.get<string>('KAKAO_REST_API_KEY');
     if (!apiKey) throw new BadRequestException('Kakao API Key is missing.');
 
     const cleanCandidates: string[] = [];
-    const raw = String(address).trim();
-    cleanCandidates.push(raw);
+    let raw = String(address).trim();
+
+    // 0. Strip vehicle prefixes and labels like '1호차', '(1호차)', '[1호차]', '1코스'
+    raw = raw.replace(/\([0-9]+\s*호차\)/g, '').replace(/\[[0-9]+\s*호차\]/g, '');
+    raw = raw.replace(/^[0-9]+\s*호차\s*/, '');
+    raw = raw.replace(/^[0-9]+\s*코스\s*/, '');
+    raw = raw.replace(/^[0-9]+\s*노선\s*/, '');
+    raw = raw.trim();
 
     // Extract region if present (e.g., '경기도 양주시')
     const regionMatch = raw.match(/^([가-힣]+(?:시|도)\s+[가-힣]+(?:구|군|시))/);
-    const region = regionMatch ? regionMatch[1] : '';
+    const region = regionMatch ? regionMatch[1] : defaultRegion;
 
-    // 1. Inside parentheses: apartment / complex / building name
-    const parenMatch = raw.match(/\(([^)]+)\)/);
-    if (parenMatch) {
-      let inside = parenMatch[1]
-        .replace(/\d+\s*동\s*\d+\s*호/g, '')
-        .replace(/\d+\s*동/g, '')
-        .replace(/\d+\s*호/g, '')
-        .replace(/\d+\s*-\s*\d+/g, '')
-        .trim();
-      if (inside) {
-        if (region) cleanCandidates.push(`${region} ${inside}`);
-        cleanCandidates.push(inside);
-      }
-    }
-
-    // 2. Without parentheses and without unit details
+    // 1. Full address without parentheses (road name + building number)
     let withoutParen = raw.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
     withoutParen = withoutParen
       .replace(/\d+\s*동\s*\d+\s*호/g, '')
@@ -123,29 +118,46 @@ export class RoutingService {
       .replace(/\d+\s*호/g, '')
       .replace(/\d+\s*-\s*\d+/g, '')
       .trim();
-    if (withoutParen && !cleanCandidates.includes(withoutParen)) {
+    if (withoutParen) {
+      if (!withoutParen.startsWith(region) && !withoutParen.match(/^[가-힣]+(?:시|도)/)) {
+        cleanCandidates.push(`${region} ${withoutParen}`);
+      }
       cleanCandidates.push(withoutParen);
     }
 
-    // 3. Road address pattern (시/도 + 시/군/구 + 도로명 + 번호)
-    const roadMatch = withoutParen.match(/([가-힣]+(?:시|도)?\s*[가-힣]+(?:구|군|시)?\s*[가-힣0-9]+(?:로|길)\s*\d+(?:-\d+)?)/);
-    if (roadMatch && !cleanCandidates.includes(roadMatch[1])) {
-      cleanCandidates.push(roadMatch[1]);
+    // 2. Inside parentheses: apartment / complex / building name
+    const parenMatch = raw.match(/\(([^)]+)\)/);
+    if (parenMatch) {
+      let inside = parenMatch[1]
+        .replace(/\d+\s*동\s*\d+\s*호/g, '')
+        .replace(/\d+\s*동/g, '')
+        .replace(/\d+\s*호/g, '')
+        .replace(/\d+\s*-\s*\d+/g, '')
+        .replace(/[0-9]+\s*호차/g, '')
+        .trim();
+      if (inside && inside.length >= 2) {
+        cleanCandidates.push(`${region} ${inside}`);
+        cleanCandidates.push(inside);
+      }
     }
 
-    // 4. Road without number (fallback if building number is missing or non-standard)
-    const roadNoNumMatch = withoutParen.match(/([가-힣]+(?:시|도)?\s*[가-힣]+(?:구|군|시)?\s*[가-힣0-9]+(?:로|길))/);
-    if (roadNoNumMatch && !cleanCandidates.includes(roadNoNumMatch[1])) {
-      cleanCandidates.push(roadNoNumMatch[1]);
+    // 3. Road name without building number (e.g., '경기도 양주시 고읍북로')
+    const roadOnlyMatch = withoutParen.match(/([가-힣]+(?:시|도)?\s*[가-힣]+(?:구|군|시)?\s*[가-힣0-9]+(?:로|길))/);
+    if (roadOnlyMatch && roadOnlyMatch[1]) {
+      const roadOnly = roadOnlyMatch[1].trim();
+      if (!roadOnly.startsWith(region) && !roadOnly.match(/^[가-힣]+(?:시|도)/)) {
+        cleanCandidates.push(`${region} ${roadOnly}`);
+      }
+      cleanCandidates.push(roadOnly);
     }
 
-    // 5. Town / Dong pattern (시/도 + 시/군/구 + 읍/면/동)
-    const dongMatch = withoutParen.match(/([가-힣]+(?:시|도)?\s*[가-힣]+(?:구|군|시)?\s*[가-힣0-9]+(?:읍|면|동))/);
-    if (dongMatch && !cleanCandidates.includes(dongMatch[1])) {
-      cleanCandidates.push(dongMatch[1]);
+    // 4. Raw cleaned address
+    if (raw && !cleanCandidates.includes(raw)) {
+      cleanCandidates.push(raw);
     }
 
     const uniqueCandidates = Array.from(new Set(cleanCandidates.filter(Boolean)));
+    const cCoords = centerCoords || { lat: 37.8083, lng: 127.0717 };
 
     for (const query of uniqueCandidates) {
       if (!query) continue;
@@ -162,7 +174,11 @@ export class RoutingService {
           const x = parseFloat(docs[0].x);
           const y = parseFloat(docs[0].y);
           if (!isNaN(x) && !isNaN(y)) {
-            return { lat: y, lng: x };
+            const dist = this.getDistanceKm(y, x, cCoords.lat, cCoords.lng);
+            // Distance Guard: Must be within 25km of academy in Yangju!
+            if (dist <= 25.0) {
+              return { lat: y, lng: x };
+            }
           }
         }
       } catch (e) {}
@@ -178,10 +194,16 @@ export class RoutingService {
         );
         const kwDocs = kwResponse.data?.documents;
         if (kwDocs && kwDocs.length > 0) {
-          const x = parseFloat(kwDocs[0].x);
-          const y = parseFloat(kwDocs[0].y);
-          if (!isNaN(x) && !isNaN(y)) {
-            return { lat: y, lng: x };
+          for (const doc of kwDocs) {
+            const x = parseFloat(doc.x);
+            const y = parseFloat(doc.y);
+            if (!isNaN(x) && !isNaN(y)) {
+              const dist = this.getDistanceKm(y, x, cCoords.lat, cCoords.lng);
+              // Distance Guard: Must be within 25km of academy in Yangju!
+              if (dist <= 25.0) {
+                return { lat: y, lng: x };
+              }
+            }
           }
         }
       } catch (e) {}
@@ -204,18 +226,23 @@ export class RoutingService {
           );
           const addrs = nResponse.data?.addresses;
           if (addrs && addrs.length > 0) {
-            const x = parseFloat(addrs[0].x);
-            const y = parseFloat(addrs[0].y);
-            if (!isNaN(x) && !isNaN(y)) {
-              return { lat: y, lng: x };
+            for (const doc of addrs) {
+              const x = parseFloat(doc.x);
+              const y = parseFloat(doc.y);
+              if (!isNaN(x) && !isNaN(y)) {
+                const dist = this.getDistanceKm(y, x, cCoords.lat, cCoords.lng);
+                if (dist <= 25.0) {
+                  return { lat: y, lng: x };
+                }
+              }
             }
           }
         } catch (e) {}
       }
     }
 
-    console.warn(`[geocodeAddress] 주소 변환 실패: ${address}`);
-    return null;
+    console.warn(`[geocodeAddress] 주소 변환 기준점 적용: ${address} -> fallback center`);
+    return { lat: cCoords.lat, lng: cCoords.lng };
   }
 
   private colorPalette = [
@@ -610,18 +637,38 @@ export class RoutingService {
       if (numOnly) vehiclePointsMap[numOnly] = vehicleObj;
     }
 
-    academy.vehicleCount = savedVehicles.length;
+    // Preserve academy's registered vehicle count
+    academy.vehicleCount = Math.max(savedVehicles.length, academy.vehicleCount || 1, existingVehicles.length);
     await this.academyRepository.save(academy);
+
+    // Academy center coordinates and default region (e.g. '경기도 양주시')
+    let centerLat = parseFloat(academy.latitude);
+    let centerLng = parseFloat(academy.longitude);
+    if (isNaN(centerLat) || isNaN(centerLng)) {
+      centerLat = 37.8083;
+      centerLng = 127.0717;
+    }
+    const academyCenter = { lat: centerLat, lng: centerLng };
+    const defaultRegion = academy.roadAddress?.match(/^([가-힣]+(?:시|도)\s+[가-힣]+(?:구|군|시))/)?.[1] || '경기도 양주시';
+
+    // Clear active polygon coordinates on all existing vehicles before computing new zones
+    for (const ev of existingVehicles) {
+      ev.polygonCoordinates = null;
+      await this.vehicleRepository.save(ev);
+    }
 
     // 3. Geocode Addresses and Associate with Vehicles (with caching & parallel batch pre-fetch)
     const geocodeCache = new Map<string, { lat: number, lng: number } | null>();
 
     const uniqueLocations = new Set<string>();
     for (const row of parsedData) {
-      const inLocation = row['등원지'] || row['탑승지'] || row['승차지'] || row['승차지(주소)'] || row['주소'] || row['도로명주소'];
-      const outLocation = row['하원지'] || row['하차지'] || row['하차지(주소)'] || row['주소'] || row['도로명주소'];
-      if (inLocation && inLocation.toString().trim()) uniqueLocations.add(inLocation.toString().trim());
-      if (outLocation && outLocation.toString().trim()) uniqueLocations.add(outLocation.toString().trim());
+      // Prioritize road address first!
+      const road = row['도로명주소'] || row['주소'];
+      const stop = row['탑승차량_승차지'] || row['승차지'] || row['등원지'] || row['탑승지'];
+      const drop = row['탑승차량_하차지'] || row['하차지'] || row['하원지'];
+      if (road && String(road).trim()) uniqueLocations.add(String(road).trim());
+      else if (stop && String(stop).trim()) uniqueLocations.add(String(stop).trim());
+      else if (drop && String(drop).trim()) uniqueLocations.add(String(drop).trim());
     }
 
     const locArray = Array.from(uniqueLocations);
@@ -630,7 +677,7 @@ export class RoutingService {
       const batch = locArray.slice(i, i + BATCH_SIZE);
       await Promise.all(batch.map(async (addr) => {
         try {
-          const res = await this.geocodeAddress(addr);
+          const res = await this.geocodeAddress(addr, defaultRegion, academyCenter);
           geocodeCache.set(addr, res);
         } catch (e) {
           geocodeCache.set(addr, null);
@@ -642,7 +689,7 @@ export class RoutingService {
       const cleanAddr = addr.trim();
       if (!cleanAddr) return null;
       if (geocodeCache.has(cleanAddr)) return geocodeCache.get(cleanAddr);
-      const res = await this.geocodeAddress(cleanAddr);
+      const res = await this.geocodeAddress(cleanAddr, defaultRegion, academyCenter);
       geocodeCache.set(cleanAddr, res);
       return res;
     };
@@ -659,52 +706,37 @@ export class RoutingService {
       return null;
     };
 
+    const resolveBusName = (row: any) => {
+      const direct = row['등원차량'] || row['하원차량'] || row['차량'] || row['호차'] || row['등원_차량'] || row['하원_차량'];
+      if (direct && String(direct).trim()) return String(direct).trim();
+      const rawText = (row['탑승차량_승차지'] || row['승차지'] || row['탑승차량_하차지'] || row['하차지'] || row['비고'] || row['노선'] || row['코스'] || '').toString();
+      const m = rawText.match(/([0-9]+)\s*(?:호차|코스|노선)/);
+      return m ? `${m[1]}호차` : null;
+    };
+
     const allGeocodedPoints: [number, number][] = [];
 
     for (const row of parsedData) {
-      const inBusRaw = row['등원차량'] || row['차량'] || row['호차'] || row['등원_차량'];
-      const inBusName = inBusRaw ? inBusRaw.toString().trim() : null;
-      const inLocation = row['등원지'] || row['탑승지'] || row['승차지'] || row['승차지(주소)'] || row['주소'] || row['도로명주소'];
+      const busName = resolveBusName(row);
+      const inTarget = busName ? findTargetVehicle(busName) : null;
+      const inLocation = row['도로명주소'] || row['주소'] || row['탑승차량_승차지'] || row['승차지'] || row['등원지'] || row['탑승지'];
 
-      const outBusRaw = row['하원차량'] || row['차량'] || row['호차'] || row['하원_차량'];
-      const outBusName = outBusRaw ? outBusRaw.toString().trim() : null;
-      const outLocation = row['하원지'] || row['하차지'] || row['하차지(주소)'] || row['주소'] || row['도로명주소'];
-
-      const inTarget = inBusName ? findTargetVehicle(inBusName) : null;
       if (inLocation) {
         const coords = await geocodeWithCache(inLocation.toString());
         if (coords) {
           allGeocodedPoints.push([coords.lat, coords.lng]);
           if (inTarget) {
-            const exists = inTarget.points.some((p: any) => p[0] === coords.lat && p[1] === coords.lng);
+            const exists = inTarget.points.some((p: any) => Math.abs(p[0] - coords.lat) < 0.0001 && Math.abs(p[1] - coords.lng) < 0.0001);
             if (!exists) inTarget.points.push([coords.lat, coords.lng]);
           }
         }
       }
-
-      const outTarget = outBusName ? findTargetVehicle(outBusName) : null;
-      if (outLocation && outLocation !== inLocation) {
-        const coords = await geocodeWithCache(outLocation.toString());
-        if (coords) {
-          allGeocodedPoints.push([coords.lat, coords.lng]);
-          if (outTarget) {
-            const exists = outTarget.points.some((p: any) => p[0] === coords.lat && p[1] === coords.lng);
-            if (!exists) outTarget.points.push([coords.lat, coords.lng]);
-          }
-        }
-      }
     }
 
-    // Academy center coordinates (or average of points)
-    let centerLat = parseFloat(academy.latitude);
-    let centerLng = parseFloat(academy.longitude);
+    // Fallback center coordinates if needed
     if ((isNaN(centerLat) || isNaN(centerLng)) && allGeocodedPoints.length > 0) {
       centerLat = allGeocodedPoints.reduce((sum, p) => sum + p[0], 0) / allGeocodedPoints.length;
       centerLng = allGeocodedPoints.reduce((sum, p) => sum + p[1], 0) / allGeocodedPoints.length;
-    }
-    if (isNaN(centerLat) || isNaN(centerLng)) {
-      centerLat = 37.5665;
-      centerLng = 126.9780;
     }
 
     const nVehicles = savedVehicles.length;
@@ -739,7 +771,7 @@ export class RoutingService {
     // Boundaries touch along shared borders, never overlap (0% invasion), and never anchor to the center kindergarten
     const partitionedPolygons = this.partitionVehicleZones(
       savedVehicles.map(v => v.points),
-      1.8 // Realistic neighborhood service sector coverage (~2.5km to ~5km span)
+      1.2 // 1.2km service buffer around real student stops for realistic neighborhood sectors
     );
 
     for (let i = 0; i < nVehicles; i++) {
@@ -751,7 +783,7 @@ export class RoutingService {
       const vehicleToUpdate = await this.vehicleRepository.findOne({ where: { id: v.id } });
       if (vehicleToUpdate) {
         vehicleToUpdate.colorHex = v.color;
-        vehicleToUpdate.polygonCoordinates = v.points;
+        vehicleToUpdate.polygonCoordinates = v.points && v.points.length >= 3 ? v.points : null;
         await this.vehicleRepository.save(vehicleToUpdate);
       }
     }
@@ -780,8 +812,16 @@ export class RoutingService {
         let sLat = student.latitude;
         let sLng = student.longitude;
 
-        if ((sLat === undefined || sLat === null || isNaN(sLat) || sLng === undefined || sLng === null || isNaN(sLng)) && (student.boardingLocation || student.address)) {
-          const addr = student.boardingLocation || student.address;
+        // Check if student raw data already has explicit vehicle designation
+        const rawObj = student.raw || {};
+        const explicitBus = rawObj['등원차량'] || rawObj['하원차량'] || rawObj['차량'] || rawObj['호차'];
+        if (explicitBus) {
+          const numOnly = String(explicitBus).replace(/[^0-9]/g, '');
+          targetVehicle = currentVehicles.find(v => v.busNumber === explicitBus || (numOnly && v.busNumber.replace(/[^0-9]/g, '') === numOnly)) || null;
+        }
+
+        if (!targetVehicle && (sLat === undefined || sLat === null || isNaN(sLat) || sLng === undefined || sLng === null || isNaN(sLng)) && (student.address || student.boardingLocation)) {
+          const addr = student.address || student.boardingLocation;
           const coords = await geocodeWithCache(addr);
           if (coords) {
             sLat = coords.lat;

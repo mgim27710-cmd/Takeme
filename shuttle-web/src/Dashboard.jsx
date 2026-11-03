@@ -1560,9 +1560,9 @@ const parseKindergartenExcelSheet = (sheet) => {
   const row0 = rows[0] || [];
   const row1 = rows[1] || [];
 
-  // Check if row 1 contains sub-headers like '정규하원', '방과후하원', '종일반하원'
+  // Check if row 1 contains sub-headers like '정규하원', '방과후하원', '종일반하원', '승차지', '하차지'
   const isTwoRowHeader = row1.some(cell => 
-    cell && typeof cell === 'string' && (cell.includes('하원') || cell.includes('정규') || cell.includes('종일'))
+    cell && typeof cell === 'string' && (cell.includes('하원') || cell.includes('정규') || cell.includes('종일') || cell.includes('승차') || cell.includes('하차'))
   );
 
   let headerRowIndex = 0;
@@ -1573,7 +1573,13 @@ const parseKindergartenExcelSheet = (sheet) => {
     for (let c = 0; c < Math.max(row0.length, row1.length); c++) {
       const top = row0[c] ? String(row0[c]).trim() : '';
       const sub = row1[c] ? String(row1[c]).trim() : '';
-      if (sub) {
+      if (top.includes('호차') || top.includes('차량') || (top && (sub.includes('승차') || sub.includes('하차')))) {
+        if (sub.includes('하차')) {
+          headers.push('탑승차량_하차지');
+        } else {
+          headers.push('탑승차량_승차지');
+        }
+      } else if (sub) {
         headers.push(sub);
       } else if (top) {
         headers.push(top);
@@ -1585,6 +1591,24 @@ const parseKindergartenExcelSheet = (sheet) => {
     headerRowIndex = 1;
     headers = row0.map((c, idx) => c ? String(c).trim() : `COL_${idx}`);
   }
+
+  const cleanVehicle = (str) => {
+    if (!str) return '';
+    const m = String(str).match(/([0-9]+)\s*호차/);
+    return m ? `${m[1]}호차` : '';
+  };
+
+  const cleanStopName = (str) => {
+    if (!str) return '';
+    return String(str)
+      .replace(/\([0-9]+\s*호차\)/g, '')
+      .replace(/\[[0-9]+\s*호차\]/g, '')
+      .replace(/^[0-9]+\s*호차\s*/, '')
+      .replace(/^[0-9]+\s*코스\s*/, '')
+      .replace(/^[0-9]+\s*노선\s*/, '')
+      .replace(/^\s*\(\s*|\s*\)\s*$/g, '')
+      .trim();
+  };
 
   const result = [];
   for (let r = headerRowIndex; r < rows.length; r++) {
@@ -1611,7 +1635,25 @@ const parseKindergartenExcelSheet = (sheet) => {
     const kindergartenName = (academy?.name && academy.name.trim()) || obj['유치원명'] || obj['소속원명'] || obj['학교명'] || '';
     const age = obj['연령'] || obj['학년'] || '';
     const parentPhone = obj['부모연락처'] || obj['보호자연락처'] || obj['보호자 연락처'] || '';
-    const address = obj['등원지'] || obj['탑승지'] || obj['승차지'] || obj['주소'] || obj['도로명주소'] || '';
+
+    // CRITICAL: Road name address is in '주소' / '도로명주소' (Column 7)
+    const roadAddress = obj['주소'] || obj['도로명주소'] || '';
+
+    // Vehicle & Stop parsing
+    const rawBoarding = obj['탑승차량_승차지'] || obj['승차지'] || obj['등원지'] || obj['탑승지'] || '';
+    const rawDropoff = obj['탑승차량_하차지'] || obj['하차지'] || obj['하원지'] || '';
+    const noteStr = obj['비고'] || obj['노선'] || obj['코스'] || '';
+
+    const detectedBus = cleanVehicle(rawBoarding) || cleanVehicle(rawDropoff) || cleanVehicle(noteStr) || cleanVehicle(obj['등원차량']) || cleanVehicle(obj['차량']) || cleanVehicle(obj['호차']);
+    if (detectedBus) {
+      obj['등원차량'] = detectedBus;
+      obj['하원차량'] = detectedBus;
+      obj['호차'] = detectedBus;
+      obj['차량'] = detectedBus;
+    }
+
+    const boardingStopName = cleanStopName(rawBoarding) || cleanStopName(rawDropoff) || '';
+
     const allergies = obj['알레르기'] || obj['알러지'] || obj['특이사항(알레르기)'] || '';
     obj['알레르기'] = allergies;
 
@@ -1631,7 +1673,14 @@ const parseKindergartenExcelSheet = (sheet) => {
     obj['연령'] = age;
     obj['부모연락처'] = parentPhone;
     obj['보호자연락처'] = parentPhone;
-    obj['주소'] = address;
+
+    // Road address is preserved as primary address; boardingStopName is preserved as stop
+    obj['주소'] = roadAddress || boardingStopName;
+    obj['도로명주소'] = roadAddress;
+    obj['등원지'] = boardingStopName || roadAddress;
+    obj['탑승지'] = boardingStopName || roadAddress;
+    obj['승차지'] = boardingStopName || roadAddress;
+    obj['하차지'] = cleanStopName(rawDropoff) || boardingStopName || roadAddress;
 
     result.push(obj);
   }
@@ -1675,8 +1724,10 @@ const parseKindergartenExcelSheet = (sheet) => {
 
         const addressMap = data.map((row, idx) => {
           const name = row['학생이름/영문이름'] || row['이름'] || row['원생명'] || row['학생명'] || row['원생이름'] || `원생${idx + 1}`;
-          const address = row['등원지'] || row['탑승지'] || row['승차지'] || row['승차지(주소)'] || row['주소'] || row['도로명주소'] || row['실탑승지'] || '';
-          const boardingLocation = row['등원지'] || row['탑승지'] || row['승차지'] || address;
+          const roadAddress = row['도로명주소'] || row['주소'] || '';
+          const stopLocation = row['탑승차량_승차지'] || row['승차지'] || row['등원지'] || row['탑승지'] || row['승차지(주소)'] || '';
+          const address = roadAddress || stopLocation;
+          const boardingLocation = stopLocation || roadAddress;
           return {
             name: name.toString().trim(),
             address: address.toString().trim(),
@@ -1841,9 +1892,9 @@ const parseKindergartenExcelSheet = (sheet) => {
         if (b1) busSet.add(b1.toString().trim());
         if (b2) busSet.add(b2.toString().trim());
 
-        // Check '비고', '노선', '코스' for patterns like "1코스", "2코스", "1호차"
-        const note = (row['비고'] || row['노선'] || row['코스'] || '').toString();
-        const match = note.match(/([1-9]|10)\s*(?:코스|호차|노선)/);
+        // Check '비고', '노선', '코스', '승차지', '탑승차량_승차지' for vehicle patterns
+        const note = (row['비고'] || row['노선'] || row['코스'] || row['탑승차량_승차지'] || row['승차지'] || '').toString();
+        const match = note.match(/([0-9]+)\s*(?:호차|코스|노선)/);
         if (match) busSet.add(`${match[1]}호차`);
       });
 
@@ -1853,12 +1904,12 @@ const parseKindergartenExcelSheet = (sheet) => {
         return na - nb;
       });
 
-      // If Excel had no vehicle columns, preserve the academy's registered vehicle count (e.g. 8 buses) instead of 1!
+      // Preserve all registered vehicles of the academy!
       const existingCount = Array.isArray(buses) && buses.length > 0 ? buses.length : (academy?.vehicleCount || 1);
-      const count = busList.length > 0 ? busList.length : existingCount;
+      const count = Math.max(existingCount, busList.length, academy?.vehicleCount || 1);
       const vehicles = Array.from({ length: count }).map((_, i) => ({
-        id: i + 1,
-        busNumber: busList[i] || (buses[i] ? buses[i].name : `${i + 1}호차`),
+        id: buses[i]?.id || (i + 1),
+        busNumber: buses[i]?.name || (busList[i] || `${i + 1}호차`),
         plateNumber: buses[i]?.plateNumber || '',
         driverName: buses[i]?.driverName || '미정',
         driverPhone: buses[i]?.driverPhone || '000-0000-0000',
