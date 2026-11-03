@@ -539,6 +539,12 @@ export class RoutingService {
       await this.vehicleRepository.save(v);
     }
 
+    // 3. Reset student vehicle assignments to pending state
+    await this.studentRepository.update(
+      { academy: { id: academy.id } },
+      { assignedVehicle: null as any }
+    );
+
     this.notifyRouteUpdated(academy.id);
 
     return {

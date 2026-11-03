@@ -683,6 +683,30 @@ export default function Dashboard() {
     }
   }, [buses]);
 
+  // 60-second Stale Timeout for real-time bus GPS markers
+  useEffect(() => {
+    const staleInterval = setInterval(() => {
+      const now = Date.now();
+      const STALE_TIMEOUT_MS = 60 * 1000;
+      setBusLocations(prev => {
+        let changed = false;
+        const next = { ...prev };
+        Object.entries(prev).forEach(([vid, loc]) => {
+          if (loc && loc.timestamp) {
+            const locTime = typeof loc.timestamp === 'number' ? loc.timestamp : new Date(loc.timestamp).getTime();
+            if (now - locTime > STALE_TIMEOUT_MS) {
+              delete next[vid];
+              changed = true;
+            }
+          }
+        });
+        return changed ? next : prev;
+      });
+    }, 15000);
+
+    return () => clearInterval(staleInterval);
+  }, []);
+
   const handleLogout = () => {
     if (window.confirm('로그아웃 하시겠습니까?')) {
       localStorage.removeItem('takeme_user');
@@ -3054,6 +3078,17 @@ const parseKindergartenExcelSheet = (sheet) => {
                     >
                       {isProcessing ? '구역 매핑 처리 중...' : '새 엑셀 업로드'}
                     </button>
+                  </div>
+                  <div className="p-2.5 bg-blue-50/70 border border-blue-200/60 rounded-xl text-xs text-blue-800 space-y-1">
+                    <div className="font-bold flex items-center gap-1 text-blue-900">
+                      <svg className="w-3.5 h-3.5 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span>전년도 매핑 엑셀 작성 안내</span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-blue-700">
+                      승차지/하차지 또는 비고란에 <b>'1호차 (도로명 주소)'</b> 형태로 호차를 표기해주시면, 호차별 실제 운행 거점이 0% 겹침으로 정확하게 지도에 매핑됩니다.
+                    </p>
                   </div>
                   <div className="pt-1">
                     <button

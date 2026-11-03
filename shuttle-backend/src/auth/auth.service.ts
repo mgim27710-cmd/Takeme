@@ -610,15 +610,37 @@ export class AuthService {
         await this.usersRepository.save(savedUser);
       } else if (userRole === UserRole.STUDENT || userRole === UserRole.PARENT) {
         if (!targetAcademy) throw new BadRequestException('소속 유치원 정보를 찾을 수 없습니다.');
-        const student = await this.studentRepository.createQueryBuilder('student')
+        const matchingStudents = await this.studentRepository.createQueryBuilder('student')
           .leftJoinAndSelect('student.studentUser', 'studentUser')
           .leftJoinAndSelect('student.parentUser', 'parentUser')
           .where('TRIM(student.name) = :name', { name: searchName.trim() })
           .andWhere('student.academyId = :academyId', { academyId: targetAcademy.id })
-          .getOne();
+          .getMany();
           
-        if (!student) {
+        if (matchingStudents.length === 0) {
           throw new BadRequestException('해당 유치원에서 일치하는 이름의 원아 정보를 찾을 수 없습니다.');
+        }
+
+        let student = matchingStudents[0];
+        if (matchingStudents.length > 1) {
+          // 동명이인 처리: 학부모 전화번호가 제공된 경우 전화번호 대조
+          const phoneInput = (data.phone || data.parentPhone || savedUser.phone || '').replace(/[^0-9]/g, '');
+          if (phoneInput) {
+            const foundByPhone = matchingStudents.find(s => {
+              const rawObj = typeof s.raw === 'string' ? JSON.parse(s.raw || '{}') : (s.raw || {});
+              const sPhone = (rawObj['부모연락처'] || rawObj['보호자연락처'] || rawObj['보호자 연락처'] || rawObj['연락처'] || '').replace(/[^0-9]/g, '');
+              return sPhone && (sPhone.endsWith(phoneInput) || phoneInput.endsWith(sPhone));
+            });
+            if (foundByPhone) {
+              student = foundByPhone;
+            } else {
+              const unlinked = matchingStudents.find(s => userRole === UserRole.PARENT ? !s.parentUser : !s.studentUser);
+              if (unlinked) student = unlinked;
+            }
+          } else {
+            const unlinked = matchingStudents.find(s => userRole === UserRole.PARENT ? !s.parentUser : !s.studentUser);
+            if (unlinked) student = unlinked;
+          }
         }
         
         if (userRole === UserRole.STUDENT) {
