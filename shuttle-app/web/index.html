@@ -14,7 +14,19 @@
     This is a placeholder for base href that will be replaced by the value of
     the `--base-href` argument provided to `flutter build`.
   -->
-  <base href="$FLUTTER_BASE_HREF">
+  <script>
+    (function() {
+      var p = window.location.pathname;
+      var b = document.querySelector('base') || document.createElement('base');
+      if (p.indexOf('/driver') === 0) { b.setAttribute('href', '/driver/'); }
+      else if (p.indexOf('/naver') === 0) { b.setAttribute('href', '/naver/'); }
+      else if (p.indexOf('/tmap') === 0) { b.setAttribute('href', '/tmap/'); }
+      else if (p.indexOf('/app') === 0) { b.setAttribute('href', '/app/'); }
+      else { b.setAttribute('href', '/app/'); }
+      if (!b.parentNode) document.head.prepend(b);
+    })();
+  </script>
+  <base href="/app/">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
