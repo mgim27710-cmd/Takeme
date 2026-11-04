@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
@@ -17,7 +17,6 @@ import { PickupPoint } from '../entities/pickup-point.entity';
 import { BoardPost } from '../entities/board-post.entity';
 import { BoardComment } from '../entities/board-comment.entity';
 import { AuditLog } from '../entities/audit-log.entity';
-import { YearlyZoneMapping } from '../entities/yearly-zone-mapping.entity';
 import { Between } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 
@@ -51,8 +50,6 @@ export class RoutingService {
     private boardCommentRepository: Repository<BoardComment>,
     @InjectRepository(AuditLog)
     private auditLogRepository: Repository<AuditLog>,
-    @InjectRepository(YearlyZoneMapping)
-    private yearlyZoneMappingRepository: Repository<YearlyZoneMapping>,
     private httpService: HttpService,
     private configService: ConfigService,
   ) {}
@@ -87,45 +84,20 @@ export class RoutingService {
     return notifications;
   }
 
-  public async geocodeAddress(
-    address: string,
-    defaultRegion = '경기도 양주시',
-    centerCoords?: { lat: number, lng: number }
-  ): Promise<{ lat: number, lng: number } | null> {
+  public async geocodeAddress(address: string): Promise<{ lat: number, lng: number } | null> {
     if (!address) return null;
     const apiKey = this.configService.get<string>('KAKAO_REST_API_KEY');
     if (!apiKey) throw new BadRequestException('Kakao API Key is missing.');
 
     const cleanCandidates: string[] = [];
-    let raw = String(address).trim();
-
-    // 0. Strip vehicle prefixes and labels like '1호차', '(1호차)', '[1호차]', '1코스'
-    raw = raw.replace(/\([0-9]+\s*호차\)/g, '').replace(/\[[0-9]+\s*호차\]/g, '');
-    raw = raw.replace(/^[0-9]+\s*호차\s*/, '');
-    raw = raw.replace(/^[0-9]+\s*코스\s*/, '');
-    raw = raw.replace(/^[0-9]+\s*노선\s*/, '');
-    raw = raw.trim();
+    const raw = String(address).trim();
+    cleanCandidates.push(raw);
 
     // Extract region if present (e.g., '경기도 양주시')
     const regionMatch = raw.match(/^([가-힣]+(?:시|도)\s+[가-힣]+(?:구|군|시))/);
-    const region = regionMatch ? regionMatch[1] : defaultRegion;
+    const region = regionMatch ? regionMatch[1] : '';
 
-    // 1. Full address without parentheses (road name + building number)
-    let withoutParen = raw.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
-    withoutParen = withoutParen
-      .replace(/\d+\s*동\s*\d+\s*호/g, '')
-      .replace(/\d+\s*동/g, '')
-      .replace(/\d+\s*호/g, '')
-      .replace(/\d+\s*-\s*\d+/g, '')
-      .trim();
-    if (withoutParen) {
-      if (!withoutParen.startsWith(region) && !withoutParen.match(/^[가-힣]+(?:시|도)/)) {
-        cleanCandidates.push(`${region} ${withoutParen}`);
-      }
-      cleanCandidates.push(withoutParen);
-    }
-
-    // 2. Inside parentheses: apartment / complex / building name
+    // 1. Inside parentheses: apartment / complex / building name
     const parenMatch = raw.match(/\(([^)]+)\)/);
     if (parenMatch) {
       let inside = parenMatch[1]
@@ -133,31 +105,44 @@ export class RoutingService {
         .replace(/\d+\s*동/g, '')
         .replace(/\d+\s*호/g, '')
         .replace(/\d+\s*-\s*\d+/g, '')
-        .replace(/[0-9]+\s*호차/g, '')
         .trim();
-      if (inside && inside.length >= 2) {
-        cleanCandidates.push(`${region} ${inside}`);
+      if (inside) {
+        if (region) cleanCandidates.push(`${region} ${inside}`);
         cleanCandidates.push(inside);
       }
     }
 
-    // 3. Road name without building number (e.g., '경기도 양주시 고읍북로')
-    const roadOnlyMatch = withoutParen.match(/([가-힣]+(?:시|도)?\s*[가-힣]+(?:구|군|시)?\s*[가-힣0-9]+(?:로|길))/);
-    if (roadOnlyMatch && roadOnlyMatch[1]) {
-      const roadOnly = roadOnlyMatch[1].trim();
-      if (!roadOnly.startsWith(region) && !roadOnly.match(/^[가-힣]+(?:시|도)/)) {
-        cleanCandidates.push(`${region} ${roadOnly}`);
-      }
-      cleanCandidates.push(roadOnly);
+    // 2. Without parentheses and without unit details
+    let withoutParen = raw.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
+    withoutParen = withoutParen
+      .replace(/\d+\s*동\s*\d+\s*호/g, '')
+      .replace(/\d+\s*동/g, '')
+      .replace(/\d+\s*호/g, '')
+      .replace(/\d+\s*-\s*\d+/g, '')
+      .trim();
+    if (withoutParen && !cleanCandidates.includes(withoutParen)) {
+      cleanCandidates.push(withoutParen);
     }
 
-    // 4. Raw cleaned address
-    if (raw && !cleanCandidates.includes(raw)) {
-      cleanCandidates.push(raw);
+    // 3. Road address pattern (시/도 + 시/군/구 + 도로명 + 번호)
+    const roadMatch = withoutParen.match(/([가-힣]+(?:시|도)?\s*[가-힣]+(?:구|군|시)?\s*[가-힣0-9]+(?:로|길)\s*\d+(?:-\d+)?)/);
+    if (roadMatch && !cleanCandidates.includes(roadMatch[1])) {
+      cleanCandidates.push(roadMatch[1]);
+    }
+
+    // 4. Road without number (fallback if building number is missing or non-standard)
+    const roadNoNumMatch = withoutParen.match(/([가-힣]+(?:시|도)?\s*[가-힣]+(?:구|군|시)?\s*[가-힣0-9]+(?:로|길))/);
+    if (roadNoNumMatch && !cleanCandidates.includes(roadNoNumMatch[1])) {
+      cleanCandidates.push(roadNoNumMatch[1]);
+    }
+
+    // 5. Town / Dong pattern (시/도 + 시/군/구 + 읍/면/동)
+    const dongMatch = withoutParen.match(/([가-힣]+(?:시|도)?\s*[가-힣]+(?:구|군|시)?\s*[가-힣0-9]+(?:읍|면|동))/);
+    if (dongMatch && !cleanCandidates.includes(dongMatch[1])) {
+      cleanCandidates.push(dongMatch[1]);
     }
 
     const uniqueCandidates = Array.from(new Set(cleanCandidates.filter(Boolean)));
-    const cCoords = centerCoords || { lat: 37.8083, lng: 127.0717 };
 
     for (const query of uniqueCandidates) {
       if (!query) continue;
@@ -174,11 +159,7 @@ export class RoutingService {
           const x = parseFloat(docs[0].x);
           const y = parseFloat(docs[0].y);
           if (!isNaN(x) && !isNaN(y)) {
-            const dist = this.getDistanceKm(y, x, cCoords.lat, cCoords.lng);
-            // Distance Guard: Must be within 25km of academy in Yangju!
-            if (dist <= 25.0) {
-              return { lat: y, lng: x };
-            }
+            return { lat: y, lng: x };
           }
         }
       } catch (e) {}
@@ -194,16 +175,10 @@ export class RoutingService {
         );
         const kwDocs = kwResponse.data?.documents;
         if (kwDocs && kwDocs.length > 0) {
-          for (const doc of kwDocs) {
-            const x = parseFloat(doc.x);
-            const y = parseFloat(doc.y);
-            if (!isNaN(x) && !isNaN(y)) {
-              const dist = this.getDistanceKm(y, x, cCoords.lat, cCoords.lng);
-              // Distance Guard: Must be within 25km of academy in Yangju!
-              if (dist <= 25.0) {
-                return { lat: y, lng: x };
-              }
-            }
+          const x = parseFloat(kwDocs[0].x);
+          const y = parseFloat(kwDocs[0].y);
+          if (!isNaN(x) && !isNaN(y)) {
+            return { lat: y, lng: x };
           }
         }
       } catch (e) {}
@@ -226,22 +201,17 @@ export class RoutingService {
           );
           const addrs = nResponse.data?.addresses;
           if (addrs && addrs.length > 0) {
-            for (const doc of addrs) {
-              const x = parseFloat(doc.x);
-              const y = parseFloat(doc.y);
-              if (!isNaN(x) && !isNaN(y)) {
-                const dist = this.getDistanceKm(y, x, cCoords.lat, cCoords.lng);
-                if (dist <= 25.0) {
-                  return { lat: y, lng: x };
-                }
-              }
+            const x = parseFloat(addrs[0].x);
+            const y = parseFloat(addrs[0].y);
+            if (!isNaN(x) && !isNaN(y)) {
+              return { lat: y, lng: x };
             }
           }
         } catch (e) {}
       }
     }
 
-    console.warn(`[geocodeAddress] 주소 변환 실패: ${address} -> null 반환 (임의 기본좌표 사용 금지)`);
+    console.warn(`[geocodeAddress] 주소 변환 실패: ${address}`);
     return null;
   }
 
@@ -278,42 +248,16 @@ export class RoutingService {
 
   async getAcademy(academyId?: number, userId?: number): Promise<Academy | null> {
     if (academyId && !isNaN(Number(academyId))) {
-      const acad = await this.academyRepository.findOne({
-        where: { id: Number(academyId) },
-        relations: { owner: true }
-      });
-      if (acad) return acad;
+      return this.academyRepository.findOne({ where: { id: Number(academyId) } });
     }
     if (userId && !isNaN(Number(userId))) {
-      const acad = await this.academyRepository.findOne({
-        where: { owner: { id: Number(userId) } },
-        relations: { owner: true }
-      });
-      if (acad) return acad;
-
-      const user = await this.userRepository.findOne({
-        where: { id: Number(userId) },
-        relations: { academy: true }
-      });
-      if (user?.academy) return user.academy;
+      return this.academyRepository.findOne({ where: { owner: { id: Number(userId) } } });
     }
-    return null;
+    return this.academyRepository.findOne({ where: {}, order: { id: 'DESC' } });
   }
 
-  async getAllAcademies(reqUser?: any) {
-    let whereCondition: any = {};
-    if (reqUser && reqUser.role !== 'SUPER_ADMIN') {
-      const targetAcademyId = reqUser.academyId;
-      if (targetAcademyId) {
-        whereCondition = { id: targetAcademyId };
-      } else if (reqUser.sub) {
-        whereCondition = { owner: { id: reqUser.sub } };
-      } else {
-        return [];
-      }
-    }
+  async getAllAcademies() {
     const academies = await this.academyRepository.find({
-      where: whereCondition,
       relations: { owner: true },
       order: { id: 'ASC' }
     });
@@ -339,236 +283,9 @@ export class RoutingService {
     return results;
   }
 
-  async archiveCurrentZoneMapping(
-    academyId?: number,
-    userId?: number,
-    academicYear = '전년도',
-    title = '전년도 구역 매핑 이력',
-    description?: string
-  ): Promise<YearlyZoneMapping | null> {
-    const academy = await this.getAcademy(academyId, userId);
-    if (!academy) return null;
-
-    const vehicles = await this.vehicleRepository.find({
-      where: { academy: { id: academy.id } },
-      relations: { driverUser: true, teacherUser: true },
-      order: { id: 'ASC' }
-    });
-
-    if (vehicles.length === 0) return null;
-
-    const students = await this.studentRepository.find({
-      where: { academy: { id: academy.id } },
-      relations: { assignedVehicle: true }
-    });
-
-    const vehicleMappings = vehicles.map(v => {
-      let poly: any = [];
-      try {
-        poly = typeof v.polygonCoordinates === 'string' ? JSON.parse(v.polygonCoordinates) : (v.polygonCoordinates || []);
-      } catch (e) {
-        poly = [];
-      }
-
-      const assignedStudents = students.filter(s => s.assignedVehicle?.id === v.id);
-      return {
-        vehicleId: v.id,
-        busNumber: v.busNumber,
-        plateNumber: v.plateNumber,
-        driverName: v.driverName,
-        driverUserId: v.driverUser?.id,
-        teacherName: v.teacherName,
-        teacherUserId: v.teacherUser?.id,
-        capacity: v.capacity,
-        colorHex: v.colorHex,
-        polygonCoordinates: poly,
-        studentCount: assignedStudents.length,
-        studentsSummary: assignedStudents.slice(0, 50).map(s => ({
-          id: s.id,
-          name: s.name,
-          address: s.address,
-          boardingLocation: s.boardingLocation
-        }))
-      };
-    });
-
-    const hasAnyPolygon = vehicleMappings.some(vm => vm.polygonCoordinates && vm.polygonCoordinates.length > 0);
-    if (!hasAnyPolygon) {
-      return null;
-    }
-
-    const archive = this.yearlyZoneMappingRepository.create({
-      academy,
-      academicYear: academicYear || '전년도',
-      title: title || '전년도 구역 매핑 이력',
-      description: description || `호차 ${vehicles.length}대, 원아 ${students.length}명 매핑 스냅샷`,
-      vehicleMappings,
-      totalStudents: students.length,
-      totalVehicles: vehicles.length,
-      archivedAt: new Date()
-    });
-
-    return await this.yearlyZoneMappingRepository.save(archive);
-  }
-
-  async getYearlyZoneMappings(academyId?: number, userId?: number) {
-    const academy = await this.getAcademy(academyId, userId);
-    if (!academy) return [];
-    return this.yearlyZoneMappingRepository.find({
-      where: { academy: { id: academy.id } },
-      order: { id: 'DESC' }
-    });
-  }
-
-  async restoreYearlyZoneMapping(mappingId: number, academyId?: number, userId?: number) {
-    const academy = await this.getAcademy(academyId, userId);
-    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
-
-    const archive = await this.yearlyZoneMappingRepository.findOne({
-      where: { id: mappingId, academy: { id: academy.id } }
-    });
-    if (!archive) throw new BadRequestException('전년도 구역 매핑 데이터를 찾을 수 없습니다.');
-
-    // 1. Snapshot current active mapping before restoring
-    await this.archiveCurrentZoneMapping(
-      academy.id,
-      undefined,
-      '복원 전 활성 구역',
-      `${new Date().toLocaleDateString('ko-KR')} 복원 전 활성 구역 백업`,
-      '전년도 구역 매핑 복원 직전의 활성 구역 스냅샷입니다.'
-    );
-
-    const vehicles = await this.vehicleRepository.find({
-      where: { academy: { id: academy.id } },
-      order: { id: 'ASC' }
-    });
-
-    const vehicleMap = new Map<string, Vehicle>();
-    vehicles.forEach(v => {
-      vehicleMap.set(v.busNumber, v);
-      const numOnly = v.busNumber.replace(/[^0-9]/g, '');
-      if (numOnly) vehicleMap.set(numOnly, v);
-    });
-
-    for (const vm of archive.vehicleMappings) {
-      const numOnly = vm.busNumber?.replace(/[^0-9]/g, '');
-      const targetVehicle = vehicleMap.get(vm.busNumber) || (numOnly ? vehicleMap.get(numOnly) : undefined);
-      if (targetVehicle) {
-        targetVehicle.polygonCoordinates = vm.polygonCoordinates;
-        if (vm.colorHex) targetVehicle.colorHex = vm.colorHex;
-        await this.vehicleRepository.save(targetVehicle);
-      }
-    }
-
-    const existingStudents = await this.studentRepository.find({
-      where: { academy: { id: academy.id } },
-      relations: { assignedVehicle: true }
-    });
-
-    const updatedVehicles = await this.vehicleRepository.find({
-      where: { academy: { id: academy.id } }
-    });
-
-    const vehiclePolyList = updatedVehicles.map(v => {
-      let pts: [number, number][] = [];
-      try {
-        pts = typeof v.polygonCoordinates === 'string' ? JSON.parse(v.polygonCoordinates) : (v.polygonCoordinates || []);
-      } catch (e) {}
-      return { vehicle: v, points: pts };
-    });
-
-    for (const student of existingStudents) {
-      let targetVehicle: Vehicle | null = null;
-      const sLat = student.latitude;
-      const sLng = student.longitude;
-
-      if (sLat && sLng && !isNaN(sLat) && !isNaN(sLng)) {
-        for (const vp of vehiclePolyList) {
-          if (vp.points.length >= 3 && this.isPointInPolygon([sLat, sLng], vp.points)) {
-            targetVehicle = vp.vehicle;
-            break;
-          }
-        }
-      }
-      if (targetVehicle) {
-        student.assignedVehicle = targetVehicle;
-      }
-    }
-    await this.studentRepository.save(existingStudents);
-
-    this.notifyRouteUpdated(academy.id);
-    return {
-      success: true,
-      message: `'${archive.title}'(${archive.academicYear}) 구역 매핑이 성공적으로 복원되었습니다.`
-    };
-  }
-
-  async deleteYearlyZoneMapping(mappingId: number, academyId?: number, userId?: number) {
-    const academy = await this.getAcademy(academyId, userId);
-    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
-
-    const archive = await this.yearlyZoneMappingRepository.findOne({
-      where: { id: mappingId, academy: { id: academy.id } }
-    });
-    if (!archive) throw new BadRequestException('해당 구역 매핑 이력을 찾을 수 없습니다.');
-
-    await this.yearlyZoneMappingRepository.remove(archive);
-    return { success: true, message: '전년도 구역 매핑 내역이 삭제되었습니다.' };
-  }
-
-  async resetActiveZones(academyId?: number, userId?: number) {
-    const academy = await this.getAcademy(academyId, userId);
-    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
-
-    // 1. Archive current active mapping before clearing
-    await this.archiveCurrentZoneMapping(
-      academy.id,
-      undefined,
-      '전년도',
-      '전년도 구역 매핑 이력',
-      '구역 매핑 초기화 전 자동 보관된 매핑 내역입니다.'
-    );
-
-    // 2. Clear polygon coordinates on all vehicles (Preserve vehicle ID, driver, teacher, and approval statuses!)
-    const vehicles = await this.vehicleRepository.find({
-      where: { academy: { id: academy.id } }
-    });
-
-    for (const v of vehicles) {
-      v.polygonCoordinates = null;
-      await this.vehicleRepository.save(v);
-    }
-
-    // 3. Reset student vehicle assignments to pending state
-    await this.studentRepository.update(
-      { academy: { id: academy.id } },
-      { assignedVehicle: null as any }
-    );
-
-    this.notifyRouteUpdated(academy.id);
-
-    return {
-      success: true,
-      message: '현재 구역 매핑이 전년도 구역 매핑 DB에 저장되었으며, 활성 구역 매핑이 초기화되었습니다. 새로운 엑셀 시트를 업로드하여 새 구역을 설정할 수 있습니다.'
-    };
-  }
-
   async initializeZones(vehicles: any[], parsedData: any[], academyId?: number, userId?: number) {
     const academy = await this.getAcademy(academyId, userId);
     if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
-
-    // 0. Auto-archive current active zone mapping before applying the new Excel sheet
-    try {
-      await this.archiveCurrentZoneMapping(
-        academy.id,
-        undefined,
-        '전년도',
-        '전년도 구역 매핑 (새 엑셀 업로드 전 자동 보관)',
-        '새 엑셀 업로드 및 구역 재매핑 전 자동 백업된 구역 매핑입니다.'
-      );
-    } catch (e: any) {
-      console.warn('Auto-archiving previous zone mapping skipped:', e?.message);
-    }
 
     // 1. Preserve existing vehicles, drivers, teachers, and students (Non-destructive update)
     const existingVehicles = await this.vehicleRepository.find({
@@ -669,38 +386,18 @@ export class RoutingService {
       if (numOnly) vehiclePointsMap[numOnly] = vehicleObj;
     }
 
-    // Preserve academy's registered vehicle count
-    academy.vehicleCount = Math.max(savedVehicles.length, academy.vehicleCount || 1, existingVehicles.length);
+    academy.vehicleCount = savedVehicles.length;
     await this.academyRepository.save(academy);
-
-    // Academy center coordinates and default region (e.g. '경기도 양주시')
-    let centerLat = parseFloat(academy.latitude);
-    let centerLng = parseFloat(academy.longitude);
-    if (isNaN(centerLat) || isNaN(centerLng)) {
-      centerLat = 37.8083;
-      centerLng = 127.0717;
-    }
-    const academyCenter = { lat: centerLat, lng: centerLng };
-    const defaultRegion = academy.roadAddress?.match(/^([가-힣]+(?:시|도)\s+[가-힣]+(?:구|군|시))/)?.[1] || '경기도 양주시';
-
-    // Clear active polygon coordinates on all existing vehicles before computing new zones
-    for (const ev of existingVehicles) {
-      ev.polygonCoordinates = null;
-      await this.vehicleRepository.save(ev);
-    }
 
     // 3. Geocode Addresses and Associate with Vehicles (with caching & parallel batch pre-fetch)
     const geocodeCache = new Map<string, { lat: number, lng: number } | null>();
 
     const uniqueLocations = new Set<string>();
     for (const row of parsedData) {
-      // Prioritize road address first!
-      const road = row['도로명주소'] || row['주소'];
-      const stop = row['탑승차량_승차지'] || row['승차지'] || row['등원지'] || row['탑승지'];
-      const drop = row['탑승차량_하차지'] || row['하차지'] || row['하원지'];
-      if (road && String(road).trim()) uniqueLocations.add(String(road).trim());
-      else if (stop && String(stop).trim()) uniqueLocations.add(String(stop).trim());
-      else if (drop && String(drop).trim()) uniqueLocations.add(String(drop).trim());
+      const inLocation = row['등원지'] || row['탑승지'] || row['승차지'] || row['승차지(주소)'] || row['주소'] || row['도로명주소'];
+      const outLocation = row['하원지'] || row['하차지'] || row['하차지(주소)'] || row['주소'] || row['도로명주소'];
+      if (inLocation && inLocation.toString().trim()) uniqueLocations.add(inLocation.toString().trim());
+      if (outLocation && outLocation.toString().trim()) uniqueLocations.add(outLocation.toString().trim());
     }
 
     const locArray = Array.from(uniqueLocations);
@@ -709,7 +406,7 @@ export class RoutingService {
       const batch = locArray.slice(i, i + BATCH_SIZE);
       await Promise.all(batch.map(async (addr) => {
         try {
-          const res = await this.geocodeAddress(addr, defaultRegion, academyCenter);
+          const res = await this.geocodeAddress(addr);
           geocodeCache.set(addr, res);
         } catch (e) {
           geocodeCache.set(addr, null);
@@ -721,7 +418,7 @@ export class RoutingService {
       const cleanAddr = addr.trim();
       if (!cleanAddr) return null;
       if (geocodeCache.has(cleanAddr)) return geocodeCache.get(cleanAddr);
-      const res = await this.geocodeAddress(cleanAddr, defaultRegion, academyCenter);
+      const res = await this.geocodeAddress(cleanAddr);
       geocodeCache.set(cleanAddr, res);
       return res;
     };
@@ -738,37 +435,52 @@ export class RoutingService {
       return null;
     };
 
-    const resolveBusName = (row: any) => {
-      const direct = row['등원차량'] || row['하원차량'] || row['차량'] || row['호차'] || row['등원_차량'] || row['하원_차량'];
-      if (direct && String(direct).trim()) return String(direct).trim();
-      const rawText = (row['탑승차량_승차지'] || row['승차지'] || row['탑승차량_하차지'] || row['하차지'] || row['비고'] || row['노선'] || row['코스'] || '').toString();
-      const m = rawText.match(/([0-9]+)\s*(?:호차|코스|노선)/);
-      return m ? `${m[1]}호차` : null;
-    };
-
     const allGeocodedPoints: [number, number][] = [];
 
     for (const row of parsedData) {
-      const busName = resolveBusName(row);
-      const inTarget = busName ? findTargetVehicle(busName) : null;
-      const inLocation = row['도로명주소'] || row['주소'] || row['탑승차량_승차지'] || row['승차지'] || row['등원지'] || row['탑승지'];
+      const inBusRaw = row['등원차량'] || row['차량'] || row['호차'] || row['등원_차량'];
+      const inBusName = inBusRaw ? inBusRaw.toString().trim() : null;
+      const inLocation = row['등원지'] || row['탑승지'] || row['승차지'] || row['승차지(주소)'] || row['주소'] || row['도로명주소'];
 
+      const outBusRaw = row['하원차량'] || row['차량'] || row['호차'] || row['하원_차량'];
+      const outBusName = outBusRaw ? outBusRaw.toString().trim() : null;
+      const outLocation = row['하원지'] || row['하차지'] || row['하차지(주소)'] || row['주소'] || row['도로명주소'];
+
+      const inTarget = inBusName ? findTargetVehicle(inBusName) : null;
       if (inLocation) {
         const coords = await geocodeWithCache(inLocation.toString());
         if (coords) {
           allGeocodedPoints.push([coords.lat, coords.lng]);
           if (inTarget) {
-            const exists = inTarget.points.some((p: any) => Math.abs(p[0] - coords.lat) < 0.0001 && Math.abs(p[1] - coords.lng) < 0.0001);
+            const exists = inTarget.points.some((p: any) => p[0] === coords.lat && p[1] === coords.lng);
             if (!exists) inTarget.points.push([coords.lat, coords.lng]);
+          }
+        }
+      }
+
+      const outTarget = outBusName ? findTargetVehicle(outBusName) : null;
+      if (outLocation && outLocation !== inLocation) {
+        const coords = await geocodeWithCache(outLocation.toString());
+        if (coords) {
+          allGeocodedPoints.push([coords.lat, coords.lng]);
+          if (outTarget) {
+            const exists = outTarget.points.some((p: any) => p[0] === coords.lat && p[1] === coords.lng);
+            if (!exists) outTarget.points.push([coords.lat, coords.lng]);
           }
         }
       }
     }
 
-    // Fallback center coordinates if needed
+    // Academy center coordinates (or average of points)
+    let centerLat = parseFloat(academy.latitude);
+    let centerLng = parseFloat(academy.longitude);
     if ((isNaN(centerLat) || isNaN(centerLng)) && allGeocodedPoints.length > 0) {
       centerLat = allGeocodedPoints.reduce((sum, p) => sum + p[0], 0) / allGeocodedPoints.length;
       centerLng = allGeocodedPoints.reduce((sum, p) => sum + p[1], 0) / allGeocodedPoints.length;
+    }
+    if (isNaN(centerLat) || isNaN(centerLng)) {
+      centerLat = 37.5665;
+      centerLng = 126.9780;
     }
 
     const nVehicles = savedVehicles.length;
@@ -803,7 +515,7 @@ export class RoutingService {
     // Boundaries touch along shared borders, never overlap (0% invasion), and never anchor to the center kindergarten
     const partitionedPolygons = this.partitionVehicleZones(
       savedVehicles.map(v => v.points),
-      1.2 // 1.2km service buffer around real student stops for realistic neighborhood sectors
+      1.8 // Realistic neighborhood service sector coverage (~2.5km to ~5km span)
     );
 
     for (let i = 0; i < nVehicles; i++) {
@@ -815,305 +527,105 @@ export class RoutingService {
       const vehicleToUpdate = await this.vehicleRepository.findOne({ where: { id: v.id } });
       if (vehicleToUpdate) {
         vehicleToUpdate.colorHex = v.color;
-        vehicleToUpdate.polygonCoordinates = v.points && v.points.length >= 3 ? v.points : null;
+        vehicleToUpdate.polygonCoordinates = v.points;
         await this.vehicleRepository.save(vehicleToUpdate);
       }
     }
 
-    // 5. Expand newly mapped vehicle zones toward registered students and auto-dispatch
-    try {
-      await this.expandZonesToStudents(academy.id, userId);
-      const reloadedVehicles = await this.vehicleRepository.find({
-        where: { academy: { id: academy.id } },
-        order: { id: 'ASC' }
-      });
-      for (const v of savedVehicles) {
-        const found = reloadedVehicles.find(rv => rv.id === v.id);
-        if (found) {
-          let pts = found.polygonCoordinates;
-          while (typeof pts === 'string') {
-            try { pts = JSON.parse(pts); } catch (e) { break; }
-          }
-          v.points = Array.isArray(pts) ? pts : [];
-          v.polygon = v.points;
-        }
-      }
-    } catch (err: any) {
-      console.warn('[initializeZones] Auto-expansion to students failed:', err?.message || err);
-    }
-
-    this.notifyRouteUpdated(academy.id);
-    return savedVehicles;
-  }
-
-  async expandZonesToStudents(academyId?: number, userId?: number) {
-    const academy = await this.getAcademy(academyId, userId);
-    if (!academy) {
-      throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
-    }
-
-    const vehicles = await this.vehicleRepository.find({
-      where: { academy: { id: academy.id } },
-      order: { id: 'ASC' }
-    });
-
-    if (!vehicles || vehicles.length === 0) {
-      return { success: false, message: '등록된 차량이 없습니다.', count: 0, vehicles: [] };
-    }
-
-    // Load any past snapshot seed polygons in case some vehicles currently lack distinct polygons
-    let pastMap: any[] = [];
-    try {
-      const pastMapping = await this.yearlyZoneMappingRepository.findOne({
-        where: { academy: { id: academy.id } },
-        order: { id: 'DESC' }
-      });
-      if (pastMapping && pastMapping.vehicleMappings) {
-        pastMap = typeof pastMapping.vehicleMappings === 'string'
-          ? JSON.parse(pastMapping.vehicleMappings)
-          : pastMapping.vehicleMappings;
-      }
-    } catch (e) {}
-
-    interface VehicleZoneState {
-      vehicle: Vehicle;
-      polygon: [number, number][];
-      centroid: [number, number];
-      allPoints: [number, number][];
-      assignedStudents: any[];
-    }
-
-    const vehicleStates: VehicleZoneState[] = vehicles.map(v => {
-      let poly: [number, number][] = [];
-      try {
-        let rawPts = v.polygonCoordinates;
-        while (typeof rawPts === 'string') {
-          try { rawPts = JSON.parse(rawPts); } catch (e) { break; }
-        }
-        if (Array.isArray(rawPts)) {
-          poly = rawPts.filter(p => Array.isArray(p) && p.length >= 2 && !isNaN(p[0]) && !isNaN(p[1])) as [number, number][];
-        }
-      } catch (e) {}
-
-      // Fallback to snapshot points if poly is empty
-      if (poly.length === 0 && pastMap.length > 0) {
-        const snap = pastMap.find(m => m.busNumber === v.busNumber || m.vehicleId === v.id);
-        if (snap && Array.isArray(snap.polygonCoordinates) && snap.polygonCoordinates.length > 0) {
-          poly = snap.polygonCoordinates;
-        }
-      }
-
-      let cLat = 0, cLng = 0;
-      if (poly.length > 0) {
-        cLat = poly.reduce((s, p) => s + p[0], 0) / poly.length;
-        cLng = poly.reduce((s, p) => s + p[1], 0) / poly.length;
-      }
-
-      return {
-        vehicle: v,
-        polygon: poly,
-        centroid: [cLat, cLng],
-        allPoints: [...poly],
-        assignedStudents: []
-      };
-    });
-
-    // Check if any two vehicles share identical centroids, and recover distinct seeds if available
-    for (let i = 0; i < vehicleStates.length; i++) {
-      for (let j = i + 1; j < vehicleStates.length; j++) {
-        const vi = vehicleStates[i];
-        const vj = vehicleStates[j];
-        if (vi.centroid[0] !== 0 && vj.centroid[0] !== 0) {
-          const dCent = this.getDistanceKm(vi.centroid[0], vi.centroid[1], vj.centroid[0], vj.centroid[1]);
-          if (dCent < 0.001 && pastMap.length > 0) {
-            const snapI = pastMap.find(m => m.busNumber === vi.vehicle.busNumber);
-            const snapJ = pastMap.find(m => m.busNumber === vj.vehicle.busNumber);
-            if (snapI?.polygonCoordinates?.length > 0) {
-              vi.polygon = snapI.polygonCoordinates;
-              vi.centroid = [
-                vi.polygon.reduce((s, p) => s + p[0], 0) / vi.polygon.length,
-                vi.polygon.reduce((s, p) => s + p[1], 0) / vi.polygon.length
-              ];
-              vi.allPoints = [...vi.polygon];
-            }
-            if (snapJ?.polygonCoordinates?.length > 0) {
-              vj.polygon = snapJ.polygonCoordinates;
-              vj.centroid = [
-                vj.polygon.reduce((s, p) => s + p[0], 0) / vj.polygon.length,
-                vj.polygon.reduce((s, p) => s + p[1], 0) / vj.polygon.length
-              ];
-              vj.allPoints = [...vj.polygon];
-            }
-          }
-        }
-      }
-    }
-
-    const students = await this.studentRepository.find({
+    // 5. Merge existing students into newly mapped vehicle zones
+    const existingStudents = await this.studentRepository.find({
       where: { academy: { id: academy.id } },
       relations: { assignedVehicle: true }
     });
 
-    if (students.length === 0) {
-      return { success: true, count: 0, vehicles: vehicles.map(v => ({ id: v.id, busNumber: v.busNumber, studentCount: 0 })) };
-    }
+    if (existingStudents.length > 0) {
+      const currentVehicles = await this.vehicleRepository.find({
+        where: { academy: { id: academy.id } }
+      });
 
-    // Geocode any students missing coordinates
-    for (const student of students) {
-      if ((student.latitude === undefined || student.latitude === null || isNaN(student.latitude) ||
-           student.longitude === undefined || student.longitude === null || isNaN(student.longitude)) &&
-          (student.address || student.boardingLocation)) {
-        const addr = student.address || student.boardingLocation;
-        const coords = await this.geocodeAddress(addr);
-        if (coords) {
-          student.latitude = coords.lat;
-          student.longitude = coords.lng;
+      const vehiclePolyList = currentVehicles.map(v => {
+        let pts: [number, number][] = [];
+        try {
+          pts = typeof v.polygonCoordinates === 'string' ? JSON.parse(v.polygonCoordinates) : (v.polygonCoordinates || []);
+        } catch (e) {}
+        return { vehicle: v, points: pts };
+      });
+
+      for (const student of existingStudents) {
+        let targetVehicle: Vehicle | null = null;
+        let sLat = student.latitude;
+        let sLng = student.longitude;
+
+        if ((sLat === undefined || sLat === null || isNaN(sLat) || sLng === undefined || sLng === null || isNaN(sLng)) && (student.boardingLocation || student.address)) {
+          const addr = student.boardingLocation || student.address;
+          const coords = await geocodeWithCache(addr);
+          if (coords) {
+            sLat = coords.lat;
+            sLng = coords.lng;
+            student.latitude = sLat;
+            student.longitude = sLng;
+          }
         }
-      }
-    }
 
-    const validStudents = students.filter(s => s.latitude !== undefined && s.latitude !== null && !isNaN(s.latitude) &&
-                                               s.longitude !== undefined && s.longitude !== null && !isNaN(s.longitude));
-
-    // Vehicle matching helper
-    const matchVehicle = (val: any): VehicleZoneState | null => {
-      if (!val) return null;
-      const str = String(val).trim();
-      let found = vehicleStates.find(vs => vs.vehicle.busNumber === str || String(vs.vehicle.id) === str);
-      if (found) return found;
-      const digits = str.replace(/[^0-9]/g, '');
-      if (digits) {
-        found = vehicleStates.find(vs => vs.vehicle.busNumber.replace(/[^0-9]/g, '') === digits);
-        if (found) return found;
-      }
-      return null;
-    };
-
-    // Assign students to vehicle zones:
-    // 1. High priority: explicit vehicle in raw metadata (호차, 차량, 등원차량) or currently assignedVehicle
-    // 2. If no explicit bus, check if student coordinate is already inside a vehicle's polygon
-    // 3. Proximity to vehicle polygon / centroid
-    for (const st of validStudents) {
-      const sLat = Number(st.latitude);
-      const sLng = Number(st.longitude);
-
-      let parsedRaw: any = {};
-      if (st.raw) {
-        if (typeof st.raw === 'string') {
-          try { parsedRaw = JSON.parse(st.raw); } catch (e) { parsedRaw = {}; }
-        } else if (typeof st.raw === 'object') {
-          parsedRaw = st.raw;
-        }
-      }
-
-      let chosenVs: VehicleZoneState | null = null;
-
-      // 1. Check containment inside existing vehicle polygons first!
-      // If student is located inside an existing vehicle zone, assign to that vehicle immediately.
-      for (const vs of vehicleStates) {
-        if (vs.polygon.length >= 3 && this.isPointInPolygon([sLat, sLng], vs.polygon)) {
-          chosenVs = vs;
-          break;
-        }
-      }
-
-      // 2. If outside existing polygons, check explicit raw bus (호차, 차량, assignedVehicle, 등원차량)
-      if (!chosenVs) {
-        const explicitBusStr = parsedRaw['호차'] || parsedRaw['차량'] || (st.assignedVehicle ? st.assignedVehicle.busNumber : null) || parsedRaw['등원차량'];
-        if (explicitBusStr) {
-          chosenVs = matchVehicle(explicitBusStr);
-        }
-      }
-
-      // 3. If still not resolved, assign to nearest vehicle
-      if (!chosenVs) {
-        let minDist = Infinity;
-        for (const vs of vehicleStates) {
-          let dist = Infinity;
-          if (vs.polygon.length > 0) {
-            for (const pt of vs.polygon) {
-              const d = this.getDistanceKm(sLat, sLng, pt[0], pt[1]);
-              if (d < dist) dist = d;
+        if (sLat !== undefined && sLat !== null && !isNaN(sLat) && sLng !== undefined && sLng !== null && !isNaN(sLng)) {
+          // 1. Check if student coordinate is inside any vehicle polygon
+          for (const vp of vehiclePolyList) {
+            if (vp.points.length >= 3 && this.isPointInPolygon([sLat, sLng], vp.points)) {
+              targetVehicle = vp.vehicle;
+              break;
             }
-          } else if (vs.centroid[0] !== 0) {
-            dist = this.getDistanceKm(sLat, sLng, vs.centroid[0], vs.centroid[1]);
           }
-          if (dist < minDist) {
-            minDist = dist;
-            chosenVs = vs;
+
+          // 2. Fallback: closest vehicle polygon by minimum distance to polygon points
+          if (!targetVehicle) {
+            let minDistance = Infinity;
+            for (const vp of vehiclePolyList) {
+              if (vp.points.length > 0) {
+                for (const pt of vp.points) {
+                  const dist = this.getDistanceKm(sLat, sLng, pt[0], pt[1]);
+                  if (dist < minDistance) {
+                    minDistance = dist;
+                    targetVehicle = vp.vehicle;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // 3. Fallback: retain current vehicle or assign to first vehicle
+        if (!targetVehicle) {
+          targetVehicle = student.assignedVehicle || (currentVehicles.length > 0 ? currentVehicles[0] : null);
+        }
+
+        if (targetVehicle) {
+          student.assignedVehicle = targetVehicle;
+          if (student.raw && typeof student.raw === 'object') {
+            student.raw['등원차량'] = targetVehicle.busNumber;
+            student.raw['하원차량'] = targetVehicle.busNumber;
+            if (academy.name && academy.name.trim()) {
+              student.raw['유치원명'] = academy.name.trim();
+              student.raw['학교명'] = academy.name.trim();
+            }
           }
         }
       }
 
-      if (!chosenVs) {
-        chosenVs = vehicleStates[0];
-      }
+      await this.studentRepository.save(existingStudents);
 
-      chosenVs.assignedStudents.push(st);
-      chosenVs.allPoints.push([sLat, sLng]);
-    }
-
-    // Now auto-expand each vehicle's zone to encompass all its assigned students!
-    // ("할당은 되어 있는데 학생 위치까지 구역을 넓혀 줘야지 자동으로")
-    // Buffer = 0.8km ensures full envelope coverage while bisector clipping guarantees 0% overlap
-    const studentPointsList = vehicleStates.map(vs => {
-      const studentPts = vs.assignedStudents.map(s => [Number(s.latitude), Number(s.longitude)] as [number, number]);
-      const basePts = vs.polygon.length > 0 ? vs.polygon : [];
-      return [...basePts, ...studentPts];
-    });
-
-    const expandedPolygons = this.partitionVehicleZones(studentPointsList, 0.8);
-
-    // Save expanded polygons to DB
-    for (let i = 0; i < vehicleStates.length; i++) {
-      const vs = vehicleStates[i];
-      const poly = expandedPolygons[i];
-      if (poly && poly.length >= 3) {
-        vs.vehicle.polygonCoordinates = poly;
-        await this.vehicleRepository.save(vs.vehicle);
-      }
-    }
-
-    // Save student assignments and update raw metadata
-    for (const vs of vehicleStates) {
-      for (const st of vs.assignedStudents) {
-        st.assignedVehicle = vs.vehicle;
-        st.color = vs.vehicle.colorHex;
-        if (!st.raw || typeof st.raw !== 'object') st.raw = {};
-        st.raw['등원차량'] = vs.vehicle.busNumber;
-        st.raw['하원차량'] = vs.vehicle.busNumber;
-        st.raw['호차'] = vs.vehicle.busNumber;
-        st.raw['차량'] = vs.vehicle.busNumber;
-        if (academy.name && academy.name.trim()) {
-          st.raw['유치원명'] = academy.name.trim();
-          st.raw['학교명'] = academy.name.trim();
+      // Synchronize student_schedules to the newly assigned vehicles
+      for (const st of existingStudents) {
+        if (st.assignedVehicle) {
+          await this.studentRepository.query(
+            `UPDATE student_schedules SET "assignedVehicleId" = $1 WHERE "studentId" = $2`,
+            [st.assignedVehicle.id, st.id]
+          ).catch(() => {});
         }
-        await this.studentRepository.save(st);
-
-        // Update schedule assignedVehicleId
-        await this.studentRepository.query(
-          `UPDATE student_schedules SET "assignedVehicleId" = $1 WHERE "studentId" = $2`,
-          [vs.vehicle.id, st.id]
-        ).catch(() => {});
       }
     }
 
-    // Notify connected clients via websocket
     this.notifyRouteUpdated(academy.id);
-
-    const vehicleSummary = vehicleStates.map((vs, idx) => ({
-      id: vs.vehicle.id,
-      busNumber: vs.vehicle.busNumber,
-      studentCount: vs.assignedStudents.length,
-      capacity: vs.vehicle.capacity || 25,
-      vertices: (expandedPolygons[idx] || []).length
-    }));
-
-    return {
-      success: true,
-      count: validStudents.length,
-      vehicles: vehicleSummary
-    };
+    return savedVehicles;
   }
 
   async getInitialState(academyId?: number, userId?: number) {
@@ -1137,8 +649,6 @@ export class RoutingService {
         name: v.busNumber,
         color: v.colorHex || this.getDistinctColor(),
         points: parsedPoints,
-        polygon: parsedPoints,
-        polygonCoordinates: parsedPoints,
         busNumber: v.busNumber,
         plateNumber: v.plateNumber,
         driverName: v.driverName,
@@ -1159,7 +669,7 @@ export class RoutingService {
     
     const dbStudents = await this.studentRepository.find({ 
       where: { academy: { id: academy.id } },
-      relations: { assignedVehicle: true, assignedDepartureVehicle: true, studentUser: true, parentUser: true, schedules: { assignedVehicle: true } } 
+      relations: { assignedVehicle: true, studentUser: true, parentUser: true, schedules: { assignedVehicle: true } } 
     });
     const formattedStudents = dbStudents.map(st => {
       let parsedRaw: any = {};
@@ -1167,23 +677,15 @@ export class RoutingService {
         parsedRaw = typeof st.raw === 'string' ? JSON.parse(st.raw) : (st.raw || {});
       } catch(e) {}
 
-      const isNotRiding = Boolean(st.isNotRiding || parsedRaw['미탑승'] || parsedRaw['차량미탑승']);
-      const needsAddress = !isNotRiding && (!st.address || st.latitude === null || st.latitude === undefined || isNaN(st.latitude) || !st.longitude || isNaN(st.longitude) || !!parsedRaw['주소입력필요']);
-
       return {
         id: st.id,
         name: st.adminDisplayName || st.name,
         realName: st.name,
-        address: st.address || '',
-        boardingLocation: st.boardingLocation || '',
-        dropoffLocation: st.dropoffLocation || parsedRaw['하차지'] || parsedRaw['하원지'] || '',
+        address: st.address,
+        boardingLocation: st.boardingLocation,
         lat: st.latitude,
         lng: st.longitude,
-        isNotRiding,
-        addressNeedsInput: needsAddress,
         assignedBusId: st.assignedVehicle ? st.assignedVehicle.id : null,
-        assignedDepartureBusId: st.assignedDepartureVehicle ? st.assignedDepartureVehicle.id : null,
-        assignedDepartureBusName: st.assignedDepartureVehicle ? st.assignedDepartureVehicle.busNumber : (parsedRaw['하원차량'] || ''),
         color: st.assignedVehicle ? (st.assignedVehicle.colorHex || '#64748b') : '#64748b',
         allergies: st.allergies || parsedRaw['알레르기'] || parsedRaw['알러지'] || '',
         raw: parsedRaw,
@@ -1476,7 +978,7 @@ export class RoutingService {
     return lower.concat(upper);
   }
 
-  public generateZonePolygon(points: [number, number][], bufferKm: number = 1.8): [number, number][] {
+  private generateZonePolygon(points: [number, number][], bufferKm: number = 1.8): [number, number][] {
     if (!points || points.length === 0) return [];
 
     // Deduplicate points
@@ -1872,182 +1374,64 @@ export class RoutingService {
       }
 
       const allergyVal = rawObj ? (rawObj['알레르기'] || rawObj['알러지'] || rawObj['특이사항(알레르기)'] || '') : '';
-      const hasCoords = st.lat !== undefined && st.lat !== null && !isNaN(parseFloat(st.lat)) &&
-                        st.lng !== undefined && st.lng !== null && !isNaN(parseFloat(st.lng));
-      const sLat = hasCoords ? parseFloat(st.lat) : (null as any);
-      const sLng = hasCoords ? parseFloat(st.lng) : (null as any);
-      const sAddr = hasCoords ? (st.address || '') : '';
-      if (!hasCoords && rawObj) {
-        rawObj['주소입력필요'] = true;
-        if (st.address && !rawObj['실패주소']) rawObj['실패주소'] = st.address;
-      }
-
-      let depVehicle = st.assignedDepartureBusId ? vehicleMap.get(st.assignedDepartureBusId) : null;
-      if (!depVehicle && rawObj && rawObj['하원차량']) {
-        const dBusNum = String(rawObj['하원차량']).trim();
-        depVehicle = vehicles.find(v => v.busNumber === dBusNum || v.busNumber.replace(/[^0-9]/g, '') === dBusNum.replace(/[^0-9]/g, '')) || null;
-      }
-      const isNotRiding = Boolean(st.isNotRiding || (rawObj && (rawObj['미탑승'] || rawObj['차량미탑승'])));
-      const dropLocation = st.dropoffLocation || (rawObj && (rawObj['하차지'] || rawObj['하원지'])) || '';
-
       return this.studentRepository.create({
         name: st.name,
         adminDisplayName,
-        address: sAddr,
-        boardingLocation: hasCoords ? (st.boardingLocation || sAddr) : '',
-        dropoffLocation: dropLocation,
-        latitude: sLat,
-        longitude: sLng,
-        isNotRiding,
+        address: st.address,
+        boardingLocation: st.boardingLocation || st.address,
+        latitude: st.lat !== undefined && st.lat !== null ? parseFloat(st.lat) : undefined,
+        longitude: st.lng !== undefined && st.lng !== null ? parseFloat(st.lng) : undefined,
         allergies: allergyVal || st.allergies || '',
         raw: rawObj || st.raw,
-        assignedVehicle: isNotRiding ? undefined : (vehicle || undefined),
-        assignedDepartureVehicle: isNotRiding ? undefined : (depVehicle || undefined),
+        assignedVehicle: vehicle || undefined,
         academy: academy
       });
     });
 
     await this.studentRepository.save(newStudents);
 
-    // Auto-expand vehicle zones to envelop all geocoded students
-    try {
-      await this.expandZonesToStudents(academy.id, userId);
-    } catch (e: any) {
-      console.warn('[saveStudents] Auto zone expansion failed:', e?.message || e);
-    }
+    const acadLat = parseFloat(academy.latitude);
+    const acadLng = parseFloat(academy.longitude);
 
-    this.notifyRouteUpdated(academy.id);
-
-    const successCount = newStudents.filter(s => s.latitude && s.longitude).length;
-    const failedAddressCount = newStudents.length - successCount;
-    return {
-      success: true,
-      totalCount: newStudents.length,
-      successCount,
-      failedAddressCount,
-      count: newStudents.length,
-      message: `총 ${newStudents.length}명 등록 완료 (정상 배차: ${successCount}명, 주소 수동 입력 필요: ${failedAddressCount}명)`
-    };
-  }
-
-  async updateStudent(studentId: number, data: any, academyId?: number, userId?: number) {
-    const academy = await this.getAcademy(academyId, userId);
-    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
-
-    const student = await this.studentRepository.findOne({
-      where: { id: studentId, academy: { id: academy.id } },
-      relations: { assignedVehicle: true, academy: true }
-    });
-    if (!student) throw new NotFoundException('원아를 찾을 수 없습니다.');
-
-    if (data.name !== undefined) student.name = data.name;
-    if (data.adminDisplayName !== undefined) student.adminDisplayName = data.adminDisplayName;
-
-    let parsedRaw: any = {};
-    if (student.raw) {
-      if (typeof student.raw === 'string') {
-        try { parsedRaw = JSON.parse(student.raw); } catch (e) { parsedRaw = {}; }
-      } else if (typeof student.raw === 'object') {
-        parsedRaw = { ...student.raw };
-      }
-    }
-
-    if (data.address !== undefined) {
-      const trimmedAddress = String(data.address || '').trim();
-      student.address = trimmedAddress;
-      student.boardingLocation = trimmedAddress;
-      if (trimmedAddress) {
-        const coords = await this.geocodeAddress(trimmedAddress);
-        if (coords) {
-          student.latitude = coords.lat;
-          student.longitude = coords.lng;
-          delete parsedRaw['주소입력필요'];
-          delete parsedRaw['실패주소'];
-        } else {
-          student.latitude = null as any;
-          student.longitude = null as any;
-          parsedRaw['주소입력필요'] = true;
-          parsedRaw['실패주소'] = trimmedAddress;
-        }
-      } else {
-        student.latitude = null as any;
-        student.longitude = null as any;
-        parsedRaw['주소입력필요'] = true;
-      }
-    }
-
-    if (data.className !== undefined) parsedRaw['반명'] = data.className;
-    if (data.age !== undefined) parsedRaw['연령'] = data.age;
-    if (data.gender !== undefined) parsedRaw['성별'] = data.gender;
-    if (data.parentName !== undefined) parsedRaw['보호자 성함'] = data.parentName;
-    if (data.parentPhone !== undefined) {
-      parsedRaw['부모연락처'] = data.parentPhone;
-      parsedRaw['보호자연락처'] = data.parentPhone;
-    }
-    if (data.allergies !== undefined) {
-      student.allergies = data.allergies;
-      parsedRaw['알레르기'] = data.allergies;
-    }
-    if (data.note !== undefined) parsedRaw['비고'] = data.note;
-
-    if (data.isNotRiding !== undefined) {
-      student.isNotRiding = Boolean(data.isNotRiding);
-      parsedRaw['차량미탑승'] = student.isNotRiding;
-      if (student.isNotRiding) {
-        delete parsedRaw['주소입력필요'];
-        delete parsedRaw['실패주소'];
-        student.assignedVehicle = null as any;
-        student.assignedDepartureVehicle = null as any;
-      }
-    }
-
-    if (data.dropoffLocation !== undefined) {
-      student.dropoffLocation = data.dropoffLocation;
-      parsedRaw['하차지'] = data.dropoffLocation;
-    }
-
-    if (data.assignedBusId) {
-      const vehicle = await this.vehicleRepository.findOne({
-        where: { id: Number(data.assignedBusId), academy: { id: academy.id } }
-      });
-      if (vehicle) {
-        student.assignedVehicle = vehicle;
-        parsedRaw['등원차량'] = vehicle.busNumber;
-        parsedRaw['호차'] = vehicle.busNumber;
-        parsedRaw['차량'] = vehicle.busNumber;
-      }
-    } else if (data.assignedBusId === null) {
-      student.assignedVehicle = null as any;
-    }
-
-    if (data.assignedDepartureBusId !== undefined) {
-      if (data.assignedDepartureBusId) {
-        const dVehicle = await this.vehicleRepository.findOne({
-          where: { id: Number(data.assignedDepartureBusId), academy: { id: academy.id } }
-        });
-        if (dVehicle) {
-          student.assignedDepartureVehicle = dVehicle;
-          parsedRaw['하원차량'] = dVehicle.busNumber;
-        }
-      } else {
-        student.assignedDepartureVehicle = null as any;
-      }
-    }
-
-    student.raw = parsedRaw;
-    await this.studentRepository.save(student);
-
-    // If student now has valid coordinates, auto-expand vehicle zone!
-    if (student.latitude && student.longitude) {
+    // Form clean, non-overlapping vehicle zones encompassing assigned students
+    // Boundaries touch along shared borders, never overlap (0% invasion), and never anchor to the center kindergarten
+    const vehiclePointsForPartition: [number, number][][] = [];
+    for (const vehicle of vehicles) {
+      const assignedStudents = newStudents.filter(
+        st => st.assignedVehicle && st.assignedVehicle.id === vehicle.id && st.latitude && st.longitude
+      );
+      let existingPoints: [number, number][] = [];
       try {
-        await this.expandZonesToStudents(academy.id, userId);
-      } catch (e: any) {
-        console.warn('Auto zone expansion on student update:', e?.message || e);
+        let rawPts = vehicle.polygonCoordinates;
+        while (typeof rawPts === 'string') {
+          try { rawPts = JSON.parse(rawPts); } catch(e) { break; }
+        }
+        if (Array.isArray(rawPts)) {
+          existingPoints = rawPts.filter(p => Array.isArray(p) && p.length >= 2 && !isNaN(p[0]) && !isNaN(p[1])) as [number, number][];
+        }
+      } catch (e) {}
+
+      // Filter out academy center point if it was previously included
+      existingPoints = existingPoints.filter(p => {
+        if (isNaN(acadLat) || isNaN(acadLng)) return true;
+        return this.getDistanceKm(p[0], p[1], acadLat, acadLng) > 0.08;
+      });
+
+      const studentPoints: [number, number][] = assignedStudents.map(st => [st.latitude!, st.longitude!]);
+      vehiclePointsForPartition.push([...existingPoints, ...studentPoints]);
+    }
+
+    const updatedPolygons = this.partitionVehicleZones(vehiclePointsForPartition, 1.8);
+    for (let i = 0; i < vehicles.length; i++) {
+      const v = vehicles[i];
+      if (updatedPolygons[i] && updatedPolygons[i].length >= 3) {
+        v.polygonCoordinates = updatedPolygons[i];
+        await this.vehicleRepository.save(v);
       }
     }
 
     this.notifyRouteUpdated(academy.id);
-    return { success: true, student };
+    return { success: true, count: newStudents.length };
   }
 
   async addStudent(studentData: any, academyId?: number, userId?: number) {
@@ -2211,40 +1595,20 @@ export class RoutingService {
     if (studentData.allergies) {
       raw['알레르기'] = studentData.allergies;
     }
-    let depVehicle: Vehicle | null = null;
-    if (studentData.assignedDepartureBusId) {
-      depVehicle = vehicles.find(v => v.id === Number(studentData.assignedDepartureBusId)) || null;
-    }
-    const isNotRiding = Boolean(studentData.isNotRiding || raw['미탑승'] || raw['차량미탑승']);
-    const dropoffLocation = studentData.dropoffLocation || studentData.outLocation || raw['하차지'] || raw['하원지'] || '';
-
     const student = this.studentRepository.create({
       name: studentData.name,
       adminDisplayName,
       address: studentData.address,
       boardingLocation: studentData.inLocation || studentData.boardingLocation || studentData.address,
-      dropoffLocation,
       latitude: lat,
       longitude: lng,
-      isNotRiding,
       allergies: studentData.allergies || studentData.raw?.['알레르기'] || '',
       raw,
-      assignedVehicle: isNotRiding ? undefined : (vehicle || undefined),
-      assignedDepartureVehicle: isNotRiding ? undefined : (depVehicle || undefined),
+      assignedVehicle: vehicle || undefined,
       academy
     });
 
     const saved = await this.studentRepository.save(student);
-
-    if (lat !== undefined && lng !== undefined) {
-      try {
-        await this.expandZonesToStudents(academy.id, userId);
-        zoneExpanded = true;
-      } catch (e: any) {
-        console.warn('Auto zone expansion on addStudent:', e?.message || e);
-      }
-    }
-
     this.notifyRouteUpdated(academy.id);
 
     return {
@@ -2276,90 +1640,6 @@ export class RoutingService {
     return { success: true };
   }
 
-  async deleteVehicle(vehicleId: number, academyId?: number, userId?: number) {
-    const academy = await this.getAcademy(academyId, userId);
-    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
-
-    const vehicleToDelete = await this.vehicleRepository.findOne({
-      where: { id: vehicleId, academy: { id: academy.id } }
-    });
-    if (!vehicleToDelete) throw new NotFoundException('삭제할 차량을 찾을 수 없습니다.');
-
-    // 1. Find all remaining vehicles of this academy
-    const remainingVehicles = await this.vehicleRepository.find({
-      where: { academy: { id: academy.id } },
-      order: { id: 'ASC' }
-    });
-    const otherVehicles = remainingVehicles.filter(v => v.id !== vehicleId);
-
-    // 2. Reassign students of the deleted vehicle to the closest remaining vehicle
-    const studentsOfVehicle = await this.studentRepository.find({
-      where: [
-        { academy: { id: academy.id }, assignedVehicle: { id: vehicleId } },
-        { academy: { id: academy.id }, assignedDepartureVehicle: { id: vehicleId } }
-      ]
-    });
-
-    if (otherVehicles.length > 0 && studentsOfVehicle.length > 0) {
-      for (const st of studentsOfVehicle) {
-        if (st.latitude && st.longitude) {
-          let closestVeh = otherVehicles[0];
-          let minDist = Infinity;
-          for (const ov of otherVehicles) {
-            let pts: [number, number][] = [];
-            try {
-              pts = typeof ov.polygonCoordinates === 'string' ? JSON.parse(ov.polygonCoordinates) : (ov.polygonCoordinates || []);
-            } catch (e) {}
-            if (pts.length > 0) {
-              for (const pt of pts) {
-                const d = this.getDistanceKm(st.latitude, st.longitude, pt[0], pt[1]);
-                if (d < minDist) {
-                  minDist = d;
-                  closestVeh = ov;
-                }
-              }
-            }
-          }
-          if (st.assignedVehicle?.id === vehicleId) {
-            st.assignedVehicle = closestVeh;
-            if (st.raw && typeof st.raw === 'object') st.raw['등원차량'] = closestVeh.busNumber;
-          }
-          if (st.assignedDepartureVehicle?.id === vehicleId) {
-            st.assignedDepartureVehicle = closestVeh;
-            if (st.raw && typeof st.raw === 'object') st.raw['하원차량'] = closestVeh.busNumber;
-          }
-        } else {
-          if (st.assignedVehicle?.id === vehicleId) st.assignedVehicle = otherVehicles[0];
-          if (st.assignedDepartureVehicle?.id === vehicleId) st.assignedDepartureVehicle = otherVehicles[0];
-        }
-        await this.studentRepository.save(st);
-      }
-    }
-
-    // 3. Delete vehicle from DB
-    await this.vehicleRepository.delete({ id: vehicleId, academy: { id: academy.id } });
-
-    // 4. Update academy vehicleCount
-    academy.vehicleCount = otherVehicles.length;
-    await this.academyRepository.save(academy);
-
-    // 5. Expand remaining vehicles' zones to absorb the reassigned students & area!
-    if (otherVehicles.length > 0) {
-      try {
-        await this.expandZonesToStudents(academy.id, userId);
-      } catch (e: any) {
-        console.warn('Auto zone expansion after vehicle deletion:', e?.message || e);
-      }
-    }
-
-    this.notifyRouteUpdated(academy.id);
-    return {
-      success: true,
-      message: `${vehicleToDelete.busNumber} 차량이 삭제되었으며, 해당 구역과 원아들이 주변 차량들로 자연스럽게 확장 배정되었습니다.`,
-      remainingCount: otherVehicles.length
-    };
-  }
-
   async geocodeBulk(addresses: string[]) {
     if (!Array.isArray(addresses)) return [];
     const cache = new Map<string, { lat: number, lng: number } | null>();
@@ -2380,37 +1660,6 @@ export class RoutingService {
       results.push({ address: trimmed, coords });
     }
     return results;
-  }
-
-  async reverseGeocode(lat: number, lng: number): Promise<{ address: string; roadAddress?: string }> {
-    if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
-      return { address: '위치 정보 없음' };
-    }
-    const apiKey = this.configService.get<string>('KAKAO_REST_API_KEY');
-    if (apiKey) {
-      try {
-        const response = await firstValueFrom(
-          this.httpService.get('https://dapi.kakao.com/v2/local/geo/coord2address.json', {
-            params: { x: lng, y: lat },
-            headers: { Authorization: `KakaoAK ${apiKey}` },
-          })
-        );
-        const doc = response.data?.documents?.[0];
-        if (doc) {
-          const road = doc.road_address?.address_name;
-          const jibun = doc.address?.address_name;
-          const building = doc.road_address?.building_name;
-          const display = building ? `${road || jibun} (${building})` : (road || jibun);
-          return {
-            address: display || `지정 좌표 (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
-            roadAddress: road || undefined,
-          };
-        }
-      } catch (err) {
-        // Kakao reverse geocode error fallback
-      }
-    }
-    return { address: `지정 좌표 (${lat.toFixed(5)}, ${lng.toFixed(5)})` };
   }
 
   async updateVehicle(id: number, data: Partial<Vehicle>) {
@@ -2688,7 +1937,7 @@ export class RoutingService {
 
   async getHolidays(academyId?: number, userId?: number) {
     const academy = await this.getAcademy(academyId, userId);
-    if (!academy) return [];
+    if (!academy) return this.academyHolidayRepository.find({ order: { startDate: 'DESC' } });
     return this.academyHolidayRepository.find({ 
       where: { academy: { id: academy.id } },
       order: { startDate: 'DESC' } 
@@ -2708,18 +1957,10 @@ export class RoutingService {
     return { success: true };
   }
 
-  async getAdminMessages(academyId?: number, userId?: number) {
-    const academy = await this.getAcademy(academyId, userId);
-    if (!academy) return [];
-
+  async getAdminMessages() {
     return this.parentMessageRepository.createQueryBuilder('msg')
-      .leftJoinAndSelect('msg.student', 'student')
-      .leftJoinAndSelect('msg.receiverUser', 'receiverUser')
       .where('msg.targetRoles LIKE :role', { role: '%ACADEMY_ADMIN%' })
-      .andWhere('(student.academyId = :academyId OR receiverUser.academyId = :academyId OR receiverUser.id = :userId)', {
-        academyId: academy.id,
-        userId: userId || 0
-      })
+      .leftJoinAndSelect('msg.student', 'student')
       .orderBy('msg.createdAt', 'DESC')
       .getMany();
   }

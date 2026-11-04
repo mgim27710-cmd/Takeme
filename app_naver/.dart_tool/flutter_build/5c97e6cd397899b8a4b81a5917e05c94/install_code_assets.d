@@ -1,1 +1,0 @@
- C:\\Users\\admin\\.gemini\\antigravity\\scratch\\shuttle-system\\app_naver\\.dart_tool\\flutter_build\\5c97e6cd397899b8a4b81a5917e05c94\\native_assets.json: 

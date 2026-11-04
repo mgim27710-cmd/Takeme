@@ -12,12 +12,8 @@ export class ApprovalController {
   }
 
   @Get('pending')
-  async getPending(
-    @Query('email') email: string,
-    @Query('role') role: string,
-    @Query('academyId') academyId?: string
-  ) {
-    return this.approvalService.getPendingRequests(email, role, academyId ? parseInt(academyId, 10) : undefined);
+  async getPending(@Query('email') email: string, @Query('role') role: string) {
+    return this.approvalService.getPendingRequests(email, role);
   }
 
   @Post(':id/decide')

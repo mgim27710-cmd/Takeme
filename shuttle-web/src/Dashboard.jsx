@@ -4528,14 +4528,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             ))}
           </div>
 
-          <button
-            onClick={handleLogout}
-            className="px-3 py-2 bg-white text-slate-700 hover:text-red-600 rounded-lg shadow-lg border border-slate-200 text-xs font-bold transition-colors whitespace-nowrap"
-            title="로그아웃"
-          >
-            로그아웃
-          </button>
-        </div>
+</div>
 
         <MapContainer 
           center={academy && !isNaN(academy.lat) && !isNaN(academy.lng) ? [academy.lat, academy.lng] : [37.5650, 126.9750]} 
