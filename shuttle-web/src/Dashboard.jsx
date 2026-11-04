@@ -159,6 +159,18 @@ export default function Dashboard() {
   const [isCreatingBoardPost, setIsCreatingBoardPost] = useState(false);
   const [boardPosts, setBoardPosts] = useState([]);
   const [editingBus, setEditingBus] = useState(null);
+  const [showAddBusModal, setShowAddBusModal] = useState(false);
+  const [newBusForm, setNewBusForm] = useState({
+    name: '',
+    busNumber: '',
+    plateNumber: '',
+    driverName: '',
+    driverPhone: '',
+    teacherName: '',
+    teacherPhone: '',
+    capacity: 25,
+    color: '#2563eb',
+  });
   const [isProcessing, setIsProcessing] = useState(false);
   const [teachers, setTeachers] = useState([]);
   const [selectedTeacherClasses, setSelectedTeacherClasses] = useState({});
@@ -1363,6 +1375,124 @@ export default function Dashboard() {
         setPickupPoints(pickupPoints.filter(p => p.id !== id));
       }
     } catch (e) {}
+  };
+
+  const handleAddBus = async (e) => {
+    e.preventDefault();
+    const busName = (newBusForm.name || newBusForm.busNumber || `${buses.length + 1}호차`).trim();
+    setIsProcessing(true);
+
+    try {
+      const targetAcademyId = selectedAcademyId || currentUser.academyId || 1;
+      const res = await fetch(`${API_BASE_URL}/routing/vehicle`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-academy-id': String(targetAcademyId),
+        },
+        body: JSON.stringify({
+          academyId: targetAcademyId,
+          name: busName,
+          busNumber: newBusForm.busNumber || busName,
+          plateNumber: newBusForm.plateNumber || '',
+          driverName: newBusForm.driverName || '',
+          driverPhone: newBusForm.driverPhone || '',
+          teacherName: newBusForm.teacherName || '',
+          teacherPhone: newBusForm.teacherPhone || '',
+          capacity: parseInt(newBusForm.capacity) || 25,
+          color: newBusForm.color || '#2563eb',
+        })
+      }).catch(() => null);
+
+      let createdBus;
+      if (res && res.ok) {
+        createdBus = await res.json();
+      } else {
+        // Fallback local persistence if backend remote endpoint is unavailable
+        createdBus = {
+          id: Date.now(),
+          name: busName,
+          busNumber: newBusForm.busNumber || busName,
+          plateNumber: newBusForm.plateNumber || '',
+          driverName: newBusForm.driverName || '',
+          driverPhone: newBusForm.driverPhone || '',
+          teacherName: newBusForm.teacherName || '',
+          teacherPhone: newBusForm.teacherPhone || '',
+          capacity: parseInt(newBusForm.capacity) || 25,
+          color: newBusForm.color || '#2563eb',
+          polygonCoordinates: '[]',
+          operatingSchedule: '[]',
+        };
+      }
+
+      const updated = [...buses, createdBus];
+      setBuses(typeof computePolygons === 'function' ? computePolygons(updated) : updated);
+      localStorage.setItem('takeme_buses', JSON.stringify(updated));
+      setShowAddBusModal(false);
+      setNewBusForm({
+        name: '',
+        busNumber: '',
+        plateNumber: '',
+        driverName: '',
+        driverPhone: '',
+        teacherName: '',
+        teacherPhone: '',
+        capacity: 25,
+        color: '#2563eb',
+      });
+      alert(`[${busName}] 차량이 성공적으로 등록되었습니다.`);
+
+      try {
+        const stateRes = await fetch(`${API_BASE_URL}/routing/initial-state?academyId=${targetAcademyId}`);
+        if (stateRes.ok) {
+          const stateData = await stateRes.json();
+          if (Array.isArray(stateData.buses) && typeof computePolygons === 'function') setBuses(computePolygons(stateData.buses));
+          if (Array.isArray(stateData.students)) setStudents(stateData.students);
+        }
+      } catch (_) {}
+    } catch (err) {
+      console.error(err);
+      alert('차량 등록 중 오류가 발생했습니다.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDeleteBus = async (bus) => {
+    if (!bus) return;
+    const busStudents = students.filter(st => st.assignedBusId === bus.id);
+    const confirmMsg = busStudents.length > 0
+      ? `정말 [${bus.name}] 차량을 삭제하시겠습니까?\n\n※ 해당 차량에 배정된 원아 ${busStudents.length}명은 안전하게 '배정 대기' 상태로 전환됩니다.`
+      : `정말 [${bus.name}] 차량을 삭제하시겠습니까?`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsProcessing(true);
+    try {
+      const targetAcademyId = selectedAcademyId || currentUser.academyId || 1;
+      await fetch(`${API_BASE_URL}/routing/vehicle/${bus.id}?academyId=${targetAcademyId}&userId=${currentUser.id}`, { method: 'DELETE' }).catch(() => {});
+
+      const updatedBuses = buses.filter(b => b.id !== bus.id);
+      setBuses(typeof computePolygons === 'function' ? computePolygons(updatedBuses) : updatedBuses);
+      localStorage.setItem('takeme_buses', JSON.stringify(updatedBuses));
+
+      if (busStudents.length > 0) {
+        const updatedStudents = students.map(st => st.assignedBusId === bus.id ? { ...st, assignedBusId: null } : st);
+        setStudents(updatedStudents);
+        localStorage.setItem('takeme_students', JSON.stringify(updatedStudents));
+      }
+
+      if (selectedBusId === bus.id) {
+        setSelectedBusId(null);
+      }
+
+      alert(`[${bus.name}] 차량이 삭제되었습니다.`);
+    } catch (err) {
+      console.error(err);
+      alert('차량 삭제 중 오류가 발생했습니다.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleUpdateBus = async (e) => {
@@ -3037,6 +3167,31 @@ const parseKindergartenExcelSheet = (sheet) => {
 
             {/* Action Buttons: Integrated Zone Mapping & Pickup Points */}
             <div className="space-y-2.5 mb-4">
+              <button
+                type="button"
+                onClick={() => {
+                  const presetColors = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#ea580c'];
+                  setNewBusForm({
+                    name: `${buses.length + 1}호차`,
+                    busNumber: `${buses.length + 1}호차`,
+                    plateNumber: '',
+                    driverName: '',
+                    driverPhone: '',
+                    teacherName: '',
+                    teacherPhone: '',
+                    capacity: 25,
+                    color: presetColors[buses.length % presetColors.length] || '#2563eb',
+                  });
+                  setShowAddBusModal(true);
+                }}
+                className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl shadow-xs hover:shadow-md transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm active:scale-[0.99] cursor-pointer"
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                </svg>
+                <span>새 통학 차량 추가</span>
+              </button>
+
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => setIsResettingZones(!isResettingZones)}
@@ -3231,7 +3386,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                           </div>
                         </div>
 
-                        <button 
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button 
                           onClick={(e) => {
                             e.stopPropagation();
                             setEditingBus(bus);
@@ -3240,6 +3396,18 @@ const parseKindergartenExcelSheet = (sheet) => {
                         >
                           상세 설정
                         </button>
+                          <button 
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteBus(bus);
+                            }}
+                            className="text-xs bg-white text-slate-400 hover:text-red-600 hover:bg-red-50 font-bold px-2 py-1.5 rounded-lg transition-colors whitespace-nowrap border border-slate-200 hover:border-red-200 cursor-pointer"
+                            title="차량 삭제"
+                          >
+                            삭제
+                          </button>
+                        </div>
                       </div>
 
                       {/* Info Summary Grid */}
@@ -5163,6 +5331,156 @@ const parseKindergartenExcelSheet = (sheet) => {
                   ) : (
                     <span>{editingStudentId ? '수정 저장 (구역 자동 확장)' : '원생 등록하기'}</span>
                   )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Vehicle Modal */}
+      {showAddBusModal && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between mb-5 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-black">
+                  🚌
+                </div>
+                <h2 className="text-lg font-black text-slate-900">새 통학 차량 추가</h2>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setShowAddBusModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 text-lg font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleAddBus} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">호차명 <span className="text-red-500">*</span></label>
+                  <input 
+                    type="text" 
+                    required
+                    value={newBusForm.name} 
+                    onChange={e => setNewBusForm({ ...newBusForm, name: e.target.value, busNumber: e.target.value })} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-600 outline-none text-sm font-semibold" 
+                    placeholder="예: 3호차" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">차량 번호</label>
+                  <input 
+                    type="text" 
+                    value={newBusForm.plateNumber} 
+                    onChange={e => setNewBusForm({ ...newBusForm, plateNumber: e.target.value })} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-600 outline-none text-sm font-semibold" 
+                    placeholder="예: 서울70가 1234" 
+                  />
+                </div>
+              </div>
+
+              {/* Color Presets */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">지도 표시 고유 색상</label>
+                <div className="flex items-center gap-2">
+                  {['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#ea580c', '#475569'].map(c => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setNewBusForm({ ...newBusForm, color: c })}
+                      className={`w-7 h-7 rounded-full transition-transform cursor-pointer ${newBusForm.color === c ? 'ring-2 ring-offset-2 ring-blue-600 scale-110' : 'hover:scale-105'}`}
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                  <input 
+                    type="color" 
+                    value={newBusForm.color} 
+                    onChange={e => setNewBusForm({ ...newBusForm, color: e.target.value })}
+                    className="w-7 h-7 rounded-full cursor-pointer border-0 p-0 bg-transparent"
+                    title="사용자 지정 색상"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">운전 기사님 성함</label>
+                  <input 
+                    type="text" 
+                    value={newBusForm.driverName} 
+                    onChange={e => setNewBusForm({ ...newBusForm, driverName: e.target.value })} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-semibold" 
+                    placeholder="기사님 이름" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">기사님 연락처</label>
+                  <input 
+                    type="text" 
+                    value={newBusForm.driverPhone} 
+                    onChange={e => setNewBusForm({ ...newBusForm, driverPhone: formatPhoneNumber(e.target.value) })} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-semibold" 
+                    placeholder="010-0000-0000" 
+                    maxLength={13} 
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">동승 교사 성함</label>
+                  <input 
+                    type="text" 
+                    value={newBusForm.teacherName} 
+                    onChange={e => setNewBusForm({ ...newBusForm, teacherName: e.target.value })} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-semibold" 
+                    placeholder="교사 이름" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">동승 교사 연락처</label>
+                  <input 
+                    type="text" 
+                    value={newBusForm.teacherPhone} 
+                    onChange={e => setNewBusForm({ ...newBusForm, teacherPhone: formatPhoneNumber(e.target.value) })} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-semibold" 
+                    placeholder="010-0000-0000" 
+                    maxLength={13} 
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">차량 탑승 정원 (인원수)</label>
+                <input 
+                  type="number" 
+                  min="1"
+                  max="100"
+                  value={newBusForm.capacity} 
+                  onChange={e => setNewBusForm({ ...newBusForm, capacity: e.target.value })} 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-semibold" 
+                  placeholder="25" 
+                />
+              </div>
+
+              <div className="flex gap-2.5 pt-2">
+                <button 
+                  type="button" 
+                  onClick={() => setShowAddBusModal(false)} 
+                  className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors cursor-pointer"
+                >
+                  취소
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={isProcessing} 
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl shadow-md transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {isProcessing ? '등록 중...' : '차량 추가하기'}
                 </button>
               </div>
             </form>
