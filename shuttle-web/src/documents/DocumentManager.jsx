@@ -160,7 +160,7 @@ export default function DocumentManager({
         category: categoryLabel,
         file: uploadFile,
         note: uploadNote.trim(),
-        uploadedBy: currentUser?.name ? `${currentUser.name} 관리자` : '원장선생님/관리자',
+        uploadedBy: currentUser?.name ? `${currentUser.name} 관리자` : '관리자',
       });
 
       // Reset modal form

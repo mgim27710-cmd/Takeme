@@ -43,7 +43,7 @@ const DEFAULT_POSTS = [
     likedUserIds: ['admin'],
     comments: [
       { id: 1, authorName: '민준이 어머님', authorRole: 'PARENT', content: '사진 너무 예쁘네요! 오늘도 수고 많으셨습니다 선생님~', createdAt: new Date(Date.now() - 3600000).toISOString() },
-      { id: 2, authorName: '원장선생님', authorRole: 'ADMIN', content: '햇살반 친구들 표정이 정말 밝고 예쁩니다 ^^', createdAt: new Date(Date.now() - 1800000).toISOString() }
+      { id: 2, authorName: '관리자', authorRole: 'ADMIN', content: '햇살반 친구들 표정이 정말 밝고 예쁩니다 ^^', createdAt: new Date(Date.now() - 1800000).toISOString() }
     ],
     createdAt: new Date(Date.now() - 7200000).toISOString()
   },
@@ -53,7 +53,7 @@ const DEFAULT_POSTS = [
     content: '학부모님 안녕하십니까. 다음 주 금요일 진행되는 가을 운동회 및 꿈나무 축제 일정 안내드립니다. 편안한 복장과 운동화 착용을 부탁드리며 셔틀 운행 시간표를 확인해 주시기 바랍니다.',
     imageUrl: 'https://images.unsplash.com/photo-1587654780291-39c9404d746b?w=800&auto=format&fit=crop&q=80',
     images: [],
-    authorName: '원장선생님',
+    authorName: '관리자',
     authorRole: 'ADMIN',
     visibility: 'ALL',
     targetClass: null,
@@ -134,7 +134,7 @@ export default function BoardViewer({
   // Form state for new / edit post
   const defaultAuthorName = isTeacher 
     ? `${currentUser.name || '선생님'} (${teacherClass})`
-    : (currentUser?.name ? `${currentUser.name} 원장선생님` : '원장선생님');
+    : (currentUser?.name ? `${currentUser.name} 관리자` : '관리자');
 
   const [postForm, setPostForm] = useState({
     title: '',
@@ -302,7 +302,7 @@ export default function BoardViewer({
     const text = commentInputs[postId]?.trim();
     if (!text) return;
 
-    const authorName = currentUser?.name ? `${currentUser.name} 원장선생님` : '원장선생님';
+    const authorName = currentUser?.name ? `${currentUser.name} 관리자` : '관리자';
     const newComment = {
       id: Date.now(),
       authorName,
@@ -498,7 +498,7 @@ export default function BoardViewer({
           targetClass: postForm.visibility === 'CLASS' ? postForm.targetClass : null,
           imageUrl: primaryImageUrl,
           images: formImages,
-          authorName: postForm.authorName || '원장선생님'
+          authorName: postForm.authorName || '관리자'
         };
       });
       savePostsLocal(updated);
@@ -889,7 +889,7 @@ export default function BoardViewer({
                             <div className="flex items-center gap-1.5">
                               <span className="text-xs font-black text-slate-800">{post.authorName}</span>
                               <span className="text-[10px] font-bold px-1.5 py-0.2 bg-slate-100 text-slate-600 rounded">
-                                {post.authorRole === 'ADMIN' ? '원장/관리자' : post.authorRole === 'TEACHER' ? '선생님' : '학부모'}
+                                {post.authorRole === 'ADMIN' ? '관리자' : post.authorRole === 'TEACHER' ? '선생님' : '학부모'}
                               </span>
                             </div>
                             <span className="text-[10px] text-slate-400 block">{formattedDate}</span>
@@ -978,7 +978,7 @@ export default function BoardViewer({
                                   <div className="flex items-center gap-1.5 mb-1">
                                     <span className="font-bold text-slate-800 text-[11px]">{c.authorName}</span>
                                     <span className="text-[9px] px-1 py-0.2 bg-slate-200 text-slate-600 rounded font-medium">
-                                      {c.authorRole === 'ADMIN' ? '원장' : c.authorRole === 'TEACHER' ? '선생님' : '학부모'}
+                                      {c.authorRole === 'ADMIN' ? '관리자' : c.authorRole === 'TEACHER' ? '선생님' : '학부모'}
                                     </span>
                                     <span className="text-[10px] text-slate-400">
                                       {new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

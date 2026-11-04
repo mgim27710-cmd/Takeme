@@ -365,7 +365,7 @@ export default function ClassManager({
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            원장선생님께서 새로운 반을 개설하고, 원아들을 드래그하여 반에 넣고 담당 담임교사를 지정할 수 있습니다.
+            관리자님께서 새로운 반을 개설하고, 원아들을 드래그하여 반에 넣고 담당 담임교사를 지정할 수 있습니다.
           </p>
         </div>
 

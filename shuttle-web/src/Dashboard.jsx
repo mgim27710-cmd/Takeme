@@ -77,10 +77,18 @@ function PickupPointEvents({ isAddingPickupPoint, onAddPickupPoint }) {
   return null;
 }
 
-export default function Dashboard() {
+export default function Dashboard({ initialEducationLevel } = {}) {
   const location = useLocation();
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
+
+  // 현재 교육 부문 (유치원, 초등부, 중,고등부)
+  const activeEducationLevel = useMemo(() => {
+    if (location.pathname.includes('/elementary')) return '초등부';
+    if (location.pathname.includes('/middle-high')) return '중,고등부';
+    if (location.pathname.includes('/kindergarten')) return '유치원';
+    return initialEducationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
+  }, [location.pathname, initialEducationLevel]);
 
   // Multi-tenant User Context
   const currentUser = (() => {
@@ -3075,7 +3083,7 @@ const parseKindergartenExcelSheet = (sheet) => {
       <div className="w-20 bg-blue-700 flex flex-col items-center py-8 gap-6 z-20 shadow-xl">
         <div className="text-white font-bold text-xs mb-1">Takeme</div>
         <div className="text-xs text-blue-200 text-center truncate max-w-[70px] mb-4 font-medium" title={currentUser.name}>
-          {isSuperAdmin ? '플랫폼관리' : (currentUser.name ? `${currentUser.name} 원장선생님` : '원장선생님')}
+          {isSuperAdmin ? '플랫폼관리' : (currentUser.name ? `${currentUser.name} 관리자님` : '관리자님')}
         </div>
         <button 
           onClick={() => handleTabChange('status')} 
@@ -3161,7 +3169,12 @@ const parseKindergartenExcelSheet = (sheet) => {
           <div className="p-6 h-full flex flex-col overflow-y-auto break-keep">
             {/* Header */}
             <div className="mb-4">
-              <h2 className="text-xl font-bold text-slate-800">차량 및 구역 관리</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-bold text-slate-800">차량 및 구역 관리</h2>
+                <span className="text-xs px-2.5 py-1 rounded-lg font-black bg-blue-100 text-blue-700 border border-blue-200 shadow-xs">
+                  {activeEducationLevel}
+                </span>
+              </div>
               <p className="text-[13px] text-slate-500 mt-1">호차별 운행 구역, 차량 정보 및 탑승 원생을 통합 관리합니다.</p>
             </div>
 
@@ -4065,7 +4078,7 @@ const parseKindergartenExcelSheet = (sheet) => {
           <div className="p-6 h-full flex flex-col">
             <h2 className="text-xl font-bold text-slate-800 mb-1">반 및 분반 관리</h2>
             <p className="text-[13px] text-slate-500 mb-4">
-              학원원장이 새로운 반을 개설하고, 원아들을 드래그하여 반에 넣고 담당 담임교사를 배정할 수 있습니다.
+              관리자이 새로운 반을 개설하고, 원아들을 드래그하여 반에 넣고 담당 담임교사를 배정할 수 있습니다.
             </p>
 
             <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-4 text-xs space-y-2">
@@ -4656,7 +4669,7 @@ const parseKindergartenExcelSheet = (sheet) => {
           </div>
         )}
 
-        {/* Top-Right Controls: SuperAdmin Switcher & Day Filter & Logout */}
+        {/* Top-Right Controls: SuperAdmin Switcher & Day Filter */}
         <div className="absolute top-4 right-4 z-[1000] flex items-center gap-2">
           {isSuperAdmin && (
             <div className="flex items-center gap-2 bg-indigo-700 text-white px-3 py-1.5 rounded-lg shadow-lg text-xs font-bold border border-indigo-500">

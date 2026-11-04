@@ -11,6 +11,7 @@ export default function Landing() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [name, setName] = useState('');
   const [role, setRole] = useState('ACADEMY_ADMIN'); // 'ACADEMY_ADMIN' | 'TEACHER'
+  const [educationLevel, setEducationLevel] = useState('유치원'); // '유치원' | '초등부' | '중,고등부'
   const [otpToken, setOtpToken] = useState('');
   const [qrCodeUrl, setQrCodeUrl] = useState('');
   const [userId, setUserId] = useState(null);
@@ -60,7 +61,7 @@ export default function Landing() {
 
   const handleSendUnlockSms = async () => {
     if (!email || !email.includes('@')) {
-      return alert('잠금 해제할 원장님 이메일 계정을 입력해주세요.');
+      return alert('잠금 해제할 관리자 이메일 계정을 입력해주세요.');
     }
     setUnlockLoading(true);
     try {
@@ -97,7 +98,7 @@ export default function Landing() {
       });
       const data = await res.json();
       if (res.ok) {
-        alert('원장님 계정 잠금이 성공적으로 해제되었습니다! 이제 로그인해 주세요.');
+        alert('관리자 계정 잠금이 성공적으로 해제되었습니다! 이제 로그인해 주세요.');
         setShowSelfUnlock(false);
         setUnlockSmsSent(false);
         setUnlockSmsCode('');
@@ -249,12 +250,13 @@ export default function Landing() {
           password, 
           name, 
           role: 'TEACHER', 
-          authCode: authCode.trim().toUpperCase()
+          authCode: authCode.trim().toUpperCase(),
+          educationLevel
         })
       });
       const data = await res.json();
       if (res.ok) {
-        alert(data.message || '교사 회원가입이 완료되었습니다! 원장선생님의 반 배정 후 이용 가능합니다.');
+        alert(data.message || '교사 회원가입이 완료되었습니다! 관리자님의 반 배정 후 이용 가능합니다.');
         setMode('login');
         setPassword('');
         setConfirmPassword('');
@@ -270,10 +272,11 @@ export default function Landing() {
     const res = await fetch(`${API_BASE_URL}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name, role, phone: directorPhone.trim() || undefined })
+      body: JSON.stringify({ email, password, name, role, phone: directorPhone.trim() || undefined, educationLevel })
     });
     const data = await res.json();
     if (res.ok) {
+      localStorage.setItem('takeme_selected_education_level', educationLevel);
       setUserId(data.userId);
       setQrCodeUrl(data.qrCodeUrl);
       setMode('otp-setup');
@@ -352,7 +355,14 @@ export default function Landing() {
           ...data.user,
           accessToken: data.accessToken || null
         }));
-        navigate('/dashboard');
+        const targetLevel = data.user?.educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
+        if (targetLevel === '초등부') {
+          navigate('/dashboard/elementary');
+        } else if (targetLevel === '중,고등부') {
+          navigate('/dashboard/middle-high');
+        } else {
+          navigate('/dashboard/kindergarten');
+        }
       }
     } else {
       alert(data.message);
@@ -363,7 +373,7 @@ export default function Landing() {
     <div className="min-h-screen bg-slate-100 flex items-center justify-center relative overflow-hidden py-8 px-4">
       <div className="landing-glass w-full max-w-md p-8 relative z-10 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200">
         <h1 className="text-3xl font-extrabold text-center mb-1 text-blue-600 tracking-tight">Takeme</h1>
-        <p className="text-center text-slate-500 mb-6 text-sm">유치원 안심 통학 셔틀 & 원아 안심 케어 시스템</p>
+        <p className="text-center text-slate-500 mb-6 text-sm">안심 통학 셔틀 & 학생 안심 케어 시스템</p>
 
         {mode === 'login' && (
           <form onSubmit={handleLogin} className="space-y-4">
@@ -406,11 +416,11 @@ export default function Landing() {
             {showSelfUnlock && (
               <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-2xl text-left space-y-3 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-bold text-amber-950">원장님 계정 잠금 해제 안내</p>
+                  <p className="text-xs font-bold text-amber-950">관리자 계정 잠금 해제 안내</p>
                   <span className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-full">5회 실패 보안잠금</span>
                 </div>
                 <p className="text-xs text-amber-800 leading-relaxed">
-                  원장님 본인 확인을 위해 휴대폰 SMS 또는 이메일로 인증번호를 받아 즉시 잠금을 해제할 수 있습니다.
+                  관리자 본인 확인을 위해 휴대폰 SMS 또는 이메일로 인증번호를 받아 즉시 잠금을 해제할 수 있습니다.
                 </p>
 
                 {/* Unlock Method Tabs */}
@@ -446,7 +456,7 @@ export default function Landing() {
                       <>
                         <div>
                           <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                            원장님 휴대폰 번호 (등록된 번호 자동 연동)
+                            관리자 휴대폰 번호 (등록된 번호 자동 연동)
                           </label>
                           <input
                             type="tel"
@@ -511,7 +521,7 @@ export default function Landing() {
                         disabled={unlockLoading}
                         className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl transition shadow-sm"
                       >
-                        {unlockLoading ? '인증번호 발송 중...' : '원장님 이메일로 인증번호 받기'}
+                        {unlockLoading ? '인증번호 발송 중...' : '관리자 이메일로 인증번호 받기'}
                       </button>
                     ) : (
                       <div className="space-y-2">
@@ -602,7 +612,7 @@ export default function Landing() {
                 본 계정은 앱기반 계정입니다.
               </h2>
               <p className="text-xs text-slate-500 leading-relaxed px-4">
-                기사 및 학부모 계정은 모바일 앱(Takeme)을 통해 로그인해 주시기 바랍니다. (원장님 및 담임/동승 교사는 웹에서도 이용 가능합니다.)
+                기사 및 학부모 계정은 모바일 앱(Takeme)을 통해 로그인해 주시기 바랍니다. (관리자 및 담임/동승 교사는 웹에서도 이용 가능합니다.)
               </p>
             </div>
             <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl space-y-1">
@@ -624,6 +634,31 @@ export default function Landing() {
 
         {mode === 'signup' && (
           <form onSubmit={handleSignup} className="space-y-4">
+            {/* Education Level Selector: 유치원 / 초등부 / 중,고등부 */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5">교육 부문 선택</label>
+              <div className="grid grid-cols-3 gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                {[
+                  { id: 'kindergarten', label: '유치원' },
+                  { id: 'elementary', label: '초등부' },
+                  { id: 'middle_high', label: '중,고등부' },
+                ].map(level => (
+                  <button
+                    key={level.id}
+                    type="button"
+                    onClick={() => setEducationLevel(level.label)}
+                    className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center cursor-pointer ${
+                      educationLevel === level.label
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <span>{level.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Role Switcher */}
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">가입 유형 선택</label>
@@ -640,7 +675,7 @@ export default function Landing() {
                       : 'text-slate-500 hover:text-slate-700'
                   }`}
                 >
-                  <span>원장선생님</span>
+                  <span>관리자</span>
                 </button>
                 <button
                   type="button"
@@ -653,18 +688,18 @@ export default function Landing() {
                       : 'text-slate-500 hover:text-slate-700'
                   }`}
                 >
-                  <span>유치원 교사</span>
+                  <span>교사</span>
                 </button>
               </div>
             </div>
 
             {role === 'ACADEMY_ADMIN' ? (
               <p className="text-xs font-medium text-blue-700 bg-blue-50 py-2 px-3 rounded-lg border border-blue-100">
-                가입 즉시 새로운 유치원 관리 대시보드가 생성됩니다.
+                가입 즉시 새로운 통합 관리 대시보드가 생성됩니다.
               </p>
             ) : (
               <p className="text-xs font-medium text-emerald-700 bg-emerald-50 py-2 px-3 rounded-lg border border-emerald-100">
-                원장선생님께 전달받은 <strong>원 인증코드</strong>를 입력해주세요.
+                관리자에게 전달받은 <strong>기관 인증코드</strong>를 입력해주세요.
               </p>
             )}
 
@@ -703,7 +738,7 @@ export default function Landing() {
                 </div>
                 {isAuthCodeVerified && (
                   <div className="text-xs font-semibold text-emerald-600 mt-1 pl-1">
-                    소속: <strong>{verifiedAcademyName}</strong> (가입 후 원장선생님께서 담당 반을 배정합니다)
+                    소속: <strong>{verifiedAcademyName}</strong> (가입 후 관리자님께서 담당 반을 배정합니다)
                   </div>
                 )}
               </div>
@@ -756,7 +791,7 @@ export default function Landing() {
             {/* Name */}
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">
-                {role === 'ACADEMY_ADMIN' ? '원장선생님 성함' : '선생님 성함'}
+                {role === 'ACADEMY_ADMIN' ? '관리자 성함' : '교사 성함'}
               </label>
               <input 
                 type="text" 
@@ -771,7 +806,7 @@ export default function Landing() {
             {role === 'ACADEMY_ADMIN' && (
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">
-                  원장님 휴대폰 번호
+                  관리자 휴대폰 번호
                 </label>
                 <input 
                   type="tel" 
@@ -867,7 +902,7 @@ export default function Landing() {
               className="btn-primary w-full py-3 font-bold text-sm shadow-md shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed" 
               disabled={!isEmailVerified || !validatePassword(password) || password !== confirmPassword || (role === 'TEACHER' && !isAuthCodeVerified)}
             >
-              {role === 'ACADEMY_ADMIN' ? '원장선생님 가입 완료' : '유치원 교사 가입 완료'}
+              {role === 'ACADEMY_ADMIN' ? '관리자 가입 완료' : '교사 가입 완료'}
             </button>
             <div className="text-center mt-3">
               <button

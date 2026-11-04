@@ -400,14 +400,14 @@ export function openPrintDocument(type, data = {}) {
           <strong style="color: #0f172a; font-size: 11px;">[통학버스 응급상황 발생 시 법정 행동수칙]</strong><br>
           1. <strong>즉시 정차 및 2차 사고 방지:</strong> 비상점멸등을 켜고 갓길 등 안전지대에 정차한 후 삼각대를 설치합니다.<br>
           2. <strong>원아 안전 확보 및 응급처치:</strong> 호흡곤란·알레르기 쇼크·경련 등 응급환자 발생 시 즉시 119에 신고하고 기도 확보 및 구급상자를 활용하여 응급조치를 실시합니다.<br>
-          3. <strong>신속한 보고 및 보호자 연락:</strong> 유치원 원장 및 위 비상연락망의 보호자에게 즉시 상황을 알리고 인계 절차를 진행합니다.
+          3. <strong>신속한 보고 및 보호자 연락:</strong> 기관 관리자 및 위 비상연락망의 보호자에게 즉시 상황을 알리고 인계 절차를 진행합니다.
         </div>
 
         <div class="footer-sign" style="margin-top: 18px;">
           본 비상연락망 및 건강 유의사항 명부는 개인정보보호법에 의거 통학버스 안전관리 및 응급처치 목적으로만 사용됩니다.<br>
           <div class="date-line">${autoDateKorean}</div>
           <div class="sign-names">
-            확인자(동승보호자): __________________ (인) &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 관리책임자(원장): __________________ (인)
+            확인자(동승보호자): __________________ (인) &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 관리책임자(관리자): __________________ (인)
           </div>
         </div>
       </div>
@@ -536,7 +536,7 @@ export function openPrintDocument(type, data = {}) {
           위 노선표에 따라 안전운행 및 정시 운행을 준수할 것을 확인합니다.<br>
           <div class="date-line">${autoDateKorean}</div>
           <div class="sign-names">
-            ${academyName} 원장 (직인)
+            ${academyName} 대표 관리자 (직인)
           </div>
         </div>
       </div>
@@ -674,7 +674,7 @@ export function openPrintDocument(type, data = {}) {
         <div class="header-section">
           <div class="title-wrap" style="width: 100%; text-align: center;">
             <h1 style="font-size: 22px;">어린이 통학차량 이용 신청 및 안전동의서</h1>
-            <p class="sub-text">${academyName ? `${academyName} 귀중` : '유치원장선생님 귀중'}</p>
+            <p class="sub-text">${academyName ? `${academyName} 귀중` : '기관 관리자 귀중'}</p>
           </div>
         </div>
 

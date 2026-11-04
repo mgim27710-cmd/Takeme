@@ -14,7 +14,7 @@ L.Icon.Default.mergeOptions({
 // Custom Pins for Director (Red), Teacher Proposal (Green), and Default (Blue)
 const redPinIcon = L.divIcon({
   className: 'custom-red-pin',
-  html: '<div style="background-color:#ef4444;color:white;border:2px solid white;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,0.4);font-size:11px;font-weight:900;">원장</div>',
+  html: '<div style="background-color:#ef4444;color:white;border:2px solid white;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,0.4);font-size:11px;font-weight:900;">관리자</div>',
   iconSize: [30, 30],
   iconAnchor: [15, 15],
 });
@@ -109,7 +109,7 @@ function ComparisonLocationMap({ original, suggested }) {
       >
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
         <Marker position={pos1} icon={redPinIcon}>
-          <Popup>원장 지정: {original.boardingLocation}</Popup>
+          <Popup>관리자 지정: {original.boardingLocation}</Popup>
         </Marker>
         <Marker position={pos2} icon={greenPinIcon}>
           <Popup>지도교사 제안: {suggested.boardingLocation}</Popup>
@@ -118,7 +118,7 @@ function ComparisonLocationMap({ original, suggested }) {
       <div className="absolute bottom-1 left-1 right-1 flex items-center justify-between bg-white/95 backdrop-blur-xs px-2.5 py-1 rounded-lg text-[10px] border border-slate-200 z-[400] shadow-2xs font-extrabold">
         <span className="flex items-center gap-1 text-red-600">
           <span className="w-2 h-2 rounded-full bg-red-500"></span>
-          원장: {original.boardingLocation}
+          관리자: {original.boardingLocation}
         </span>
         <span className="flex items-center gap-1 text-emerald-600">
           <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
@@ -667,7 +667,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     }
   };
 
-  // Submit Counter-Proposal (원장에게 재결제 요청 보내기)
+  // Submit Counter-Proposal (관리자에게 재결제 요청 보내기)
   const handleSubmitCounterProposal = async () => {
     if (!counterModalMsg) return;
     if (!counterLocation.lat || !counterLocation.lng) {
@@ -677,7 +677,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       return alert('새로 제안하는 탑승지 명칭을 입력해주세요.');
     }
     if (!counterNote.trim()) {
-      return alert('원장님께 전달할 재결제 요청 사유를 입력해주세요.');
+      return alert('관리자님께 전달할 재결제 요청 사유를 입력해주세요.');
     }
 
     setIsSubmittingCounter(true);
@@ -699,7 +699,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
       if (res.ok) {
         const data = await res.json();
-        alert('원장님께 새로운 탑승 위치로 재결제 요청을 발송했습니다.\n원장님께서 승인하시면 해당 위치로 확정됩니다.');
+        alert('관리자님께 새로운 탑승 위치로 재결제 요청을 발송했습니다.\n관리자님께서 승인하시면 해당 위치로 확정됩니다.');
         setCounterModalMsg(null);
         if (data.message) {
           setMessages(prev => prev.map(m => m.id === counterModalMsg.id ? data.message : m));
@@ -876,7 +876,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       case 'PARENT':
         return <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 rounded">학부모</span>;
       case 'ACADEMY_ADMIN':
-        return <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded">원장</span>;
+        return <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded">관리자</span>;
       case 'SUPER_ADMIN':
         return <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded">통합관리</span>;
       default:
@@ -1312,7 +1312,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                   <svg className="w-3.5 h-3.5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                                   </svg>
-                                  <span>원장 원래 신청 내용</span>
+                                  <span>관리자 원래 신청 내용</span>
                                 </div>
                                 <p className="text-xs font-bold text-slate-800 leading-relaxed">
                                   "{payload.note || '학부모 상담 후 신규 탑승지 지정 및 결제 승인 요청'}"
@@ -1347,7 +1347,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                               {payload.status === 'RE_REQUESTED' && payload.counterProposal ? (
                                 <div className="grid grid-cols-2 gap-2 text-xs">
                                   <div className="p-2.5 rounded-xl bg-red-50/50 border border-red-200">
-                                    <span className="text-[10px] font-bold text-red-500 block">원장 지정 원래 탑승지</span>
+                                    <span className="text-[10px] font-bold text-red-500 block">관리자 지정 원래 탑승지</span>
                                     <span className="font-extrabold text-slate-900 block truncate" title={payload.counterProposal.originalLocation?.boardingLocation}>
                                       {payload.counterProposal.originalLocation?.boardingLocation}
                                     </span>
@@ -1450,7 +1450,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                         </button>
                                       </div>
                                       <p className="text-[10px] text-center text-slate-400 font-medium">
-                                        원장님께서 수락하시면 지도교사가 제안한 위치로 최종 노선/구역이 확정됩니다.
+                                        관리자님께서 수락하시면 지도교사가 제안한 위치로 최종 노선/구역이 확정됩니다.
                                       </p>
                                     </div>
                                   ) : (
@@ -1472,7 +1472,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                           type="button"
                                           onClick={() => handleOpenCounterModal(msg)}
                                           className="py-2.5 px-3 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 active:scale-95 font-extrabold text-xs rounded-xl transition-all flex items-center gap-1"
-                                          title="다른 위치를 지도에서 핀으로 찍어 원장에게 재결제 요청"
+                                          title="다른 위치를 지도에서 핀으로 찍어 관리자에게 재결제 요청"
                                         >
                                           <svg className="w-3.5 h-3.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
@@ -1739,14 +1739,14 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     </div>
                   )}
 
-                  {/* Category 4: 원장 / 관리자 (Admins) */}
+                  {/* Category 4: 관리자 (Admins) */}
                   {filteredAdmins.length > 0 && (
                     <div className="space-y-1.5">
                       <div className="flex items-center gap-1.5 text-xs font-black text-purple-700 bg-purple-50/80 px-2.5 py-1.5 rounded-lg border border-purple-100">
                         <svg className="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                         </svg>
-                        <span>원장 / 관리자 ({filteredAdmins.length}명)</span>
+                        <span>관리자 ({filteredAdmins.length}명)</span>
                       </div>
                       <div className="grid grid-cols-1 gap-1 pl-1">
                         {filteredAdmins.map((u) => {
@@ -2147,7 +2147,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-bold">지도교사 위치 역제안</span>
                 </h3>
                 <p className="text-[11px] text-amber-100 mt-0.5">
-                  통학버스 운행/회차 여건에 맞추어 다른 위치를 핀으로 찍어 원장님께 재결제를 요청합니다.
+                  통학버스 운행/회차 여건에 맞추어 다른 위치를 핀으로 찍어 관리자님께 재결제를 요청합니다.
                 </p>
               </div>
               <button
@@ -2174,7 +2174,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   <span className="font-extrabold text-indigo-700 text-sm">{counterModalMsg.payload?.busNumber}</span>
                 </div>
                 <div className="text-right">
-                  <span className="text-[10px] text-red-500 font-bold block">원장 원래 요청 위치</span>
+                  <span className="text-[10px] text-red-500 font-bold block">관리자 원래 요청 위치</span>
                   <span className="font-bold text-slate-700 max-w-[140px] truncate block" title={counterModalMsg.payload?.boardingLocation}>
                     {counterModalMsg.payload?.boardingLocation}
                   </span>
@@ -2211,13 +2211,13 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         position={[Number(counterModalMsg.payload.latitude), Number(counterModalMsg.payload.longitude)]}
                         icon={redPinIcon}
                       >
-                        <Popup>원장 원래 요청 위치</Popup>
+                        <Popup>관리자 원래 요청 위치</Popup>
                       </Marker>
                     )}
                   </MapContainer>
                   <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none z-[400]">
                     <span className="bg-red-500/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow">
-                      빨간 핀: 원장 원래 위치
+                      빨간 핀: 관리자 원래 위치
                     </span>
                     <span className="bg-emerald-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow">
                       초록 핀: 지도교사 제안 위치
@@ -2248,7 +2248,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
               {/* Reason / Note */}
               <div className="space-y-1">
                 <label className="text-xs font-black text-slate-800 flex items-center gap-1">
-                  <span>재결제 요청 사유 (원장님께 전달)</span>
+                  <span>재결제 요청 사유 (관리자님께 전달)</span>
                   <span className="text-red-500">*</span>
                 </label>
                 <textarea
@@ -2277,7 +2277,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 onClick={handleSubmitCounterProposal}
                 className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-indigo-600 hover:opacity-95 active:scale-95 text-white text-xs font-black rounded-xl shadow-xs transition-all disabled:opacity-40 flex items-center gap-1.5"
               >
-                {isSubmittingCounter ? '재결제 요청 전송 중...' : '원장에게 재결제 요청 보내기'}
+                {isSubmittingCounter ? '재결제 요청 전송 중...' : '관리자에게 재결제 요청 보내기'}
               </button>
             </div>
           </div>

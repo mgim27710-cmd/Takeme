@@ -193,7 +193,7 @@ export default function TeacherDashboard({
           localStorage.setItem('takeme_user', JSON.stringify(updatedUser));
           alert(`[${data.assignedClass}] 담임으로 배정되었습니다!`);
         } else {
-          alert('아직 담당 반이 배정되지 않았습니다. 원장선생님께 문의해주세요.');
+          alert('아직 담당 반이 배정되지 않았습니다. 관리자님께 문의해주세요.');
         }
       }
     } catch (e) {
@@ -418,7 +418,7 @@ export default function TeacherDashboard({
     const { student, targetBus } = quickRequestModal;
 
     if (!targetBus) {
-      alert('배차 가능한 셔틀 차량 정보가 없습니다. 원장님께 문의해주세요.');
+      alert('배차 가능한 셔틀 차량 정보가 없습니다. 관리자님께 문의해주세요.');
       return;
     }
 
@@ -1053,7 +1053,7 @@ export default function TeacherDashboard({
         ) : (
           /* VIEW B: Classroom Home Mode */
           <div className="flex-1 flex flex-col overflow-y-auto">
-            {/* Condition: Unassigned Teacher Screen (아무 화면 없게 나오고 원장이 배정하는 시스템) */}
+            {/* Condition: Unassigned Teacher Screen (아무 화면 없게 나오고 관리자가 배정하는 시스템) */}
             {!isAssigned ? (
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-50">
                 <div className="max-w-md w-full bg-white rounded-3xl p-8 border border-slate-200 shadow-xl space-y-5 animate-fade-in">
@@ -1069,7 +1069,7 @@ export default function TeacherDashboard({
                     <p className="text-xs text-slate-500 leading-relaxed">
                       <strong>{localTeacherUser?.name || '선생님'}</strong>님, 환영합니다.<br/>
                       현재 <strong>{academy?.name || '소속 유치원'}</strong>에 정상 등록되었으며,
-                      <strong>원장선생님께서 담당 반을 배정</strong>하시면 교실 수업 일정 및 원아 명단이 자동으로 활성화됩니다.
+                      <strong>관리자님께서 담당 반을 배정</strong>하시면 교실 수업 일정 및 원아 명단이 자동으로 활성화됩니다.
                     </p>
                   </div>
 
@@ -2178,7 +2178,7 @@ export default function TeacherDashboard({
                 </div>
               ) : (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 font-bold">
-                  배차 가능한 차량을 찾을 수 없습니다. 원장님께 배차 등록을 문의해주세요.
+                  배차 가능한 차량을 찾을 수 없습니다. 관리자님께 배차 등록을 문의해주세요.
                 </div>
               )}
 

@@ -8,3 +8,6 @@ coverage/
 *.log
 .tempmediaStorage/
 *.sqlite
+scratch/
+*.bak/
+*.bak
