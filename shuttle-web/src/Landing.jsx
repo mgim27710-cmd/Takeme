@@ -256,6 +256,7 @@ export default function Landing() {
       });
       const data = await res.json();
       if (res.ok) {
+        localStorage.setItem('takeme_selected_education_level', educationLevel);
         alert(data.message || '교사 회원가입이 완료되었습니다! 관리자님의 반 배정 후 이용 가능합니다.');
         setMode('login');
         setPassword('');
