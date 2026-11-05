@@ -150,7 +150,7 @@ class ApiService {
   // AUTH
   // ----------------------------------------------------
   Future<Map<String, dynamic>> login(String email, String password, {String? otpToken, String? clientType = 'app'}) async {
-    final url = Uri.parse('/auth/login');
+    final url = Uri.parse('${AppConfig.apiHost}/auth/login');
     final body = {
       'email': email.trim(),
       'password': password,

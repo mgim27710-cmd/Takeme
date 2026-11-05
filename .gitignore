@@ -11,3 +11,5 @@ coverage/
 scratch/
 *.bak/
 *.bak
+*.apk
+release_apks/
