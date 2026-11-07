@@ -9,7 +9,7 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  String _selectedRole = 'DRIVER';
+  final String _selectedRole = 'DRIVER';
   String _selectedClass = '햇살반';
   final List<String> _classList = const ['햇살반', '열매반', '풀잎반', '새싹반', '심화B반'];
   final _authCodeController = TextEditingController();
