@@ -845,7 +845,7 @@ export class RoutingService {
     return { success: true };
   }
 
-  async setupAcademy(data: { name: string, address: string, lat: number, lng: number }, academyId?: number, userId?: number) {
+  async setupAcademy(data: { name: string, address: string, lat: number, lng: number, businessNumber?: string }, academyId?: number, userId?: number) {
     let academy = await this.getAcademy(academyId, userId);
     if (!academy) {
       let code = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -857,6 +857,7 @@ export class RoutingService {
         roadAddress: data.address,
         latitude: data.lat.toString(),
         longitude: data.lng.toString(),
+        businessNumber: data.businessNumber || null,
         authCode: code
       });
     } else {
@@ -864,6 +865,9 @@ export class RoutingService {
       academy.roadAddress = data.address;
       academy.latitude = data.lat.toString();
       academy.longitude = data.lng.toString();
+      if (data.businessNumber !== undefined) {
+        academy.businessNumber = data.businessNumber;
+      }
       if (!academy.authCode) {
         let code = Math.random().toString(36).substring(2, 8).toUpperCase();
         while (await this.academyRepository.findOne({ where: { authCode: code } })) {

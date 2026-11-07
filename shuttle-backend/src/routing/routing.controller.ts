@@ -94,7 +94,7 @@ export class RoutingController {
 
   @Post('setup-academy')
   async setupAcademy(
-    @Body() body: { name: string, address: string, lat: number, lng: number, academyId?: number },
+    @Body() body: { name: string, address: string, lat: number, lng: number, businessNumber?: string, academyId?: number },
     @Headers('x-academy-id') academyIdHeader?: string,
     @Headers('x-user-id') userIdHeader?: string,
   ) {

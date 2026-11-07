@@ -34,6 +34,15 @@ const getRandomColor = () => {
   return `hsl(${randomHue}, 70%, 50%)`;
 };
 
+// 사업자 등록번호 10자리 자동 하이픈 포맷터 (000-00-00000)
+const formatBusinessNumber = (value) => {
+  if (!value) return '';
+  const nums = value.replace(/\D/g, '').slice(0, 10);
+  if (nums.length <= 3) return nums;
+  if (nums.length <= 5) return `${nums.slice(0, 3)}-${nums.slice(3)}`;
+  return `${nums.slice(0, 3)}-${nums.slice(3, 5)}-${nums.slice(5, 10)}`;
+};
+
 function MapBoundsFit({ buses, academy }) {
   const map = useMap();
   useEffect(() => {
@@ -390,12 +399,12 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const [showAcademyModal, setShowAcademyModal] = useState(false);
   const [setupStep, setSetupStep] = useState(1);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [academyForm, setAcademyForm] = useState({ name: '', address: '' });
+  const [academyForm, setAcademyForm] = useState({ name: '', address: '', businessNumber: '' });
   const [isResettingZones, setIsResettingZones] = useState(false);
   const resetFileInputRef = useRef(null);
   const setupFileInputRef = useRef(null);
   const [isChangingAcademy, setIsChangingAcademy] = useState(false);
-  const [academyChangeForm, setAcademyChangeForm] = useState({ name: '', address: '' });
+  const [academyChangeForm, setAcademyChangeForm] = useState({ name: '', address: '', businessNumber: '' });
   
   // Zone Editing State
   const [isZoneEditingMode, setIsZoneEditingMode] = useState(false);
@@ -1612,6 +1621,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
           id: data.academy.id,
           name: data.academy.name,
           address: data.academy.roadAddress,
+          businessNumber: data.academy.businessNumber || '',
           lat: parseFloat(data.academy.latitude),
           lng: parseFloat(data.academy.longitude),
           authCode: data.academy.authCode
@@ -1619,7 +1629,8 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         setAcademy(formattedAcademy);
         setAcademyForm({
           name: formattedAcademy.name,
-          address: formattedAcademy.address
+          address: formattedAcademy.address,
+          businessNumber: formattedAcademy.businessNumber
         });
       } else {
         setAcademy(null);
@@ -1683,6 +1694,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         const newAcademy = {
           name: academyForm.name,
           address: academyForm.address,
+          businessNumber: academyForm.businessNumber ? academyForm.businessNumber.trim() : '',
           lat: geocoded[0].coords.lat,
           lng: geocoded[0].coords.lng
         };
@@ -1730,6 +1742,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         const newAcademy = {
           name: academyChangeForm.name,
           address: academyChangeForm.address,
+          businessNumber: academyChangeForm.businessNumber ? academyChangeForm.businessNumber.trim() : '',
           lat: geocoded[0].coords.lat,
           lng: geocoded[0].coords.lng
         };
@@ -1748,7 +1761,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         setAcademy(newAcademy);
         localStorage.setItem('takeme_academy', JSON.stringify(newAcademy));
         setIsChangingAcademy(false);
-        alert('유치원 위치가 성공적으로 변경되었습니다!');
+        alert('유치원 정보가 성공적으로 변경되었습니다!');
       } else {
         alert('주소를 좌표로 변환할 수 없습니다. 정확한 주소를 입력해주세요.');
       }
@@ -3031,20 +3044,26 @@ const parseKindergartenExcelSheet = (sheet) => {
                   </svg>
                   {isProcessing ? '구역 세팅 중...' : '엑셀 업로드 및 시작하기'}
                 </button>
+                <button 
+                  type="button"
+                  onClick={() => setSetupStep(2)}
+                  className="w-full mt-3 py-2 text-xs font-semibold text-slate-500 hover:text-blue-600 transition-colors underline"
+                >
+                  엑셀 파일 없이 유치원 정보 직접 등록하기 &rarr;
+                </button>
               </>
             )}
             
             {setupStep === 2 && (
               <>
                 <div className="text-center mb-6">
-                  
-                  <h2 className="text-2xl font-bold text-slate-800">유치원 위치 확인</h2>
-                  <p className="text-slate-500 text-sm mt-2">지도의 중심이 될 유치원의 위치를 등록해주세요.</p>
+                  <h2 className="text-2xl font-bold text-slate-800">유치원 정보 등록</h2>
+                  <p className="text-slate-500 text-sm mt-2">지도의 중심이 될 유치원 위치와 사업자등록번호를 등록해주세요.</p>
                 </div>
                 
                 <form onSubmit={handleAcademySubmit} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-1">유치원명</label>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">유치원명 <span className="text-red-500">*</span></label>
                     <input 
                       type="text" 
                       value={academyForm.name} 
@@ -3055,7 +3074,19 @@ const parseKindergartenExcelSheet = (sheet) => {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-1">원 도로명 주소</label>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">사업자 등록번호</label>
+                    <input 
+                      type="text" 
+                      value={academyForm.businessNumber || ''} 
+                      onChange={e => setAcademyForm({...academyForm, businessNumber: formatBusinessNumber(e.target.value)})}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all tracking-wider"
+                      placeholder="예: 123-45-67890 (10자리)"
+                      maxLength={12}
+                    />
+                    <p className="text-[11px] text-slate-400 mt-1">숫자 10자리를 입력하시면 하이픈(-)이 자동으로 적용됩니다.</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">원 도로명 주소 <span className="text-red-500">*</span></label>
                     <input 
                       type="text" 
                       value={academyForm.address} 
@@ -3070,7 +3101,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                     disabled={isProcessing}
                     className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors mt-6 disabled:opacity-50"
                   >
-                    {isProcessing ? '위치 확인 및 완료 중...' : '모든 설정 완료하고 메인으로'}
+                    {isProcessing ? '위치 확인 및 저장 중...' : '모든 설정 완료하고 메인으로'}
                   </button>
                 </form>
               </>
@@ -4289,20 +4320,40 @@ const parseKindergartenExcelSheet = (sheet) => {
             
             <div className="space-y-4">
               <div className="p-4 bg-orange-50 rounded-xl border border-orange-100 transition-all">
-                <h3 className="font-bold text-orange-700 mb-1">유치원 위치 변경</h3>
-                <p className="text-xs text-orange-600 mb-3 opacity-80 leading-relaxed">유치원이 이전한 경우 새 주소와 이름을 입력하세요.</p>
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="font-bold text-orange-700">유치원 정보 관리</h3>
+                  {academy?.businessNumber && (
+                    <span className="text-[11px] bg-orange-200/70 text-orange-800 font-semibold px-2 py-0.5 rounded-full">
+                      사업자번호: {academy.businessNumber}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-orange-600 mb-3 opacity-80 leading-relaxed">유치원명, 주소 및 사업자 등록번호를 확인하고 변경할 수 있습니다.</p>
                 
                 {!isChangingAcademy ? (
-                  <button onClick={() => {
-                    setAcademyChangeForm({ name: academy?.name || '', address: academy?.address || '' });
-                    setIsChangingAcademy(true);
-                  }} className="w-full py-2.5 px-3 bg-white text-orange-600 rounded-xl text-sm font-bold border border-orange-200 shadow-xs hover:bg-orange-600 hover:text-white transition-colors whitespace-nowrap">
-                    유치원 위치 변경 모드
-                  </button>
+                  <div className="space-y-2">
+                    {academy && (
+                      <div className="text-xs text-slate-600 bg-white/80 p-2.5 rounded-lg border border-orange-200/50 mb-2 space-y-1">
+                        <div><span className="font-bold text-slate-700">기관명:</span> {academy.name || '미등록'}</div>
+                        <div><span className="font-bold text-slate-700">주소:</span> {academy.address || '미등록'}</div>
+                        <div><span className="font-bold text-slate-700">사업자 등록번호:</span> {academy.businessNumber || '미등록'}</div>
+                      </div>
+                    )}
+                    <button onClick={() => {
+                      setAcademyChangeForm({ 
+                        name: academy?.name || '', 
+                        address: academy?.address || '',
+                        businessNumber: academy?.businessNumber || ''
+                      });
+                      setIsChangingAcademy(true);
+                    }} className="w-full py-2.5 px-3 bg-white text-orange-600 rounded-xl text-sm font-bold border border-orange-200 shadow-xs hover:bg-orange-600 hover:text-white transition-colors whitespace-nowrap">
+                      유치원 정보 수정 모드
+                    </button>
+                  </div>
                 ) : (
                   <form onSubmit={handleChangeAcademySubmit} className="space-y-3 mt-4 pt-4 border-t border-orange-200">
                     <div>
-                      <label className="block text-xs font-bold text-orange-800 mb-1">새 유치원명</label>
+                      <label className="block text-xs font-bold text-orange-800 mb-1">새 유치원명 <span className="text-red-500">*</span></label>
                       <input 
                         type="text" 
                         value={academyChangeForm.name} 
@@ -4313,7 +4364,18 @@ const parseKindergartenExcelSheet = (sheet) => {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-orange-800 mb-1">새 원 주소 (도로명/지번)</label>
+                      <label className="block text-xs font-bold text-orange-800 mb-1">사업자 등록번호</label>
+                      <input 
+                        type="text" 
+                        value={academyChangeForm.businessNumber || ''} 
+                        onChange={e => setAcademyChangeForm({...academyChangeForm, businessNumber: formatBusinessNumber(e.target.value)})}
+                        className="w-full px-3 py-2 bg-white border border-orange-200 rounded-xl text-sm outline-none tracking-wider"
+                        placeholder="예: 123-45-67890 (10자리)"
+                        maxLength={12}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-orange-800 mb-1">새 원 주소 (도로명/지번) <span className="text-red-500">*</span></label>
                       <input 
                         type="text" 
                         value={academyChangeForm.address} 
