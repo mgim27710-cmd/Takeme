@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Student } from '../entities/student.entity';
@@ -52,7 +52,8 @@ export class TeacherService {
 
   private async getTodayStudentsForVehicle(vehicleId: number): Promise<Student[]> {
     const defaultStudents = await this.studentRepository.find({ 
-      where: { assignedVehicle: { id: vehicleId } } 
+      where: { assignedVehicle: { id: vehicleId } },
+      relations: { parentUser: true }
     });
     const overrides = await this.getActiveOverridesForToday();
     
@@ -71,7 +72,10 @@ export class TeacherService {
       .map(o => o.student.id);
 
     const movedInStudents = movedInStudentIds.length > 0 
-      ? await this.studentRepository.createQueryBuilder('s').where('s.id IN (:...ids)', { ids: movedInStudentIds }).getMany() 
+      ? await this.studentRepository.createQueryBuilder('s')
+          .leftJoinAndSelect('s.parentUser', 'parentUser')
+          .where('s.id IN (:...ids)', { ids: movedInStudentIds })
+          .getMany() 
       : [];
 
     // Filter out moved-in students who might already be in defaultStudents just in case
@@ -146,20 +150,25 @@ export class TeacherService {
     
     // Return boardStatus from DB, filter out absent students
     return students
-      .map(s => ({
-      id: s.id,
-      name: s.adminDisplayName || s.name,
-      address: s.address,
-      latitude: s.latitude,
-      longitude: s.longitude,
-      boarded: s.boardStatus === 'BOARDED',
-      absent: s.boardStatus === 'ABSENT',
-      expectedTime: s.raw ? s.raw['예상탑승시간'] || '15:30' : '15:30',
-      allergies: s.allergies || (s.raw ? s.raw['알레르기'] : '') || '',
-      teacherMemo: s.teacherMemo,
-      runNumber: s.runNumber || 1,
-      isOverride: (s as any).isOverride || false
-    }));
+      .map(s => {
+        const rawPhone = s.raw ? (s.raw['학부모연락처'] || s.raw['연락처'] || s.raw['전화번호'] || s.raw['비상연락처'] || '') : '';
+        const parentPhone = s.parentUser?.phone || rawPhone || '';
+        return {
+          id: s.id,
+          name: s.adminDisplayName || s.name,
+          address: s.address,
+          latitude: s.latitude,
+          longitude: s.longitude,
+          boarded: s.boardStatus === 'BOARDED',
+          absent: s.boardStatus === 'ABSENT',
+          expectedTime: s.raw ? s.raw['예상탑승시간'] || '15:30' : '15:30',
+          allergies: s.allergies || (s.raw ? s.raw['알레르기'] : '') || '',
+          teacherMemo: s.teacherMemo,
+          runNumber: s.runNumber || 1,
+          isOverride: (s as any).isOverride || false,
+          parentPhone,
+        };
+      });
   }
 
   async getRoute(email: string) {
@@ -354,6 +363,145 @@ export class TeacherService {
     }
 
     return { success: true, studentName: student.adminDisplayName || student.name };
+  }
+
+  async unboardStudent(email: string, studentId: number) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('User not found');
+
+    const vehicle = await this.findAssignedVehicle(user.id);
+    if (!vehicle) throw new BadRequestException('Assigned vehicle not found');
+
+    const student = await this.studentRepository.findOne({ 
+      where: { id: studentId },
+      relations: { assignedVehicle: true }
+    });
+    if (!student) throw new BadRequestException('Student not found');
+
+    const todayStudents = await this.getTodayStudentsForVehicle(vehicle.id);
+    const isOurStudent = todayStudents.some(s => s.id === student.id);
+    if (!isOurStudent) {
+      throw new BadRequestException('해당 차량에 배정된 원아가 아닙니다.');
+    }
+
+    student.boardStatus = 'WAITING';
+    student.actualBoardTime = null as any;
+    await this.studentRepository.save(student);
+
+    await this.appendBoardingLog(
+      vehicle.id,
+      student.id,
+      `${student.adminDisplayName || student.name} 탑승 취소`,
+      'MANUAL'
+    );
+
+    return { success: true, studentName: student.adminDisplayName || student.name };
+  }
+
+  async checkInEscort(email: string) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('User not found');
+
+    const vehicle = await this.findAssignedVehicle(user.id, { academy: true });
+    if (!vehicle) throw new BadRequestException('Assigned vehicle not found');
+
+    const isMemoryOperating = this.locationGateway?.operatingVehicles?.get(vehicle.id) === true;
+    const dateString = new Date().toISOString().split('T')[0];
+    const latestLog = await this.operationLogRepository.findOne({
+      where: { vehicle: { id: vehicle.id }, dateString },
+      order: { id: 'DESC' }
+    });
+    const isLogOperating = !!(latestLog && latestLog.startTime && !latestLog.endTime);
+
+    const isOperating = isMemoryOperating || isLogOperating;
+    if (!isOperating) {
+      throw new ConflictException('기사님이 운행을 시작하면 동승 확인을 누를 수 있어요.');
+    }
+
+    const escortName = user.name || user.email;
+    const confirmedAt = new Date().toISOString();
+
+    await this.appendBoardingLog(
+      vehicle.id,
+      null,
+      `동승 확인: ${escortName}`,
+      'ESCORT'
+    );
+
+    if (this.locationGateway?.server) {
+      // 차량 방에 escortConfirmed 전송 (기사 앱 배지용)
+      this.locationGateway.server.to(`vehicle_${vehicle.id}`).emit('escortConfirmed', {
+        vehicleId: vehicle.id,
+        escortName,
+        confirmedAt,
+      });
+
+      // 유치원 방에 escortStarted 전송 (관리자 웹 알림용)
+      const academyId = vehicle.academy?.id || (vehicle as any).academyId;
+      if (academyId) {
+        this.locationGateway.server.to(`academy_${academyId}`).emit('escortStarted', {
+          vehicleId: vehicle.id,
+          vehicleName: vehicle.busNumber,
+          escortName,
+          time: confirmedAt,
+        });
+      }
+    }
+
+    return { success: true, escortName, confirmedAt };
+  }
+
+  async getEscortStatus(email: string, targetVehicleId?: number) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('User not found');
+
+    let vehicle: Vehicle | null = null;
+    if (targetVehicleId) {
+      vehicle = await this.vehicleRepository.findOne({ where: { id: targetVehicleId } });
+    } else {
+      vehicle = await this.findAssignedVehicle(user.id);
+    }
+    if (!vehicle) {
+      return { operating: false };
+    }
+
+    const isMemoryOperating = this.locationGateway?.operatingVehicles?.get(vehicle.id) === true;
+    const dateString = new Date().toISOString().split('T')[0];
+    const latestLog = await this.operationLogRepository.findOne({
+      where: { vehicle: { id: vehicle.id }, dateString },
+      order: { id: 'DESC' }
+    });
+    const isLogOperating = !!(latestLog && latestLog.startTime && !latestLog.endTime);
+    const operating = isMemoryOperating || isLogOperating;
+
+    let escortName: string | undefined;
+    let confirmedAt: string | undefined;
+
+    if (latestLog?.boardingRecords) {
+      let records: any[] = [];
+      try {
+        records = typeof latestLog.boardingRecords === 'string'
+          ? JSON.parse(latestLog.boardingRecords)
+          : (latestLog.boardingRecords || []);
+      } catch (_) {}
+
+      for (let i = records.length - 1; i >= 0; i--) {
+        const rec = records[i];
+        if (rec.method === 'ESCORT') {
+          confirmedAt = rec.boardTime;
+          if (rec.studentName?.startsWith('동승 확인: ')) {
+            escortName = rec.studentName.replace('동승 확인: ', '');
+          }
+          break;
+        }
+      }
+    }
+
+    return {
+      operating,
+      escortName,
+      confirmedAt,
+    };
   }
 
   async startOperation(email: string) {

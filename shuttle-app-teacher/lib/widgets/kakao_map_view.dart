@@ -16,6 +16,7 @@ class KakaoMapView extends StatefulWidget {
   final String? myChildAddress;
   final bool isFullScreen;
   final VoidCallback? onToggleFullscreen;
+  final void Function(int index, String name)? onStopTap;
 
   const KakaoMapView({
     super.key,
@@ -30,6 +31,7 @@ class KakaoMapView extends StatefulWidget {
     this.myChildAddress,
     this.isFullScreen = false,
     this.onToggleFullscreen,
+    this.onStopTap,
   });
 
   @override
@@ -46,6 +48,19 @@ class _KakaoMapViewState extends State<KakaoMapView> {
     if (!kIsWeb) {
       _controller = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..addJavaScriptChannel(
+          'StopClickHandler',
+          onMessageReceived: (JavaScriptMessage msg) {
+            try {
+              final data = jsonDecode(msg.message);
+              final idx = data['index'] as int?;
+              final name = data['name'] as String? ?? '';
+              if (idx != null && widget.onStopTap != null) {
+                widget.onStopTap!(idx, name);
+              }
+            } catch (_) {}
+          },
+        )
         ..setNavigationDelegate(
           NavigationDelegate(
             onPageFinished: (_) {
@@ -323,6 +338,11 @@ class _KakaoMapViewState extends State<KakaoMapView> {
                   var marker = L.marker([s.lat, s.lng], { icon: myIcon, zIndexOffset: 1000 })
                     .bindPopup('<b>⭐ 우리 아이 탑승지</b><br/>' + (s.address || s.name))
                     .addTo(map);
+                  marker.on('click', function() {
+                    if (window.StopClickHandler) {
+                      window.StopClickHandler.postMessage(JSON.stringify({ index: idx, name: s.name }));
+                    }
+                  });
                   marker.openPopup();
                 } else {
                   var icon = L.divIcon({
@@ -331,9 +351,14 @@ class _KakaoMapViewState extends State<KakaoMapView> {
                     iconSize: [26, 26],
                     iconAnchor: [13, 13]
                   });
-                  L.marker([s.lat, s.lng], { icon: icon })
+                  var m = L.marker([s.lat, s.lng], { icon: icon })
                     .bindPopup('<b>' + (idx + 1) + '번 경유지</b><br/>' + (s.address || s.name))
                     .addTo(map);
+                  m.on('click', function() {
+                    if (window.StopClickHandler) {
+                      window.StopClickHandler.postMessage(JSON.stringify({ index: idx, name: s.name }));
+                    }
+                  });
                 }
               }
             });
