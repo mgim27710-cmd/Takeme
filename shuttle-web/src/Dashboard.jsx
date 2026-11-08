@@ -44,6 +44,68 @@ const formatBusinessNumber = (value) => {
   return `${nums.slice(0, 3)}-${nums.slice(3, 5)}-${nums.slice(5, 10)}`;
 };
 
+// Daum/Kakao 우편번호 도로명 주소 검색 팝업 유틸리티
+const openPostcodePopup = (onSelect) => {
+  const triggerPostcode = () => {
+    new window.daum.Postcode({
+      oncomplete: (data) => {
+        const selectedAddr = data.roadAddress || data.jibunAddress || data.address;
+        if (onSelect) onSelect(selectedAddr, data);
+      }
+    }).open();
+  };
+
+  if (window.daum && window.daum.Postcode) {
+    triggerPostcode();
+  } else {
+    const script = document.createElement('script');
+    script.src = '//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
+    script.onload = triggerPostcode;
+    document.head.appendChild(script);
+  }
+};
+
+// 교육 부문별 원생/학생 지도 마커 SVG 생성기 (유치원, 초등부, 중·고등부)
+const getStudentMarkerHtml = (color, educationLevel) => {
+  let iconSvg = '';
+  let badgeTitle = '원아';
+
+  if (educationLevel === '초등부') {
+    badgeTitle = '초등생';
+    // 초등학생 책가방 (Backpack) SVG
+    iconSvg = `
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="white">
+        <path d="M19 7h-2.18c-.45-1.72-2-3-3.82-3h-2c-1.82 0-3.37 1.28-3.82 3H5c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zm-8-1c.55 0 1 .45 1 1v1h-2V7c0-.55.45-1 1-1zm5 12H8v-2h8v2zm2-4H6v-3h12v3z"/>
+      </svg>
+    `;
+  } else if (educationLevel === '중,고등부') {
+    badgeTitle = '학생';
+    // 중·고등부 학사모 (Graduation Cap / Academic) SVG
+    iconSvg = `
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="white">
+        <path d="M12 3L1 9l11 6 9-4.91V17h2V9L12 3zm0 8.45L4.45 8.99 12 4.9l7.55 4.09L12 11.45zM6 12.5v4.5c0 2.21 2.69 4 6 4s6-1.79 6-4v-4.5c-1.63 1.15-3.69 1.75-6 1.75s-4.37-.6-6-1.75z"/>
+      </svg>
+    `;
+  } else {
+    badgeTitle = '원아';
+    // 유치원생 귀여운 유아 실루엣 SVG
+    iconSvg = `
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="white">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
+      </svg>
+    `;
+  }
+
+  return `
+    <div style="position: relative; width: 24px; height: 28px; display: flex; flex-direction: column; align-items: center; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.35)); cursor: pointer;" title="${badgeTitle}">
+      <div style="background-color: ${color}; width: 22px; height: 22px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; box-shadow: inset 0 1px 2px rgba(0,0,0,0.2);">
+        ${iconSvg}
+      </div>
+      <div style="width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid ${color}; margin-top: -1px;"></div>
+    </div>
+  `;
+};
+
 function MapBoundsFit({ buses, academy }) {
   const map = useMap();
   useEffect(() => {
@@ -400,12 +462,12 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const [showAcademyModal, setShowAcademyModal] = useState(false);
   const [setupStep, setSetupStep] = useState(1);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [academyForm, setAcademyForm] = useState({ name: '', address: '', businessNumber: '' });
+  const [academyForm, setAcademyForm] = useState({ name: '', roadAddress: '', detailAddress: '', address: '', businessNumber: '' });
   const [isResettingZones, setIsResettingZones] = useState(false);
   const resetFileInputRef = useRef(null);
   const setupFileInputRef = useRef(null);
   const [isChangingAcademy, setIsChangingAcademy] = useState(false);
-  const [academyChangeForm, setAcademyChangeForm] = useState({ name: '', address: '', businessNumber: '' });
+  const [academyChangeForm, setAcademyChangeForm] = useState({ name: '', roadAddress: '', detailAddress: '', address: '', businessNumber: '' });
   
   // Zone Editing State
   const [isZoneEditingMode, setIsZoneEditingMode] = useState(false);
@@ -1683,6 +1745,8 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         setAcademy(formattedAcademy);
         setAcademyForm({
           name: formattedAcademy.name,
+          roadAddress: formattedAcademy.address,
+          detailAddress: '',
           address: formattedAcademy.address,
           businessNumber: formattedAcademy.businessNumber
         });
@@ -1733,21 +1797,28 @@ export default function Dashboard({ initialEducationLevel } = {}) {
 
   const handleAcademySubmit = async (e) => {
     e.preventDefault();
-    if (!academyForm.name || !academyForm.address) return alert('유치원명과 주소를 입력해주세요.');
+    const roadAddr = (academyForm.roadAddress || academyForm.address || '').trim();
+    if (!academyForm.name?.trim() || !roadAddr) {
+      return alert('유치원명과 도로명 주소를 입력해주세요.');
+    }
+
+    const fullAddress = academyForm.detailAddress?.trim() 
+      ? `${roadAddr} ${academyForm.detailAddress.trim()}`
+      : roadAddr;
 
     setIsProcessing(true);
     try {
       const res = await fetch(`${API_BASE_URL}/routing/geocode-bulk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ addresses: [academyForm.address] })
+        body: JSON.stringify({ addresses: [roadAddr] })
       });
       const geocoded = await res.json();
       
       if (geocoded.length > 0 && geocoded[0].coords && !isNaN(geocoded[0].coords.lat) && !isNaN(geocoded[0].coords.lng)) {
         const newAcademy = {
-          name: academyForm.name,
-          address: academyForm.address,
+          name: academyForm.name.trim(),
+          address: fullAddress,
           businessNumber: academyForm.businessNumber ? academyForm.businessNumber.trim() : '',
           lat: geocoded[0].coords.lat,
           lng: geocoded[0].coords.lng
@@ -1781,21 +1852,28 @@ export default function Dashboard({ initialEducationLevel } = {}) {
 
   const handleChangeAcademySubmit = async (e) => {
     e.preventDefault();
-    if (!academyChangeForm.name || !academyChangeForm.address) return alert('유치원명과 주소를 입력해주세요.');
+    const roadAddr = (academyChangeForm.roadAddress || academyChangeForm.address || '').trim();
+    if (!academyChangeForm.name?.trim() || !roadAddr) {
+      return alert('유치원명과 도로명 주소를 입력해주세요.');
+    }
+
+    const fullAddress = academyChangeForm.detailAddress?.trim() 
+      ? `${roadAddr} ${academyChangeForm.detailAddress.trim()}`
+      : roadAddr;
 
     setIsProcessing(true);
     try {
       const res = await fetch(`${API_BASE_URL}/routing/geocode-bulk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ addresses: [academyChangeForm.address] })
+        body: JSON.stringify({ addresses: [roadAddr] })
       });
       const geocoded = await res.json();
       
       if (geocoded.length > 0 && geocoded[0].coords && !isNaN(geocoded[0].coords.lat) && !isNaN(geocoded[0].coords.lng)) {
         const newAcademy = {
-          name: academyChangeForm.name,
-          address: academyChangeForm.address,
+          name: academyChangeForm.name.trim(),
+          address: fullAddress,
           businessNumber: academyChangeForm.businessNumber ? academyChangeForm.businessNumber.trim() : '',
           lat: geocoded[0].coords.lat,
           lng: geocoded[0].coords.lng
@@ -2598,28 +2676,14 @@ const parseKindergartenExcelSheet = (sheet) => {
   };
 
   const handleSearchAddress = () => {
-    const triggerPostcode = () => {
-      new window.daum.Postcode({
-        oncomplete: (data) => {
-          const selectedAddr = data.roadAddress || data.jibunAddress || data.address;
-          setStudentForm(prev => ({
-            ...prev,
-            address: selectedAddr,
-            inLocation: prev.inLocation ? prev.inLocation : selectedAddr,
-            outLocation: prev.outLocation ? prev.outLocation : selectedAddr,
-          }));
-        }
-      }).open();
-    };
-
-    if (window.daum && window.daum.Postcode) {
-      triggerPostcode();
-    } else {
-      const script = document.createElement('script');
-      script.src = '//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
-      script.onload = triggerPostcode;
-      document.head.appendChild(script);
-    }
+    openPostcodePopup((selectedAddr) => {
+      setStudentForm(prev => ({
+        ...prev,
+        address: selectedAddr,
+        inLocation: prev.inLocation ? prev.inLocation : selectedAddr,
+        outLocation: prev.outLocation ? prev.outLocation : selectedAddr,
+      }));
+    });
   };
 
   const handleAddStudentSubmit = async (e) => {
@@ -3141,13 +3205,34 @@ const parseKindergartenExcelSheet = (sheet) => {
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">원 도로명 주소 <span className="text-red-500">*</span></label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" 
+                        value={academyForm.roadAddress || academyForm.address || ''} 
+                        onClick={() => openPostcodePopup((addr) => setAcademyForm(prev => ({ ...prev, roadAddress: addr })))}
+                        onChange={e => setAcademyForm({...academyForm, roadAddress: e.target.value})}
+                        className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer text-sm"
+                        placeholder="주소 검색 버튼을 눌러 도로명 주소를 선택하세요"
+                        required
+                        readOnly
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => openPostcodePopup((addr) => setAcademyForm(prev => ({ ...prev, roadAddress: addr })))}
+                        className="px-4 py-3 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-700 transition-colors shrink-0 shadow-sm text-sm"
+                      >
+                        주소 검색
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">상세주소 <span className="text-slate-400 font-normal text-xs">(층/호수 등)</span></label>
                     <input 
                       type="text" 
-                      value={academyForm.address} 
-                      onChange={e => setAcademyForm({...academyForm, address: e.target.value})}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                      placeholder="예: 서울 강남구 역삼로 123"
-                      required
+                      value={academyForm.detailAddress || ''} 
+                      onChange={e => setAcademyForm({...academyForm, detailAddress: e.target.value})}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm"
+                      placeholder="예: 3층 301호, 본관 2층"
                     />
                   </div>
                   <button 
@@ -3180,21 +3265,43 @@ const parseKindergartenExcelSheet = (sheet) => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 17a2 2 0 100 4 2 2 0 000-4zm10 0a2 2 0 100 4 2 2 0 000-4zM4 6a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm0 5h16M9 6v5m6-5v5" />
           </svg>
         </button>
-        <button onClick={() => handleTabChange('students')} className={`p-4 rounded-2xl transition-all ${activeTab === 'students' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="원생 정보">
-          {/* 유치원생 돔형 통학모 아이콘 (사이드바 통일 라인 스타일) */}
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            {/* 상단 꼭지 단추 */}
-            <ellipse cx="12" cy="4.9" rx="1.3" ry="0.7" />
-            {/* 돔형 크라운 (모자 몸통) */}
-            <path d="M5.2 14 C4.6 9.2 7.8 5.6 10.7 5.2 M13.3 5.2 C16.2 5.6 19.4 9.2 18.8 14" />
-            {/* 돔 하단 이마 곡선 */}
-            <path d="M5.2 14 C8 16.2 16 16.2 18.8 14" />
-            {/* 유치원 모자 챙 (Brim) */}
-            <path d="M5.2 14 C3.2 14.8 1.8 15.8 1.2 16.8 C4.5 20.6 19.5 20.6 22.8 16.8 C22.2 15.8 20.8 14.8 18.8 14" />
-            {/* 패널 절개선 */}
-            <path d="M11.2 5.5 C9.8 8.8 8.8 12.2 8.5 15.8" />
-            <path d="M12.8 5.5 C14.2 8.8 15.2 12.2 15.5 15.8" />
-          </svg>
+        <button 
+          onClick={() => handleTabChange('students')} 
+          className={`p-4 rounded-2xl transition-all ${activeTab === 'students' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} 
+          title={activeEducationLevel === '초등부' ? '초등학생 정보' : activeEducationLevel === '중,고등부' ? '학생 정보' : '원생 정보'}
+        >
+          {activeEducationLevel === '초등부' ? (
+            /* 초등학생 책가방(Backpack) 라인 아이콘 */
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
+              <rect x="5" y="6" width="14" height="15" rx="3" />
+              <path d="M5 11h14" />
+              <path d="M10 11v3h4v-3" />
+              <path d="M8 18h8" />
+            </svg>
+          ) : activeEducationLevel === '중,고등부' ? (
+            /* 중·고등부 학사모(Graduation Cap) 라인 아이콘 */
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
+              <path d="M6 12v5c0 2 3 3 6 3s6-1 6-3v-5" />
+              <circle cx="22" cy="16" r="1" fill="currentColor" />
+            </svg>
+          ) : (
+            /* 유치원생 돔형 통학모 아이콘 (사이드바 통일 라인 스타일) */
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {/* 상단 꼭지 단추 */}
+              <ellipse cx="12" cy="4.9" rx="1.3" ry="0.7" />
+              {/* 돔형 크라운 (모자 몸통) */}
+              <path d="M5.2 14 C4.6 9.2 7.8 5.6 10.7 5.2 M13.3 5.2 C16.2 5.6 19.4 9.2 18.8 14" />
+              {/* 돔 하단 이마 곡선 */}
+              <path d="M5.2 14 C8 16.2 16 16.2 18.8 14" />
+              {/* 유치원 모자 챙 (Brim) */}
+              <path d="M5.2 14 C3.2 14.8 1.8 15.8 1.2 16.8 C4.5 20.6 19.5 20.6 22.8 16.8 C22.2 15.8 20.8 14.8 18.8 14" />
+              {/* 패널 절개선 */}
+              <path d="M11.2 5.5 C9.8 8.8 8.8 12.2 8.5 15.8" />
+              <path d="M12.8 5.5 C14.2 8.8 15.2 12.2 15.5 15.8" />
+            </svg>
+          )}
         </button>
         <button onClick={() => handleTabChange('classes')} className={`p-4 rounded-2xl transition-all ${activeTab === 'classes' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="반 관리">
           {/* 교실 학급 칠판 아이콘 */}
@@ -3719,9 +3826,11 @@ const parseKindergartenExcelSheet = (sheet) => {
 
         {activeTab === 'students' && (
           <div className="p-4 h-full flex flex-col">
-            <h2 className="text-lg font-bold text-slate-800 mb-1 text-center">원아 정보</h2>
+            <h2 className="text-lg font-bold text-slate-800 mb-1 text-center flex items-center justify-center gap-1.5">
+              <span>{activeEducationLevel === '초등부' ? '🎒 초등학생 명단' : activeEducationLevel === '중,고등부' ? '🎓 학생 명단' : '🐥 원아 정보'}</span>
+            </h2>
             <p className="text-[13px] text-slate-500 mb-3 text-center">
-              원아를 직접 추가하거나 엑셀 파일로 일괄 등록할 수 있습니다.
+              {activeEducationLevel === '초등부' ? '초등학생을 직접 추가하거나 엑셀 파일로 일괄 등록할 수 있습니다.' : activeEducationLevel === '중,고등부' ? '학생을 직접 추가하거나 엑셀 파일로 일괄 등록할 수 있습니다.' : '원아를 직접 추가하거나 엑셀 파일로 일괄 등록할 수 있습니다.'}
             </p>
 
             <input 
@@ -3921,7 +4030,12 @@ const parseKindergartenExcelSheet = (sheet) => {
                           <div className="flex items-center justify-between mb-1">
                             <div className="flex items-center gap-1.5 flex-1 min-w-0">
                               <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b') }}></div>
-                              <span className="font-bold text-slate-800 text-sm shrink-0">{st.name}</span>
+                              <span className="font-bold text-slate-800 text-sm shrink-0 flex items-center gap-1">
+                                <span>{st.name}</span>
+                                <span className="text-[11px] select-none" title={activeEducationLevel}>
+                                  {activeEducationLevel === '초등부' ? '🎒' : activeEducationLevel === '중,고등부' ? '🎓' : '🐥'}
+                                </span>
+                              </span>
                               <div className="flex items-center gap-1 overflow-hidden truncate">
                                 {needsAddress && (
                                   <span className="text-xs bg-red-100 text-red-700 font-extrabold px-1.5 py-0.5 rounded border border-red-300 shrink-0 animate-pulse">
@@ -4122,7 +4236,12 @@ const parseKindergartenExcelSheet = (sheet) => {
                                       <div className="flex items-center justify-between mb-1">
                                         <div className="flex items-center gap-1.5 flex-1 min-w-0">
                                           <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b') }}></div>
-                                          <span className="font-bold text-slate-800 text-sm shrink-0">{st.name}</span>
+                                          <span className="font-bold text-slate-800 text-sm shrink-0 flex items-center gap-1">
+                                            <span>{st.name}</span>
+                                            <span className="text-[11px] select-none" title={activeEducationLevel}>
+                                              {activeEducationLevel === '초등부' ? '🎒' : activeEducationLevel === '중,고등부' ? '🎓' : '🐥'}
+                                            </span>
+                                          </span>
                                           <div className="flex items-center gap-1 overflow-hidden truncate">
                                             {needsAddress && (
                                               <span className="text-xs bg-red-100 text-red-700 font-extrabold px-1.5 py-0.5 rounded border border-red-300 shrink-0 animate-pulse">
@@ -4537,6 +4656,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                     <button onClick={() => {
                       setAcademyChangeForm({ 
                         name: academy?.name || '', 
+                        roadAddress: academy?.address || '',
+                        detailAddress: '',
                         address: academy?.address || '',
                         businessNumber: academy?.businessNumber || ''
                       });
@@ -4570,14 +4691,35 @@ const parseKindergartenExcelSheet = (sheet) => {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-orange-800 mb-1">새 원 주소 (도로명/지번) <span className="text-red-500">*</span></label>
+                      <label className="block text-xs font-bold text-orange-800 mb-1">새 원 도로명 주소 <span className="text-red-500">*</span></label>
+                      <div className="flex gap-2">
+                        <input 
+                          type="text" 
+                          value={academyChangeForm.roadAddress || academyChangeForm.address || ''} 
+                          onClick={() => openPostcodePopup((addr) => setAcademyChangeForm(prev => ({ ...prev, roadAddress: addr })))}
+                          onChange={e => setAcademyChangeForm({...academyChangeForm, roadAddress: e.target.value})}
+                          className="flex-1 px-3 py-2 bg-white border border-orange-200 rounded-xl text-sm outline-none cursor-pointer"
+                          placeholder="주소 검색 버튼을 눌러 도로명 주소 선택"
+                          required
+                          readOnly
+                        />
+                        <button 
+                          type="button" 
+                          onClick={() => openPostcodePopup((addr) => setAcademyChangeForm(prev => ({ ...prev, roadAddress: addr })))}
+                          className="px-3 py-2 bg-orange-700 text-white font-bold rounded-xl hover:bg-orange-800 transition-colors shrink-0 text-xs shadow-xs"
+                        >
+                          주소 검색
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-orange-800 mb-1">상세주소 <span className="text-orange-600/70 font-normal">(층/호수 등)</span></label>
                       <input 
                         type="text" 
-                        value={academyChangeForm.address} 
-                        onChange={e => setAcademyChangeForm({...academyChangeForm, address: e.target.value})}
+                        value={academyChangeForm.detailAddress || ''} 
+                        onChange={e => setAcademyChangeForm({...academyChangeForm, detailAddress: e.target.value})}
                         className="w-full px-3 py-2 bg-white border border-orange-200 rounded-xl text-sm outline-none"
-                        placeholder="주소"
-                        required
+                        placeholder="예: 3층 301호, 본관 2층"
                       />
                     </div>
                     <button 
@@ -5246,14 +5388,25 @@ const parseKindergartenExcelSheet = (sheet) => {
 
             const studentIcon = L.divIcon({
               className: 'custom-student-marker',
-              html: `<div style="background-color: ${stColor}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>`,
-              iconSize: [14, 14],
-              iconAnchor: [7, 7]
+              html: getStudentMarkerHtml(stColor, activeEducationLevel),
+              iconSize: [24, 28],
+              iconAnchor: [12, 28],
+              popupAnchor: [0, -28]
             });
             return (
               <Marker key={st.id} position={[displayLat, displayLng]} icon={studentIcon}>
                 <Popup className="student-popup">
-                <div className="font-bold text-lg mb-1">{st.name} <span className="text-sm font-normal text-slate-500">{st.raw?.['성별']} / {st.raw?.['연령'] || st.raw?.['학년'] || ''}</span></div>
+                <div className="font-bold text-lg mb-1 flex items-center gap-1.5">
+                  <span>{st.name}</span>
+                  <span className="text-xs px-1.5 py-0.5 rounded font-extrabold" style={{
+                    backgroundColor: activeEducationLevel === '초등부' ? '#ecfdf5' : activeEducationLevel === '중,고등부' ? '#eef2ff' : '#fefce8',
+                    color: activeEducationLevel === '초등부' ? '#047857' : activeEducationLevel === '중,고등부' ? '#4338ca' : '#b45309',
+                    border: `1px solid ${activeEducationLevel === '초등부' ? '#a7f3d0' : activeEducationLevel === '중,고등부' ? '#c7d2fe' : '#fde68a'}`
+                  }}>
+                    {activeEducationLevel === '초등부' ? '🎒 초등생' : activeEducationLevel === '중,고등부' ? '🎓 학생' : '🐥 원아'}
+                  </span>
+                  <span className="text-sm font-normal text-slate-500">{st.raw?.['성별']} / {st.raw?.['연령'] || st.raw?.['학년'] || ''}</span>
+                </div>
                 <div className="text-sm text-slate-700 mb-2">{st.raw?.['유치원명'] || st.raw?.['학교명']} {st.raw?.['반명'] ? `(${st.raw?.['반명']})` : ''} {st.raw?.['하원구분'] ? `[${st.raw?.['하원구분']}]` : ''}</div>
                 
                 <div className="bg-slate-50 p-2 rounded border border-slate-100 text-xs mb-2">
