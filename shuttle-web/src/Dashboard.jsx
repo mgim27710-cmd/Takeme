@@ -17,6 +17,9 @@ import { API_BASE_URL } from './config';
 import TeacherDashboard from './TeacherDashboard';
 import ClassManager from './classes/ClassManager';
 import AuthViewer from './auth/AuthViewer';
+import StudentTableManager from './StudentTableManager';
+import ApprovalRequestManager from './ApprovalRequestManager';
+import IntegratedCalendar from './IntegratedCalendar';
 
 
 // Fix Leaflet default icon issue
@@ -345,6 +348,28 @@ export default function Dashboard({ initialEducationLevel } = {}) {
 
   // Legal Expiry Urgent Count State
   const [urgentExpiryCount, setUrgentExpiryCount] = useState(0);
+
+  // Approval Pending Count State
+  const [approvalPendingCount, setApprovalPendingCount] = useState(0);
+
+  useEffect(() => {
+    const fetchPendingCount = async () => {
+      try {
+        const token = localStorage.getItem('takeme_token') || localStorage.getItem('token') || '';
+        const res = await fetch(`${API_BASE_URL}/approval/admin?status=PENDING`, {
+          headers: {
+            'Authorization': token ? `Bearer ${token}` : '',
+            'x-academy-id': String(selectedAcademyId || ''),
+          },
+        });
+        if (res.ok) {
+          const list = await res.json();
+          setApprovalPendingCount(Array.isArray(list) ? list.length : 0);
+        }
+      } catch (_) {}
+    };
+    fetchPendingCount();
+  }, [selectedAcademyId]);
 
   useEffect(() => {
     const updateExpiryStatus = () => {
@@ -3321,6 +3346,32 @@ const parseKindergartenExcelSheet = (sheet) => {
             <path d="M12.8 5.5 C14.2 8.8 15.2 12.2 15.5 15.8" />
           </svg>
         </button>
+        {/* 통학 변경 신청함 버튼 */}
+        <button
+          onClick={() => handleTabChange('approval')}
+          className={`relative p-4 rounded-2xl transition-all ${activeTab === 'approval' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`}
+          title="통학 변경 신청함"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          {approvalPendingCount > 0 && (
+            <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-blue-700 animate-pulse shadow-sm">
+              {approvalPendingCount}
+            </span>
+          )}
+        </button>
+        {/* 통합 캘린더 버튼 */}
+        <button
+          onClick={() => handleTabChange('calendar')}
+          className={`p-4 rounded-2xl transition-all ${activeTab === 'calendar' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`}
+          title="통합 캘린더"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <rect x="3" y="4" width="18" height="18" rx="2" strokeWidth={2} />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 2v4M8 2v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01" />
+          </svg>
+        </button>
         <button onClick={() => handleTabChange('classes')} className={`p-4 rounded-2xl transition-all ${activeTab === 'classes' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="반 관리">
           {/* 교실 학급 칠판 아이콘 */}
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3379,7 +3430,7 @@ const parseKindergartenExcelSheet = (sheet) => {
       </div>
 
       {/* Sidebar Content Panel */}
-      <div className={`bg-white shadow-lg z-10 flex flex-col w-[380px] shrink-0 break-keep ${activeTab === 'messages' ? 'hidden' : ''}`}>
+      <div className={`bg-white shadow-lg z-10 flex flex-col w-[380px] shrink-0 break-keep ${activeTab === 'messages' || activeTab === 'students' || activeTab === 'approval' || activeTab === 'calendar' ? 'hidden' : ''}`}>
 
         {(activeTab === 'status' || activeTab === 'buses') && (
           <div className="p-6 h-full flex flex-col overflow-y-auto break-keep">
@@ -4810,6 +4861,44 @@ const parseKindergartenExcelSheet = (sheet) => {
             isClosing={isClassesClosing}
             onClose={() => handleTabChange('status')}
           />
+        )}
+
+        {activeTab === 'students' && (
+          <div className="absolute inset-0 z-20 bg-slate-50 flex flex-col overflow-hidden">
+            <StudentTableManager 
+              students={students}
+              buses={buses}
+              availableClasses={availableClasses}
+              onRefresh={refreshAllData}
+              onOpenAddModal={handleOpenAddStudentModal}
+              onOpenUpload={() => fileInputRef.current?.click()}
+              selectedAcademyId={selectedAcademyId}
+              currentUser={currentUser}
+            />
+          </div>
+        )}
+
+        {activeTab === 'approval' && (
+          <div className="absolute inset-0 z-20 bg-slate-50 flex flex-col overflow-hidden">
+            <ApprovalRequestManager 
+              selectedAcademyId={selectedAcademyId}
+              currentUser={currentUser}
+              socket={socketRef.current}
+              onCountsChange={setApprovalPendingCount}
+            />
+          </div>
+        )}
+
+        {activeTab === 'calendar' && (
+          <div className="absolute inset-0 z-20 bg-slate-50 flex flex-col overflow-hidden">
+            <IntegratedCalendar 
+              selectedAcademyId={selectedAcademyId}
+              currentUser={currentUser}
+              availableClasses={availableClasses}
+              buses={buses}
+              onNavigateToApproval={() => handleTabChange('approval')}
+            />
+          </div>
         )}
 
         {activeTab === 'attendance' && (
