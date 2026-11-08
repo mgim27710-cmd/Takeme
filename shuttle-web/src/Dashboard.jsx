@@ -77,6 +77,16 @@ function PickupPointEvents({ isAddingPickupPoint, onAddPickupPoint }) {
   return null;
 }
 
+function MapFocusEffect({ target }) {
+  const map = useMap();
+  useEffect(() => {
+    if (target && target[0] && target[1]) {
+      map.setView(target, 16, { animate: true });
+    }
+  }, [target, map]);
+  return null;
+}
+
 export default function Dashboard({ initialEducationLevel } = {}) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -153,6 +163,9 @@ export default function Dashboard({ initialEducationLevel } = {}) {
 
   const [buses, setBuses] = useState([]);
   const [students, setStudents] = useState([]); // Array of { name, address, lat, lng, assignedBusId, color }
+  const [emergencyAlert, setEmergencyAlert] = useState(null);
+  const [escortToast, setEscortToast] = useState(null);
+  const [mapFocusTarget, setMapFocusTarget] = useState(null);
   const [selectedBusId, setSelectedBusId] = useState(null);
   const [activeTab, setActiveTab] = useState('status'); // 'status', 'buses', 'students', 'classes', 'auth', 'log', 'messages', 'documents', 'board', 'settings'
   const [isLogClosing, setIsLogClosing] = useState(false);
@@ -645,11 +658,77 @@ export default function Dashboard({ initialEducationLevel } = {}) {
 
     socket.on('connect', () => {
       console.log('Manager socket connected:', socket.id);
+      if (selectedAcademyId) {
+        socket.emit('joinAcademyRoom', { academyId: Number(selectedAcademyId), token });
+      }
       if (buses && buses.length > 0) {
         buses.forEach(b => {
           socket.emit('joinVehicleRoom', { vehicleId: Number(b.id) });
         });
       }
+    });
+
+    socket.on('emergencyAlert', (data) => {
+      console.warn('🚨 Emergency alert received on manager dashboard:', data);
+      setEmergencyAlert(data);
+      if (data && data.lat && data.lng) {
+        setMapFocusTarget([parseFloat(data.lat), parseFloat(data.lng)]);
+      }
+
+      // Audio Alarm using Web Audio API
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) {
+          const audioCtx = new AudioCtx();
+          const playBeep = (freq, duration, delay) => {
+            setTimeout(() => {
+              try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+              } catch (_) {}
+            }, delay);
+          };
+          playBeep(880, 0.25, 0);
+          playBeep(660, 0.25, 250);
+          playBeep(880, 0.25, 500);
+          playBeep(660, 0.35, 750);
+        }
+      } catch (e) {
+        console.warn('Audio alarm playback error:', e);
+      }
+
+      // Browser Notification API
+      if ('Notification' in window) {
+        if (Notification.permission === 'granted') {
+          new Notification('🚨 긴급 사고·고장 비상 알림', {
+            body: `${data.vehicleName} (${data.driverName}) 비상 알림이 발생했습니다.`,
+          });
+        } else if (Notification.permission !== 'denied') {
+          Notification.requestPermission().then(p => {
+            if (p === 'granted') {
+              new Notification('🚨 긴급 사고·고장 비상 알림', {
+                body: `${data.vehicleName} (${data.driverName}) 비상 알림이 발생했습니다.`,
+              });
+            }
+          });
+        }
+      }
+    });
+
+    socket.on('escortStarted', (data) => {
+      console.log('Escort started received:', data);
+      setEscortToast(data);
+      setTimeout(() => {
+        setEscortToast(prev => (prev?.time === data?.time ? null : prev));
+      }, 5000);
     });
 
     socket.on('allVehicleOperatingStatus', (statusMap) => {
@@ -731,6 +810,19 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       });
     }
   }, [buses]);
+
+  useEffect(() => {
+    if (socketRef.current && socketRef.current.connected && selectedAcademyId) {
+      const token = localStorage.getItem('takeme_token');
+      socketRef.current.emit('joinAcademyRoom', { academyId: Number(selectedAcademyId), token });
+    }
+  }, [selectedAcademyId]);
+
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, []);
 
   // 60-second Stale Timeout for real-time bus GPS markers
   useEffect(() => {
@@ -2835,6 +2927,56 @@ const parseKindergartenExcelSheet = (sheet) => {
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans relative">
+      {/* 긴급 사고·고장 비상 알림 (빨간 줄 알림 배너 - 사용자가 확인할 때까지 유지) */}
+      {emergencyAlert && (
+        <div className="fixed top-0 left-0 right-0 z-[9999] bg-red-600 text-white px-6 py-4 shadow-2xl flex items-center justify-between border-b-4 border-red-700 animate-in slide-in-from-top duration-200">
+          <div className="flex items-center gap-3.5">
+            <span className="text-3xl animate-pulse">🚨</span>
+            <div>
+              <div className="font-black text-lg tracking-wide flex items-center gap-2">
+                <span>[긴급 사고·고장 비상 알림]</span>
+                <span className="bg-white/20 px-2 py-0.5 rounded text-sm">{emergencyAlert.vehicleName}</span>
+                <span className="text-sm font-bold text-red-100">기사: {emergencyAlert.driverName}</span>
+              </div>
+              <div className="text-xs text-red-100 mt-1">
+                발생 시각: {emergencyAlert.time ? new Date(emergencyAlert.time).toLocaleTimeString('ko-KR') : '방금'} · 지도에서 해당 차량 위치로 포커스되었습니다.
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5">
+            {emergencyAlert.lat && emergencyAlert.lng && (
+              <button
+                type="button"
+                onClick={() => setMapFocusTarget([parseFloat(emergencyAlert.lat), parseFloat(emergencyAlert.lng)])}
+                className="px-3.5 py-1.5 bg-white/20 hover:bg-white/30 text-white font-bold text-xs rounded-lg transition"
+              >
+                위치 보기
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setEmergencyAlert(null)}
+              className="px-5 py-2 bg-white text-red-600 hover:bg-red-50 font-black text-sm rounded-lg shadow transition"
+            >
+              확인
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 동승 시작 알림 배너 (파란색, 소리 없음, 몇 초 뒤 사라짐) */}
+      {escortToast && (
+        <div className="fixed top-5 right-5 z-[9999] bg-blue-600 text-white px-5 py-3 rounded-xl shadow-xl flex items-center gap-3 border border-blue-400 animate-in slide-in-from-top duration-300">
+          <span className="text-xl">🚌</span>
+          <div>
+            <div className="font-extrabold text-sm">{escortToast.vehicleName} 동승 시작</div>
+            <div className="text-xs text-blue-100">
+              지도교사: {escortToast.escortName} ({escortToast.time ? new Date(escortToast.time).toLocaleTimeString('ko-KR') : ''})
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Yearly Zone Mapping History Modal */}
       {showYearlyMappingModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
@@ -4723,6 +4865,7 @@ const parseKindergartenExcelSheet = (sheet) => {
           />
 
           <MapBoundsFit buses={buses} academy={academy} />
+          <MapFocusEffect target={mapFocusTarget} />
 
           {/* Draw Academy Marker */}
           {academy && !isNaN(academy.lat) && !isNaN(academy.lng) && (

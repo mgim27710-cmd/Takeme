@@ -831,96 +831,104 @@ export class TeacherService {
     return { success: true };
   }
 
-  async triggerEmergency(email: string) {
+  async triggerEmergency(email: string, clientLat?: number, clientLng?: number) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
 
     const vehicle = await this.vehicleRepository.findOne({ 
       where: [{ teacherUser: { id: user.id } }, { driverUser: { id: user.id } }],
-      relations: { academy: { owner: true } }
+      relations: { academy: { owner: true }, driverUser: true, teacherUser: true }
     });
     if (!vehicle) throw new BadRequestException('Assigned vehicle not found');
 
-    // Get unboarded students for this vehicle
+    const academyId = vehicle.academy?.id || (vehicle as any).academyId;
+    if (!academyId) throw new BadRequestException('소속 유치원을 찾을 수 없습니다.');
+
+    // 같은 유치원에 소속된 다른 차량들만 조회
+    const otherVehicles = await this.vehicleRepository.find({
+      where: { academy: { id: academyId } },
+      relations: { driverUser: true, teacherUser: true }
+    }).then(list => list.filter(v => v.id !== vehicle.id));
+
     const todayStudents = await this.getTodayStudentsForVehicle(vehicle.id);
     const unboardedStudents = todayStudents.filter(s => s.boardStatus === 'WAITING' && s.latitude && s.longitude);
 
-    // Find all OTHER vehicles
-    const allVehicles = await this.vehicleRepository.find({ relations: { driverUser: true, teacherUser: true } });
-    const otherVehicles = allVehicles.filter(v => v.id !== vehicle.id);
-
-    const today = new Date().toISOString().split('T')[0];
-
-    // Auto-reassign and notify
+    // 자동 재배정은 제거하고 비상 알림만 전송
     for (const student of unboardedStudents) {
-      let closestVehicle = null;
-      if (otherVehicles.length > 0) {
-        // Simplified: assign to the first available other vehicle for now
-        // In a real scenario, this would use geocoding distance to find the optimal vehicle
-        closestVehicle = otherVehicles[0];
-      }
+      const parentUser = await this.userRepository.createQueryBuilder('user')
+        .leftJoin('user.parentStudents', 'student')
+        .where('student.id = :studentId', { studentId: student.id })
+        .getOne();
 
-      if (closestVehicle) {
-        // 1. Create ScheduleOverride
-        const override = this.scheduleOverrideRepository.create({
-          student,
-          startDate: today,
-          endDate: today,
-          overrideType: OverrideType.CHANGE_LOCATION,
-          reason: '차량 사고 긴급 대체 배차',
-          newVehicleId: closestVehicle.id,
-          latitude: student.latitude,
-          longitude: student.longitude,
-          newAddress: student.address
-        } as any);
-        await this.scheduleOverrideRepository.save(override);
-
-        // 2. Notify Parent
-        const parentUser = await this.userRepository.createQueryBuilder('user')
-           .leftJoin('user.parentStudents', 'student')
-           .where('student.id = :studentId', { studentId: student.id })
-           .getOne();
-
-        if (parentUser) {
-           const msg = this.messageRepository.create({
-             student,
-             targetRoles: ['PARENT'],
-             message: `[긴급 안내] ${vehicle.busNumber} 사고로 인해 운행이 불가능해졌습니다. 아직 탑승하지 못한 원아들은 다른 호차 차량이 픽업해 유치원까지 안전하게 이동하겠습니다.`,
-             receiverUser: parentUser
-           });
-           await this.messageRepository.save(msg);
-        }
-      }
-    }
-
-    // 3. Notify Admin (Director)
-    if (vehicle.academy && vehicle.academy.owner) {
+      if (parentUser) {
         const msg = this.messageRepository.create({
-          targetRoles: ['ACADEMY_ADMIN'],
-          message: `🚨 [긴급] ${vehicle.busNumber} 운행 불가 사태 발생. 남은 학생 ${unboardedStudents.length}명 타 차량 대체 배차 처리 완료.`,
-          receiverUser: vehicle.academy.owner
+          student,
+          targetRoles: ['PARENT'],
+          message: `[긴급 안내] ${vehicle.busNumber} 차량에 비상 상황이 발생하였습니다. 원아의 안전을 최우선으로 확인 중입니다.`,
+          receiverUser: parentUser
         });
         await this.messageRepository.save(msg);
+      }
     }
 
-    // 4. Notify other drivers/teachers
+    // 유치원 관리자(원장님) 알림
+    if (vehicle.academy && vehicle.academy.owner) {
+      const msg = this.messageRepository.create({
+        targetRoles: ['ACADEMY_ADMIN'],
+        message: `🚨 [긴급 SOS] ${vehicle.busNumber} 차량 사고/고장 비상 상황 발생. 즉시 확인해 주세요.`,
+        receiverUser: vehicle.academy.owner
+      });
+      await this.messageRepository.save(msg);
+    }
+
+    // 같은 유치원의 타 호차 직원에게 알림
     for (const v of otherVehicles) {
-       const staffUsers = [];
-       if (v.driverUser) staffUsers.push(v.driverUser);
-       if (v.teacherUser) staffUsers.push(v.teacherUser);
-       for (const staff of staffUsers) {
-          const msg = this.messageRepository.create({
-            targetRoles: [staff.role],
-            message: `🚨 [비상] ${vehicle.busNumber} 고장/사고로 인해 인근 학생이 기사님 노선으로 긴급 추가되었습니다. 명단과 지도를 새로고침해 주세요.`,
-            receiverUser: staff
-          });
-          await this.messageRepository.save(msg);
-       }
+      const staffUsers = [];
+      if (v.driverUser) staffUsers.push(v.driverUser);
+      if (v.teacherUser) staffUsers.push(v.teacherUser);
+      for (const staff of staffUsers) {
+        const msg = this.messageRepository.create({
+          targetRoles: [staff.role],
+          message: `🚨 [비상] ${vehicle.busNumber} 사고/고장 비상 상황이 발생했습니다.`,
+          receiverUser: staff
+        });
+        await this.messageRepository.save(msg);
+      }
     }
 
-    // 5. Save Operation Log
-    await this.appendBoardingLog(vehicle.id, null, '🚨 긴급 모드 발동 (타 호차 인계)', 'SYSTEM');
+    // 소켓 emergencyAlert: 오직 유치원 방에만 전송 (전체 브로드캐스트 금지)
+    let defaultLat = 37.5580;
+    let defaultLng = 126.8240;
+    if (vehicle.polygonCoordinates && Array.isArray(vehicle.polygonCoordinates) && vehicle.polygonCoordinates.length > 0) {
+      const firstPt = vehicle.polygonCoordinates[0];
+      if (Array.isArray(firstPt) && firstPt.length >= 2) {
+        defaultLat = Number(firstPt[0]) || defaultLat;
+        defaultLng = Number(firstPt[1]) || defaultLng;
+      }
+    }
+    const lat = clientLat || defaultLat;
+    const lng = clientLng || defaultLng;
+    const time = new Date().toISOString();
+    const driverName = vehicle.driverUser?.name || user.name || '기사님';
 
-    return { success: true, message: '긴급 모드가 성공적으로 발동되었습니다.' };
+    if (this.locationGateway?.server) {
+      this.locationGateway.server.to(`academy_${academyId}`).emit('emergencyAlert', {
+        vehicleId: vehicle.id,
+        vehicleName: vehicle.busNumber,
+        driverName,
+        lat,
+        lng,
+        time,
+      });
+    }
+
+    // Operation Log 저장
+    await this.appendBoardingLog(vehicle.id, null, '🚨 긴급 SOS 발동', 'SYSTEM');
+
+    return {
+      success: true,
+      message: '긴급 알림이 유치원 관리자에게 전송되었습니다.',
+      alert: { vehicleId: vehicle.id, vehicleName: vehicle.busNumber, driverName, lat, lng, time }
+    };
   }
 }

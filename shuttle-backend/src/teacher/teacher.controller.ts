@@ -140,8 +140,8 @@ export class TeacherController {
   }
 
   @Post('emergency')
-  async triggerEmergency(@AuthEmail() email: string) {
+  async triggerEmergency(@AuthEmail() email: string, @Body() body?: { lat?: number; lng?: number }) {
     if (!email) throw new BadRequestException('이메일이 필요합니다.');
-    return this.teacherService.triggerEmergency(email);
+    return this.teacherService.triggerEmergency(email, body?.lat, body?.lng);
   }
 }
