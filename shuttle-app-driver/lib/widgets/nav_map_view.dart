@@ -46,7 +46,13 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
   bool _hasInitialLocation = false;
   bool _isInitialFitDone = false;
   bool _isMapReady = false;
-  double _currentMapRotation = 0.0;
+
+  // 도로 추종 및 예측·보정 상태
+  bool _isSnappedToRoute = false;
+  DateTime? _lastGpsTime;
+  double _correctionOffsetX = 0.0;
+  double _correctionOffsetY = 0.0;
+  double _correctionRemainingSec = 0.0;
 
   bool get _canUseMapController {
     if (!_isMapReady || !mounted) return false;
@@ -149,14 +155,26 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
 
       // 주행 중이면 경로선에 30m 이내 스냅
       final primary = _getPrimaryRouteLatLngs();
-      final snapped = navigating ? _snapToRoute(rawLatLng, primary) : rawLatLng;
+      final (snapped, segIdx, frac, isSnapped) = navigating
+          ? _snapToRouteDetail(rawLatLng, primary)
+          : (rawLatLng, 0, 0.0, false);
       _targetPos = snapped;
+      _isSnappedToRoute = isSnapped;
 
       if (!_hasInitialLocation) {
         _hasInitialLocation = true;
         _animatedLat = snapped.latitude;
         _animatedLng = snapped.longitude;
+        _correctionOffsetX = 0.0;
+        _correctionOffsetY = 0.0;
+        _correctionRemainingSec = 0.0;
+      } else if (navigating) {
+        // 새 GPS 가 오면 0.3초에 걸쳐 현재 표시 위치와 새 스냅 위치 사이 오차를 보정
+        _correctionOffsetY = snapped.latitude - _animatedLat;
+        _correctionOffsetX = snapped.longitude - _animatedLng;
+        _correctionRemainingSec = NavMapConfig.reconciliationSeconds;
       }
+      _lastGpsTime = DateTime.now();
 
       // 회전각 처리 (정지 상태 시 흔들림 방지)
       if (heading != null && !heading.isNaN) {
@@ -206,20 +224,43 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
     final clampedDt = dt.clamp(0.001, 0.1);
 
     if (_isFollowing && _isNavigating) {
-      // 1. 위치 부드러운 보간 (GPS 약 1초 간격 보간)
-      final posFactor = (clampedDt / NavMapConfig.posLerpDuration).clamp(0.0, 1.0);
-      _animatedLat += (_targetPos.latitude - _animatedLat) * posFactor;
-      _animatedLng += (_targetPos.longitude - _animatedLng) * posFactor;
+      final now = DateTime.now();
+      final speedMps = ((_impl.currentSpeedKmh ?? 0.0) / 3.6);
+      final sinceGps = _lastGpsTime != null
+          ? (now.difference(_lastGpsTime!).inMilliseconds / 1000.0)
+          : 0.0;
 
-      // 2. 방향 부드러운 보간 (최단 각도 회전)
+      // 1. 도로 따라 예측 이동: GPS 사이에는 마지막 속도로 경로를 따라 예측 이동 (최대 2초, 속도 0 근처면 정지)
+      if (_isSnappedToRoute && sinceGps <= NavMapConfig.predictionMaxSeconds && speedMps > 0.5) {
+        final moveMeters = speedMps * clampedDt;
+        final primary = _getPrimaryRouteLatLngs();
+        _advanceAlongRoute(moveMeters, primary);
+      }
+
+      // 2. 새 GPS 가 오면 0.3초에 걸쳐 보정
+      if (_correctionRemainingSec > 0.001) {
+        final stepFactor = (clampedDt / _correctionRemainingSec).clamp(0.0, 1.0);
+        _animatedLat += _correctionOffsetY * stepFactor;
+        _animatedLng += _correctionOffsetX * stepFactor;
+        _correctionOffsetY -= _correctionOffsetY * stepFactor;
+        _correctionOffsetX -= _correctionOffsetX * stepFactor;
+        _correctionRemainingSec -= clampedDt;
+      } else if (!_isSnappedToRoute) {
+        // 경로 밖(스냅 해제)일 때는 일반 부드러운 이동
+        final posFactor = (clampedDt / 0.3).clamp(0.0, 1.0);
+        _animatedLat += (_targetPos.latitude - _animatedLat) * posFactor;
+        _animatedLng += (_targetPos.longitude - _animatedLng) * posFactor;
+      }
+
+      // 3. 방향 부드러운 보간 (최단 각도 회전)
       final headingFactor = (clampedDt / NavMapConfig.headingLerpDuration).clamp(0.0, 1.0);
       _animatedHeading += (_targetHeading - _animatedHeading) * headingFactor;
 
-      // 3. 줌 레벨 부드러운 보간
+      // 4. 줌 레벨 부드러운 보간
       final zoomFactor = (clampedDt / NavMapConfig.zoomLerpDuration).clamp(0.0, 1.0);
       _animatedZoom += (_targetZoom - _animatedZoom) * zoomFactor;
 
-      // 4. 화면 화살표 Y비율 부드러운 보간
+      // 5. 화면 화살표 Y비율 부드러운 보간
       final ratioFactor = (clampedDt / NavMapConfig.ratioLerpDuration).clamp(0.0, 1.0);
       _animatedYRatio += (_targetYRatio - _animatedYRatio) * ratioFactor;
 
@@ -326,9 +367,41 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
     return from + diff;
   }
 
-  /// 경로선 30m 이내 스냅 계산 (투영점 산출)
-  LatLng _snapToRoute(LatLng rawPos, List<LatLng>? primaryRoute) {
-    if (primaryRoute == null || primaryRoute.length < 2) return rawPos;
+  /// 경로선 상에서 moveMeters 만큼 전진하여 _animatedLat, _animatedLng를 갱신
+  void _advanceAlongRoute(double moveMeters, List<LatLng>? primary) {
+    if (primary == null || primary.length < 2) return;
+    final segIdx = _impl.routeProgressIndex.clamp(0, primary.length - 2);
+    final a = primary[segIdx];
+    final b = primary[segIdx + 1];
+
+    const rad = math.pi / 180.0;
+    const latScale = 111132.954;
+    final lngScale = 111412.84 * math.cos(_animatedLat * rad);
+
+    final dxMeters = (b.longitude - a.longitude) * lngScale;
+    final dyMeters = (b.latitude - a.latitude) * latScale;
+    final segLen = math.sqrt(dxMeters * dxMeters + dyMeters * dyMeters);
+
+    if (segLen < 1e-3) return;
+
+    final unitX = dxMeters / segLen;
+    final unitY = dyMeters / segLen;
+
+    final deltaLng = (unitX * moveMeters) / lngScale;
+    final deltaLat = (unitY * moveMeters) / latScale;
+
+    _animatedLat += deltaLat;
+    _animatedLng += deltaLng;
+  }
+
+  /// 경로선 30m 이내 스냅 상세 계산 (투영점, 세그먼트 인덱스, 비율, 스냅 여부 산출)
+  (LatLng point, int segIndex, double t, bool isSnapped) _snapToRouteDetail(
+    LatLng rawPos,
+    List<LatLng>? primaryRoute,
+  ) {
+    if (primaryRoute == null || primaryRoute.length < 2) {
+      return (rawPos, 0, 0.0, false);
+    }
 
     const rad = math.pi / 180.0;
     const latScale = 111132.954;
@@ -337,9 +410,11 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
     final px = rawPos.longitude * lngScale;
     final py = rawPos.latitude * latScale;
 
-    double bestDistSq =
-        NavMapConfig.snapRouteDistanceMeters * NavMapConfig.snapRouteDistanceMeters;
+    const maxDist = NavMapConfig.snapRouteDistanceMeters;
+    double bestDistSq = maxDist * maxDist;
     LatLng? bestPoint;
+    int bestSeg = 0;
+    double bestT = 0.0;
 
     for (int i = 0; i < primaryRoute.length - 1; i++) {
       final a = primaryRoute[i];
@@ -364,6 +439,8 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
       final distSq = (px - cx) * (px - cx) + (py - cy) * (py - cy);
       if (distSq < bestDistSq) {
         bestDistSq = distSq;
+        bestSeg = i;
+        bestT = clampedT;
         bestPoint = LatLng(
           a.latitude + clampedT * (b.latitude - a.latitude),
           a.longitude + clampedT * (b.longitude - a.longitude),
@@ -371,7 +448,10 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
       }
     }
 
-    return bestPoint ?? rawPos;
+    if (bestPoint != null) {
+      return (bestPoint, bestSeg, bestT, true);
+    }
+    return (rawPos, 0, 0.0, false);
   }
 
   List<Polyline> _buildPolylines() {
@@ -390,29 +470,73 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
       );
     }
 
-    // 2. 주 경로 기본 윤곽선 (진한 테두리선)
+    // 2. 주 경로 기본 윤곽선 및 교통 색상 (지나온 경로 지우기)
     final pri = _getPrimaryRouteLatLngs();
     if (pri != null && pri.length > 1) {
-      lines.add(
-        Polyline(
-          points: pri,
-          color: const Color(0xFF14532D).withValues(alpha: 0.4),
-          strokeWidth: 12,
-          strokeCap: StrokeCap.round,
-          strokeJoin: StrokeJoin.round,
-        ),
-      );
+      final List<LatLng> activePoints;
+      final int currentSegIdx;
 
-      // 3. 교통 색상 경로 (정체 빨강, 서행 노랑, 원활 파랑/초록)
+      if (_isNavigating) {
+        // 주행 중: 현재 화살표 위치부터 끝까지만 그림 (지나온 경로 지우기)
+        final segIdx = _impl.routeProgressIndex.clamp(0, pri.length - 1);
+        currentSegIdx = segIdx;
+        final curPos = LatLng(_animatedLat, _animatedLng);
+        activePoints = <LatLng>[curPos];
+        if (segIdx + 1 < pri.length) {
+          activePoints.addAll(pri.sublist(segIdx + 1));
+        }
+      } else {
+        currentSegIdx = 0;
+        activePoints = pri;
+      }
+
+      if (activePoints.length > 1) {
+        // 주 경로 기본 윤곽선 (진한 테두리선)
+        lines.add(
+          Polyline(
+            points: activePoints,
+            color: const Color(0xFF14532D).withValues(alpha: 0.4),
+            strokeWidth: 12,
+            strokeCap: StrokeCap.round,
+            strokeJoin: StrokeJoin.round,
+          ),
+        );
+      }
+
+      // 3. 교통 색상 경로 (지나온 구간 제외, 현재 위치부터 끝까지만 그림)
       final traffic = _impl.trafficSegments;
       if (traffic != null && traffic.isNotEmpty) {
         for (final seg in traffic) {
-          final from = seg.from.clamp(0, pri.length - 1);
-          final to = (seg.to + 1).clamp(0, pri.length);
-          if (to > from + 1) {
+          if (_isNavigating && seg.to < currentSegIdx) {
+            // 이미 완전히 지나온 구간은 제외
+            continue;
+          }
+
+          final List<LatLng> segPoints;
+          if (_isNavigating && seg.from <= currentSegIdx && currentSegIdx <= seg.to) {
+            // 현재 주행 중인 구간: 현재 위치부터 이 구간 끝까지
+            final curPos = LatLng(_animatedLat, _animatedLng);
+            final nextIdx = (currentSegIdx + 1).clamp(0, pri.length);
+            final toIdx = (seg.to + 1).clamp(0, pri.length);
+            segPoints = [curPos];
+            if (nextIdx < toIdx) {
+              segPoints.addAll(pri.sublist(nextIdx, toIdx));
+            }
+          } else {
+            // 아직 도달하지 않은 앞쪽 구간
+            final from = seg.from.clamp(0, pri.length - 1);
+            final to = (seg.to + 1).clamp(0, pri.length);
+            if (to > from + 1) {
+              segPoints = pri.sublist(from, to);
+            } else {
+              segPoints = const [];
+            }
+          }
+
+          if (segPoints.length > 1) {
             lines.add(
               Polyline(
-                points: pri.sublist(from, to),
+                points: segPoints,
                 color: _trafficColor(seg.state),
                 strokeWidth: 8,
                 strokeCap: StrokeCap.round,
@@ -421,10 +545,10 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
             );
           }
         }
-      } else {
+      } else if (activePoints.length > 1) {
         lines.add(
           Polyline(
-            points: pri,
+            points: activePoints,
             color: const Color(0xFF16A34A),
             strokeWidth: 8,
             strokeCap: StrokeCap.round,
@@ -484,12 +608,10 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
       );
     }
 
-    // 3. 내 위치 차량 마커 (흰 원 안의 파란 화살표, 진행 방향 회전)
+    // 3. 내 위치 차량 마커 (흰 원 안의 파란 화살표)
     if (_hasInitialLocation) {
-      // 화면 기준 화살표 회전각: 진행방향(animatedHeading) + 지도회전각(mapRotation)
-      // headingUp 모드에서는 mapRotation = -animatedHeading 이므로 screenAngle = 0 (정확히 위쪽 12시 고정)
-      final mapRot = _isMapReady ? _currentMapRotation : (_headingUp ? -_animatedHeading : 0.0);
-      final screenAngleDeg = _animatedHeading + mapRot;
+      // 진행 방향 위 모드에서는 항상 12시(0도) 고정, 북쪽 위 모드에서는 실제 진행 방향(도)을 가리킴
+      final screenAngleDeg = _headingUp ? 0.0 : _animatedHeading;
 
       markers.add(
         Marker(
@@ -537,7 +659,6 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
               });
             },
             onPositionChanged: (camera, hasGesture) {
-              _currentMapRotation = camera.rotation;
               if (hasGesture) {
                 // 사용자가 직접 화면을 조작(드래그/핀치)하면 따라가기 해제
                 _isFollowing = false;

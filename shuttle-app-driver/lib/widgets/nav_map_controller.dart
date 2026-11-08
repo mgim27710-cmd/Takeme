@@ -36,11 +36,13 @@ class NavMapConfig {
   // 정지 판단 속도 (km/h, 이 속도 미만이면 회전 흔들림 방지를 위해 마지막 방향 유지)
   static const double stationarySpeedThreshold = 3.0;
 
-  // 보간 시간 계수 (초)
+  // 보간 및 경로 추종 계수
   static const double posLerpDuration = 0.85;
   static const double headingLerpDuration = 0.35;
   static const double zoomLerpDuration = 1.0;
   static const double ratioLerpDuration = 1.0;
+  static const double predictionMaxSeconds = 2.0;    // GPS 사이 최대 예측 주행 시간 (초)
+  static const double reconciliationSeconds = 0.3;   // 새 GPS 수신 시 오차 보정 시간 (초)
 }
 
 abstract class NavMapController {
@@ -64,7 +66,12 @@ abstract class NavMapController {
     bool follow = false,
     bool navigating = false,
     double? speedKmh,
+    int? routeProgressIndex,
+    double? routeProgressFraction,
   });
+
+  /// 경로 진행 위치 업데이트 (지나온 경로 지우기용: segmentIndex = 경로 좌표 인덱스, fraction = 구간 내 비율 0.0~1.0)
+  void updateRouteProgress({required int segmentIndex, required double fraction});
 
   void centerOn(GeoPoint p, {int zoom = 16});
   void markStopPassed(int index);
@@ -100,6 +107,10 @@ class NavMapControllerImpl implements NavMapController {
   bool headingUp = true;
   final Set<int> passedStopIndices = {};
 
+  // 경로 진행 위치 (좌표 인덱스 + 구간 내 비율)
+  int routeProgressIndex = 0;
+  double routeProgressFraction = 0.0;
+
   // View 바인딩 리스너
   final List<VoidCallback> _listeners = [];
   void addListener(VoidCallback l) => _listeners.add(l);
@@ -130,6 +141,8 @@ class NavMapControllerImpl implements NavMapController {
     this.stops = List<Map<String, dynamic>>.from(stops);
     this.academy = academy;
     shouldFitOnRoutes = fit;
+    routeProgressIndex = 0;
+    routeProgressFraction = 0.0;
     passedStopIndices.clear();
     for (int i = 0; i < stops.length; i++) {
       if (stops[i]['passed'] == true) {
@@ -146,6 +159,8 @@ class NavMapControllerImpl implements NavMapController {
     bool follow = false,
     bool navigating = false,
     double? speedKmh,
+    int? routeProgressIndex,
+    double? routeProgressFraction,
   }) {
     currentPosition = p;
     if (heading != null && !heading.isNaN) {
@@ -156,6 +171,19 @@ class NavMapControllerImpl implements NavMapController {
     if (speedKmh != null) {
       currentSpeedKmh = speedKmh;
     }
+    if (routeProgressIndex != null) {
+      this.routeProgressIndex = routeProgressIndex;
+    }
+    if (routeProgressFraction != null) {
+      this.routeProgressFraction = routeProgressFraction;
+    }
+    _notify();
+  }
+
+  @override
+  void updateRouteProgress({required int segmentIndex, required double fraction}) {
+    routeProgressIndex = segmentIndex;
+    routeProgressFraction = fraction;
     _notify();
   }
 

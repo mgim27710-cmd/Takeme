@@ -161,6 +161,7 @@ class DriverNavigator extends ChangeNotifier {
   final List<NavStop> _testStops = [];
   int _routeSeq = 0;
   int _progress = 0;
+  double _progressFrac = 0.0;
   int _offRouteCount = 0;
   DateTime _lastReroute = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastAutoRouteSync = DateTime.fromMillisecondsSinceEpoch(0);
@@ -632,8 +633,26 @@ class DriverNavigator extends ChangeNotifier {
       }
 
       _gpsSub?.cancel();
+      late final LocationSettings locationSettings;
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        locationSettings = AndroidSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+          intervalDuration: const Duration(seconds: 1),
+          distanceFilter: 0,
+        );
+      } else if (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS) {
+        locationSettings = AppleSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+          distanceFilter: 0,
+        );
+      } else {
+        locationSettings = const LocationSettings(
+          accuracy: LocationAccuracy.bestForNavigation,
+          distanceFilter: 0,
+        );
+      }
       _gpsSub = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 3),
+        locationSettings: locationSettings,
       ).listen(
         (p) {
           gpsError = null;
@@ -902,6 +921,7 @@ class DriverNavigator extends ChangeNotifier {
       from = s.pathIndex;
     }
     _progress = 0;
+    _progressFrac = 0.0;
     _offRouteCount = 0;
     _simMeters = 0;
 
@@ -915,6 +935,7 @@ class DriverNavigator extends ChangeNotifier {
       academy: academy,
       fit: shouldFitOverview,
     );
+    map.updateRouteProgress(segmentIndex: 0, fraction: 0.0);
     _updateProgress();
     if (driving && position != null) {
       map.moveMe(position!, heading: heading, follow: follow, navigating: true, speedKmh: speedKmh.toDouble());
@@ -1134,24 +1155,32 @@ class DriverNavigator extends ChangeNotifier {
     final prev = position;
     position = p;
     if (acc != null) accuracy = acc;
-    // 진행 방향: GPS 방향이 있으면 사용, 없으면 이전 위치에서 계산 (2m 이상 움직였을 때)
-    if (gpsHeading != null && gpsHeading >= 0) {
-      heading = gpsHeading;
-    } else if (prev != null && distanceM(prev, p) > 2) {
-      heading = bearingDeg(prev, p);
-    }
 
     _evaluateSafety(p, speedMps: speedMps, simulated: simulated);
 
     if (!driving) {
+      final speedMpsVal = speedMps ?? (speedKmh / 3.6);
+      if (speedMpsVal >= 2.0 && gpsHeading != null && gpsHeading >= 0) {
+        heading = gpsHeading;
+      } else if (speedMpsVal >= 2.0 && prev != null && distanceM(prev, p) > 2) {
+        heading = bearingDeg(prev, p);
+      }
       map.moveMe(p, heading: heading, speedKmh: speedKmh.toDouble());
       notifyListeners();
       return;
     }
 
     _checkStopArrival(p);
-    _updateProgress(hasGpsHeading: gpsHeading != null && gpsHeading >= 0);
-    map.moveMe(p, heading: heading, follow: follow, navigating: true, speedKmh: speedKmh.toDouble());
+    _updateProgress(gpsHeading: gpsHeading, speedMps: speedMps, prev: prev);
+    map.moveMe(
+      p,
+      heading: heading,
+      follow: follow,
+      navigating: true,
+      speedKmh: speedKmh.toDouble(),
+      routeProgressIndex: _progress,
+      routeProgressFraction: _progressFrac,
+    );
 
     // 실제 도로 기준 남은 시간(ETA)과 위치를 서버로 자동 전송 (오프라인 시 큐에 저장 후 자동 재전송)
     final mayLeaveDevice = serverLive && !testMode && (!simulated || simSendToServer);
@@ -1200,22 +1229,85 @@ class DriverNavigator extends ChangeNotifier {
     }
   }
 
-  void _updateProgress({bool hasGpsHeading = false}) {
+  /// 경로 선분 중 p 와 가장 가까운 선분 인덱스, 선분 내 비율(0~1), 스냅 좌표, 이탈 거리(m), 도로 방향(도)을 구한다.
+  (int, double, GeoPoint, double, double) _findNearestSegment(
+    List<GeoPoint> path,
+    GeoPoint p, {
+    int from = 0,
+    int? to,
+  }) {
+    if (path.isEmpty) return (0, 0.0, p, 0.0, 0.0);
+    if (path.length == 1) return (0, 0.0, path[0], distanceM(path[0], p), 0.0);
+
+    final end = math.min(to ?? (path.length - 2), path.length - 2);
+    final start = math.max(0, from).clamp(0, end);
+
+    var bestSeg = start;
+    var bestT = 0.0;
+    var bestPoint = path[start];
+    var bestDist = double.infinity;
+    var bestBearing = 0.0;
+
+    for (var i = start; i <= end; i++) {
+      final a = path[i];
+      final b = path[i + 1];
+
+      final cosLat = math.cos(a.lat * math.pi / 180.0);
+      final dx = (b.lng - a.lng) * cosLat;
+      final dy = b.lat - a.lat;
+      final lenSq = dx * dx + dy * dy;
+
+      double t;
+      if (lenSq < 1e-12) {
+        t = 0.0;
+      } else {
+        final px = (p.lng - a.lng) * cosLat;
+        final py = p.lat - a.lat;
+        t = ((px * dx) + (py * dy)) / lenSq;
+        t = t.clamp(0.0, 1.0);
+      }
+
+      final projLat = a.lat + t * (b.lat - a.lat);
+      final projLng = a.lng + t * (b.lng - a.lng);
+      final projPoint = GeoPoint(projLat, projLng);
+      final dist = distanceM(projPoint, p);
+
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestSeg = i;
+        bestT = t;
+        bestPoint = projPoint;
+        bestBearing = bearingDeg(a, b);
+      }
+    }
+
+    return (bestSeg, bestT, bestPoint, bestDist, bestBearing);
+  }
+
+  void _updateProgress({double? gpsHeading, double? speedMps, GeoPoint? prev}) {
     final a = active;
     final pos = position;
     if (a == null || pos == null) return;
 
-    final idx = nearestIndex(a.path, pos, from: math.max(0, _progress - 5), to: _progress + 80);
-    final off = distanceM(a.path[idx], pos);
-    _progress = idx;
+    final (segIdx, frac, _, off, roadBearing) = _findNearestSegment(
+      a.path,
+      pos,
+      from: math.max(0, _progress - 5),
+      to: _progress + 80,
+    );
+    _progress = segIdx;
+    _progressFrac = frac;
 
-    // 경로 위를 주행 중이고 GPS 진행 방향이 없거나 정지 상태일 때 현재 도로 구간의 방향을 사용해 항상 12시 방향 정렬 유지
-    if (!hasGpsHeading && off <= 45) {
-      final roadHeading = _roadBearingAt(a.path, idx);
-      if (roadHeading != null) {
-        heading = roadHeading;
-      }
+    // 화살표 방향: 경로선 30m 이내면 도로 구간 방향, 아니면 속도 2m/s 이상일 때만 GPS 방향, 정지 중엔 마지막 방향
+    final speedMpsVal = speedMps ?? (speedKmh / 3.6);
+    if (driving && off <= 30.0) {
+      heading = roadBearing;
+    } else if (speedMpsVal >= 2.0 && gpsHeading != null && gpsHeading >= 0) {
+      heading = gpsHeading;
+    } else if (speedMpsVal >= 2.0 && prev != null && distanceM(prev, pos) > 2) {
+      heading = bearingDeg(prev, pos);
     }
+    // 정지 중(speedMpsVal < 2.0)이면 마지막 방향(heading) 유지
 
     // 70m 이상 벗어난 상태가 3번 연속이면 재탐색 (20초에 한 번, 중복 요청 방지)
     _offRouteCount = off > 70 ? _offRouteCount + 1 : 0;
@@ -1234,7 +1326,7 @@ class DriverNavigator extends ChangeNotifier {
     final (d, text) = turn;
     NavGuide? g;
     for (final x in a.guides) {
-      if (x.pathIndex > idx) {
+      if (x.pathIndex > _progress) {
         g = x;
         break;
       }
