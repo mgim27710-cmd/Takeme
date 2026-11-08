@@ -61,6 +61,16 @@ export class ParentController {
     return this.parentService.getUnreadNotificationCount(email);
   }
 
+  @Get('class-board')
+  async getClassBoard(
+    @AuthEmail() authEmail: string,
+    @Query('email') queryEmail?: string,
+  ) {
+    const email = authEmail || queryEmail;
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.getClassBoard(email);
+  }
+
   @Post('notifications/read-all')
   async readAllNotifications(
     @AuthEmail() authEmail: string,

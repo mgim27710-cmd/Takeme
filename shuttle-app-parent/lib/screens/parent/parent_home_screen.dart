@@ -10,6 +10,7 @@ import '../../models/notification_model.dart';
 import '../../widgets/kakao_map_view.dart';
 import 'absence_modal.dart';
 import 'notification_list_screen.dart';
+import 'class_board_screen.dart';
 import '../settings_screen.dart';
 
 class ParentHomeScreen extends StatefulWidget {
@@ -408,6 +409,83 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        // 우리 반 알림장 바로가기 카드
+                        Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => ClassBoardScreen(
+                                    childClassName: _childInfo?.className,
+                                  ),
+                                ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(16),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFF2563EB).withValues(alpha: 0.22),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 38,
+                                    height: 38,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Icon(Icons.article_rounded, color: Colors.white, size: 20),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          _childInfo?.className != null && _childInfo!.className!.isNotEmpty
+                                              ? '${_childInfo!.className} 알림장'
+                                              : '우리 반 알림장',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 15,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        const Text(
+                                          '선생님이 올린 사진과 공지 확인하기',
+                                          style: TextStyle(
+                                            color: Color(0xFFDBEAFE),
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(Icons.chevron_right, color: Colors.white, size: 22),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+
                         // Tabs: 등원 / 하원
                         Row(
                           children: [

@@ -14,6 +14,7 @@ import { PickupPoint } from '../entities/pickup-point.entity';
 
 import { BoardPost } from '../entities/board-post.entity';
 import { getStudentClassName } from '../utils/school.util';
+import { resolveMediaRef, resolveMediaRefs } from '../utils/s3.util';
 
 @Injectable()
 export class ParentService {
@@ -710,5 +711,61 @@ export class ParentService {
     await this.userRepository.save(user);
 
     return { success: true, message: '비밀번호가 성공적으로 변경되었습니다.' };
+  }
+
+  async getClassBoard(email: string) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) return [];
+
+    const student = await this.studentRepository.createQueryBuilder('student')
+      .leftJoinAndSelect('student.parentUser', 'parentUser')
+      .leftJoinAndSelect('student.studentUser', 'studentUser')
+      .leftJoinAndSelect('student.academy', 'academy')
+      .where('parentUser.id = :uid OR studentUser.id = :uid OR parentUser.email = :email OR studentUser.email = :email', { uid: user.id, email })
+      .getOne();
+
+    if (!student) return [];
+
+    const academyId = student.academy?.id || user.academyId;
+    if (!academyId) return [];
+
+    const className = getStudentClassName(student);
+
+    const qb = this.boardPostRepository.createQueryBuilder('post')
+      .leftJoinAndSelect('post.comments', 'comment')
+      .where('post.academyId = :aid', { aid: academyId });
+
+    if (className) {
+      qb.andWhere('(post.visibility = :vAll OR post.targetClass = :tc OR post.className = :tc)', { vAll: 'ALL', tc: className });
+    } else {
+      qb.andWhere('post.visibility = :vAll', { vAll: 'ALL' });
+    }
+
+    qb.orderBy('post.createdAt', 'DESC')
+      .addOrderBy('comment.createdAt', 'ASC');
+
+    const posts = await qb.getMany();
+
+    return Promise.all(posts.map(async p => {
+      const resolvedImageUrl = await resolveMediaRef(p.imageUrl);
+      const resolvedImages = await resolveMediaRefs(p.images);
+      return {
+        id: p.id,
+        title: p.title,
+        content: p.content,
+        imageUrl: resolvedImageUrl,
+        images: resolvedImages,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+        authorName: p.authorName,
+        authorRole: p.authorRole,
+        targetClass: p.targetClass,
+        className: p.className || p.targetClass,
+        likeCount: p.likeCount || 0,
+        likedUserIds: p.likedUserIds || [],
+        commentCount: p.comments?.length || 0,
+        comments: p.comments || [],
+      };
+    }));
   }
 }

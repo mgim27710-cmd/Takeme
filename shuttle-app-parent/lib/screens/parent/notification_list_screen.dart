@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/notification_model.dart';
 import '../../services/api_service.dart';
+import 'class_board_screen.dart';
 
 class NotificationListScreen extends StatefulWidget {
   const NotificationListScreen({super.key});
@@ -130,19 +131,54 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
                 ),
               ),
               const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2563EB),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+              if (noti.type == 'BOARD') ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const ClassBoardScreen()),
+                      );
+                    },
+                    icon: const Icon(Icons.article_outlined, size: 18),
+                    label: const Text('우리 반 알림장 바로보기', style: TextStyle(fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2563EB),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
                   ),
-                  child: const Text('확인', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
-              ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF64748B),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: const Text('닫기'),
+                  ),
+                ),
+              ] else
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2563EB),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: const Text('확인', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
             ],
           ),
         ),

@@ -2168,6 +2168,7 @@ export class RoutingService {
       authorRole,
       visibility: body.visibility || 'ALL',
       targetClass,
+      className: targetClass,
       academy: academy || undefined,
       likeCount: 0,
       likedUserIds: [],

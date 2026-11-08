@@ -305,6 +305,18 @@ class ApiService {
     }
   }
 
+  Future<List<Map<String, dynamic>>> getClassBoardPosts(String email) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/parent/class-board?email=${Uri.encodeComponent(email)}');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
+        return list.map((e) => e as Map<String, dynamic>).toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
   Future<RouteDataModel?> getParentRoute(String email) async {
     final url = Uri.parse('${AppConfig.apiHost}/parent/route?email=${Uri.encodeComponent(email)}');
     final res = await getWithAuth(url);
