@@ -334,7 +334,8 @@ export default function Landing() {
       data.user.role === 'SUPER_ADMIN' ||
       data.user.role === 'TEACHER' ||
       data.user.role === 'HOMEROOM_TEACHER' ||
-      data.user.role === 'SHUTTLE_TEACHER'
+      data.user.role === 'SHUTTLE_TEACHER' ||
+      data.user.role === 'DESK_STAFF'
     );
 
     if (data.isAppAccount || (data.user && !isWebAllowed)) {

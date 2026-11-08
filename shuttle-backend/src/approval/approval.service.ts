@@ -38,7 +38,7 @@ export class ApprovalService {
     return this.approvalRepo.save(req);
   }
 
-  async getPendingRequests(email: string, role: string) {
+  async getPendingRequests(email: string, role: string, academyId?: number) {
     const query = this.approvalRepo.createQueryBuilder('req')
       .leftJoinAndSelect('req.student', 'student')
       .leftJoinAndSelect('student.parentUser', 'parentUser')
@@ -49,6 +49,9 @@ export class ApprovalService {
            .andWhere('parentUser.email = :email', { email });
     } else {
       query.andWhere('req.direction = :dir', { dir: ApprovalDirection.PARENT_TO_TEACHER });
+      if (academyId) {
+        query.andWhere('student.academyId = :academyId', { academyId });
+      }
     }
     
     return query.orderBy('req.createdAt', 'DESC').getMany();

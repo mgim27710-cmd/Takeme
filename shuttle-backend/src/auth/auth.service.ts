@@ -228,8 +228,17 @@ export class AuthService {
   }
 
   async login(data: any) {
-    const { email, password, otpToken, clientType } = data;
-    const user = await this.usersRepository.findOne({ where: { email } });
+    let { email, password, otpToken, clientType } = data;
+    const cleanEmail = (email || '').trim().toLowerCase();
+    let user = await this.usersRepository.findOne({ where: { email: cleanEmail } });
+    if (!user && (cleanEmail === 'kdu2224capstone@gmail.com' || cleanEmail === '2224kducapstone@gmail.com')) {
+      user = await this.usersRepository.findOne({
+        where: [
+          { email: 'kdu2224capstone@gmail.com' },
+          { email: '2224kducapstone@gmail.com' },
+        ],
+      });
+    }
 
     if (!user) {
       throw new BadRequestException('이메일 또는 비밀번호가 올바르지 않습니다.');
@@ -265,14 +274,21 @@ export class AuthService {
 
     // 2-1. 플랫폼/클라이언트 역할 제한 검증 (웹 vs 모바일 앱)
     if (clientType === 'web') {
-      if (user.role !== UserRole.ACADEMY_ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+      const isWebAllowed = 
+        user.role === UserRole.ACADEMY_ADMIN || 
+        user.role === UserRole.SUPER_ADMIN || 
+        user.role === UserRole.TEACHER || 
+        user.role === UserRole.HOMEROOM_TEACHER || 
+        user.role === UserRole.SHUTTLE_TEACHER;
+
+      if (!isWebAllowed) {
         user.failedLoginAttempts = 0;
         await this.usersRepository.save(user);
         return {
           success: false,
           isAppAccount: true,
           role: user.role,
-          message: '본 계정은 앱기반 계정입니다.',
+          message: '본 계정은 모바일 앱 전용 계정입니다. (기사 및 학부모 계정)',
         };
       }
     } else if (clientType === 'app') {
@@ -359,29 +375,30 @@ export class AuthService {
       academyName = '통합 플랫폼 관리자';
     } else if (user.role === UserRole.ACADEMY_ADMIN) {
       let academy = await this.academyRepository.findOne({ where: { owner: { id: user.id } } });
+      if (!academy && user.academyId) {
+        academy = await this.academyRepository.findOne({ where: { id: user.academyId } });
+      }
       if (!academy) {
-        // Find if there is an academy without owner or create a fresh one
-        const unowned = await this.academyRepository.findOne({ where: { owner: undefined } });
-        if (unowned && !unowned.owner) {
-          unowned.owner = user;
-          await this.academyRepository.save(unowned);
-          academy = unowned;
-        } else {
-          let authCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-          while (await this.academyRepository.findOne({ where: { authCode } })) {
-            authCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-          }
-          academy = this.academyRepository.create({
-            name: user.name ? `${user.name} 유치원` : '신규 유치원',
-            owner: user,
-            authCode,
-            vehicleCount: 0
-          });
-          await this.academyRepository.save(academy);
+        let authCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+        while (await this.academyRepository.findOne({ where: { authCode } })) {
+          authCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         }
+        academy = this.academyRepository.create({
+          name: user.name ? `${user.name} 유치원` : '신규 유치원',
+          owner: user,
+          authCode,
+          businessNumber: data.businessNumber || null,
+          vehicleCount: 0
+        });
+        await this.academyRepository.save(academy);
       }
       academyId = academy.id;
       academyName = academy.name;
+      if (user.academyId !== academy.id) {
+        user.academyId = academy.id;
+        user.academy = academy;
+        await this.usersRepository.save(user);
+      }
     } else if (user.role === UserRole.STUDENT || user.role === UserRole.PARENT) {
       const student = await this.studentRepository.findOne({
         where: user.role === UserRole.STUDENT ? { studentUser: { id: user.id } } : { parentUser: { id: user.id } },
@@ -593,21 +610,45 @@ export class AuthService {
           name: name ? `${name} 유치원` : '신규 유치원',
           owner: savedUser,
           authCode,
-          businessNumber: data.businessNumber || null,
           vehicleCount: 0,
         });
         await this.academyRepository.save(academy);
+        savedUser.academyId = academy.id;
+        savedUser.academy = academy;
+        await this.usersRepository.save(savedUser);
       } else if (userRole === UserRole.STUDENT || userRole === UserRole.PARENT) {
         if (!targetAcademy) throw new BadRequestException('소속 유치원 정보를 찾을 수 없습니다.');
-        const student = await this.studentRepository.createQueryBuilder('student')
+        const matchingStudents = await this.studentRepository.createQueryBuilder('student')
           .leftJoinAndSelect('student.studentUser', 'studentUser')
           .leftJoinAndSelect('student.parentUser', 'parentUser')
           .where('TRIM(student.name) = :name', { name: searchName.trim() })
           .andWhere('student.academyId = :academyId', { academyId: targetAcademy.id })
-          .getOne();
+          .getMany();
           
-        if (!student) {
+        if (matchingStudents.length === 0) {
           throw new BadRequestException('해당 유치원에서 일치하는 이름의 원아 정보를 찾을 수 없습니다.');
+        }
+
+        let student = matchingStudents[0];
+        if (matchingStudents.length > 1) {
+          // 동명이인 처리: 학부모 전화번호가 제공된 경우 전화번호 대조
+          const phoneInput = (data.phone || data.parentPhone || savedUser.phone || '').replace(/[^0-9]/g, '');
+          if (phoneInput) {
+            const foundByPhone = matchingStudents.find(s => {
+              const rawObj = typeof s.raw === 'string' ? JSON.parse(s.raw || '{}') : (s.raw || {});
+              const sPhone = (rawObj['부모연락처'] || rawObj['보호자연락처'] || rawObj['보호자 연락처'] || rawObj['연락처'] || '').replace(/[^0-9]/g, '');
+              return sPhone && (sPhone.endsWith(phoneInput) || phoneInput.endsWith(sPhone));
+            });
+            if (foundByPhone) {
+              student = foundByPhone;
+            } else {
+              const unlinked = matchingStudents.find(s => userRole === UserRole.PARENT ? !s.parentUser : !s.studentUser);
+              if (unlinked) student = unlinked;
+            }
+          } else {
+            const unlinked = matchingStudents.find(s => userRole === UserRole.PARENT ? !s.parentUser : !s.studentUser);
+            if (unlinked) student = unlinked;
+          }
         }
         
         if (userRole === UserRole.STUDENT) {

@@ -52,6 +52,31 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
   const [holidayToDelete, setHolidayToDelete] = useState(null);
   const [isSavingHoliday, setIsSavingHoliday] = useState(false);
   const [isDeletingHoliday, setIsDeletingHoliday] = useState(false);
+  // Filter by Class and Student Search
+  const [selectedClassFilter, setSelectedClassFilter] = useState('ALL');
+  const [absenceSearchKeyword, setAbsenceSearchKeyword] = useState('');
+  const [approvedRides, setApprovedRides] = useState([]);
+
+  // Fetch approved rides for calendar display
+  const fetchApprovedRides = useCallback(async () => {
+    try {
+      const activeAcadId = localStorage.getItem('takeme_selected_academy_id') || (() => {
+        try { return JSON.parse(localStorage.getItem('takeme_user') || '{}').academyId; } catch (e) { return ''; }
+      })();
+      const res = await fetch(`${API_BASE_URL}/chat/payment/requests${activeAcadId ? `?academyId=${activeAcadId}` : ''}`);
+      if (res.ok) {
+        const data = await res.json();
+        setApprovedRides(data.filter(d => d.status === 'APPROVED') || []);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchApprovedRides();
+  }, [fetchApprovedRides]);
+
 
   const calendarRef = useRef(null);
   const hasScrolledRef = useRef(false);
@@ -371,33 +396,50 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
 
   const busStudents = useMemo(() => {
     if (!students || !selectedBusId) return [];
-    return students.filter(s =>
-      s.assignedBusId === selectedBusId ||
-      s.assignedVehicle?.id === selectedBusId ||
-      s.assignedVehicleId === selectedBusId ||
-      s.schedules?.some(sch => sch.assignedVehicle?.id === selectedBusId || sch.assignedVehicleId === selectedBusId)
-    );
-  }, [students, selectedBusId]);
+    return students.filter(s => {
+      const isAssigned = s.assignedBusId === selectedBusId ||
+        s.assignedVehicle?.id === selectedBusId ||
+        s.assignedVehicleId === selectedBusId ||
+        s.schedules?.some(sch => sch.assignedVehicle?.id === selectedBusId || sch.assignedVehicleId === selectedBusId);
+      if (!isAssigned) return false;
+
+      if (selectedClassFilter !== 'ALL') {
+        const c = s.raw?.['반명'] || s.raw?.['반'] || s.assignedClass;
+        if (c !== selectedClassFilter) return false;
+      }
+
+      if (absenceSearchKeyword.trim()) {
+        const kw = absenceSearchKeyword.toLowerCase();
+        const n = (s.name || '').toLowerCase();
+        const p = s.phone || s.raw?.['학부모전화번호'] || s.raw?.['연락처'] || '';
+        if (!n.includes(kw) && !p.includes(kw)) return false;
+      }
+
+      return true;
+    });
+  }, [students, selectedBusId, selectedClassFilter, absenceSearchKeyword]);
 
   const renderDots = (dateStr) => {
     if (isDateHoliday(dateStr)) {
-      return <div className="absolute bottom-1 flex justify-center w-full pointer-events-none"><span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span></div>;
+      return <div className="absolute bottom-1 flex justify-center w-full pointer-events-none"><span className="w-1.5 h-1.5 rounded-full bg-orange-500" title="휴업일"></span></div>;
     }
 
     if (currentTab === 'ABSENCE') {
       const count = getAbsenceCountForDate(dateStr);
       if (count > 0) {
-        const dots = Math.min(count, 3);
-        return (
-          <div className="absolute bottom-1 flex justify-center w-full gap-0.5 flex-wrap px-1 pointer-events-none">
-            {Array.from({ length: dots }, (_, i) => (
-              <span key={i} className="w-1.5 h-1.5 rounded-full bg-red-400"></span>
-            ))}
-            {count > 3 && <span className="w-1 h-1 rounded-full bg-slate-400"></span>}
-          </div>
-        );
+        return <div className="absolute bottom-1 flex justify-center w-full pointer-events-none"><span className="w-1.5 h-1.5 rounded-full bg-red-500" title={`결석 ${count}명`}></span></div>;
       }
     }
+
+    const rideMatches = approvedRides.filter(r => (r.createdAt && r.createdAt.startsWith(dateStr)) || (r.rideDate === dateStr));
+    if (rideMatches.length > 0) {
+      return (
+        <div className="absolute bottom-1 flex justify-center gap-0.5 w-full pointer-events-none">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title={`결재 승인 셔틀 탑승 ${rideMatches.length}건`}></span>
+        </div>
+      );
+    }
+
     return null;
   };
 
@@ -611,11 +653,40 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
               </div>
             )}
             {currentTab === 'ABSENCE' && (
-              <div className="flex items-center justify-between mb-4">
+              <>
+              <div className="flex items-center justify-between mb-3">
                 <h2 className="text-lg font-black text-slate-800">
                   원생 결석관리
                 </h2>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedClassFilter}
+                    onChange={(e) => setSelectedClassFilter(e.target.value)}
+                    className="bg-white text-xs font-bold py-1 px-2 rounded-lg border border-slate-200 text-slate-700 outline-none cursor-pointer"
+                  >
+                    <option value="ALL">전체 반</option>
+                    {Array.from(new Set(students.map(s => s.raw?.['반명'] || s.raw?.['반'] || s.assignedClass).filter(Boolean))).map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                  <span className="text-xs font-bold text-slate-400">
+                    {busStudents.length}명
+                  </span>
+                </div>
               </div>
+              <div className="relative mb-3">
+                <input
+                  type="text"
+                  value={absenceSearchKeyword}
+                  onChange={(e) => setAbsenceSearchKeyword(e.target.value)}
+                  placeholder="원아 이름 또는 연락처 검색..."
+                  className="w-full text-xs py-2 pl-8 pr-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-blue-500 outline-none transition"
+                />
+                <svg className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+              </>
             )}
             
             {/* Bus Selection Tabs */}

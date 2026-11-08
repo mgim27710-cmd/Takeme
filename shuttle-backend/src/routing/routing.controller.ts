@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Param, Query, Res, Delete, Headers, Put, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Query, Res, Delete, Headers, Put, UseGuards, Req } from '@nestjs/common';
 import type { Response } from 'express';
 import { RoutingService } from './routing.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -8,38 +8,55 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 export class RoutingController {
   constructor(private readonly routingService: RoutingService) {}
 
-  private resolveAcademyContext(headerA?: string, queryA?: string, headerU?: string, queryU?: string) {
-    const a = headerA || queryA;
-    const u = headerU || queryU;
+  private resolveAcademyContext(
+    req?: any,
+    clientAcademyId?: string | number,
+    clientUserId?: string | number
+  ) {
+    const isSuper = req?.user?.role === 'SUPER_ADMIN';
+    const authAcademyId = req?.user?.academyId || req?.dbUser?.academyId || (req?.dbUser?.ownedAcademy ? req.dbUser.ownedAcademy.id : undefined);
+    const authUserId = req?.user?.sub || req?.dbUser?.id;
+
+    if (!isSuper && (authAcademyId || authUserId)) {
+      return {
+        academyId: authAcademyId ? Number(authAcademyId) : undefined,
+        userId: authUserId ? Number(authUserId) : undefined,
+      };
+    }
+
+    const a = clientAcademyId ?? authAcademyId;
+    const u = clientUserId ?? authUserId;
     return {
-      academyId: a && !isNaN(Number(a)) ? Number(a) : undefined,
-      userId: u && !isNaN(Number(u)) ? Number(u) : undefined,
+      academyId: a && !isNaN(Number(a)) ? Number(a) : (authAcademyId ? Number(authAcademyId) : undefined),
+      userId: u && !isNaN(Number(u)) ? Number(u) : (authUserId ? Number(authUserId) : undefined),
     };
   }
 
   @Get('academies')
-  async getAllAcademies() {
-    return this.routingService.getAllAcademies();
+  async getAllAcademies(@Req() req: any) {
+    return this.routingService.getAllAcademies(req?.user);
   }
 
   @Get('initial-state')
   async getInitialState(
+    @Req() req: any,
     @Headers('x-academy-id') academyIdHeader?: string,
     @Headers('x-user-id') userIdHeader?: string,
     @Query('academyId') academyIdQuery?: string,
     @Query('userId') userIdQuery?: string,
   ) {
-    const { academyId, userId } = this.resolveAcademyContext(academyIdHeader, academyIdQuery, userIdHeader, userIdQuery);
+    const { academyId, userId } = this.resolveAcademyContext(req, academyIdHeader || academyIdQuery, userIdHeader || userIdQuery);
     return this.routingService.getInitialState(academyId, userId);
   }
 
   @Get('export-excel')
   async exportExcel(
+    @Req() req: any,
     @Res() res: Response,
     @Headers('x-academy-id') academyIdHeader?: string,
     @Query('academyId') academyIdQuery?: string,
   ) {
-    const academyId = academyIdHeader ? Number(academyIdHeader) : (academyIdQuery ? Number(academyIdQuery) : undefined);
+    const { academyId } = this.resolveAcademyContext(req, academyIdHeader || academyIdQuery);
     const buffer = await this.routingService.generateExcelBuffer(academyId);
     res.set({
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -59,11 +76,12 @@ export class RoutingController {
 
   @Post('generate-auth-code')
   async generateAuthCode(
+    @Req() req: any,
     @Headers('x-academy-id') academyIdHeader?: string,
     @Query('academyId') academyIdQuery?: string,
     @Body('academyId') academyIdBody?: number,
   ) {
-    const academyId = academyIdBody || (academyIdHeader ? Number(academyIdHeader) : (academyIdQuery ? Number(academyIdQuery) : undefined));
+    const { academyId } = this.resolveAcademyContext(req, academyIdBody || academyIdHeader || academyIdQuery);
     return this.routingService.generateAuthCode(academyId);
   }
 
@@ -94,12 +112,12 @@ export class RoutingController {
 
   @Post('setup-academy')
   async setupAcademy(
+    @Req() req: any,
     @Body() body: { name: string, address: string, lat: number, lng: number, businessNumber?: string, academyId?: number },
     @Headers('x-academy-id') academyIdHeader?: string,
     @Headers('x-user-id') userIdHeader?: string,
   ) {
-    const academyId = body.academyId || (academyIdHeader ? Number(academyIdHeader) : undefined);
-    const userId = userIdHeader ? Number(userIdHeader) : undefined;
+    const { academyId, userId } = this.resolveAcademyContext(req, body.academyId || academyIdHeader, userIdHeader);
     return this.routingService.setupAcademy(body, academyId, userId);
   }
 
@@ -120,20 +138,22 @@ export class RoutingController {
 
   @Post('holiday')
   async createHoliday(
+    @Req() req: any,
     @Body() body: { startDate: string, endDate: string, reason?: string, academyId?: number },
     @Headers('x-academy-id') academyIdHeader?: string,
   ) {
-    const academyId = body.academyId || (academyIdHeader ? Number(academyIdHeader) : undefined);
+    const { academyId } = this.resolveAcademyContext(req, body.academyId || academyIdHeader);
     return this.routingService.createHoliday(body, academyId);
   }
 
   @Get('holidays')
   async getHolidays(
+    @Req() req: any,
     @Headers('x-academy-id') academyIdHeader?: string,
     @Query('academyId') academyIdQuery?: string,
   ) {
-    const academyId = academyIdHeader ? Number(academyIdHeader) : (academyIdQuery ? Number(academyIdQuery) : undefined);
-    return this.routingService.getHolidays(academyId);
+    const { academyId, userId } = this.resolveAcademyContext(req, academyIdHeader || academyIdQuery);
+    return this.routingService.getHolidays(academyId, userId);
   }
 
   @Delete('holiday/:id')
@@ -143,24 +163,92 @@ export class RoutingController {
 
   @Post('delete-academy')
   async deleteAcademy(
+    @Req() req: any,
     @Headers('x-academy-id') academyIdHeader?: string,
     @Headers('x-user-id') userIdHeader?: string,
     @Body('academyId') academyIdBody?: number,
   ) {
-    const academyId = academyIdBody || (academyIdHeader ? Number(academyIdHeader) : undefined);
-    const userId = userIdHeader ? Number(userIdHeader) : undefined;
+    const { academyId, userId } = this.resolveAcademyContext(req, academyIdBody || academyIdHeader, userIdHeader);
     return this.routingService.deleteAcademy(academyId, userId);
   }
 
   @Post('init-zones')
   async initZones(
+    @Req() req: any,
     @Body() body: { vehicles: any[], parsedData: any[], academyId?: number },
     @Headers('x-academy-id') academyIdHeader?: string,
     @Headers('x-user-id') userIdHeader?: string,
   ) {
-    const academyId = body.academyId || (academyIdHeader ? Number(academyIdHeader) : undefined);
-    const userId = userIdHeader ? Number(userIdHeader) : undefined;
+    const { academyId, userId } = this.resolveAcademyContext(req, body.academyId || academyIdHeader, userIdHeader);
     return this.routingService.initializeZones(body.vehicles, body.parsedData, academyId, userId);
+  }
+
+  @Post('expand-zones-to-students')
+  async expandZonesToStudents(
+    @Req() req: any,
+    @Body() body: { academyId?: number },
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, body?.academyId || academyIdHeader, userIdHeader);
+    return this.routingService.expandZonesToStudents(academyId, userId);
+  }
+
+  @Get('yearly-zone-mappings')
+  async getYearlyZoneMappings(
+    @Req() req: any,
+    @Query('academyId') academyIdQuery?: string,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, academyIdQuery || academyIdHeader, userIdHeader);
+    return this.routingService.getYearlyZoneMappings(academyId, userId);
+  }
+
+  @Post('yearly-zone-mappings/archive')
+  async archiveZoneMapping(
+    @Req() req: any,
+    @Body() body: { academyId?: number; academicYear?: string; title?: string; description?: string },
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, body.academyId || academyIdHeader, userIdHeader);
+    return this.routingService.archiveCurrentZoneMapping(academyId, userId, body.academicYear, body.title, body.description);
+  }
+
+  @Post('yearly-zone-mappings/:id/restore')
+  async restoreZoneMapping(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { academyId?: number },
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, body?.academyId || academyIdHeader, userIdHeader);
+    return this.routingService.restoreYearlyZoneMapping(Number(id), academyId, userId);
+  }
+
+  @Delete('yearly-zone-mappings/:id')
+  async deleteZoneMapping(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Query('academyId') academyIdQuery?: string,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, academyIdQuery || academyIdHeader, userIdHeader);
+    return this.routingService.deleteYearlyZoneMapping(Number(id), academyId, userId);
+  }
+
+  @Post('reset-zones')
+  async resetZones(
+    @Req() req: any,
+    @Body() body: { academyId?: number },
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, body?.academyId || academyIdHeader, userIdHeader);
+    return this.routingService.resetActiveZones(academyId, userId);
   }
 
   @Post('vehicle/:id/zone')
@@ -173,56 +261,83 @@ export class RoutingController {
 
   @Post('save-students')
   async saveStudents(
+    @Req() req: any,
     @Body() body: any,
     @Headers('x-academy-id') academyIdHeader?: string,
     @Headers('x-user-id') userIdHeader?: string,
     @Query('academyId') academyIdQuery?: string,
   ) {
     const students = Array.isArray(body) ? body : (body.students || []);
-    const academyId = (body && body.academyId) || (academyIdHeader ? Number(academyIdHeader) : (academyIdQuery ? Number(academyIdQuery) : undefined));
-    const userId = userIdHeader ? Number(userIdHeader) : undefined;
+    const { academyId, userId } = this.resolveAcademyContext(req, (body && body.academyId) || academyIdHeader || academyIdQuery, userIdHeader);
     return this.routingService.saveStudents(students, academyId, userId);
   }
 
   @Post('add-student')
   async addStudent(
+    @Req() req: any,
     @Body() body: any,
     @Headers('x-academy-id') academyIdHeader?: string,
     @Headers('x-user-id') userIdHeader?: string,
     @Query('academyId') academyIdQuery?: string,
   ) {
-    const academyId = body?.academyId || (academyIdHeader ? Number(academyIdHeader) : (academyIdQuery ? Number(academyIdQuery) : undefined));
-    const userId = userIdHeader ? Number(userIdHeader) : undefined;
+    const { academyId, userId } = this.resolveAcademyContext(req, body?.academyId || academyIdHeader || academyIdQuery, userIdHeader);
     return this.routingService.addStudent(body || {}, academyId, userId);
   }
 
   @Delete('student/:id')
   async deleteStudent(
+    @Req() req: any,
     @Param('id') id: string,
     @Headers('x-academy-id') academyIdHeader?: string,
     @Headers('x-user-id') userIdHeader?: string,
     @Query('academyId') academyIdQuery?: string,
   ) {
-    const academyId = academyIdHeader ? Number(academyIdHeader) : (academyIdQuery ? Number(academyIdQuery) : undefined);
-    const userId = userIdHeader ? Number(userIdHeader) : undefined;
+    const { academyId, userId } = this.resolveAcademyContext(req, academyIdHeader || academyIdQuery, userIdHeader);
     return this.routingService.deleteStudent(Number(id), academyId, userId);
+  }
+
+  @Put('student/:id')
+  async updateStudent(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: any,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+    @Query('academyId') academyIdQuery?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, body?.academyId || academyIdHeader || academyIdQuery, userIdHeader);
+    return this.routingService.updateStudent(Number(id), body || {}, academyId, userId);
+  }
+
+  @Delete('vehicle/:id')
+  async deleteVehicle(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+    @Query('academyId') academyIdQuery?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, academyIdHeader || academyIdQuery, userIdHeader);
+    return this.routingService.deleteVehicle(Number(id), academyId, userId);
   }
 
   @Post('pickup-point')
   async createPickupPoint(
+    @Req() req: any,
     @Body() body: { name: string, latitude: number, longitude: number, academyId?: number },
     @Headers('x-academy-id') academyIdHeader?: string,
   ) {
-    const academyId = body.academyId || (academyIdHeader ? Number(academyIdHeader) : undefined);
+    const { academyId } = this.resolveAcademyContext(req, body.academyId || academyIdHeader);
     return this.routingService.createPickupPoint(body, academyId);
   }
 
   @Get('pickup-points')
   async getPickupPoints(
+    @Req() req: any,
     @Headers('x-academy-id') academyIdHeader?: string,
     @Query('academyId') academyIdQuery?: string,
   ) {
-    const academyId = academyIdHeader ? Number(academyIdHeader) : (academyIdQuery ? Number(academyIdQuery) : undefined);
+    const { academyId } = this.resolveAcademyContext(req, academyIdHeader || academyIdQuery);
     return this.routingService.getPickupPoints(academyId);
   }
 
@@ -236,14 +351,27 @@ export class RoutingController {
     return this.routingService.geocodeBulk(body.addresses);
   }
 
+  @Get('reverse-geocode')
+  async reverseGeocode(
+    @Query('lat') lat: string,
+    @Query('lng') lng: string,
+  ) {
+    return this.routingService.reverseGeocode(parseFloat(lat), parseFloat(lng));
+  }
+
   @Post('vehicle/:id')
   async updateVehicle(@Body() body: any, @Param('id') id: string) {
     return this.routingService.updateVehicle(Number(id), body);
   }
 
   @Get('admin-messages')
-  async getAdminMessages() {
-    return this.routingService.getAdminMessages();
+  async getAdminMessages(
+    @Req() req: any,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Query('academyId') academyIdQuery?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, academyIdHeader || academyIdQuery);
+    return this.routingService.getAdminMessages(academyId, userId);
   }
 
   @Post('admin-messages/send')
@@ -254,6 +382,7 @@ export class RoutingController {
   // ===================== BOARD ROUTES =====================
   @Get('board/posts')
   async getBoardPosts(
+    @Req() req: any,
     @Headers('x-academy-id') academyIdHeader?: string,
     @Headers('x-user-id') userIdHeader?: string,
     @Query('academyId') academyIdQuery?: string,
@@ -261,8 +390,7 @@ export class RoutingController {
     @Query('targetClass') targetClass?: string,
     @Query('search') search?: string,
   ) {
-    const academyId = academyIdHeader ? Number(academyIdHeader) : (academyIdQuery ? Number(academyIdQuery) : undefined);
-    const userId = userIdHeader ? Number(userIdHeader) : undefined;
+    const { academyId, userId } = this.resolveAcademyContext(req, academyIdHeader || academyIdQuery, userIdHeader);
     return this.routingService.getBoardPosts({ academyId, userId, visibility, targetClass, search });
   }
 
@@ -273,12 +401,12 @@ export class RoutingController {
 
   @Post('board/posts')
   async createBoardPost(
+    @Req() req: any,
     @Body() body: any,
     @Headers('x-academy-id') academyIdHeader?: string,
     @Headers('x-user-id') userIdHeader?: string,
   ) {
-    const academyId = academyIdHeader ? Number(academyIdHeader) : undefined;
-    const userId = userIdHeader ? Number(userIdHeader) : undefined;
+    const { academyId, userId } = this.resolveAcademyContext(req, academyIdHeader, userIdHeader);
     return this.routingService.createBoardPost(body, academyId, userId);
   }
 
@@ -347,11 +475,12 @@ export class RoutingController {
 
   @Get('teachers')
   async getTeachers(
+    @Req() req: any,
     @Query('academyId') academyId?: string,
     @Headers('x-academy-id') headerA?: string,
     @Headers('x-user-id') headerU?: string
   ) {
-    const { academyId: aId, userId: uId } = this.resolveAcademyContext(headerA, academyId, headerU);
+    const { academyId: aId, userId: uId } = this.resolveAcademyContext(req, headerA || academyId, headerU);
     return this.routingService.getTeachers(aId, uId);
   }
 

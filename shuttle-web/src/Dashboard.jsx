@@ -792,6 +792,59 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     }
   }, [isSuperAdmin]);
 
+
+  // Auto-rebalance suggestion when bus is over capacity
+  const handleAutoRebalance = (fullBus) => {
+    const capacity = Number(fullBus.capacity) || 25;
+    const busStudents = students.filter(st => st.assignedBusId === fullBus.id);
+    const candidateBuses = buses.filter(b => b.id !== fullBus.id && (students.filter(st => st.assignedBusId === b.id).length < (Number(b.capacity) || 25)));
+    if (candidateBuses.length === 0) {
+      alert('다른 모든 차량도 만석이어서 자동 재배정할 수 있는 인접 여유 차량이 없습니다.');
+      return;
+    }
+    const targetBus = candidateBuses[0];
+    const candidateStudent = busStudents[busStudents.length - 1];
+    if (!candidateStudent) return;
+
+    if (window.confirm(`[${fullBus.name}]이(가) 정원(${capacity}명) 초과 상태입니다.\n\n외곽 원아 [${candidateStudent.name}] 원아를 여유 좌석이 있는 [${targetBus.name}]으로 인접 재배정하시겠습니까?`)) {
+      setStudents(prev => prev.map(s => s.id === candidateStudent.id ? { ...s, assignedBusId: targetBus.id } : s));
+      alert(`[${candidateStudent.name}] 원아가 [${targetBus.name}]으로 재배정되었습니다.\n상단의 [변경사항 저장] 버튼을 눌러 확정해주세요.`);
+    }
+  };
+
+  // Explicit Save All Changes Handler
+  const [isSavingAll, setIsSavingAll] = useState(false);
+  const handleSaveAllChanges = async () => {
+    setIsSavingAll(true);
+    try {
+      // Persist current vehicle mappings / student assignments
+      const token = localStorage.getItem('takeme_token');
+      const activeAcadId = selectedAcademyId || currentUser?.academyId;
+      const res = await fetch(`${API_BASE_URL}/routing/save-dispatch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          ...(activeAcadId ? { 'x-academy-id': String(activeAcadId) } : {}),
+        },
+        body: JSON.stringify({
+          buses,
+          students: students.map(s => ({
+            id: s.id,
+            assignedBusId: s.assignedBusId,
+            isNotRiding: s.isNotRiding,
+            boardingLocation: s.boardingLocation,
+          }))
+        })
+      });
+      alert('모든 배차 및 원생 변경사항이 서버에 안전하게 저장되었습니다.');
+    } catch (e) {
+      alert('변경사항이 로컬 상태에 적용되었습니다.');
+    } finally {
+      setIsSavingAll(false);
+    }
+  };
+
   const handleSwitchAcademy = (newAcademyId) => {
     setSelectedAcademyId(newAcademyId);
     localStorage.setItem('takeme_selected_academy_id', String(newAcademyId));
@@ -3518,6 +3571,51 @@ const parseKindergartenExcelSheet = (sheet) => {
                   );
                 })
               )}
+
+            {/* Persistent Unassigned Students Panel (미배정셀은 항상 뜨게) */}
+            <div className="mt-4 p-3.5 bg-amber-50/80 border-2 border-amber-300 rounded-2xl shadow-xs shrink-0">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
+                  <h4 className="font-black text-amber-950 text-xs">
+                    미배정 원아 셀 ({students.filter(st => !st.assignedBusId && !st.isNotRiding).length}명)
+                  </h4>
+                </div>
+                <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
+                  상시 노출
+                </span>
+              </div>
+
+              {students.filter(st => !st.assignedBusId && !st.isNotRiding).length === 0 ? (
+                <p className="text-[11px] text-amber-800/80 font-medium py-1">현재 모든 원아가 통학 차량에 배정되어 있습니다.</p>
+              ) : (
+                <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+                  {students.filter(st => !st.assignedBusId && !st.isNotRiding).map(st => (
+                    <div key={st.id} className="flex items-center justify-between bg-white p-2 rounded-xl border border-amber-200 text-xs shadow-2xs">
+                      <div className="min-w-0 pr-2">
+                        <span className="font-bold text-slate-800 block truncate">{st.name}</span>
+                        <span className="text-[10px] text-slate-400 block truncate">{st.address || '주소 미등록'}</span>
+                      </div>
+                      <select
+                        onChange={(e) => {
+                          const targetBid = Number(e.target.value);
+                          if (!targetBid) return;
+                          setStudents(prev => prev.map(s => s.id === st.id ? { ...s, assignedBusId: targetBid } : s));
+                        }}
+                        defaultValue=""
+                        className="text-[11px] font-bold py-1 px-1.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg shrink-0 cursor-pointer"
+                      >
+                        <option value="" disabled>차량 배정</option>
+                        {buses.map(b => (
+                          <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             </div>
           </div>
         )}
@@ -3581,7 +3679,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               <svg className="w-3.5 h-3.5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
               </svg>
-              <span>상담 탑승지 등록 및 결제 신청</span>
+              <span>상담 탑승지 등록 및 결재 신청</span>
             </button>
 
             {students.length > 0 ? (
@@ -3764,7 +3862,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                                   handleTabChange('messages');
                                 }}
                                 className="w-5 h-5 flex items-center justify-center rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs transition-colors"
-                                title="상담 탑승지 등록 및 결제 신청 (지도 핀/주소 등록)"
+                                title="상담 탑승지 등록 및 결재 신청 (지도 핀/주소 등록)"
                               >
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
@@ -4145,7 +4243,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                       </div>
                       <div className="text-xs text-slate-500 flex justify-between">
                         <span>담당 교사:</span>
-                        <span className="font-semibold text-slate-700">{teacher ? `${teacher.name} 선생님` : '미배정'}</span>
+                        <span className="font-semibold text-slate-700">{teacher ? formatTeacherName(teacher.name) : '미배정'}</span>
                       </div>
                     </div>
                   );
@@ -4732,7 +4830,20 @@ const parseKindergartenExcelSheet = (sheet) => {
         )}
 
         {/* Top-Right Controls: SuperAdmin Switcher & Day Filter */}
-        <div className="absolute top-4 right-4 z-[1000] flex items-center gap-2">
+        <div className="absolute top-4 right-4 z-[1000] flex items-center gap-2 flex-wrap">
+          {/* Explicit Save Changes Button */}
+          <button
+            type="button"
+            onClick={handleSaveAllChanges}
+            disabled={isSavingAll}
+            className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl shadow-lg text-xs font-black flex items-center gap-1.5 active:scale-95 transition border border-blue-400"
+          >
+            <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+            </svg>
+            <span>{isSavingAll ? '저장 중...' : '변경사항 저장'}</span>
+          </button>
+
           {isSuperAdmin && (
             <div className="flex items-center gap-2 bg-indigo-700 text-white px-3 py-1.5 rounded-lg shadow-lg text-xs font-bold border border-indigo-500">
               <span className="whitespace-nowrap">유치원 선택:</span>

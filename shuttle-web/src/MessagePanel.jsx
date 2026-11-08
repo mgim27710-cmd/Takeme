@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { formatTeacherName, formatPhoneNumber } from './utils/formatters';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { API_BASE_URL } from './config';
@@ -137,6 +138,58 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   const [isSending, setIsSending] = useState(false);
   const [searchRoomQuery, setSearchRoomQuery] = useState('');
 
+  // Bookmarked Messages
+  const [bookmarkedIds, setBookmarkedIds] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('takeme_bookmarked_msgs') || '[]');
+    } catch (e) {
+      return [];
+    }
+  });
+  const [showBookmarksOnly, setShowBookmarksOnly] = useState(false);
+
+  const handleToggleBookmark = (msgId) => {
+    setBookmarkedIds(prev => {
+      const next = prev.includes(msgId) ? prev.filter(id => id !== msgId) : [...prev, msgId];
+      try { localStorage.setItem('takeme_bookmarked_msgs', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+  };
+
+  // Quick Action [+] Menu State
+  const [showPlusMenu, setShowPlusMenu] = useState(false);
+
+  // Message Presets & Saved Phrases State
+  const [showPhrasesModal, setShowPhrasesModal] = useState(false);
+  const [newPhraseInput, setNewPhraseInput] = useState('');
+  const [savedPhrases, setSavedPhrases] = useState(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('takeme_saved_phrases') || '[]');
+      if (stored.length > 0) return stored;
+    } catch (e) {}
+    return [
+      '오늘 통학 차량이 도로 사정으로 약 5~10분 지연 도착 예정입니다. 양해 부탁드립니다.',
+      '기상 악화(우천/강설)로 인해 안전을 최우선으로 서행 운행 중입니다. 안심하셔도 좋습니다.',
+      '내일은 원내 특별 체험활동 일정으로 셔틀 하원 시간이 30분 앞당겨집니다.',
+      '오늘 원아의 건강 상태 및 특이사항(투약, 컨디션)을 확인 부탁드립니다.',
+      '정차 장소에 3분 전 미리 대기해 주시면 원활하고 안전한 승하차에 큰 도움이 됩니다.'
+    ];
+  });
+
+  const handleSavePhrase = () => {
+    if (!newPhraseInput.trim()) return;
+    const next = [...savedPhrases, newPhraseInput.trim()];
+    setSavedPhrases(next);
+    try { localStorage.setItem('takeme_saved_phrases', JSON.stringify(next)); } catch (e) {}
+    setNewPhraseInput('');
+  };
+
+  const handleSelectPhrase = (phrase) => {
+    setInputText(phrase);
+    setShowPhrasesModal(false);
+  };
+
+
   // New Chat Modal State
   const [isNewChatModalOpen, setIsNewChatModalOpen] = useState(false);
   const [categoryUsers, setCategoryUsers] = useState({ drivers: [], teachers: [], parents: [], admins: [] });
@@ -165,13 +218,16 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     address: '',
     latitude: 37.842,
     longitude: 127.123,
+    rideType: 'REGULAR', // 'REGULAR' | 'TODAY_ONLY'
     requestDate: new Date().toISOString().split('T')[0],
-    note: '학부모 상담 후 신규 탑승지 지정 및 결제 승인 요청',
+    isPublicContest: false,
+    note: '학부모 상담 후 신규 탑승지 지정 및 결재 승인 요청',
   });
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [isDeciding, setIsDeciding] = useState(null);
+  const [isPushingParent, setIsPushingParent] = useState(null);
 
-  // Counter-Proposal (지도교사 재결제 요청) Modal State
+  // Counter-Proposal (지도교사 재결재 요청) Modal State
   const [counterModalMsg, setCounterModalMsg] = useState(null);
   const [counterLocation, setCounterLocation] = useState({ lat: 37.842, lng: 127.123, boardingLocation: '', address: '' });
   const [counterNote, setCounterNote] = useState('');
@@ -406,6 +462,69 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     }
   };
 
+  const handleCreateVehicleGroupRooms = async () => {
+    setIsCreatingRoom(true);
+    try {
+      const q = new URLSearchParams();
+      if (targetAcademyId) q.append('academyId', String(targetAcademyId));
+      const res = await fetch(`${API_BASE_URL}/routing/initial-state?${q.toString()}`, {
+        headers: getAuthHeaders(),
+      });
+      let vehicleList = [];
+      if (res.ok) {
+        const d = await res.json();
+        vehicleList = Array.isArray(d.buses) ? d.buses : [];
+      }
+      if (vehicleList.length === 0) {
+        vehicleList = [
+          { id: '1', name: '1호차' },
+          { id: '2', name: '2호차' },
+          { id: '3', name: '3호차' },
+        ];
+      }
+
+      const uRes = await fetch(`${API_BASE_URL}/chat/users?${q.toString()}`, {
+        headers: getAuthHeaders(),
+      });
+      let allUsers = [];
+      if (uRes.ok) {
+        const ud = await uRes.json();
+        allUsers = [...(ud.teachers || []), ...(ud.drivers || []), ...(ud.parents || [])];
+      }
+
+      let createdCount = 0;
+      for (const v of vehicleList) {
+        const busName = v.name || v.busNumber || `${v.id}호차`;
+        const groupTitle = `[${busName}] 동승 지도교사 및 학부모 단톡방`;
+        const exists = rooms.some((r) => r.name === groupTitle);
+        if (!exists) {
+          const targetUserIds = allUsers.slice(0, 5).map((u) => u.id);
+          const createRes = await fetch(`${API_BASE_URL}/chat/rooms`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+              userIds: targetUserIds,
+              name: groupTitle,
+              type: 'GROUP',
+              creatorEmail: myUser.email,
+            }),
+          });
+          if (createRes.ok) {
+            createdCount++;
+          }
+        }
+      }
+
+      await fetchRooms();
+      alert(`[호차별 단톡방 개설 완료]\n총 ${vehicleList.length}개 호차의 지도교사 및 학부모 단톡방이 준비되었습니다.`);
+    } catch (e) {
+      console.error(e);
+      alert('호차별 단톡방 개설 중 오류가 발생했습니다.');
+    } finally {
+      setIsCreatingRoom(false);
+    }
+  };
+
   const handleSendMessage = async () => {
     const text = inputText.trim();
     if (!text || !activeRoom) return;
@@ -449,7 +568,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   };
 
   // ============================================================
-  // 결제 및 탑승 신청 관련 핸들러
+  // 결재 및 탑승 신청 관련 핸들러
   // ============================================================
 
   // Auto open modal when initialStudent prop is provided (e.g. from Director Dashboard consultation)
@@ -475,14 +594,14 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         address: student.address || '',
         latitude: sLat,
         longitude: sLng,
-        note: `[학부모 상담] ${student.name} 원아 신규 탑승지 지정 및 결제 승인 요청`,
+        note: `[학부모 상담] ${student.name} 원아 신규 탑승지 지정 및 결재 승인 요청`,
       }));
     }
   };
 
   const handleOpenPaymentModal = async () => {
     if (isParent) {
-      return alert('학부모 계정은 결제 신청 기능을 이용할 수 없습니다.');
+      return alert('학부모 계정은 결재 신청 기능을 이용할 수 없습니다.');
     }
 
     setIsPaymentModalOpen(true);
@@ -513,7 +632,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           latitude: prev.latitude || defaultLat,
           longitude: prev.longitude || defaultLng,
           requestDate: new Date().toISOString().split('T')[0],
-          note: prev.note || '학부모 상담 후 신규 탑승지 지정 및 결제 승인 요청',
+          note: prev.note || '학부모 상담 후 신규 탑승지 지정 및 결재 승인 요청',
         }));
       }
     } catch (e) {
@@ -630,7 +749,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     }
   };
 
-  // Open Counter-Proposal Modal (지도교사가 다른 위치 핀 찍어 재결제 요청)
+  // Open Counter-Proposal Modal (지도교사가 다른 위치 핀 찍어 재결재 요청)
   const handleOpenCounterModal = (msg) => {
     setCounterModalMsg(msg);
     const p = msg.payload || {};
@@ -667,7 +786,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     }
   };
 
-  // Submit Counter-Proposal (관리자에게 재결제 요청 보내기)
+  // Submit Counter-Proposal (관리자에게 재결재 요청 보내기)
   const handleSubmitCounterProposal = async () => {
     if (!counterModalMsg) return;
     if (!counterLocation.lat || !counterLocation.lng) {
@@ -677,7 +796,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       return alert('새로 제안하는 탑승지 명칭을 입력해주세요.');
     }
     if (!counterNote.trim()) {
-      return alert('관리자님께 전달할 재결제 요청 사유를 입력해주세요.');
+      return alert('관리자님께 전달할 재결재 요청 사유를 입력해주세요.');
     }
 
     setIsSubmittingCounter(true);
@@ -699,7 +818,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
       if (res.ok) {
         const data = await res.json();
-        alert('관리자님께 새로운 탑승 위치로 재결제 요청을 발송했습니다.\n관리자님께서 승인하시면 해당 위치로 확정됩니다.');
+        alert('관리자님께 새로운 탑승 위치로 재결재 요청을 발송했습니다.\n관리자님께서 승인하시면 해당 위치로 확정됩니다.');
         setCounterModalMsg(null);
         if (data.message) {
           setMessages(prev => prev.map(m => m.id === counterModalMsg.id ? data.message : m));
@@ -707,10 +826,10 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         fetchRooms();
       } else {
         const err = await res.json().catch(() => ({}));
-        alert(err.message || '재결제 요청 전송에 실패했습니다.');
+        alert(err.message || '재결재 요청 전송에 실패했습니다.');
       }
     } catch (e) {
-      alert('재결제 요청 전송 중 오류가 발생했습니다.');
+      alert('재결재 요청 전송 중 오류가 발생했습니다.');
     } finally {
       setIsSubmittingCounter(false);
     }
@@ -769,8 +888,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       return alert('원생(학생) 이름을 선택하거나 입력해주세요.');
     }
 
-    if (!paymentForm.selectedVehicleId) {
-      return alert('담당 차량(호차)을 선택해주세요.');
+    if (!paymentForm.isPublicContest && !paymentForm.selectedVehicleId) {
+      return alert('담당 차량(호차)을 선택하거나 공모 결재를 체크해주세요.');
     }
 
     const boardingLocation = paymentForm.boardingLocation.trim();
@@ -787,14 +906,17 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         body: JSON.stringify({
           studentId: paymentForm.selectedStudentId ? Number(paymentForm.selectedStudentId) : undefined,
           studentName,
-          vehicleId: Number(paymentForm.selectedVehicleId),
+          vehicleId: paymentForm.isPublicContest ? null : (paymentForm.selectedVehicleId ? Number(paymentForm.selectedVehicleId) : undefined),
           boardingLocation,
           address: paymentForm.address.trim() || boardingLocation,
           latitude: paymentForm.latitude || undefined,
           longitude: paymentForm.longitude || undefined,
           locationType: paymentForm.locationType || 'PIN',
           requestDate: paymentForm.requestDate,
-          note: paymentForm.note.trim() || '학부모 상담 후 신규 탑승지 지정 및 결제 승인 요청',
+          isPublicContest: !!paymentForm.isPublicContest,
+          note: paymentForm.isPublicContest
+            ? `[공모 결재] ${paymentForm.note.trim() || `${studentName} 학생 탑승 희망 - 가능한 호차 확인 부탁드립니다.`}`
+            : (paymentForm.note.trim() || '학부모 상담 후 신규 탑승지 지정 및 결재 승인 요청'),
           requesterEmail: myUser.email,
         }),
       });
@@ -813,10 +935,10 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         await fetchRooms();
       } else {
         const err = await res.json().catch(() => ({}));
-        alert(err.message || '결제 신청서 발송에 실패했습니다.');
+        alert(err.message || '결재 신청서 발송에 실패했습니다.');
       }
     } catch (e) {
-      alert('결제 신청 전송 중 오류가 발생했습니다.');
+      alert('결재 신청 전송 중 오류가 발생했습니다.');
     } finally {
       setIsSubmittingPayment(false);
     }
@@ -828,7 +950,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       return alert('학부모 계정은 승인 또는 거절 권한이 없습니다.');
     }
 
-    const actionText = decision === 'APPROVED' ? '결제 및 탑승을 수락' : '결제 신청을 거절';
+    const actionText = decision === 'APPROVED' ? '결재 및 탑승을 수락' : '결재 신청을 거절';
     if (!window.confirm(`${actionText}하시겠습니까?`)) {
       return;
     }
@@ -865,6 +987,32 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     }
   };
 
+  const handlePushParentNotification = async (messageId) => {
+    if (!messageId || isPushingParent) return;
+    setIsPushingParent(messageId);
+    try {
+      const res = await fetch(`${API_BASE_URL}/chat/payment-request/${messageId}/push-parent`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ senderEmail: myUser.email }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(`학부모님께 알림 푸시가 성공적으로 전송되었습니다!\n"${data.pushText || ''}"`);
+        if (activeRoom) {
+          fetchMessages(activeRoom.id);
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message || '학부모 푸시 발송에 실패했습니다.');
+      }
+    } catch (e) {
+      alert('서버 연결 중 오류가 발생했습니다.');
+    } finally {
+      setIsPushingParent(null);
+    }
+  };
+
   const getRoleBadge = (role) => {
     switch (role) {
       case 'DRIVER':
@@ -886,8 +1034,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
   const getRoomTitle = (room) => {
     if (!room) return '';
-    if (room.type === 'PAYMENT_SYSTEM' || room.name === '결제 시스템 방') {
-      return '결제 시스템 방';
+    if (room.type === 'PAYMENT_SYSTEM' || room.name === '결재 전용 채널') {
+      return '결재 전용 채널';
     }
     if (room.name && room.name !== '1:1 대화' && !room.name.includes('(')) {
       return room.name;
@@ -984,7 +1132,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     };
   });
 
-  const isCurrentRoomPaymentSystem = activeRoom?.type === 'PAYMENT_SYSTEM' || activeRoom?.name === '결제 시스템 방';
+  const isCurrentRoomPaymentSystem = activeRoom?.type === 'PAYMENT_SYSTEM' || activeRoom?.name === '결재 전용 채널';
 
   return (
     <div
@@ -1010,17 +1158,29 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             </div>
           </div>
 
-          {/* 메세지 보내기 (새 대화) 버튼 */}
-          <button
-            onClick={handleOpenNewChatModal}
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs py-2 px-3 rounded-xl shadow-sm transition-all"
-            title="새로운 상대 또는 그룹에게 메세지 보내기"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-            </svg>
-            <span>메세지 보내기</span>
-          </button>
+          {/* Action Buttons: 호차별 단톡방 개설 + 새 대화 */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleCreateVehicleGroupRooms}
+              className="flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 active:scale-95 font-bold text-xs py-2 px-2.5 rounded-xl transition-all"
+              title="각 호차별 동승 지도교사와 해당 호차 탑승 학부모를 자동으로 묶은 단톡방 개설"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              <span>호차별 톡방</span>
+            </button>
+            <button
+              onClick={handleOpenNewChatModal}
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs py-2 px-3 rounded-xl shadow-sm transition-all"
+              title="새로운 상대 또는 그룹에게 메세지 보내기"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+              </svg>
+              <span>메세지 보내기</span>
+            </button>
+          </div>
         </div>
 
         {/* Room Search Bar */}
@@ -1054,11 +1214,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           ) : (
             filteredRooms.map((room) => {
               const isSelected = activeRoom && activeRoom.id === room.id;
-              const isPaymentSystem = room.type === 'PAYMENT_SYSTEM' || room.name === '결제 시스템 방';
+              const isPaymentSystem = room.type === 'PAYMENT_SYSTEM' || room.name === '결재 전용 채널';
               const title = getRoomTitle(room);
               const isGroup = (room.members || []).length > 2 || room.type === 'GROUP';
               const lastText = isPaymentSystem
-                ? room.latestMessage?.text || '신규 원생 탑승 및 결제 승인 요청 전용 채널입니다.'
+                ? room.latestMessage?.text || '신규 원생 탑승 및 결재 승인 요청 전용 채널입니다.'
                 : room.latestMessage?.text || '대화를 시작해보세요.';
               const lastTime = formatRoomListTime(room.latestMessage?.createdAt || room.updatedAt || room.createdAt);
 
@@ -1144,7 +1304,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     </h3>
                     {isCurrentRoomPaymentSystem ? (
                       <span className="text-[11px] bg-indigo-100 text-indigo-800 font-bold px-2 py-0.5 rounded-full">
-                        신규 탑승 및 결제 승인 전용
+                        신규 탑승 및 결재 승인 전용
                       </span>
                     ) : (
                       <span className="text-xs text-slate-400 font-bold">
@@ -1165,18 +1325,18 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
               </div>
 
               <div className="flex items-center gap-2">
-                {/* 결제 신청 버튼 (학부모는 이용 불가) */}
+                {/* 결재 신청 버튼 (학부모는 이용 불가) */}
                 {isCurrentRoomPaymentSystem && !isParent && (
                   <button
                     type="button"
                     onClick={handleOpenPaymentModal}
                     className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-black rounded-xl shadow-xs transition-all flex items-center gap-1.5"
-                    title="신규 원생 결제 및 탑승 신청서 작성"
+                    title="신규 원생 결재 및 탑승 신청서 작성"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
                     </svg>
-                    <span>결제 신청</span>
+                    <span>결재 신청</span>
                   </button>
                 )}
 
@@ -1214,12 +1374,14 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   </div>
                   <p className="text-xs font-semibold bg-white/80 px-3 py-1 rounded-full text-slate-600 shadow-xs">
                     {isCurrentRoomPaymentSystem
-                      ? '결제 및 탑승 승인 내역이 여기에 표시됩니다. 상단 [결제 신청] 버튼으로 신청서를 작성하세요.'
+                      ? '결재 및 탑승 승인 내역이 여기에 표시됩니다. 상단 [결재 신청] 버튼으로 신청서를 작성하세요.'
                       : '새로운 대화가 시작되었습니다. 첫 메시지를 남겨보세요.'}
                   </p>
                 </div>
               ) : (
-                messagesWithDates.map((msg) => {
+                messagesWithDates
+                  .filter(m => !showBookmarksOnly || bookmarkedIds.includes(m.id))
+                  .map((msg) => {
                   const isMine = msg.sender?.email === myUser.email || msg.sender?.id === myUser.id;
                   const senderName = msg.sender?.name || msg.sender?.email || '알 수 없음';
                   const senderRole = msg.sender?.role;
@@ -1260,30 +1422,47 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                   </svg>
                                 </div>
                                 <div>
-                                  <h4 className="text-xs font-black text-indigo-950">신규 탑승 및 결제 승인 요청</h4>
+                                  <h4 className="text-xs font-black text-indigo-950">신규 탑승 및 결재 승인 요청</h4>
                                   <span className="text-[10px] text-indigo-600 font-medium">담당 차량 지도교사 수락/거절</span>
                                 </div>
                               </div>
 
-                              {/* Status Badge */}
-                              {payload.status === 'APPROVED' ? (
-                                <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                                  ✓ 결제 수락 완료
-                                </span>
-                              ) : payload.status === 'RE_REQUESTED' ? (
-                                <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-300 animate-pulse flex items-center gap-1">
-                                  <span className="w-2 h-2 rounded-full bg-purple-600"></span>
-                                  위치 변경 재결제 요청
-                                </span>
-                              ) : payload.status === 'REJECTED' ? (
-                                <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
-                                  ✕ 결제 거절됨
-                                </span>
-                              ) : (
-                                <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
-                                  승인 대기중
-                                </span>
-                              )}
+                              {/* Status & Ride Type Badges */}
+                              <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                {payload.isPublicContest && (
+                                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-300 animate-pulse">
+                                    공모 결재 (전체 호차)
+                                  </span>
+                                )}
+                                {payload.rideType === 'TODAY_ONLY' ? (
+                                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                                    당일 1회 탑승
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300">
+                                    정규 셔틀 등록
+                                  </span>
+                                )}
+
+                                {payload.status === 'APPROVED' ? (
+                                  <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                    ✓ 결제 수락 완료
+                                  </span>
+                                ) : payload.status === 'RE_REQUESTED' ? (
+                                  <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-300 animate-pulse flex items-center gap-1">
+                                    <span className="w-2 h-2 rounded-full bg-purple-600"></span>
+                                    위치 변경 재결재 요청
+                                  </span>
+                                ) : payload.status === 'REJECTED' ? (
+                                  <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
+                                    ✕ 결재 반려됨
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
+                                    승인 대기중
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
                             {/* Card Content */}
@@ -1295,7 +1474,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                                     </svg>
-                                    <span>지도교사 위치 변경 재결제 요청</span>
+                                    <span>지도교사 위치 변경 재결재 요청</span>
                                   </div>
                                   <p className="text-xs font-bold text-purple-950 bg-white/80 p-2.5 rounded-xl border border-purple-100 leading-relaxed">
                                     "{payload.counterProposal?.note || payload.counterNote || '통학버스 운행 여건에 따른 탑승 위치 변경 제안'}"
@@ -1315,7 +1494,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                   <span>관리자 원래 신청 내용</span>
                                 </div>
                                 <p className="text-xs font-bold text-slate-800 leading-relaxed">
-                                  "{payload.note || '학부모 상담 후 신규 탑승지 지정 및 결제 승인 요청'}"
+                                  "{payload.note || '학부모 상담 후 신규 탑승지 지정 및 결재 승인 요청'}"
                                 </p>
                               </div>
 
@@ -1390,19 +1569,58 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                 />
                               )}
 
-                              {/* 4. 결제 거절 / 수락 버튼 */}
+                              {/* 4. 결재 반려 / 수락 버튼 및 학부모 알림 푸시 */}
                               {payload.status === 'APPROVED' ? (
-                                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
-                                  <svg className="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                  </svg>
-                                  <div>
-                                    <span>수락 완료: 해당 구역 및 노선에 자동 배정되었습니다.</span>
-                                    {payload.decidedBy && (
-                                      <span className="block text-[10px] text-emerald-600 font-normal">
-                                        승인자: {payload.decidedBy} ({payload.decidedAt ? formatMessageTime(payload.decidedAt) : ''})
-                                      </span>
-                                    )}
+                                <div className="space-y-2">
+                                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
+                                    <svg className="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                    <div>
+                                      <span>수락 완료: 해당 구역 및 노선에 자동 배정되었습니다.</span>
+                                      {payload.decidedBy && (
+                                        <span className="block text-[10px] text-emerald-600 font-normal">
+                                          승인자: {payload.decidedBy} ({payload.decidedAt ? formatMessageTime(payload.decidedAt) : ''})
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* 학부모 알림 푸시 버튼 (메시지 창에서 직접 푸시) */}
+                                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                                    <div className="text-[11px] text-slate-500 font-semibold flex items-center gap-1">
+                                      <svg className="w-3.5 h-3.5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                                      </svg>
+                                      <span>학부모 하차 안내:</span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      disabled={isPushingParent === msg.id}
+                                      onClick={() => handlePushParentNotification(msg.id)}
+                                      className={`px-3 py-1.5 rounded-lg text-xs font-black transition flex items-center gap-1.5 shadow-xs ${
+                                        payload.parentPushedAt
+                                          ? 'bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100'
+                                          : 'bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white'
+                                      }`}
+                                    >
+                                      {payload.parentPushedAt ? (
+                                        <>
+                                          <svg className="w-3 h-3 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                          </svg>
+                                          <span>알림 발송 완료</span>
+                                          <span className="text-[10px] opacity-75">({formatMessageTime(payload.parentPushedAt)})</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                          </svg>
+                                          <span>{isPushingParent === msg.id ? '발송 중...' : '학부모 알림 푸시'}</span>
+                                        </>
+                                      )}
+                                    </button>
                                   </div>
                                 </div>
                               ) : payload.status === 'REJECTED' ? (
@@ -1472,12 +1690,12 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                           type="button"
                                           onClick={() => handleOpenCounterModal(msg)}
                                           className="py-2.5 px-3 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 active:scale-95 font-extrabold text-xs rounded-xl transition-all flex items-center gap-1"
-                                          title="다른 위치를 지도에서 핀으로 찍어 관리자에게 재결제 요청"
+                                          title="다른 위치를 지도에서 핀으로 찍어 관리자에게 재결재 요청"
                                         >
                                           <svg className="w-3.5 h-3.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                                           </svg>
-                                          <span>다른 위치 핀 찍어 재결제 요청</span>
+                                          <span>다른 위치 핀 찍어 재결재 요청</span>
                                         </button>
                                         <button
                                           type="button"
@@ -1538,7 +1756,85 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             </div>
 
             {/* Input Bar */}
-            <div className="p-4 bg-white border-t border-slate-200 flex items-end gap-2 shadow-sm">
+            <div className="p-4 bg-white border-t border-slate-200 flex items-end gap-2 shadow-sm relative">
+              {/* Quick Action [+] Menu Popup */}
+              {showPlusMenu && (
+                <div className="absolute bottom-20 left-4 z-30 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2 w-64 space-y-1 animate-scale-up">
+                  <div className="text-[11px] font-black text-slate-400 px-2 py-1 uppercase">빠른 서식 / 결재 신청</div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPlusMenu(false);
+                      handleOpenPaymentModal();
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-indigo-50 text-indigo-950 font-bold text-xs flex items-center gap-2 transition"
+                  >
+                    <span className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs font-black">결</span>
+                    <span>셔틀 탑승 결재 요청</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPlusMenu(false);
+                      setInputText('[원아 결석 알림]\n- 원아명: \n- 결석 일자: 오늘\n- 결석 사유: ');
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-rose-50 text-rose-950 font-bold text-xs flex items-center gap-2 transition"
+                  >
+                    <span className="w-6 h-6 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center text-xs font-black">결</span>
+                    <span>원아 결석 알림서</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPlusMenu(false);
+                      setInputText('[등원 지각 알림]\n- 원아명: \n- 예상 등원 시간: \n- 지각 사유: ');
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-amber-50 text-amber-950 font-bold text-xs flex items-center gap-2 transition"
+                  >
+                    <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center text-xs font-black">지</span>
+                    <span>등원 지각 알림서</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPlusMenu(false);
+                      setInputText('[연장 보육 신청]\n- 원아명: \n- 신청 시간: ~ 19:30\n- 귀가 방식: 직접 픽업');
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-purple-50 text-purple-950 font-bold text-xs flex items-center gap-2 transition"
+                  >
+                    <span className="w-6 h-6 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center text-xs font-black">연</span>
+                    <span>연장 보육 신청서</span>
+                  </button>
+                </div>
+              )}
+
+              {/* [+] Button */}
+              <button
+                type="button"
+                onClick={() => setShowPlusMenu(prev => !prev)}
+                className={`h-[52px] w-[52px] rounded-xl flex items-center justify-center font-black text-xl transition-all shadow-xs shrink-0 ${
+                  showPlusMenu
+                    ? 'bg-indigo-600 text-white rotate-45'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900'
+                }`}
+                title="빠른 서식 (결재, 결석, 지각, 연장보육)"
+              >
+                +
+              </button>
+
+              {/* Preset Phrases Button */}
+              <button
+                type="button"
+                onClick={() => setShowPhrasesModal(true)}
+                className="h-[52px] px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition flex items-center gap-1 shrink-0"
+                title="자주 쓰는 문구 선택 및 저장"
+              >
+                <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                </svg>
+                <span className="hidden sm:inline">문구</span>
+              </button>
+
               <textarea
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
@@ -1839,7 +2135,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       )}
 
       {/* ============================================================ */}
-      {/* MODAL: 신규 탑승 및 결제 신청서 (Payment Request Modal) */}
+      {/* MODAL: 신규 탑승 및 결재 신청서 (Payment Request Modal) */}
       {/* ============================================================ */}
       {isPaymentModalOpen && (
         <div className="fixed inset-0 z-[3000] bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
@@ -1853,7 +2149,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   </svg>
                 </div>
                 <div>
-                  <h3 className="text-sm font-extrabold text-indigo-950">신규 탑승 및 결제 신청</h3>
+                  <h3 className="text-sm font-extrabold text-indigo-950">신규 탑승 및 결재 신청</h3>
                   <p className="text-[11px] text-indigo-600 font-medium">담당 차량 지도교사에게 탑승 승인 및 배정을 요청합니다.</p>
                 </div>
               </div>
@@ -1934,24 +2230,60 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     )}
                   </div>
 
+                  {/* Public Contest (공모 결재) Toggle */}
+                  <div className="bg-purple-50/70 p-3 rounded-xl border border-purple-200">
+                    <label className="flex items-start gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!paymentForm.isPublicContest}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setPaymentForm((prev) => ({
+                            ...prev,
+                            isPublicContest: checked,
+                            note: checked
+                              ? `[공모 결재] ${prev.customStudentName || '원아'} 학생 여기서 탑승하고 싶은데 가능한 호차 및 선생님 있으실까요?`
+                              : prev.note.replace(/^\[공모 결재\]\s*/, ''),
+                          }));
+                        }}
+                        className="mt-0.5 rounded text-purple-600 focus:ring-purple-500"
+                      />
+                      <div>
+                        <span className="text-xs font-black text-purple-900 flex items-center gap-1.5">
+                          <span>공모 결재 (전체 호차 대상 오픈 요청)</span>
+                          <span className="text-[10px] bg-purple-200 text-purple-800 px-1.5 py-0.2 rounded font-extrabold">공모</span>
+                        </span>
+                        <p className="text-[11px] text-purple-700/80 mt-0.5 leading-normal">
+                          "ㅇㅇㅇ학생 여기서 탑승하고 싶은데 가능한 선생님 있으실까요?" - 특정 호차 대신 전체 호차 지도교사에게 오픈 공모 결재를 올립니다.
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+
                   {/* 2. 담당 차량(호차) 및 지도교사 선택 */}
                   <div className="space-y-1.5">
                     <label className="text-xs font-black text-slate-800 flex items-center gap-1">
                       <span>배정 희망 차량 (호차)</span>
-                      <span className="text-red-500">*</span>
+                      {!paymentForm.isPublicContest && <span className="text-red-500">*</span>}
                     </label>
-                    <select
-                      value={paymentForm.selectedVehicleId}
-                      onChange={(e) => setPaymentForm((prev) => ({ ...prev, selectedVehicleId: e.target.value }))}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    >
-                      <option value="">-- 차량(호차)을 선택하세요 --</option>
-                      {(paymentContext.vehicles || []).map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.busNumber} (담당 지도교사: {v.teacherName} / 기사: {v.driverName})
-                        </option>
-                      ))}
-                    </select>
+                    {paymentForm.isPublicContest ? (
+                      <div className="w-full p-2.5 bg-purple-50 border border-purple-200 rounded-xl text-xs text-purple-800 font-bold">
+                        전체 호차 오픈 공모 결재 (모든 호차의 지도교사 및 원장님께 전달됩니다)
+                      </div>
+                    ) : (
+                      <select
+                        value={paymentForm.selectedVehicleId}
+                        onChange={(e) => setPaymentForm((prev) => ({ ...prev, selectedVehicleId: e.target.value }))}
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      >
+                        <option value="">-- 차량(호차)을 선택하세요 --</option>
+                        {(paymentContext.vehicles || []).map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.busNumber} (담당 지도교사: {v.teacherName} / 기사: {v.driverName})
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
 
                   {/* 3. 탑승 희망 위치 등록 (핀으로 찍기 vs 주소로 등록하기) */}
@@ -2125,7 +2457,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   disabled={isSubmittingPayment || isLoadingPaymentContext}
                   className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-black rounded-xl shadow-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
-                  {isSubmittingPayment ? '신청서 전송 중...' : '결제 신청서 보내기'}
+                  {isSubmittingPayment ? '신청서 전송 중...' : '결재 신청서 보내기'}
                 </button>
               </div>
             </form>
@@ -2134,7 +2466,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       )}
 
       {/* ============================================================ */}
-      {/* 지도교사 위치 수정 및 재결제 요청 모달 (Counter-Proposal) */}
+      {/* 지도교사 위치 수정 및 재결재 요청 모달 (Counter-Proposal) */}
       {/* ============================================================ */}
       {counterModalMsg && (
         <div className="fixed inset-0 z-[3100] bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
@@ -2143,11 +2475,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             <div className="p-4 border-b border-indigo-100 bg-gradient-to-r from-amber-500 to-indigo-600 text-white flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-black flex items-center gap-2">
-                  <span>탑승 위치 변경 및 재결제 요청</span>
+                  <span>탑승 위치 변경 및 재결재 요청</span>
                   <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-bold">지도교사 위치 역제안</span>
                 </h3>
                 <p className="text-[11px] text-amber-100 mt-0.5">
-                  통학버스 운행/회차 여건에 맞추어 다른 위치를 핀으로 찍어 관리자님께 재결제를 요청합니다.
+                  통학버스 운행/회차 여건에 맞추어 다른 위치를 핀으로 찍어 관리자님께 재결재를 요청합니다.
                 </p>
               </div>
               <button
@@ -2248,7 +2580,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
               {/* Reason / Note */}
               <div className="space-y-1">
                 <label className="text-xs font-black text-slate-800 flex items-center gap-1">
-                  <span>재결제 요청 사유 (관리자님께 전달)</span>
+                  <span>재결재 요청 사유 (관리자님께 전달)</span>
                   <span className="text-red-500">*</span>
                 </label>
                 <textarea
@@ -2277,7 +2609,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 onClick={handleSubmitCounterProposal}
                 className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-indigo-600 hover:opacity-95 active:scale-95 text-white text-xs font-black rounded-xl shadow-xs transition-all disabled:opacity-40 flex items-center gap-1.5"
               >
-                {isSubmittingCounter ? '재결제 요청 전송 중...' : '관리자에게 재결제 요청 보내기'}
+                {isSubmittingCounter ? '재결재 요청 전송 중...' : '관리자에게 재결재 요청 보내기'}
               </button>
             </div>
           </div>
@@ -2336,6 +2668,63 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
               >
                 닫기
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL: Saved Phrases & Presets Modal --- */}
+      {showPhrasesModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 flex flex-col max-h-[85vh] animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
+                <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                </svg>
+                자주 쓰는 알림 문구
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowPhrasesModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center font-bold text-xs"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-3 space-y-2">
+              <span className="text-[11px] font-bold text-slate-400 uppercase">클릭하여 메시지 입력창에 바로 넣기</span>
+              {savedPhrases.map((phrase, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => handleSelectPhrase(phrase)}
+                  className="w-full text-left p-3 rounded-xl bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 text-xs font-semibold text-slate-800 transition"
+                >
+                  {phrase}
+                </button>
+              ))}
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 space-y-2">
+              <label className="text-xs font-bold text-slate-700">새로운 문구 직접 저장</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newPhraseInput}
+                  onChange={(e) => setNewPhraseInput(e.target.value)}
+                  placeholder="자주 쓰는 알림 문구를 입력하세요..."
+                  className="flex-1 text-xs p-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleSavePhrase}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shrink-0 transition"
+                >
+                  저장
+                </button>
+              </div>
             </div>
           </div>
         </div>
