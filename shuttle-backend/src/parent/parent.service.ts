@@ -12,6 +12,9 @@ import { RoutingService } from '../routing/routing.service';
 import { User } from '../entities/user.entity';
 import { PickupPoint } from '../entities/pickup-point.entity';
 
+import { BoardPost } from '../entities/board-post.entity';
+import { getStudentClassName } from '../utils/school.util';
+
 @Injectable()
 export class ParentService {
   constructor(
@@ -23,6 +26,7 @@ export class ParentService {
     @InjectRepository(ParentMessage) private messageRepository: Repository<ParentMessage>,
     @InjectRepository(User) private userRepository: Repository<User>,
     @InjectRepository(PickupPoint) private pickupPointRepository: Repository<PickupPoint>,
+    @InjectRepository(BoardPost) private boardPostRepository: Repository<BoardPost>,
     private routingService: RoutingService,
   ) {}
 
@@ -145,22 +149,148 @@ export class ParentService {
   }
 
   async getNotifications(email: string) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) return [];
+
     const student = await this.studentRepository.createQueryBuilder('student')
       .leftJoinAndSelect('student.parentUser', 'parentUser')
       .leftJoinAndSelect('student.studentUser', 'studentUser')
       .leftJoinAndSelect('student.assignedVehicle', 'vehicle')
-      .where('parentUser.email = :email OR studentUser.email = :email', { email })
+      .leftJoinAndSelect('student.academy', 'academy')
+      .where('parentUser.id = :uid OR studentUser.id = :uid OR parentUser.email = :email OR studentUser.email = :email', { uid: user.id, email })
       .getOne();
 
-    if (!student || !student.assignedVehicle) {
-      return [];
+    const readKeys = new Set(Array.isArray(user.readNotificationKeys) ? user.readNotificationKeys : []);
+    const items: Array<{
+      id: number;
+      key: string;
+      title: string;
+      message: string;
+      type: string;
+      isRead: boolean;
+      createdAt: Date;
+    }> = [];
+
+    // 1. Vehicle notifications (shuttle start/end, boarding, absence)
+    if (student?.assignedVehicle) {
+      const vNotis = await this.notificationRepository.find({
+        where: { vehicle: { id: student.assignedVehicle.id } },
+        order: { createdAt: 'DESC' },
+        take: 30,
+      });
+
+      for (const n of vNotis) {
+        const msg = n.message || '';
+        let type = 'NOTICE';
+        let title = '공지 알림';
+        if (msg.includes('운행이 시작')) {
+          type = 'SHUTTLE';
+          title = '셔틀 운행 시작';
+        } else if (msg.includes('운행이 종료')) {
+          type = 'SHUTTLE';
+          title = '셔틀 운행 종료';
+        } else if (msg.includes('탑승')) {
+          type = 'BOARDING';
+          title = '원아 탑승 완료';
+        } else if (msg.includes('결석') || msg.includes('미탑승')) {
+          type = 'ABSENCE';
+          title = '결석 처리 안내';
+        }
+
+        const key = `n_${n.id}`;
+        items.push({
+          id: n.id,
+          key,
+          title,
+          message: msg,
+          type,
+          isRead: readKeys.has(key),
+          createdAt: n.createdAt,
+        });
+      }
     }
 
-    return this.notificationRepository.find({
-      where: { vehicle: { id: student.assignedVehicle.id } },
-      order: { createdAt: 'DESC' },
-      take: 20
-    });
+    // 2. Direct Messages (Teacher / Admin)
+    const qbMsg = this.messageRepository.createQueryBuilder('msg')
+      .leftJoinAndSelect('msg.student', 'student')
+      .where('msg.receiverUserId = :uid', { uid: user.id });
+
+    if (student) {
+      qbMsg.orWhere('(msg.studentId = :sid AND msg.targetRoles LIKE :pRole)', { sid: student.id, pRole: '%PARENT%' });
+    }
+    const msgs = await qbMsg.orderBy('msg.createdAt', 'DESC').take(30).getMany();
+
+    for (const m of msgs) {
+      const key = `m_${m.id}`;
+      items.push({
+        id: m.id,
+        key,
+        title: '선생님/원장님 메시지',
+        message: m.message,
+        type: 'MESSAGE',
+        isRead: m.isRead || readKeys.has(key),
+        createdAt: m.createdAt,
+      });
+    }
+
+    // 3. New Board Posts (새 알림장 글)
+    const academyId = student?.academy?.id || user.academyId;
+    if (academyId) {
+      const className = student ? getStudentClassName(student) : null;
+      const postQb = this.boardPostRepository.createQueryBuilder('post')
+        .where('post.academyId = :aid', { aid: academyId });
+
+      if (className) {
+        postQb.andWhere('(post.visibility = :vAll OR post.targetClass = :tc)', { vAll: 'ALL', tc: className });
+      } else {
+        postQb.andWhere('post.visibility = :vAll', { vAll: 'ALL' });
+      }
+
+      const posts = await postQb.orderBy('post.createdAt', 'DESC').take(15).getMany();
+      for (const p of posts) {
+        const key = `p_${p.id}`;
+        const preview = p.content ? (p.content.length > 50 ? p.content.slice(0, 50) + '...' : p.content) : p.title;
+        items.push({
+          id: p.id,
+          key,
+          title: `[새 알림장] ${p.title}`,
+          message: preview,
+          type: 'BOARD',
+          isRead: readKeys.has(key),
+          createdAt: p.createdAt,
+        });
+      }
+    }
+
+    items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return items.slice(0, 50);
+  }
+
+  async getUnreadNotificationCount(email: string): Promise<{ count: number }> {
+    const list = await this.getNotifications(email);
+    const count = list.filter((n: any) => !n.isRead).length;
+    return { count };
+  }
+
+  async readAllNotifications(email: string) {
+    const notifications = await this.getNotifications(email);
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) return { success: true };
+
+    const keys = notifications.map((n: any) => n.key).filter(Boolean);
+    const readKeys = new Set(Array.isArray(user.readNotificationKeys) ? user.readNotificationKeys : []);
+    keys.forEach(k => readKeys.add(k));
+    user.readNotificationKeys = Array.from(readKeys);
+    await this.userRepository.save(user);
+
+    await this.messageRepository.createQueryBuilder()
+      .update(ParentMessage)
+      .set({ isRead: true })
+      .where('receiverUserId = :uid', { uid: user.id })
+      .execute()
+      .catch(() => {});
+
+    return { success: true };
   }
 
   async getRoute(email: string) {
@@ -347,15 +477,35 @@ export class ParentService {
     return { success: true, message: '메시지가 성공적으로 전송되었습니다.' };
   }
 
-  async readMessage(messageId: number, email: string) {
+  async readMessage(param: { messageId?: number; notificationKey?: string } | number, email: string) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
-    
-    const msg = await this.messageRepository.findOne({ where: { id: messageId, receiverUser: { id: user.id } } });
-    if (msg) {
-      msg.isRead = true;
-      await this.messageRepository.save(msg);
+
+    const messageId = typeof param === 'number' ? param : param?.messageId;
+    const notificationKey = typeof param === 'object' ? param?.notificationKey : undefined;
+
+    let readKeys = Array.isArray(user.readNotificationKeys) ? [...user.readNotificationKeys] : [];
+
+    if (notificationKey) {
+      if (!readKeys.includes(notificationKey)) readKeys.push(notificationKey);
     }
+
+    if (messageId) {
+      const msg = await this.messageRepository.findOne({ where: { id: messageId } });
+      if (msg) {
+        msg.isRead = true;
+        await this.messageRepository.save(msg);
+      }
+      const mKey = `m_${messageId}`;
+      const nKey = `n_${messageId}`;
+      const pKey = `p_${messageId}`;
+      if (!readKeys.includes(mKey)) readKeys.push(mKey);
+      if (!readKeys.includes(nKey)) readKeys.push(nKey);
+      if (!readKeys.includes(pKey)) readKeys.push(pKey);
+    }
+
+    user.readNotificationKeys = readKeys;
+    await this.userRepository.save(user);
     return { success: true };
   }
 

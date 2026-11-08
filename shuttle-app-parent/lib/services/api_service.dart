@@ -259,13 +259,50 @@ class ApiService {
   // PARENT & STUDENT
   // ----------------------------------------------------
   Future<List<NotificationModel>> getNotifications(String email) async {
-    final url = Uri.parse('${AppConfig.apiHost}/parent/notifications?email=${Uri.encodeComponent(email)}');
-    final res = await getWithAuth(url);
-    if (res.statusCode == 200) {
-      final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
-      return list.map((item) => NotificationModel.fromJson(item as Map<String, dynamic>)).toList();
-    }
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/parent/notifications?email=${Uri.encodeComponent(email)}');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
+        return list.map((item) => NotificationModel.fromJson(item as Map<String, dynamic>)).toList();
+      }
+    } catch (_) {}
     return [];
+  }
+
+  Future<int> getUnreadNotificationCount(String email) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/parent/notifications/unread-count?email=${Uri.encodeComponent(email)}');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        return (data['count'] as num?)?.toInt() ?? 0;
+      }
+    } catch (_) {}
+    return 0;
+  }
+
+  Future<bool> readNotification({required String email, int? messageId, String? notificationKey}) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/parent/read-message');
+      final body = <String, dynamic>{'email': email};
+      if (messageId != null) body['messageId'] = messageId;
+      if (notificationKey != null) body['notificationKey'] = notificationKey;
+      final res = await postWithAuth(url, jsonEncode(body));
+      return res.statusCode == 200 || res.statusCode == 201;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> markAllNotificationsRead(String email) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/parent/notifications/read-all');
+      final res = await postWithAuth(url, jsonEncode({'email': email}));
+      return res.statusCode == 200 || res.statusCode == 201;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<RouteDataModel?> getParentRoute(String email) async {

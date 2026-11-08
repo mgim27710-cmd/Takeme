@@ -42,9 +42,34 @@ export class ParentController {
   }
 
   @Get('notifications')
-  async getNotifications(@AuthEmail() email: string) {
+  async getNotifications(
+    @AuthEmail() authEmail: string,
+    @Query('email') queryEmail?: string,
+  ) {
+    const email = authEmail || queryEmail;
     if (!email) throw new BadRequestException('이메일이 필요합니다.');
     return this.parentService.getNotifications(email);
+  }
+
+  @Get('notifications/unread-count')
+  async getUnreadCount(
+    @AuthEmail() authEmail: string,
+    @Query('email') queryEmail?: string,
+  ) {
+    const email = authEmail || queryEmail;
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.getUnreadNotificationCount(email);
+  }
+
+  @Post('notifications/read-all')
+  async readAllNotifications(
+    @AuthEmail() authEmail: string,
+    @Body('email') bodyEmail?: string,
+    @Query('email') queryEmail?: string,
+  ) {
+    const email = authEmail || bodyEmail || queryEmail;
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.readAllNotifications(email);
   }
 
   @Get('route')
@@ -65,11 +90,15 @@ export class ParentController {
 
   @Post('read-message')
   async readMessage(
-    @AuthEmail() email: string,
-    @Body('messageId') messageId: number
+    @AuthEmail() authEmail: string,
+    @Body('messageId') messageId?: number,
+    @Body('notificationKey') notificationKey?: string,
+    @Body('email') bodyEmail?: string,
+    @Query('email') queryEmail?: string,
   ) {
-    if (!email || !messageId) throw new BadRequestException('Email and messageId required');
-    return this.parentService.readMessage(messageId, email);
+    const email = authEmail || bodyEmail || queryEmail;
+    if (!email) throw new BadRequestException('Email is required');
+    return this.parentService.readMessage({ messageId, notificationKey }, email);
   }
 
   @Get('today-schedule')

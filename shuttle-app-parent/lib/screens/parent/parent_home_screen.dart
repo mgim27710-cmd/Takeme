@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -8,6 +9,7 @@ import '../../models/route_model.dart';
 import '../../models/notification_model.dart';
 import '../../widgets/kakao_map_view.dart';
 import 'absence_modal.dart';
+import 'notification_list_screen.dart';
 import '../settings_screen.dart';
 
 class ParentHomeScreen extends StatefulWidget {
@@ -22,6 +24,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   StudentModel? _childInfo;
   RouteDataModel? _routeData;
   List<NotificationModel> _notifications = [];
+  int _unreadNotificationCount = 0;
+  Timer? _notificationPollTimer;
   Map<String, dynamic>? _todaySchedule;
 
   double? _busLat;
@@ -38,16 +42,30 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   void initState() {
     super.initState();
     _loadAllData();
+    _loadUnreadCount();
+    _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) _loadUnreadCount();
+    });
   }
 
   @override
   void dispose() {
     _allergyController.dispose();
+    _notificationPollTimer?.cancel();
     final vehicleId = _routeData?.vehicleId;
     if (vehicleId != null) {
       SocketService().leaveVehicleRoom(vehicleId);
     }
     super.dispose();
+  }
+
+  Future<void> _loadUnreadCount() async {
+    final user = ApiService().currentUser;
+    if (user == null) return;
+    final count = await ApiService().getUnreadNotificationCount(user.email);
+    if (mounted) {
+      setState(() => _unreadNotificationCount = count);
+    }
   }
 
   Future<void> _loadAllData() async {
@@ -86,6 +104,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
           }
         });
       }
+      _loadUnreadCount();
     }
   }
 
@@ -313,7 +332,53 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: Color(0xFF64748B)),
-            onPressed: _loadAllData,
+            onPressed: () {
+              _loadAllData();
+              _loadUnreadCount();
+            },
+          ),
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications_outlined, color: Color(0xFF475569)),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const NotificationListScreen()),
+                  ).then((_) {
+                    _loadUnreadCount();
+                    _loadAllData();
+                  });
+                },
+              ),
+              if (_unreadNotificationCount > 0)
+                Positioned(
+                  right: 6,
+                  top: 8,
+                  child: IgnorePointer(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEF4444),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.white, width: 1.5),
+                      ),
+                      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                      child: Text(
+                        _unreadNotificationCount > 9 ? '9+' : '$_unreadNotificationCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          height: 1,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
           IconButton(
             icon: const Icon(Icons.settings_outlined, color: Color(0xFF475569)),
@@ -560,21 +625,33 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                         const SizedBox(height: 24),
 
                         // Notification Inbox
-                        Row(
-                          children: [
-                            const Icon(Icons.notifications_outlined, size: 18, color: Color(0xFF0F172A)),
-                            const SizedBox(width: 6),
-                            const Text(
-                              '수신함',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
-                            ),
-                            const Spacer(),
-                            if (_notifications.isNotEmpty)
-                              Text(
-                                '${_notifications.length}건',
-                                style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.bold),
+                        InkWell(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const NotificationListScreen()),
+                            ).then((_) {
+                              _loadUnreadCount();
+                              _loadAllData();
+                            });
+                          },
+                          child: Row(
+                            children: [
+                              const Icon(Icons.notifications_outlined, size: 18, color: Color(0xFF0F172A)),
+                              const SizedBox(width: 6),
+                              const Text(
+                                '수신함',
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
                               ),
-                          ],
+                              const Spacer(),
+                              if (_notifications.isNotEmpty)
+                                Text(
+                                  '전체보기 (${_notifications.length})',
+                                  style: const TextStyle(fontSize: 12, color: Color(0xFF2563EB), fontWeight: FontWeight.bold),
+                                ),
+                              const Icon(Icons.chevron_right, size: 18, color: Color(0xFF94A3B8)),
+                            ],
+                          ),
                         ),
                         const SizedBox(height: 10),
 
