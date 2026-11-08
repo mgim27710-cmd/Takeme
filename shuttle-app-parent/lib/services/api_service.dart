@@ -339,6 +339,63 @@ class ApiService {
     return null;
   }
 
+  Future<List<StudentModel>> getMyChildren(String email) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/parent/my-children?email=${Uri.encodeComponent(email)}');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        final list = jsonDecode(utf8.decode(res.bodyBytes));
+        if (list is List) {
+          return list.map((e) => StudentModel.fromJson(e as Map<String, dynamic>)).toList();
+        }
+      }
+    } catch (_) {}
+    final single = await getMyChild(email);
+    return single != null ? [single] : [];
+  }
+
+  Future<Map<String, dynamic>> createChangeRequest({
+    required int studentId,
+    required String type,
+    required String targetDate,
+    String? direction,
+    String? targetTime,
+    String? targetAddress,
+    String? reason,
+  }) async {
+    final url = Uri.parse('${AppConfig.apiHost}/approval/request');
+    final payload = {
+      'studentId': studentId,
+      'type': type,
+      'targetDate': targetDate,
+      if (direction != null) 'direction': direction,
+      if (targetTime != null && targetTime.isNotEmpty) 'targetTime': targetTime,
+      if (targetAddress != null && targetAddress.isNotEmpty) 'newAddress': targetAddress,
+      if (reason != null && reason.isNotEmpty) 'reason': reason,
+    };
+    final res = await postWithAuth(url, jsonEncode(payload));
+    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    return {
+      'success': res.statusCode == 200 || res.statusCode == 201,
+      'message': data['message'] ?? (res.statusCode == 200 || res.statusCode == 201 ? '신청이 접수되었습니다.' : '신청 처리에 실패했습니다.'),
+      'data': data,
+    };
+  }
+
+  Future<List<Map<String, dynamic>>> getMyChangeRequests() async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/approval/my');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        if (data is List) {
+          return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        }
+      }
+    } catch (_) {}
+    return [];
+  }
+
   Future<Map<String, dynamic>> updateChildAllergies(String email, String allergies) async {
     final url = Uri.parse('${AppConfig.apiHost}/parent/my-child/allergies');
     final res = await http.post(

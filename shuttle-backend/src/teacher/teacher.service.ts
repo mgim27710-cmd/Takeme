@@ -62,19 +62,42 @@ export class TeacherService {
     });
     const overrides = await this.getActiveOverridesForToday();
     
-    // Students originally in this vehicle, but who are NOT absent and have NOT moved to another vehicle today
-    const currentStudents = defaultStudents.filter(s => {
-      const override = overrides.find(o => o.student.id === s.id);
-      if (!override) return true;
-      if (override.overrideType === OverrideType.ABSENCE) return false;
-      if (override.overrideType === OverrideType.CHANGE_LOCATION && override.newVehicleId && override.newVehicleId !== vehicleId) return false;
-      return true;
-    });
+    const absentTypes = [
+      OverrideType.ABSENCE,
+      OverrideType.INDIVIDUAL_DISMISSAL,
+      OverrideType.PICKUP,
+      OverrideType.NO_SHUTTLE,
+    ];
 
-    // Students originally in ANOTHER vehicle, but who MOVED INTO this vehicle today
-    const movedInStudentIds = overrides
-      .filter(o => o.overrideType === OverrideType.CHANGE_LOCATION && o.newVehicleId === vehicleId)
-      .map(o => o.student.id);
+    // Students originally in this vehicle
+    const currentStudents = defaultStudents.map(s => {
+      const override = overrides.find(o => o.student?.id === s.id);
+      if (override) {
+        if (absentTypes.includes(override.overrideType)) {
+          s.boardStatus = 'ABSENT';
+          (s as any).overrideType = override.overrideType;
+          (s as any).overrideReason = override.reason;
+        } else if (override.overrideType === OverrideType.CHANGE_LOCATION) {
+          if (override.newVehicleId && override.newVehicleId !== vehicleId) {
+            return null; // moved to another vehicle
+          }
+          if (override.newAddress) s.address = override.newAddress;
+          if (override.targetTime && s.raw) {
+            s.raw = { ...s.raw, '예상탑승시간': override.targetTime };
+          }
+          (s as any).isOverride = true;
+          (s as any).overrideType = override.overrideType;
+        }
+      }
+      return s;
+    }).filter(Boolean) as Student[];
+
+    // Students moved into this vehicle today or one-time boarding
+    const movedInOverrides = overrides.filter(o => 
+      (o.overrideType === OverrideType.CHANGE_LOCATION || o.overrideType === OverrideType.ONE_TIME_BOARDING) &&
+      o.newVehicleId === vehicleId
+    );
+    const movedInStudentIds = movedInOverrides.map(o => o.student?.id).filter(Boolean);
 
     const movedInStudents = movedInStudentIds.length > 0 
       ? await this.studentRepository.createQueryBuilder('s')
@@ -83,9 +106,17 @@ export class TeacherService {
           .getMany() 
       : [];
 
-    // Filter out moved-in students who might already be in defaultStudents just in case
     const movedInFiltered = movedInStudents.filter((s: Student) => !currentStudents.find((cs: Student) => cs.id === s.id));
-    movedInFiltered.forEach((s: Student) => (s as any).isOverride = true);
+    movedInFiltered.forEach((s: Student) => {
+      const override = movedInOverrides.find(o => o.student?.id === s.id);
+      (s as any).isOverride = true;
+      (s as any).isOneTimeBoarding = override?.overrideType === OverrideType.ONE_TIME_BOARDING;
+      (s as any).overrideType = override?.overrideType;
+      if (override?.newAddress) s.address = override.newAddress;
+      if (override?.targetTime && s.raw) {
+        s.raw = { ...s.raw, '예상탑승시간': override.targetTime };
+      }
+    });
 
     return [...currentStudents, ...movedInFiltered];
   }
@@ -204,6 +235,9 @@ export class TeacherService {
           teacherMemo: s.teacherMemo,
           runNumber: s.runNumber || 1,
           isOverride: (s as any).isOverride || false,
+          isOneTimeBoarding: (s as any).isOneTimeBoarding || false,
+          overrideType: (s as any).overrideType || null,
+          overrideReason: (s as any).overrideReason || null,
           parentPhone,
         };
       });
@@ -231,7 +265,10 @@ export class TeacherService {
         address: s.address,
         latitude: parseFloat(s.latitude as any),
         longitude: parseFloat(s.longitude as any),
-        expectedTime: s.raw ? s.raw['예상탑승시간'] || '15:30' : '15:30'
+        expectedTime: s.raw ? s.raw['예상탑승시간'] || '15:30' : '15:30',
+        isOneTimeBoarding: (s as any).isOneTimeBoarding || false,
+        isOverride: (s as any).isOverride || false,
+        overrideType: (s as any).overrideType || null,
       }));
 
     // TSP Optimization (Nearest Neighbor)

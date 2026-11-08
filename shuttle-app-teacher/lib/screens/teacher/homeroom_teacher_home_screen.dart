@@ -4,6 +4,7 @@ import '../settings_screen.dart';
 import '../staff/teacher_board_view.dart';
 import '../staff/teacher_message_view.dart';
 import 'homeroom_attendance_view.dart';
+import 'homeroom_change_requests_view.dart';
 
 class HomeroomTeacherHomeScreen extends StatefulWidget {
   const HomeroomTeacherHomeScreen({super.key});
@@ -139,7 +140,9 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
                       ? '학급 알림장'
                       : _selectedTabIndex == 1
                           ? '출석부 관리'
-                          : '학급 메시지 소통',
+                          : _selectedTabIndex == 2
+                              ? '통학 변동 현황'
+                              : '학급 메시지 소통',
                   style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF1E293B)),
                 ),
                 const SizedBox(width: 8),
@@ -187,6 +190,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
         children: const [
           TeacherBoardView(),
           HomeroomAttendanceView(),
+          HomeroomChangeRequestsView(),
           TeacherMessageView(),
         ],
       ),
@@ -208,12 +212,17 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.fact_check_outlined),
             activeIcon: Icon(Icons.fact_check),
-            label: '출석부 관리',
+            label: '출석부',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.edit_calendar_outlined),
+            activeIcon: Icon(Icons.edit_calendar),
+            label: '통학 변동',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.mail_outline),
             activeIcon: Icon(Icons.mail),
-            label: '학급 메시지함',
+            label: '메시지',
           ),
         ],
       ),

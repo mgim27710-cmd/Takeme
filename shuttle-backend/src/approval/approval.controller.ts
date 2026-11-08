@@ -40,6 +40,16 @@ export class ApprovalController {
   }
 
   /**
+   * 담임교사용: 자기 반 오늘 통학 변경 현황
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('class-today')
+  async getClassTodayRequests(@Req() req: any) {
+    const user = req.dbUser;
+    return this.approvalService.getClassTodayRequests(user);
+  }
+
+  /**
    * 관리자 신청함 목록 (대기 우선, 정원 초과 시 대체 후보 포함)
    */
   @UseGuards(JwtAuthGuard)

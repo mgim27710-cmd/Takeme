@@ -329,6 +329,54 @@ export class ApprovalService {
   }
 
   /**
+   * 담임교사용: 자기 반 학생들의 오늘 통학 변경 현황
+   */
+  async getClassTodayRequests(callingUser: User) {
+    const today = kstDateString();
+    const assignedClass = callingUser.assignedClass;
+
+    const qb = this.approvalRepo.createQueryBuilder('req')
+      .leftJoinAndSelect('req.student', 'student')
+      .leftJoinAndSelect('req.requester', 'requester')
+      .leftJoinAndSelect('req.targetVehicle', 'targetVehicle')
+      .where('req.targetDate = :today', { today })
+      .orderBy('req.createdAt', 'DESC');
+
+    const allRequests = await qb.getMany();
+
+    // 담당 반 필터링
+    const classRequests = allRequests.filter(r => {
+      if (!assignedClass) return true;
+      const sClass = getStudentClassName(r.student);
+      return isSameClass(sClass, assignedClass);
+    });
+
+    const summary = {
+      total: classRequests.length,
+      approved: classRequests.filter(r => r.status === ApprovalStatus.APPROVED).length,
+      pending: classRequests.filter(r => r.status === ApprovalStatus.PENDING).length,
+      rejected: classRequests.filter(r => r.status === ApprovalStatus.REJECTED).length,
+      absence: classRequests.filter(r => r.type === ChangeRequestType.ABSENCE).length,
+      individualDismissal: classRequests.filter(r => r.type === ChangeRequestType.INDIVIDUAL_DISMISSAL).length,
+      lateness: classRequests.filter(r => r.type === ChangeRequestType.LATENESS).length,
+      pickup: classRequests.filter(r => r.type === ChangeRequestType.PICKUP).length,
+      noShuttle: classRequests.filter(r => r.type === ChangeRequestType.NO_SHUTTLE).length,
+      oneTimeBoarding: classRequests.filter(r => r.type === ChangeRequestType.ONE_TIME_BOARDING).length,
+    };
+
+    return {
+      today,
+      assignedClass: assignedClass || '전체',
+      summary,
+      requests: classRequests.map(r => ({
+        ...r,
+        typeKr: typeToKorean(r.type),
+        studentName: r.student?.adminDisplayName || r.student?.name,
+      })),
+    };
+  }
+
+  /**
    * 관리자 신청함 목록 (대기 우선, 정원 초과 시 대체 후보 포함)
    */
   async getAdminRequests(callingUser: User, statusFilter?: ApprovalStatus) {

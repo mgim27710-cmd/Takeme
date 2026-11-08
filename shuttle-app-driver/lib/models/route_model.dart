@@ -5,6 +5,9 @@ class RouteStop {
   final String? address;
   final String? stopMemo;
   final String? expectedTime;
+  final bool isOneTimeBoarding;
+  final bool isOverride;
+  final String? overrideType;
 
   RouteStop({
     required this.name,
@@ -13,6 +16,9 @@ class RouteStop {
     this.address,
     this.stopMemo,
     this.expectedTime,
+    this.isOneTimeBoarding = false,
+    this.isOverride = false,
+    this.overrideType,
   });
 
   factory RouteStop.fromJson(Map<String, dynamic> json) {
@@ -28,6 +34,9 @@ class RouteStop {
       address: json['address'],
       stopMemo: json['stopMemo'] ?? json['memo'] ?? json['address'],
       expectedTime: json['expectedTime'],
+      isOneTimeBoarding: json['isOneTimeBoarding'] == true,
+      isOverride: json['isOverride'] == true,
+      overrideType: json['overrideType']?.toString(),
     );
   }
 }

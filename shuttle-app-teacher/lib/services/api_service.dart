@@ -660,4 +660,48 @@ class ApiService {
       return {'success': false, 'message': '출석부 제출에 실패했습니다.'};
     }
   }
+
+  // ==================== CHANGE REQUEST APIs ====================
+  Future<Map<String, dynamic>?> getClassTodayChangeRequests() async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/approval/class-today');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<Map<String, dynamic>> createChangeRequest({
+    required int studentId,
+    required String type,
+    required String targetDate,
+    String? direction,
+    String? targetTime,
+    String? targetAddress,
+    String? reason,
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/approval/request');
+      final payload = {
+        'studentId': studentId,
+        'type': type,
+        'targetDate': targetDate,
+        if (direction != null) 'direction': direction,
+        if (targetTime != null && targetTime.isNotEmpty) 'targetTime': targetTime,
+        if (targetAddress != null && targetAddress.isNotEmpty) 'newAddress': targetAddress,
+        if (reason != null && reason.isNotEmpty) 'reason': reason,
+      };
+      final res = await postWithAuth(url, jsonEncode(payload));
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'message': data['message'] ?? (res.statusCode == 200 || res.statusCode == 201 ? '신청이 정상 등록되었습니다.' : '신청 등록 실패'),
+        'data': data,
+      };
+    } catch (e) {
+      return {'success': false, 'message': '네트워크 오류로 신청에 실패했습니다.'};
+    }
+  }
 }

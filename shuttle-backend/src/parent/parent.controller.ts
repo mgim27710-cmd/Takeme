@@ -127,6 +127,16 @@ export class ParentController {
     return this.parentService.getMyChild(email);
   }
 
+  @Get('my-children')
+  async getMyChildren(
+    @AuthEmail() authEmail: string,
+    @Query('email') queryEmail?: string
+  ) {
+    const email = authEmail || queryEmail;
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.getMyChildren(email);
+  }
+
   @Post('my-child/allergies')
   async updateChildAllergies(
     @AuthEmail() authEmail: string,

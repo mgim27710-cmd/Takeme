@@ -616,6 +616,45 @@ export class ParentService {
     };
   }
 
+  async getMyChildren(email: string) {
+    const students = await this.studentRepository.createQueryBuilder('student')
+      .leftJoinAndSelect('student.parentUser', 'parentUser')
+      .leftJoinAndSelect('student.studentUser', 'studentUser')
+      .leftJoinAndSelect('student.assignedVehicle', 'vehicle')
+      .leftJoinAndSelect('student.academy', 'academy')
+      .where('parentUser.email = :email OR studentUser.email = :email', { email })
+      .getMany();
+
+    if (students.length === 0) {
+      const fallback = await this.studentRepository.find({
+        where: { raw: { email } },
+        relations: { assignedVehicle: true, academy: true }
+      });
+      students.push(...fallback);
+    }
+
+    return students.map(s => {
+      let rawObj: any = {};
+      if (typeof s.raw === 'string') {
+        try { rawObj = JSON.parse(s.raw); } catch (e) { rawObj = {}; }
+      } else if (s.raw && typeof s.raw === 'object') {
+        rawObj = s.raw;
+      }
+      return {
+        id: s.id,
+        name: s.adminDisplayName || s.name,
+        realName: s.name,
+        address: s.address,
+        boardingLocation: s.boardingLocation || s.address,
+        allergies: s.allergies || rawObj['알레르기'] || '',
+        className: s.className || rawObj['반명'] || rawObj['반'] || '',
+        academyName: s.academy?.name || rawObj['유치원명'] || '',
+        vehicleName: s.assignedVehicle?.busNumber || '차량 미배정',
+        approvalStatus: s.approvalStatus,
+      };
+    });
+  }
+
   async updateChildAllergies(email: string, allergies: string) {
     let student = await this.studentRepository.createQueryBuilder('student')
       .leftJoinAndSelect('student.parentUser', 'parentUser')

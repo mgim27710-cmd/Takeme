@@ -8,7 +8,8 @@ import '../../models/student_model.dart';
 import '../../models/route_model.dart';
 import '../../models/notification_model.dart';
 import '../../widgets/kakao_map_view.dart';
-import 'absence_modal.dart';
+import 'change_request_modal.dart';
+import 'my_requests_screen.dart';
 import 'notification_list_screen.dart';
 import 'class_board_screen.dart';
 import '../settings_screen.dart';
@@ -105,6 +106,21 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
           }
         });
       }
+
+      SocketService().onChangeRequestDecided((data) {
+        if (!mounted) return;
+        _loadUnreadCount();
+        final studentName = data['studentName'] ?? '원아';
+        final isApproved = data['status'] == 'APPROVED';
+        final statusText = isApproved ? '승인' : '반려';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('[$statusText] $studentName 원아의 신청이 $statusText되었습니다.'),
+            backgroundColor: isApproved ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+          ),
+        );
+      });
+
       _loadUnreadCount();
     }
   }
@@ -662,28 +678,57 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
 
                         // Action Buttons
                         if (!isStudent)
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              showDialog(
-                                context: context,
-                                builder: (_) => AbsenceModal(
-                                  email: user!.email,
-                                  onSuccess: _loadAllData,
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    showDialog(
+                                      context: context,
+                                      builder: (_) => ChangeRequestModal(
+                                        email: user!.email,
+                                        onSuccess: _loadAllData,
+                                      ),
+                                    );
+                                  },
+                                  icon: const Icon(Icons.edit_calendar, size: 20, color: Colors.white),
+                                  label: const Text(
+                                    '통학 일정 간편 변경',
+                                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Colors.white),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF2563EB),
+                                    elevation: 0,
+                                    padding: const EdgeInsets.symmetric(vertical: 16),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  ),
                                 ),
-                              );
-                            },
-                            icon: const Icon(Icons.calendar_today, size: 18, color: Color(0xFF2563EB)),
-                            label: const Text(
-                              '결석 / 탑승지 변경 / 메시지',
-                              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Color(0xFF2563EB)),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white,
-                              elevation: 0,
-                              side: const BorderSide(color: Color(0xFFE2E8F0)),
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                            ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                flex: 2,
+                                child: OutlinedButton.icon(
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(builder: (_) => const MyRequestsScreen()),
+                                    );
+                                  },
+                                  icon: const Icon(Icons.history, size: 18, color: Color(0xFF2563EB)),
+                                  label: const Text(
+                                    '신청 내역',
+                                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: Color(0xFF2563EB)),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    side: const BorderSide(color: Color(0xFFBFDBFE), width: 1.5),
+                                    backgroundColor: const Color(0xFFEFF6FF),
+                                    padding: const EdgeInsets.symmetric(vertical: 16),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  ),
+                                ),
+                              ),
+                            ],
                           )
                         else
                           ElevatedButton.icon(

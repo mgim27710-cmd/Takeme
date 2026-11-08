@@ -61,6 +61,18 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
   DateTime? _drivingStartTime;
   bool _escort5MinWarned = false;
   io_client.Socket? _escortSocket;
+  String? _changeBannerText;
+  Timer? _changeBannerTimer;
+
+  void _showChangeBanner(String text) {
+    _changeBannerTimer?.cancel();
+    setState(() => _changeBannerText = text);
+    _changeBannerTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) {
+        setState(() => _changeBannerText = null);
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -125,6 +137,37 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
       });
       _flutterTts.speak('동승 확인되었습니다: ${_escortName ?? "지도교사"}');
     });
+
+    _escortSocket!.on('changeRequestDecided', (data) {
+      if (!mounted) return;
+      if (data is Map) {
+        final studentName = data['studentName']?.toString() ?? '원아';
+        final status = data['status']?.toString();
+        if (status == 'APPROVED') {
+          final type = data['type']?.toString();
+          String typeKr = '통학 변경';
+          if (type == 'ABSENCE') {
+            typeKr = '결석';
+          } else if (type == 'INDIVIDUAL_DISMISSAL') {
+            typeKr = '직접 하원';
+          } else if (type == 'PICKUP') {
+            typeKr = '보호자 픽업';
+          } else if (type == 'NO_SHUTTLE') {
+            typeKr = '셔틀 미탑승';
+          } else if (type == 'ONE_TIME_BOARDING') {
+            typeKr = '하루 탑승';
+          } else if (type == 'CHANGE_LOCATION') {
+            typeKr = '정류장 변경';
+          }
+
+          _showChangeBanner('$studentName 원아: $typeKr 승인 반영');
+          _nav.refreshRouteFromServer(
+            speak: true,
+            customSpeakText: '$studentName 원아의 $typeKr 신청이 승인되어 경로를 갱신합니다.',
+          );
+        }
+      }
+    });
   }
 
   Future<void> _fetchEscortStatus() async {
@@ -156,6 +199,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
+    _changeBannerTimer?.cancel();
     _flutterTts.stop();
     _escortSocket?.disconnect();
     _escortSocket = null;
@@ -532,6 +576,32 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
           child: Stack(
             children: [
               Positioned.fill(child: NavMapView(controller: _map)),
+              if (_changeBannerText != null)
+                Positioned(
+                  left: 14,
+                  right: 14,
+                  top: _nav.driving ? 100 : 20,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F172A).withValues(alpha: 0.95),
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: const [BoxShadow(color: Color(0x40000000), blurRadius: 10, offset: Offset(0, 3))],
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.notifications_active, color: Color(0xFF38BDF8), size: 24),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _changeBannerText!,
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14.5),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               if (_nav.driving) ...[
                 // 좌측 상단: 티맵 스타일 파란색+하얀색 회전 안내 표지판
                 Positioned(left: 0, top: 0, child: _turnHeader()),
@@ -1313,9 +1383,16 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     final currentMode = a?.mode ?? _nav.mode;
     final next = _nav.nextStop;
     final (ampm, clock) = _nav.etaAmPmAndTime;
-    final subtitle = next != null
-        ? '다음: ${next.name} (${next.stopMemo})'
-        : '유치원 이동 중 · ${currentMode.title}';
+    String subtitle = '유치원 이동 중 · ${currentMode.title}';
+    if (next != null) {
+      String badge = '';
+      if (next.isOneTimeBoarding) {
+        badge = ' [하루탑승]';
+      } else if (next.isOverride) {
+        badge = ' [장소변경]';
+      }
+      subtitle = '다음: ${next.name}$badge (${next.stopMemo})';
+    }
 
     return Container(
       decoration: const BoxDecoration(

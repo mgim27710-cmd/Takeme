@@ -37,11 +37,21 @@ class NavStop {
   final GeoPoint point;
   final String stopMemo; // 정차 위치 안내 메모 (예: "○○아파트 정문 앞, 오른쪽에 정차")
   final bool isTest; // 테스트 경로용 가짜 정류장 (서버·학부모에게 보내지 않음)
+  final bool isOneTimeBoarding; // 하루 탑승
+  final bool isOverride; // 탑승지/일정 변경
+  final String? overrideType;
   bool passed = false;
   bool saidApproach = false;
   int pathIndex = 0;
-  NavStop(this.name, this.point, {String? stopMemo, this.isTest = false})
-      : stopMemo = (stopMemo != null && stopMemo.trim().isNotEmpty)
+  NavStop(
+    this.name,
+    this.point, {
+    String? stopMemo,
+    this.isTest = false,
+    this.isOneTimeBoarding = false,
+    this.isOverride = false,
+    this.overrideType,
+  }) : stopMemo = (stopMemo != null && stopMemo.trim().isNotEmpty)
             ? stopMemo.trim()
             : '$name 정문 앞, 오른쪽에 정차';
 }
@@ -446,6 +456,9 @@ class DriverNavigator extends ChangeNotifier {
               s.name,
               GeoPoint(s.latitude, s.longitude),
               stopMemo: s.stopMemo ?? s.address,
+              isOneTimeBoarding: s.isOneTimeBoarding,
+              isOverride: s.isOverride,
+              overrideType: s.overrideType,
             );
             stop.passed = passedNames.contains(s.name);
             stop.saidApproach = approachedNames.contains(s.name);
