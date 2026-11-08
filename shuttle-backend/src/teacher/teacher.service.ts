@@ -12,6 +12,7 @@ import { ScheduleOverride, OverrideType } from '../entities/schedule-override.en
 import { AcademyHoliday } from '../entities/academy-holiday.entity';
 import { LessThanOrEqual, MoreThanOrEqual, Between } from 'typeorm';
 import { LocationGateway } from './location.gateway';
+import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE } from '../utils/school.util';
 
 @Injectable()
 export class TeacherService {
@@ -142,6 +143,39 @@ export class TeacherService {
 
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
+
+    if ((user.role as string) === 'HOMEROOM_TEACHER' || user.role === UserRole.HOMEROOM_TEACHER) {
+      if (!hasAssignedClass(user.assignedClass)) {
+        return [];
+      }
+      const academyId = user.academyId;
+      const qb = this.studentRepository.createQueryBuilder('s')
+        .leftJoinAndSelect('s.parentUser', 'parentUser')
+        .leftJoinAndSelect('s.assignedVehicle', 'vehicle');
+      if (academyId) {
+        qb.where('s.academyId = :academyId', { academyId });
+      }
+      const all = await qb.getMany();
+      return all
+        .filter(s => isSameClass(getStudentClassName(s), user.assignedClass))
+        .map(s => {
+          const rawPhone = s.raw ? (s.raw['학부모연락처'] || s.raw['연락처'] || s.raw['전화번호'] || s.raw['비상연락처'] || '') : '';
+          const parentPhone = s.parentUser?.phone || rawPhone || '';
+          return {
+            id: s.id,
+            name: s.adminDisplayName || s.name,
+            address: s.address,
+            latitude: s.latitude,
+            longitude: s.longitude,
+            boarded: s.boardStatus === 'BOARDED',
+            absent: s.boardStatus === 'ABSENT',
+            expectedTime: s.raw ? s.raw['예상탑승시간'] || '15:30' : '15:30',
+            allergies: s.allergies || (s.raw ? s.raw['알레르기'] : '') || '',
+            parentPhone,
+            className: user.assignedClass,
+          };
+        });
+    }
 
     const vehicle = await this.findAssignedVehicle(user.id);
     if (!vehicle) return []; // No assigned vehicle
@@ -940,8 +974,14 @@ export class TeacherService {
     if (!user) throw new BadRequestException('User not found');
 
     const assignedClass = user.assignedClass;
-    if (!assignedClass) {
-      return { assignedClass: null, students: [], summary: { total: 0, boarded: 0, waiting: 0, absent: 0 } };
+    if (!hasAssignedClass(assignedClass)) {
+      return {
+        assignedClass: null,
+        isAssigned: false,
+        message: '관리자에게 반 배정을 요청하세요',
+        students: [],
+        summary: { total: 0, boarded: 0, waiting: 0, absent: 0 }
+      };
     }
 
     const academyId = user.academy?.id || user.academyId;
@@ -957,10 +997,7 @@ export class TeacherService {
 
     const allStudents = await qb.getMany();
 
-    const classStudents = allStudents.filter(s => {
-      const cName = s.raw ? (s.raw['반명'] || s.raw['반'] || s.raw['학급']) : null;
-      return cName === assignedClass;
-    });
+    const classStudents = allStudents.filter(s => isSameClass(getStudentClassName(s), assignedClass));
 
     const students = classStudents.map(s => {
       const override = overrides.find(o => o.student.id === s.id);

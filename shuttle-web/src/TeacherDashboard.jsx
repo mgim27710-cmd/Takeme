@@ -1257,12 +1257,15 @@ export default function TeacherDashboard({
                   </div>
                   <div>
                     <h2 className="text-xl font-black text-slate-900 tracking-tight mb-2">
-                      담당 반 배정 대기 중입니다
+                      담당 반이 배정되지 않았습니다
                     </h2>
+                    <div className="inline-block px-3 py-1.5 bg-red-50 border border-red-200 text-red-600 rounded-lg text-xs font-bold mb-3">
+                      관리자에게 반 배정을 요청하세요
+                    </div>
                     <p className="text-xs text-slate-500 leading-relaxed">
                       <strong>{localTeacherUser?.name || '선생님'}</strong>님, 환영합니다.<br />
                       현재 <strong>{academy?.name || '소속 유치원'}</strong>에 정상 등록되었으며,
-                      <strong>관리자님께서 담당 반을 배정</strong>하시면 교실 수업 일정 및 원아 명단이 자동으로 활성화됩니다.
+                      <strong>관리자님께서 담당 반을 배정</strong>하시면 교실 수업 일정 및 우리 반 원아 명단이 자동으로 활성화됩니다.
                     </p>
                   </div>
 

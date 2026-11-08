@@ -29,6 +29,7 @@ import {
   toStoredMediaRefs,
   uploadToS3,
 } from '../utils/s3.util';
+import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE } from '../utils/school.util';
 
 @Injectable()
 export class RoutingService {
@@ -681,7 +682,7 @@ export class RoutingService {
       where: { academy: { id: academy.id } },
       relations: { assignedVehicle: true, studentUser: true, parentUser: true, schedules: { assignedVehicle: true } } 
     });
-    const formattedStudents = dbStudents.map(st => {
+    let formattedStudents = dbStudents.map(st => {
       let parsedRaw: any = {};
       try {
         parsedRaw = typeof st.raw === 'string' ? JSON.parse(st.raw) : (st.raw || {});
@@ -711,6 +712,18 @@ export class RoutingService {
         boardStatus: st.boardStatus || 'WAITING'
       };
     });
+
+    if (userId) {
+      const callingUser = await this.userRepository.findOne({ where: { id: userId } });
+      if (callingUser && ((callingUser.role as string) === 'HOMEROOM_TEACHER' || callingUser.role === UserRole.HOMEROOM_TEACHER)) {
+        const assignedClass = callingUser.assignedClass;
+        if (!hasAssignedClass(assignedClass)) {
+          formattedStudents = [];
+        } else {
+          formattedStudents = formattedStudents.filter(s => isSameClass(getStudentClassName(s), assignedClass));
+        }
+      }
+    }
 
     return { academy, buses: formattedVehicles, students: formattedStudents };
   }
@@ -2080,6 +2093,18 @@ export class RoutingService {
       qb.andWhere('(post.visibility = :allVis OR post.targetClass = :tc)', { allVis: 'ALL', tc: targetClass });
     }
 
+    if (userId) {
+      const callingUser = await this.userRepository.findOne({ where: { id: userId } });
+      if (callingUser && ((callingUser.role as string) === 'HOMEROOM_TEACHER' || callingUser.role === UserRole.HOMEROOM_TEACHER)) {
+        const assignedClass = callingUser.assignedClass;
+        if (!hasAssignedClass(assignedClass)) {
+          qb.andWhere('1 = 0');
+        } else {
+          qb.andWhere('(post.visibility = :vAll OR post.targetClass = :tc)', { vAll: 'ALL', tc: assignedClass });
+        }
+      }
+    }
+
     if (search && search.trim()) {
       qb.andWhere('(post.title ILIKE :kw OR post.content ILIKE :kw OR post.authorName ILIKE :kw)', { kw: `%${search.trim()}%` });
     }
@@ -2120,15 +2145,29 @@ export class RoutingService {
     academyId?: number;
   }, academyId?: number, userId?: number) {
     const academy = await this.getAcademy(body.academyId || academyId, userId);
+    let targetClass = body.targetClass || null;
+    let authorRole = body.authorRole || 'ADMIN';
+
+    if (userId) {
+      const callingUser = await this.userRepository.findOne({ where: { id: userId } });
+      if (callingUser && ((callingUser.role as string) === 'HOMEROOM_TEACHER' || callingUser.role === UserRole.HOMEROOM_TEACHER)) {
+        if (!hasAssignedClass(callingUser.assignedClass)) {
+          throw new BadRequestException('관리자에게 반 배정을 요청하세요.');
+        }
+        targetClass = callingUser.assignedClass;
+        authorRole = 'HOMEROOM_TEACHER';
+      }
+    }
+
     const post = this.boardPostRepository.create({
       title: body.title,
       content: body.content,
       imageUrl: toStoredMediaRef(body.imageUrl) || null,
       images: toStoredMediaRefs(body.images),
       authorName: body.authorName || '원장선생님',
-      authorRole: body.authorRole || 'ADMIN',
+      authorRole,
       visibility: body.visibility || 'ALL',
-      targetClass: body.targetClass || null,
+      targetClass,
       academy: academy || undefined,
       likeCount: 0,
       likedUserIds: [],
