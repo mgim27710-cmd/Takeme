@@ -626,4 +626,38 @@ class ApiService {
       return {'success': false, 'message': '메시지 전송에 실패했습니다.'};
     }
   }
+
+  // ==================== HOMEROOM ATTENDANCE APIs ====================
+  Future<Map<String, dynamic>?> getHomeroomAttendance({String? date}) async {
+    try {
+      final query = date != null && date.isNotEmpty ? '?date=${Uri.encodeComponent(date)}' : '';
+      final url = Uri.parse('${AppConfig.apiHost}/teacher/homeroom/attendance$query');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<Map<String, dynamic>> submitHomeroomAttendance({
+    required String date,
+    required List<Map<String, dynamic>> attendances,
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/teacher/homeroom/attendance');
+      final res = await postWithAuth(url, jsonEncode({
+        'date': date,
+        'attendances': attendances,
+      }));
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'message': data['message'] ?? (res.statusCode == 200 || res.statusCode == 201 ? '출석부가 제출되었습니다.' : '제출 실패'),
+        'data': data,
+      };
+    } catch (e) {
+      return {'success': false, 'message': '출석부 제출에 실패했습니다.'};
+    }
+  }
 }

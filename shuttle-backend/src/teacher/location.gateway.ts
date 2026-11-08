@@ -87,6 +87,15 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
   }
 
+  /**
+   * Broadcast attendance submission ONLY to academy room: academy_{id}
+   * (server.emit 전체 전송 금지)
+   */
+  broadcastAttendanceSubmitted(academyId: number, data: any) {
+    if (!this.server || !academyId) return;
+    this.server.to(`academy_${academyId}`).emit('attendanceSubmitted', data);
+  }
+
   @SubscribeMessage('joinVehicleRoom')
   async handleJoinVehicleRoom(
     @MessageBody() data: { vehicleId: number },

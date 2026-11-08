@@ -87,6 +87,107 @@ export default function TeacherDashboard({
     }
   }, [activeNavTab, fetchHomeroomStatus]);
 
+  // Attendance Management State
+  const [attendanceDate, setAttendanceDate] = useState(() => {
+    return new Date().toISOString().slice(0, 10);
+  });
+  const [attendanceData, setAttendanceData] = useState(null);
+  const [isAttendanceLoading, setIsAttendanceLoading] = useState(false);
+  const [isSubmittingAttendance, setIsSubmittingAttendance] = useState(false);
+
+  const fetchAttendance = useCallback(async (date) => {
+    const targetDate = date || attendanceDate;
+    try {
+      setIsAttendanceLoading(true);
+      let token = localStorage.getItem('takeme_token');
+      if (!token) {
+        try {
+          const userStr = localStorage.getItem('takeme_user');
+          if (userStr) token = JSON.parse(userStr).token;
+        } catch (_) {}
+      }
+      const res = await fetch(`${API_BASE_URL}/teacher/homeroom/attendance?date=${targetDate}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAttendanceData(data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch attendance:', e);
+    } finally {
+      setIsAttendanceLoading(false);
+    }
+  }, [attendanceDate]);
+
+  useEffect(() => {
+    if (activeNavTab === 'attendance') {
+      fetchAttendance();
+    }
+  }, [activeNavTab, attendanceDate, fetchAttendance]);
+
+  const handleAttendanceStatusChange = (studentId, status) => {
+    if (!attendanceData?.students) return;
+    setAttendanceData(prev => ({
+      ...prev,
+      students: prev.students.map(s => s.studentId === studentId ? { ...s, status } : s)
+    }));
+  };
+
+  const handleAllPresent = () => {
+    if (!attendanceData?.students) return;
+    setAttendanceData(prev => ({
+      ...prev,
+      students: prev.students.map(s => ({ ...s, status: 'PRESENT' }))
+    }));
+  };
+
+  const handleSubmitAttendance = async () => {
+    if (!attendanceData?.students || attendanceData.students.length === 0) {
+      alert('출석을 체크할 원아가 없습니다.');
+      return;
+    }
+    try {
+      setIsSubmittingAttendance(true);
+      let token = localStorage.getItem('takeme_token');
+      if (!token) {
+        try {
+          const userStr = localStorage.getItem('takeme_user');
+          if (userStr) token = JSON.parse(userStr).token;
+        } catch (_) {}
+      }
+      const payload = {
+        date: attendanceDate,
+        attendances: attendanceData.students.map(s => ({
+          studentId: s.studentId,
+          status: s.status,
+          memo: s.memo,
+        })),
+      };
+      const res = await fetch(`${API_BASE_URL}/teacher/homeroom/attendance`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(data.message || '출석부가 성공적으로 제출되었습니다!');
+        fetchAttendance(attendanceDate);
+      } else {
+        alert(data.message || '출석부 제출에 실패했습니다.');
+      }
+    } catch (e) {
+      alert('출석부 제출 중 오류가 발생했습니다.');
+    } finally {
+      setIsSubmittingAttendance(false);
+    }
+  };
+
   // Temporary Cloud Storage State
   const cloudStorageKey = `takeme_teacher_cloud_${currentUser?.id || 'default'}`;
   const [cloudPhotos, setCloudPhotos] = useState(() => {
@@ -856,6 +957,20 @@ export default function TeacherDashboard({
           </svg>
         </button>
 
+        {/* Tab: 출석부 관리 */}
+        <button
+          onClick={() => setActiveNavTab('attendance')}
+          className={`p-4 rounded-2xl transition-all ${activeNavTab === 'attendance'
+              ? 'bg-white text-blue-700 shadow-lg scale-110'
+              : 'text-blue-200 hover:bg-blue-600'
+            }`}
+          title="출석부 관리"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+          </svg>
+        </button>
+
         {/* Tab 3: 알림장 & 게시판 */}
         <button
           onClick={() => setActiveNavTab('board')}
@@ -1056,6 +1171,184 @@ export default function TeacherDashboard({
                   </h4>
                   <p className="text-xs text-slate-400 max-w-sm mx-auto">
                     담임교사 계정 설정에서 담당 반이 지정되어 있는지 확인해 주세요.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : activeNavTab === 'attendance' ? (
+          <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
+            {/* Attendance Header */}
+            <div className="bg-white border-b border-slate-200 px-8 py-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
+              <div className="flex items-center gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-xs">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-xl font-black text-slate-800 tracking-tight">
+                      {attendanceData?.assignedClass || teacherClass || '우리 반'} 일일 출석부
+                    </h1>
+                    {attendanceData?.isSubmitted ? (
+                      <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full font-bold border border-emerald-200">
+                        제출 완료
+                      </span>
+                    ) : (
+                      <span className="text-xs bg-amber-50 text-amber-700 px-2.5 py-0.5 rounded-full font-bold border border-amber-200">
+                        미제출 (체크 후 제출)
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    원아별 출석 상태를 확인하고 출석부를 제출합니다. 관리자 웹으로 실시간 전송됩니다.
+                  </p>
+                </div>
+              </div>
+
+              {/* Actions & Date */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+                  <span className="text-xs font-bold text-slate-500">날짜:</span>
+                  <input
+                    type="date"
+                    value={attendanceDate}
+                    onChange={(e) => {
+                      setAttendanceDate(e.target.value);
+                      fetchAttendance(e.target.value);
+                    }}
+                    className="bg-transparent text-xs font-bold text-slate-700 border-none outline-hidden cursor-pointer"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAllPresent}
+                  className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5"
+                >
+                  전원 출석
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSubmitAttendance}
+                  disabled={isSubmittingAttendance}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {isSubmittingAttendance ? '제출 중...' : attendanceData?.isSubmitted ? '출석부 수정 제출' : '출석부 제출'}
+                </button>
+              </div>
+            </div>
+
+            {/* Attendance Summary Bar */}
+            <div className="bg-white border-b border-slate-200 px-8 py-3 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2 text-xs">
+                <span className="font-bold text-slate-600">출석 요약:</span>
+                <span className="px-2 py-0.5 bg-slate-100 rounded-md font-bold text-slate-700">전체 {attendanceData?.summary?.total || 0}명</span>
+                <span className="px-2 py-0.5 bg-emerald-100 rounded-md font-bold text-emerald-800">출석 {attendanceData?.summary?.present || 0}명</span>
+                <span className="px-2 py-0.5 bg-red-100 rounded-md font-bold text-red-800">결석 {attendanceData?.summary?.absent || 0}명</span>
+                <span className="px-2 py-0.5 bg-amber-100 rounded-md font-bold text-amber-800">지각 {attendanceData?.summary?.late || 0}명</span>
+                <span className="px-2 py-0.5 bg-purple-100 rounded-md font-bold text-purple-800">조퇴 {attendanceData?.summary?.earlyLeave || 0}명</span>
+              </div>
+              {attendanceData?.submission?.submittedAt && (
+                <span className="text-xs text-slate-400">
+                  최종 제출: {new Date(attendanceData.submission.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({attendanceData.submission.teacherName})
+                </span>
+              )}
+            </div>
+
+            {/* Students List */}
+            <div className="flex-1 overflow-y-auto p-8">
+              {isAttendanceLoading ? (
+                <div className="flex items-center justify-center py-20">
+                  <div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              ) : attendanceData?.students && attendanceData.students.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {attendanceData.students.map((st) => {
+                    return (
+                      <div
+                        key={st.studentId}
+                        className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between gap-3"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-black text-slate-800 text-base">{st.name}</h3>
+                              {st.boardStatus === 'BOARDED' && (
+                                <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold rounded-md">
+                                  셔틀탑승 완료
+                                </span>
+                              )}
+                              {st.boardStatus === 'ABSENT' && (
+                                <span className="px-2 py-0.5 bg-red-50 text-red-700 border border-red-200 text-[11px] font-bold rounded-md">
+                                  결석 신청
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-400 mt-1">배정차량: {st.vehicleName || '미지정'}</p>
+                          </div>
+                        </div>
+
+                        {/* 4 Status Buttons: 출석 / 결석 / 지각 / 조퇴 */}
+                        <div className="grid grid-cols-4 gap-1.5 pt-2 border-t border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => handleAttendanceStatusChange(st.studentId, 'PRESENT')}
+                            className={`py-2 text-xs font-bold rounded-xl transition ${
+                              st.status === 'PRESENT'
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                            }`}
+                          >
+                            출석
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleAttendanceStatusChange(st.studentId, 'ABSENT')}
+                            className={`py-2 text-xs font-bold rounded-xl transition ${
+                              st.status === 'ABSENT'
+                                ? 'bg-red-600 text-white shadow-xs'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                            }`}
+                          >
+                            결석
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleAttendanceStatusChange(st.studentId, 'LATE')}
+                            className={`py-2 text-xs font-bold rounded-xl transition ${
+                              st.status === 'LATE'
+                                ? 'bg-amber-500 text-white shadow-xs'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                            }`}
+                          >
+                            지각
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleAttendanceStatusChange(st.studentId, 'EARLY_LEAVE')}
+                            className={`py-2 text-xs font-bold rounded-xl transition ${
+                              st.status === 'EARLY_LEAVE'
+                                ? 'bg-purple-600 text-white shadow-xs'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                            }`}
+                          >
+                            조퇴
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-24 text-center bg-white rounded-3xl border border-dashed border-slate-200">
+                  <h4 className="font-bold text-slate-700 text-sm mb-1">
+                    등록된 원아가 없습니다
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    관리자에게 담당 반 배정을 요청하거나 원아 등록 여부를 확인해 주세요.
                   </p>
                 </div>
               )}

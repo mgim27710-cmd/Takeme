@@ -3,6 +3,7 @@ import '../../services/api_service.dart';
 import '../settings_screen.dart';
 import '../staff/teacher_board_view.dart';
 import '../staff/teacher_message_view.dart';
+import 'homeroom_attendance_view.dart';
 
 class HomeroomTeacherHomeScreen extends StatefulWidget {
   const HomeroomTeacherHomeScreen({super.key});
@@ -134,7 +135,11 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
             Row(
               children: [
                 Text(
-                  _selectedTabIndex == 0 ? '학급 알림장' : '학급 메시지 소통',
+                  _selectedTabIndex == 0
+                      ? '학급 알림장'
+                      : _selectedTabIndex == 1
+                          ? '출석부 관리'
+                          : '학급 메시지 소통',
                   style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF1E293B)),
                 ),
                 const SizedBox(width: 8),
@@ -181,6 +186,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
         index: _selectedTabIndex,
         children: const [
           TeacherBoardView(),
+          HomeroomAttendanceView(),
           TeacherMessageView(),
         ],
       ),
@@ -198,6 +204,11 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
             icon: Icon(Icons.photo_library_outlined),
             activeIcon: Icon(Icons.photo_library),
             label: '학급 알림장',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.fact_check_outlined),
+            activeIcon: Icon(Icons.fact_check),
+            label: '출석부 관리',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.mail_outline),

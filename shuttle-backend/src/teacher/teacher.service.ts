@@ -12,7 +12,9 @@ import { ScheduleOverride, OverrideType } from '../entities/schedule-override.en
 import { AcademyHoliday } from '../entities/academy-holiday.entity';
 import { LessThanOrEqual, MoreThanOrEqual, Between } from 'typeorm';
 import { LocationGateway } from './location.gateway';
-import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE } from '../utils/school.util';
+import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE, kstDateString, isValidDateString } from '../utils/school.util';
+import { Attendance, AttendanceStatus } from '../entities/attendance.entity';
+import { AttendanceSubmission } from '../entities/attendance-submission.entity';
 
 @Injectable()
 export class TeacherService {
@@ -26,6 +28,8 @@ export class TeacherService {
     @InjectRepository(OperationLog) private operationLogRepository: Repository<OperationLog>,
     @InjectRepository(ScheduleOverride) private scheduleOverrideRepository: Repository<ScheduleOverride>,
     @InjectRepository(AcademyHoliday) private academyHolidayRepository: Repository<AcademyHoliday>,
+    @InjectRepository(Attendance) private attendanceRepository: Repository<Attendance>,
+    @InjectRepository(AttendanceSubmission) private submissionRepository: Repository<AttendanceSubmission>,
     private readonly locationGateway: LocationGateway
   ) {}
 
@@ -1043,6 +1047,220 @@ export class TeacherService {
         waiting: students.filter(s => s.status === 'WAITING').length,
         absent: students.filter(s => s.status === 'ABSENT').length,
       }
+    };
+  }
+
+  async getHomeroomAttendance(email: string, dateInput?: string) {
+    const user = await this.userRepository.findOne({
+      where: { email },
+      relations: { academy: true }
+    });
+    if (!user) throw new BadRequestException('사용자를 찾을 수 없습니다.');
+
+    if (!hasAssignedClass(user.assignedClass)) {
+      return {
+        assignedClass: null,
+        isAssigned: false,
+        message: '관리자에게 반 배정을 요청하세요',
+        date: dateInput || kstDateString(),
+        isSubmitted: false,
+        submission: null,
+        students: [],
+      };
+    }
+
+    const assignedClass = user.assignedClass!;
+    const date = (dateInput && isValidDateString(dateInput)) ? dateInput : kstDateString();
+    const academyId = user.academy?.id || user.academyId;
+
+    const submission = await this.submissionRepository.findOne({
+      where: {
+        academy: { id: academyId },
+        className: assignedClass,
+        date,
+      },
+    });
+
+    const qb = this.studentRepository.createQueryBuilder('s')
+      .leftJoinAndSelect('s.assignedVehicle', 'vehicle')
+      .leftJoinAndSelect('s.parentUser', 'parentUser');
+
+    if (academyId) {
+      qb.where('s.academyId = :academyId', { academyId });
+    }
+
+    const allStudents = await qb.getMany();
+    const classStudents = allStudents.filter(s => isSameClass(getStudentClassName(s), assignedClass));
+
+    const studentIds = classStudents.map(s => s.id);
+    let attendances: Attendance[] = [];
+    if (studentIds.length > 0) {
+      attendances = await this.attendanceRepository.createQueryBuilder('att')
+        .leftJoinAndSelect('att.student', 'student')
+        .where('att.studentId IN (:...ids) AND att.date = :date', { ids: studentIds, date })
+        .getMany();
+    }
+
+    const attendanceMap = new Map<number, Attendance>();
+    for (const a of attendances) {
+      if (a.student?.id) attendanceMap.set(a.student.id, a);
+    }
+
+    const studentList = classStudents.map(s => {
+      const existing = attendanceMap.get(s.id);
+
+      let currentStatus: AttendanceStatus = AttendanceStatus.PRESENT;
+      if (existing) {
+        currentStatus = existing.status;
+      } else if (s.boardStatus === 'ABSENT') {
+        currentStatus = AttendanceStatus.ABSENT;
+      } else {
+        currentStatus = AttendanceStatus.PRESENT;
+      }
+
+      return {
+        studentId: s.id,
+        name: s.adminDisplayName || s.name,
+        status: currentStatus,
+        memo: existing?.memo || '',
+        boardStatus: s.boardStatus || 'WAITING',
+        actualBoardTime: s.actualBoardTime ? new Date(s.actualBoardTime).toISOString() : null,
+        vehicleName: s.assignedVehicle?.busNumber || '미지정',
+        isRecorded: !!existing,
+      };
+    });
+
+    return {
+      assignedClass,
+      isAssigned: true,
+      date,
+      isSubmitted: !!submission,
+      submission: submission || null,
+      summary: {
+        total: studentList.length,
+        present: studentList.filter(s => s.status === AttendanceStatus.PRESENT).length,
+        absent: studentList.filter(s => s.status === AttendanceStatus.ABSENT).length,
+        late: studentList.filter(s => s.status === AttendanceStatus.LATE).length,
+        earlyLeave: studentList.filter(s => s.status === AttendanceStatus.EARLY_LEAVE).length,
+      },
+      students: studentList,
+    };
+  }
+
+  async submitHomeroomAttendance(email: string, payload: {
+    date: string;
+    attendances: Array<{ studentId: number; status: AttendanceStatus; memo?: string }>;
+  }) {
+    const user = await this.userRepository.findOne({
+      where: { email },
+      relations: { academy: true }
+    });
+    if (!user) throw new BadRequestException('사용자를 찾을 수 없습니다.');
+
+    if (!hasAssignedClass(user.assignedClass)) {
+      throw new BadRequestException('관리자에게 반 배정을 요청하세요.');
+    }
+
+    const assignedClass = user.assignedClass!;
+    const date = (payload.date && isValidDateString(payload.date)) ? payload.date : kstDateString();
+    const academyId = user.academy?.id || user.academyId;
+
+    if (!academyId) throw new BadRequestException('유치원 정보가 필요합니다.');
+
+    let presentCount = 0;
+    let absentCount = 0;
+    let lateCount = 0;
+    let earlyLeaveCount = 0;
+
+    for (const item of (payload.attendances || [])) {
+      if (!item.studentId) continue;
+      const student = await this.studentRepository.findOne({ where: { id: item.studentId } });
+      if (!student) continue;
+
+      let att = await this.attendanceRepository.findOne({
+        where: { student: { id: student.id }, date },
+      });
+
+      if (!att) {
+        att = this.attendanceRepository.create({
+          student,
+          date,
+          status: item.status || AttendanceStatus.PRESENT,
+          recordedBy: user,
+          recordedByName: user.name || '담임선생님',
+          memo: item.memo || '',
+        });
+      } else {
+        att.status = item.status || AttendanceStatus.PRESENT;
+        att.recordedBy = user;
+        att.recordedByName = user.name || '담임선생님';
+        if (item.memo !== undefined) att.memo = item.memo;
+      }
+
+      await this.attendanceRepository.save(att);
+
+      if (att.status === AttendanceStatus.PRESENT) presentCount++;
+      else if (att.status === AttendanceStatus.ABSENT) absentCount++;
+      else if (att.status === AttendanceStatus.LATE) lateCount++;
+      else if (att.status === AttendanceStatus.EARLY_LEAVE) earlyLeaveCount++;
+    }
+
+    const totalCount = payload.attendances?.length || 0;
+
+    let submission = await this.submissionRepository.findOne({
+      where: {
+        academy: { id: academyId },
+        className: assignedClass,
+        date,
+      },
+    });
+
+    if (!submission) {
+      submission = this.submissionRepository.create({
+        academy: { id: academyId } as any,
+        className: assignedClass,
+        date,
+        teacher: user,
+        teacherName: user.name || '담임선생님',
+        totalCount,
+        presentCount,
+        absentCount,
+        lateCount,
+        earlyLeaveCount,
+        submittedAt: new Date(),
+      });
+    } else {
+      submission.teacher = user;
+      submission.teacherName = user.name || '담임선생님';
+      submission.totalCount = totalCount;
+      submission.presentCount = presentCount;
+      submission.absentCount = absentCount;
+      submission.lateCount = lateCount;
+      submission.earlyLeaveCount = earlyLeaveCount;
+      submission.submittedAt = new Date();
+    }
+
+    const savedSubmission = await this.submissionRepository.save(submission);
+
+    const socketPayload = {
+      academyId,
+      className: assignedClass,
+      date,
+      teacherName: user.name || '담임선생님',
+      teacherEmail: user.email,
+      submittedAt: savedSubmission.submittedAt,
+      totalCount,
+      presentCount,
+      absentCount,
+      lateCount,
+      earlyLeaveCount,
+    };
+    this.locationGateway.broadcastAttendanceSubmitted(academyId, socketPayload);
+
+    return {
+      success: true,
+      submission: savedSubmission,
+      message: `${assignedClass} 출석부가 성공적으로 제출되었습니다.`,
     };
   }
 }

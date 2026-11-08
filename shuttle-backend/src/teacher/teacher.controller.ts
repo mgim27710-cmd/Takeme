@@ -145,6 +145,24 @@ export class TeacherController {
     return this.teacherService.getHomeroomShuttleStatus(email);
   }
 
+  @Get('homeroom/attendance')
+  async getHomeroomAttendance(
+    @AuthEmail() email: string,
+    @Query('date') date?: string,
+  ) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.getHomeroomAttendance(email, date);
+  }
+
+  @Post('homeroom/attendance')
+  async submitHomeroomAttendance(
+    @AuthEmail() email: string,
+    @Body() body: { date: string; attendances: Array<{ studentId: number; status: any; memo?: string }> },
+  ) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.submitHomeroomAttendance(email, body);
+  }
+
   @Post('emergency')
   async triggerEmergency(@AuthEmail() email: string, @Body() body?: { lat?: number; lng?: number }) {
     if (!email) throw new BadRequestException('이메일이 필요합니다.');

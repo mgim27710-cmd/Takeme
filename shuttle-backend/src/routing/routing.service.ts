@@ -29,7 +29,9 @@ import {
   toStoredMediaRefs,
   uploadToS3,
 } from '../utils/s3.util';
-import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE } from '../utils/school.util';
+import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE, kstDateString, isValidDateString } from '../utils/school.util';
+import { Attendance, AttendanceStatus } from '../entities/attendance.entity';
+import { AttendanceSubmission } from '../entities/attendance-submission.entity';
 
 @Injectable()
 export class RoutingService {
@@ -61,6 +63,10 @@ export class RoutingService {
     private boardCommentRepository: Repository<BoardComment>,
     @InjectRepository(AuditLog)
     private auditLogRepository: Repository<AuditLog>,
+    @InjectRepository(Attendance)
+    private attendanceRepository: Repository<Attendance>,
+    @InjectRepository(AttendanceSubmission)
+    private submissionRepository: Repository<AttendanceSubmission>,
     private httpService: HttpService,
     private configService: ConfigService,
   ) {}
@@ -2584,6 +2590,112 @@ export class RoutingService {
       assignedClass: teacher.assignedClass || '',
       academyId: teacher.academy?.id,
       academyName: teacher.academy?.name
+    };
+  }
+
+  async getAcademyAttendance(academyId?: number, userId?: number, dateInput?: string) {
+    const academy = await this.getAcademy(academyId, userId);
+    if (!academy) {
+      return { date: dateInput || kstDateString(), classes: [], submissions: [], summary: { totalStudents: 0, present: 0, absent: 0, late: 0, earlyLeave: 0, submittedClasses: 0, totalClasses: 0 } };
+    }
+
+    const date = (dateInput && isValidDateString(dateInput)) ? dateInput : kstDateString();
+
+    const students = await this.studentRepository.find({
+      where: { academy: { id: academy.id } },
+      relations: { assignedVehicle: true, parentUser: true },
+    });
+
+    const submissions = await this.submissionRepository.find({
+      where: { academy: { id: academy.id }, date },
+    });
+
+    const studentIds = students.map(s => s.id);
+    let attendances: Attendance[] = [];
+    if (studentIds.length > 0) {
+      attendances = await this.attendanceRepository.createQueryBuilder('att')
+        .leftJoinAndSelect('att.student', 'student')
+        .where('att.studentId IN (:...ids) AND att.date = :date', { ids: studentIds, date })
+        .getMany();
+    }
+
+    const attendanceMap = new Map<number, Attendance>();
+    for (const a of attendances) {
+      if (a.student?.id) attendanceMap.set(a.student.id, a);
+    }
+
+    const classMap = new Map<string, any[]>();
+    for (const s of students) {
+      const cName = getStudentClassName(s) || '미배정';
+      if (!classMap.has(cName)) classMap.set(cName, []);
+
+      const att = attendanceMap.get(s.id);
+      let status: AttendanceStatus = AttendanceStatus.PRESENT;
+      if (att) {
+        status = att.status;
+      } else if (s.boardStatus === 'ABSENT') {
+        status = AttendanceStatus.ABSENT;
+      }
+
+      classMap.get(cName)!.push({
+        id: s.id,
+        name: s.adminDisplayName || s.name,
+        status,
+        memo: att?.memo || '',
+        recordedByName: att?.recordedByName || '',
+        recordedAt: att?.recordedAt || null,
+        boardStatus: s.boardStatus || 'WAITING',
+        vehicleName: s.assignedVehicle?.busNumber || '미지정',
+      });
+    }
+
+    const classesList: any[] = [];
+    let grandTotal = 0;
+    let grandPresent = 0;
+    let grandAbsent = 0;
+    let grandLate = 0;
+    let grandEarlyLeave = 0;
+
+    for (const [className, stList] of classMap.entries()) {
+      const sub = submissions.find(s => s.className === className);
+      const present = stList.filter(s => s.status === AttendanceStatus.PRESENT).length;
+      const absent = stList.filter(s => s.status === AttendanceStatus.ABSENT).length;
+      const late = stList.filter(s => s.status === AttendanceStatus.LATE).length;
+      const earlyLeave = stList.filter(s => s.status === AttendanceStatus.EARLY_LEAVE).length;
+
+      grandTotal += stList.length;
+      grandPresent += present;
+      grandAbsent += absent;
+      grandLate += late;
+      grandEarlyLeave += earlyLeave;
+
+      classesList.push({
+        className,
+        isSubmitted: !!sub,
+        submittedAt: sub?.submittedAt || null,
+        teacherName: sub?.teacherName || null,
+        total: stList.length,
+        present,
+        absent,
+        late,
+        earlyLeave,
+        students: stList,
+      });
+    }
+
+    return {
+      date,
+      summary: {
+        totalStudents: grandTotal,
+        present: grandPresent,
+        absent: grandAbsent,
+        late: grandLate,
+        earlyLeave: grandEarlyLeave,
+        submittedClasses: submissions.length,
+        totalClasses: classesList.filter(c => c.className !== '미배정').length,
+      },
+      submissions,
+      classes: classesList,
     };
   }
 }
