@@ -593,6 +593,7 @@ export class AuthService {
           name: name ? `${name} 유치원` : '신규 유치원',
           owner: savedUser,
           authCode,
+          businessNumber: data.businessNumber || null,
           vehicleCount: 0,
         });
         await this.academyRepository.save(academy);

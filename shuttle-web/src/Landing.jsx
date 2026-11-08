@@ -55,6 +55,16 @@ export default function Landing() {
 
   // Director Phone for Registration
   const [directorPhone, setDirectorPhone] = useState('');
+  const [businessNumber, setBusinessNumber] = useState('');
+
+  // 사업자 등록번호 10자리 자동 하이픈 포맷터 (000-00-00000)
+  const formatBusinessNumber = (value) => {
+    if (!value) return '';
+    const nums = value.replace(/\D/g, '').slice(0, 10);
+    if (nums.length <= 3) return nums;
+    if (nums.length <= 5) return `${nums.slice(0, 3)}-${nums.slice(3)}`;
+    return `${nums.slice(0, 3)}-${nums.slice(3, 5)}-${nums.slice(5, 10)}`;
+  };
 
   const navigate = useNavigate();
 
@@ -273,7 +283,7 @@ export default function Landing() {
     const res = await fetch(`${API_BASE_URL}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name, role, phone: directorPhone.trim() || undefined, educationLevel })
+      body: JSON.stringify({ email, password, name, role, phone: directorPhone.trim() || undefined, businessNumber: businessNumber.trim() || undefined, educationLevel })
     });
     const data = await res.json();
     if (res.ok) {
@@ -805,18 +815,33 @@ export default function Landing() {
             </div>
             
             {role === 'ACADEMY_ADMIN' && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">
-                  관리자 휴대폰 번호
-                </label>
-                <input 
-                  type="tel" 
-                  placeholder="010-1234-5678" 
-                  value={directorPhone} 
-                  onChange={e=>setDirectorPhone(e.target.value)} 
-                  className="form-input" 
-                />
-              </div>
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    관리자 휴대폰 번호
+                  </label>
+                  <input 
+                    type="tel" 
+                    placeholder="010-1234-5678" 
+                    value={directorPhone} 
+                    onChange={e=>setDirectorPhone(e.target.value)} 
+                    className="form-input" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    사업자 등록번호 <span className="text-slate-400 font-normal">(선택)</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    placeholder="123-45-67890 (10자리)" 
+                    value={businessNumber} 
+                    onChange={e=>setBusinessNumber(formatBusinessNumber(e.target.value))} 
+                    maxLength={12}
+                    className="form-input tracking-wider" 
+                  />
+                </div>
+              </>
             )}
 
             {/* Password */}
