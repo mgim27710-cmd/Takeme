@@ -17,6 +17,7 @@ import { API_BASE_URL } from './config';
 import TeacherDashboard from './TeacherDashboard';
 import ClassManager from './classes/ClassManager';
 import AuthViewer from './auth/AuthViewer';
+import { formatTeacherName } from './utils/formatters';
 
 
 // Fix Leaflet default icon issue
@@ -3505,7 +3506,9 @@ const parseKindergartenExcelSheet = (sheet) => {
                                   운행중
                                 </span>
                               )}
-                              {/* Capacity Badge */}
+                            </div>
+                            {/* 탑승인원/좌석수 표시 (차번호 아래에 단독 위치) */}
+                            <div className="mt-1">
                               <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-black border ${
                                 isOverCapacity
                                   ? 'bg-rose-100 text-rose-700 border-rose-300 animate-pulse'
@@ -3513,7 +3516,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                                     ? 'bg-amber-100 text-amber-800 border-amber-300'
                                     : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                               }`}>
-                                {busStudents.length}/{capacity} {isOverCapacity ? `초과 (+${busStudents.length - capacity})` : isFull ? '만석(빗금)' : '탑승가능'}
+                                탑승인원/좌석수 {busStudents.length}/{capacity}
+                                {isOverCapacity ? ` (초과 +${busStudents.length - capacity})` : isFull ? ' (만석)' : ''}
                               </span>
                             </div>
                           </div>
@@ -3592,18 +3596,20 @@ const parseKindergartenExcelSheet = (sheet) => {
                       >
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-slate-700">배정 원아</span>
-                          <span className={`font-black px-1.5 py-0.2 rounded text-xs ${
-                            isOverCapacity 
-                              ? 'bg-rose-100 text-rose-700' 
-                              : isFull 
-                                ? 'bg-amber-100 text-amber-800' 
-                                : 'bg-blue-100 text-blue-700'
-                          }`}>
-                            {busStudents.length}/{capacity}명
-                          </span>
+                          {isSelected && (
+                            <span className={`font-black px-1.5 py-0.2 rounded text-xs ${
+                              isOverCapacity 
+                                ? 'bg-rose-100 text-rose-700' 
+                                : isFull 
+                                  ? 'bg-amber-100 text-amber-800' 
+                                  : 'bg-blue-100 text-blue-700'
+                            }`}>
+                              배정원아 {busStudents.length}/{capacity}
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center gap-1 text-slate-400">
-                          <span className="text-xs">{isSelected ? '접기' : '명단보기'}</span>
+                          <span className="text-xs">{isSelected ? '접기' : '자세히 보기'}</span>
                           <svg className={`w-3.5 h-3.5 transition-transform ${isSelected ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                           </svg>

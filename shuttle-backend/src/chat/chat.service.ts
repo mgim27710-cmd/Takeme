@@ -451,12 +451,23 @@ export class ChatService {
       }
 
       // Check if an active payment request already exists for this student (중복 신청 방지 원아 락)
-      const existingPending = await this.messageRepo
-        .createQueryBuilder('m')
-        .where("m.type = 'PAYMENT_REQUEST'")
-        .andWhere("m.payload->>'studentId' = :sId", { sId: String(data.studentId) })
-        .andWhere("m.payload->>'status' IN ('PENDING', 'RE_REQUESTED')")
-        .getOne();
+      const recentPaymentMsgs = await this.messageRepo.find({
+        where: { type: 'PAYMENT_REQUEST' },
+        order: { id: 'DESC' },
+        take: 100,
+      });
+
+      const existingPending = recentPaymentMsgs.find(m => {
+        let p = m.payload;
+        if (typeof p === 'string') {
+          try { p = JSON.parse(p); } catch { p = {}; }
+        }
+        return (
+          p &&
+          String(p.studentId) === String(data.studentId) &&
+          (p.status === 'PENDING' || p.status === 'RE_REQUESTED')
+        );
+      });
 
       if (existingPending) {
         const reqName = existingPending.payload?.requesterName || '다른 교직원';
