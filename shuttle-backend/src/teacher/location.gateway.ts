@@ -134,18 +134,21 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
       } catch (_) {}
     }
 
-    let academyId = data?.academyId ? Number(data.academyId) : undefined;
-    if (user) {
-      if (user.academyId) {
-        academyId = Number(user.academyId);
-      } else if (user.email) {
-        const dbUser = await this.userRepository.findOne({
-          where: { email: user.email },
-          relations: { academy: true }
-        });
-        if (dbUser?.academyId || dbUser?.academy?.id) {
-          academyId = Number(dbUser.academyId || dbUser.academy.id);
-        }
+    if (!user) {
+      console.warn(`[joinAcademyRoom] Unauthorized join attempt: ${client.id}`);
+      return { success: false, message: '인증 토큰이 필요합니다.' };
+    }
+
+    let academyId: number | undefined;
+    if (user.academyId) {
+      academyId = Number(user.academyId);
+    } else if (user.email) {
+      const dbUser = await this.userRepository.findOne({
+        where: { email: user.email },
+        relations: { academy: true }
+      });
+      if (dbUser?.academyId || dbUser?.academy?.id) {
+        academyId = Number(dbUser.academyId || dbUser.academy.id);
       }
     }
 
