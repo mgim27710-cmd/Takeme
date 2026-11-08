@@ -2248,28 +2248,149 @@ export class RoutingService {
     const crypto = require('crypto');
 
     let base64String = data.base64Data;
-    let ext = 'jpg';
+    let ext = '';
+    let detectedMime = 'image/jpeg';
+
     if (base64String.includes(';base64,')) {
       const parts = base64String.split(';base64,');
       const mime = parts[0].replace('data:', '');
+      detectedMime = mime;
       if (mime.includes('png')) ext = 'png';
       else if (mime.includes('webp')) ext = 'webp';
-      else if (mime.includes('gif')) ext = 'gif';
       else if (mime.includes('jpeg') || mime.includes('jpg')) ext = 'jpg';
       base64String = parts[1];
     } else if (data.mimeType) {
+      detectedMime = data.mimeType;
       if (data.mimeType.includes('png')) ext = 'png';
       else if (data.mimeType.includes('webp')) ext = 'webp';
-      else if (data.mimeType.includes('gif')) ext = 'gif';
+      else if (data.mimeType.includes('jpeg') || data.mimeType.includes('jpg')) ext = 'jpg';
+    }
+
+    if (!ext && data.filename) {
+      const fileExt = path.extname(data.filename).toLowerCase().replace('.', '');
+      if (['jpg', 'jpeg', 'png', 'webp'].includes(fileExt)) {
+        ext = fileExt === 'jpeg' ? 'jpg' : fileExt;
+        if (ext === 'png') detectedMime = 'image/png';
+        else if (ext === 'webp') detectedMime = 'image/webp';
+        else detectedMime = 'image/jpeg';
+      }
+    }
+
+    if (!['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
+      throw new BadRequestException('jpg, png, webp 형식의 이미지만 업로드할 수 있습니다.');
     }
 
     const buffer = Buffer.from(base64String, 'base64');
+    const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+    if (buffer.length > MAX_SIZE) {
+      throw new BadRequestException('파일 크기는 10MB를 초과할 수 없습니다.');
+    }
+
+    const randomName = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${ext}`;
+    const s3Bucket = process.env.AWS_S3_BUCKET;
+    const s3Region = process.env.AWS_REGION;
+
+    if (s3Bucket && s3Region) {
+      try {
+        const s3Key = `board/${randomName}`;
+        const accessKeyId = process.env.AWS_ACCESS_KEY_ID || '';
+        const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || '';
+        const host = `${s3Bucket}.s3.${s3Region}.amazonaws.com`;
+
+        if (accessKeyId && secretAccessKey) {
+          const now = new Date();
+          const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+          const dateStamp = amzDate.substring(0, 8);
+          const payloadHash = crypto.createHash('sha256').update(buffer).digest('hex');
+
+          const canonicalHeaders = `content-type:${detectedMime}\nhost:${host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
+          const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
+          const canonicalRequest = `PUT\n/${s3Key}\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+
+          const credentialScope = `${dateStamp}/${s3Region}/s3/aws4_request`;
+          const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${credentialScope}\n${crypto.createHash('sha256').update(canonicalRequest).digest('hex')}`;
+
+          const kDate = crypto.createHmac('sha256', `AWS4${secretAccessKey}`).update(dateStamp).digest();
+          const kRegion = crypto.createHmac('sha256', kDate).update(s3Region).digest();
+          const kService = crypto.createHmac('sha256', kRegion).update('s3').digest();
+          const kSigning = crypto.createHmac('sha256', kService).update('aws4_request').digest();
+          const signature = crypto.createHmac('sha256', kSigning).update(stringToSign).digest('hex');
+
+          const authorizationHeader = `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+          const https = require('https');
+          await new Promise<void>((resolve, reject) => {
+            const req = https.request({
+              hostname: host,
+              port: 443,
+              path: `/${s3Key}`,
+              method: 'PUT',
+              headers: {
+                'Content-Type': detectedMime,
+                'Content-Length': buffer.length,
+                'x-amz-date': amzDate,
+                'x-amz-content-sha256': payloadHash,
+                'Authorization': authorizationHeader,
+              }
+            }, (res: any) => {
+              if (res.statusCode >= 200 && res.statusCode < 300) resolve();
+              else reject(new Error(`S3 PUT failed with status ${res.statusCode}`));
+            });
+            req.on('error', reject);
+            req.write(buffer);
+            req.end();
+          });
+
+          // Generate 1-hour presigned GET URL
+          const nowGet = new Date();
+          const amzDateGet = nowGet.toISOString().replace(/[:-]|\.\d{3}/g, '');
+          const dateStampGet = amzDateGet.substring(0, 8);
+          const credScopeGet = `${dateStampGet}/${s3Region}/s3/aws4_request`;
+
+          const queryParams: Record<string, string> = {
+            'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
+            'X-Amz-Credential': `${encodeURIComponent(accessKeyId)}%2F${credScopeGet.replace(/\//g, '%2F')}`,
+            'X-Amz-Date': amzDateGet,
+            'X-Amz-Expires': '3600',
+            'X-Amz-SignedHeaders': 'host',
+          };
+
+          const canonicalQueryString = Object.keys(queryParams)
+            .sort()
+            .map(k => `${k}=${queryParams[k]}`)
+            .join('&');
+
+          const canonicalHeadersGet = `host:${host}\n`;
+          const canonicalRequestGet = `GET\n/${s3Key}\n${canonicalQueryString}\nhost\nUNSIGNED-PAYLOAD`;
+          const stringToSignGet = `AWS4-HMAC-SHA256\n${amzDateGet}\n${credScopeGet}\n${crypto.createHash('sha256').update(canonicalRequestGet).digest('hex')}`;
+
+          const kDateGet = crypto.createHmac('sha256', `AWS4${secretAccessKey}`).update(dateStampGet).digest();
+          const kRegionGet = crypto.createHmac('sha256', kDateGet).update(s3Region).digest();
+          const kServiceGet = crypto.createHmac('sha256', kRegionGet).update('s3').digest();
+          const kSigningGet = crypto.createHmac('sha256', kServiceGet).update('aws4_request').digest();
+          const signatureGet = crypto.createHmac('sha256', kSigningGet).update(stringToSignGet).digest('hex');
+
+          const presignedUrl = `https://${host}/${s3Key}?${canonicalQueryString}&X-Amz-Signature=${signatureGet}`;
+
+          return {
+            success: true,
+            url: presignedUrl,
+            filename: randomName,
+            size: buffer.length,
+            createdAt: new Date().toISOString()
+          };
+        }
+      } catch (s3Err) {
+        console.warn('S3 upload failed, falling back to local storage:', s3Err);
+      }
+    }
+
+    // Local disk fallback under uploads/board/
     const uploadsDir = path.join(process.cwd(), 'uploads', 'board');
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
     }
 
-    const randomName = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${ext}`;
     const filePath = path.join(uploadsDir, randomName);
     fs.writeFileSync(filePath, buffer);
 

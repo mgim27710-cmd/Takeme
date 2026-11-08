@@ -139,6 +139,12 @@ export class TeacherController {
     return this.teacherService.readMessage(email, messageId);
   }
 
+  @Get('homeroom/shuttle-status')
+  async getHomeroomShuttleStatus(@AuthEmail() email: string) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.getHomeroomShuttleStatus(email);
+  }
+
   @Post('emergency')
   async triggerEmergency(@AuthEmail() email: string, @Body() body?: { lat?: number; lng?: number }) {
     if (!email) throw new BadRequestException('이메일이 필요합니다.');

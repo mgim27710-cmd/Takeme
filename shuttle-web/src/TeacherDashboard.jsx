@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import BoardViewer from './board/BoardViewer';
@@ -46,8 +46,46 @@ export default function TeacherDashboard({
   boardPosts = [],
   setBoardPosts,
 }) {
-  // Navigation State on Left Rail: 'home' | 'board' | 'cloud'
+  // Navigation State on Left Rail: 'home' | 'shuttle' | 'board' | 'cloud'
   const [activeNavTab, setActiveNavTab] = useState('home');
+
+  // Homeroom shuttle status state
+  const [homeroomStatus, setHomeroomStatus] = useState(null);
+  const [isHomeroomLoading, setIsHomeroomLoading] = useState(false);
+
+  const fetchHomeroomStatus = useCallback(async () => {
+    try {
+      let token = localStorage.getItem('takeme_token');
+      if (!token) {
+        try {
+          const u = JSON.parse(localStorage.getItem('takeme_user') || '{}');
+          token = u?.accessToken;
+        } catch (_) {}
+      }
+      const res = await fetch(`${API_BASE_URL}/teacher/homeroom/shuttle-status`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setHomeroomStatus(data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch homeroom shuttle status:', e);
+    } finally {
+      setIsHomeroomLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeNavTab === 'shuttle') {
+      setIsHomeroomLoading(true);
+      fetchHomeroomStatus();
+      const interval = setInterval(fetchHomeroomStatus, 30000); // 30초마다 자동 갱신
+      return () => clearInterval(interval);
+    }
+  }, [activeNavTab, fetchHomeroomStatus]);
 
   // Temporary Cloud Storage State
   const cloudStorageKey = `takeme_teacher_cloud_${currentUser?.id || 'default'}`;
@@ -804,28 +842,42 @@ export default function TeacherDashboard({
           </svg>
         </button>
 
-        {/* Tab 2: 유치원 게시판 */}
+        {/* Tab 2: 오늘 셔틀 현황 */}
+        <button
+          onClick={() => setActiveNavTab('shuttle')}
+          className={`p-4 rounded-2xl transition-all ${activeNavTab === 'shuttle'
+              ? 'bg-white text-blue-700 shadow-lg scale-110'
+              : 'text-blue-200 hover:bg-blue-600'
+            }`}
+          title="오늘 셔틀 현황"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h8m-8 4h8m-9 8h10a2 2 0 002-2V6a2 2 0 00-2-2H7a2 2 0 00-2 2v11a2 2 0 002 2zm1-2a1 1 0 11-2 0 1 1 0 012 0zm8 0a1 1 0 11-2 0 1 1 0 012 0z" />
+          </svg>
+        </button>
+
+        {/* Tab 3: 알림장 & 게시판 */}
         <button
           onClick={() => setActiveNavTab('board')}
           className={`p-4 rounded-2xl transition-all ${activeNavTab === 'board'
               ? 'bg-white text-blue-700 shadow-lg scale-110'
               : 'text-blue-200 hover:bg-blue-600'
             }`}
-          title="원아 앨범 & 게시판"
+          title="알림장 & 앨범"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
         </button>
 
-        {/* Tab 3: 임시 사진 보관함 */}
+        {/* Tab 4: 사진 보관함 */}
         <button
           onClick={() => setActiveNavTab('cloud')}
           className={`p-4 rounded-2xl transition-all ${activeNavTab === 'cloud'
               ? 'bg-white text-blue-700 shadow-lg scale-110'
               : 'text-blue-200 hover:bg-blue-600'
             }`}
-          title="임시 사진 보관함"
+          title="사진 보관함"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
@@ -862,8 +914,154 @@ export default function TeacherDashboard({
       {/* 2. Main Area (To the right of the Left Rail) */}
       {/* ======================================================== */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* VIEW A: Board Mode (Only assigned class, no side buttons) */}
-        {activeNavTab === 'board' ? (
+        {/* VIEW: Homeroom Shuttle Status Mode */}
+        {activeNavTab === 'shuttle' ? (
+          <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
+            {/* Header */}
+            <div className="bg-white border-b border-slate-200 px-8 py-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
+              <div className="flex items-center gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-amber-500 text-white flex items-center justify-center font-bold shadow-xs">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h8m-8 4h8m-9 8h10a2 2 0 002-2V6a2 2 0 00-2-2H7a2 2 0 00-2 2v11a2 2 0 002 2zm1-2a1 1 0 11-2 0 1 1 0 012 0zm8 0a1 1 0 11-2 0 1 1 0 012 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-xl font-black text-slate-800 tracking-tight">
+                      {homeroomStatus?.assignedClass || teacherClass || '담임 반'} 오늘 셔틀 현황
+                    </h1>
+                    <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full font-bold border border-emerald-200">
+                      30초 자동 갱신
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    우리 반 원아들의 오늘 셔틀 호차 및 실시간 탑승 현황을 확인합니다.
+                  </p>
+                </div>
+              </div>
+
+              {/* Stats and Refresh */}
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200 text-xs font-bold">
+                  <span className="px-2.5 py-1 rounded-lg bg-white text-slate-700 shadow-xs">
+                    전체 {homeroomStatus?.summary?.total || 0}명
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    탑승 {homeroomStatus?.summary?.boarded || 0}명
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-200">
+                    대기 {homeroomStatus?.summary?.waiting || 0}명
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-red-50 text-red-700 border border-red-200">
+                    결석 {homeroomStatus?.summary?.absent || 0}명
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={fetchHomeroomStatus}
+                  disabled={isHomeroomLoading}
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5 disabled:opacity-50"
+                  title="새로고침"
+                >
+                  <svg className={`w-4 h-4 ${isHomeroomLoading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>새로고침</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Student Cards Grid */}
+            <div className="flex-1 overflow-y-auto p-8">
+              {homeroomStatus?.students && homeroomStatus.students.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {homeroomStatus.students.map(st => {
+                    const isBoarded = st.status === 'BOARDED';
+                    const isAbsent = st.status === 'ABSENT';
+
+                    return (
+                      <div
+                        key={st.id}
+                        className={`bg-white rounded-2xl p-5 border shadow-xs transition-all flex flex-col justify-between ${
+                          isBoarded
+                            ? 'border-emerald-300 bg-emerald-50/20'
+                            : isAbsent
+                            ? 'border-red-300 bg-red-50/20'
+                            : 'border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-base font-extrabold text-slate-800">{st.name}</span>
+                            <span
+                              className={`px-2.5 py-1 rounded-full text-xs font-extrabold ${
+                                isBoarded
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                  : isAbsent
+                                  ? 'bg-red-100 text-red-800 border border-red-200'
+                                  : 'bg-amber-100 text-amber-800 border border-amber-200'
+                              }`}
+                            >
+                              {isBoarded ? '✓ 탑승 완료' : isAbsent ? '✕ 결석 (미탑승)' : '⏳ 탑승 대기'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1.5 rounded-xl border border-blue-100 mb-3">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h8m-8 4h8m-9 8h10a2 2 0 002-2V6a2 2 0 00-2-2H7a2 2 0 00-2 2v11a2 2 0 002 2zm1-2a1 1 0 11-2 0 1 1 0 012 0zm8 0a1 1 0 11-2 0 1 1 0 012 0z" />
+                            </svg>
+                            <span>배정: {st.vehicle}</span>
+                          </div>
+
+                          <div className="space-y-1.5 text-xs text-slate-600">
+                            <div className="truncate text-slate-500" title={st.address}>
+                              📍 {st.address || '주소 미입력'}
+                            </div>
+                            {st.parentPhone && (
+                              <div className="flex items-center gap-1 text-slate-700 font-semibold">
+                                <span>📞 {st.parentPhone}</span>
+                              </div>
+                            )}
+                            {st.allergies && (
+                              <div className="text-red-600 font-bold bg-red-50 px-2 py-0.5 rounded text-[11px] border border-red-100 inline-block">
+                                ⚠️ 알레르기: {st.allergies}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Footer Status Time */}
+                        <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
+                          <span>상태 확인</span>
+                          <span className="font-bold text-slate-600">
+                            {isBoarded && st.boardedAt
+                              ? `${new Date(st.boardedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 탑승`
+                              : st.statusText}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-24 text-center bg-white rounded-3xl border border-dashed border-slate-200">
+                  <div className="w-16 h-16 rounded-full bg-slate-50 text-slate-400 mx-auto flex items-center justify-center mb-3">
+                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                  <h4 className="font-bold text-slate-700 text-sm mb-1">
+                    {homeroomStatus?.assignedClass ? `${homeroomStatus.assignedClass}에 등록된 원아가 없습니다` : '담당 반 정보가 설정되지 않았습니다'}
+                  </h4>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    담임교사 계정 설정에서 담당 반이 지정되어 있는지 확인해 주세요.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : activeNavTab === 'board' ? (
           <div className="flex-1 relative z-0 overflow-hidden h-full w-full">
             <BoardViewer
               isClosing={false}
@@ -1039,7 +1237,7 @@ export default function TeacherDashboard({
                   </div>
                   <h4 className="font-bold text-slate-700 text-sm mb-1">임시 보관된 사진이 없습니다</h4>
                   <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                    위 영역을 클릭하거나 사진 파일을 끌어다 놓아 임시 클라우드에 사진을 저장해보세요.
+                    위 영역을 클릭하거나 사진 파일을 끌어다 놓아 사진 보관함에 사진을 저장해보세요.
                   </p>
                 </div>
               )}

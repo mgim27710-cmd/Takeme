@@ -931,4 +931,81 @@ export class TeacherService {
       alert: { vehicleId: vehicle.id, vehicleName: vehicle.busNumber, driverName, lat, lng, time }
     };
   }
+
+  async getHomeroomShuttleStatus(email: string) {
+    const user = await this.userRepository.findOne({
+      where: { email },
+      relations: { academy: true }
+    });
+    if (!user) throw new BadRequestException('User not found');
+
+    const assignedClass = user.assignedClass;
+    if (!assignedClass) {
+      return { assignedClass: null, students: [], summary: { total: 0, boarded: 0, waiting: 0, absent: 0 } };
+    }
+
+    const academyId = user.academy?.id || user.academyId;
+    const overrides = await this.getActiveOverridesForToday();
+
+    const qb = this.studentRepository.createQueryBuilder('s')
+      .leftJoinAndSelect('s.assignedVehicle', 'vehicle')
+      .leftJoinAndSelect('s.parentUser', 'parentUser');
+
+    if (academyId) {
+      qb.where('s.academyId = :academyId', { academyId });
+    }
+
+    const allStudents = await qb.getMany();
+
+    const classStudents = allStudents.filter(s => {
+      const cName = s.raw ? (s.raw['반명'] || s.raw['반'] || s.raw['학급']) : null;
+      return cName === assignedClass;
+    });
+
+    const students = classStudents.map(s => {
+      const override = overrides.find(o => o.student.id === s.id);
+      let vehicleName = s.assignedVehicle?.busNumber || '미지정';
+      if (override && override.newVehicleId) {
+        vehicleName = `${override.newVehicleId}호차 (임시변경)`;
+      }
+
+      let status = 'WAITING';
+      let statusText = '탑승 대기';
+      if (s.boardStatus === 'BOARDED') {
+        status = 'BOARDED';
+        statusText = '탑승 완료';
+      } else if (s.boardStatus === 'ABSENT') {
+        status = 'ABSENT';
+        statusText = '결석 (미탑승)';
+      }
+
+      const rawPhone = s.raw ? (s.raw['학부모연락처'] || s.raw['연락처'] || s.raw['전화번호'] || '') : '';
+      const parentPhone = s.parentUser?.phone || rawPhone || '';
+
+      return {
+        id: s.id,
+        name: s.adminDisplayName || s.name,
+        vehicle: vehicleName,
+        status,
+        statusText,
+        boarded: status === 'BOARDED',
+        absent: status === 'ABSENT',
+        boardedAt: s.actualBoardTime ? new Date(s.actualBoardTime).toISOString() : null,
+        address: s.address,
+        parentPhone,
+        allergies: s.allergies || (s.raw ? s.raw['알레르기'] : '') || '',
+      };
+    });
+
+    return {
+      assignedClass,
+      students,
+      summary: {
+        total: students.length,
+        boarded: students.filter(s => s.status === 'BOARDED').length,
+        waiting: students.filter(s => s.status === 'WAITING').length,
+        absent: students.filter(s => s.status === 'ABSENT').length,
+      }
+    };
+  }
 }
