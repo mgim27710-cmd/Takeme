@@ -27,8 +27,8 @@ export class Academy {
   @Column({ nullable: true })
   kakaoPlaceId: string;
 
-  @Column({ nullable: true })
-  businessNumber: string; // 사업자 등록번호 (예: 123-45-67890)
+  @Column({ type: 'varchar', nullable: true })
+  businessNumber?: string | null; // 사업자 등록번호 (예: 123-45-67890)
 
   @OneToOne(() => User)
   @JoinColumn()
