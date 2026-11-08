@@ -16,6 +16,18 @@ export class Student {
   @Column({ nullable: true })
   adminDisplayName: string;
 
+  @Column({ nullable: true })
+  gender: string; // '남' | '여' | 'M' | 'F'
+
+  @Column({ nullable: true })
+  birthDate: string; // YYYY-MM-DD
+
+  @Column({ nullable: true })
+  className: string; // 담당 학급 / 반명 (예: 햇살반)
+
+  @Column({ type: 'varchar', nullable: true, transformer: encryptionTransformer })
+  phone: string; // 학부모/원아 연락처
+
   @Column()
   address: string;
 

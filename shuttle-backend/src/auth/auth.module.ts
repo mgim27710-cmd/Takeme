@@ -19,7 +19,8 @@ import { Vehicle } from '../entities/vehicle.entity';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
         const secret = config.get<string>('JWT_SECRET') || process.env.JWT_SECRET || 'TakemeJwtSecretKey2026!@#$%^';
-        return { secret, signOptions: { expiresIn: '15m' } };
+        const expiresIn = (config.get<string>('JWT_EXPIRES_IN') || process.env.JWT_EXPIRES_IN || '60m') as any;
+        return { secret, signOptions: { expiresIn } };
       },
     }),
   ],

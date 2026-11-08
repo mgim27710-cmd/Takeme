@@ -265,7 +265,14 @@ export class AuthService {
 
     // 2-1. 플랫폼/클라이언트 역할 제한 검증 (웹 vs 모바일 앱)
     if (clientType === 'web') {
-      if (user.role !== UserRole.ACADEMY_ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+      const allowedWebRoles: UserRole[] = [
+        UserRole.ACADEMY_ADMIN,
+        UserRole.SUPER_ADMIN,
+        UserRole.DESK_STAFF,
+        UserRole.HOMEROOM_TEACHER,
+        UserRole.TEACHER,
+      ];
+      if (!allowedWebRoles.includes(user.role)) {
         user.failedLoginAttempts = 0;
         await this.usersRepository.save(user);
         return {
@@ -276,14 +283,14 @@ export class AuthService {
         };
       }
     } else if (clientType === 'app') {
-      if (user.role === UserRole.ACADEMY_ADMIN || user.role === UserRole.SUPER_ADMIN) {
+      if (user.role === UserRole.ACADEMY_ADMIN || user.role === UserRole.SUPER_ADMIN || user.role === UserRole.DESK_STAFF) {
         user.failedLoginAttempts = 0;
         await this.usersRepository.save(user);
         return {
           success: false,
           isWebAccount: true,
           role: user.role,
-          message: '본 계정은 웹기반 계정입니다.',
+          message: '본 계정은 웹기반 관리자/데스크 계정입니다.',
         };
       }
     }
@@ -391,7 +398,12 @@ export class AuthService {
         academyId = student.academy.id;
         academyName = student.academy.name;
       }
-    } else if ((user.role === UserRole.TEACHER || user.role === UserRole.HOMEROOM_TEACHER || user.role === UserRole.SHUTTLE_TEACHER)) {
+    } else if (
+      user.role === UserRole.TEACHER ||
+      user.role === UserRole.HOMEROOM_TEACHER ||
+      user.role === UserRole.SHUTTLE_TEACHER ||
+      user.role === UserRole.DESK_STAFF
+    ) {
       const teacherUser = await this.usersRepository.findOne({
         where: { id: user.id },
         relations: { academy: true }

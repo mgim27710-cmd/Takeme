@@ -31,8 +31,11 @@ export function parseStudentRaw(student: Pick<Student, 'raw'>): Record<string, a
   return raw && typeof raw === 'object' ? raw : {};
 }
 
-/** 원아 반 이름 (raw 의 '반명' → '반' → '학급'). 없으면 빈 문자열 */
-export function getStudentClassName(student: Pick<Student, 'raw'>): string {
+/** 원아 반 이름 (student.className 우선 → 없으면 raw 의 '반명' → '반' → '학급'). 없으면 빈 문자열 */
+export function getStudentClassName(student: Pick<Student, 'raw'> & { className?: string | null }): string {
+  if (student?.className && typeof student.className === 'string' && student.className.trim().length > 0) {
+    return student.className.trim();
+  }
   const raw = parseStudentRaw(student);
   return String(raw['반명'] ?? raw['반'] ?? raw['학급'] ?? '').trim();
 }
