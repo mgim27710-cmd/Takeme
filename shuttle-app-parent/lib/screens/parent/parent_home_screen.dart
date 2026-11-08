@@ -6,7 +6,6 @@ import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
 import '../../models/student_model.dart';
 import '../../models/route_model.dart';
-import '../../models/notification_model.dart';
 import '../../widgets/kakao_map_view.dart';
 import 'change_request_modal.dart';
 import 'my_requests_screen.dart';
@@ -25,7 +24,6 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   String _activeTab = 'goto'; // 'goto' (등원) | 'gohome' (하원)
   StudentModel? _childInfo;
   RouteDataModel? _routeData;
-  List<NotificationModel> _notifications = [];
   int _unreadNotificationCount = 0;
   Timer? _notificationPollTimer;
   Map<String, dynamic>? _todaySchedule;
@@ -80,14 +78,12 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
 
     final child = await ApiService().getMyChild(user.email);
     final route = await ApiService().getParentRoute(user.email);
-    final notis = await ApiService().getNotifications(user.email);
     final schedule = await ApiService().getTodaySchedule(user.email);
 
     if (mounted) {
       setState(() {
         _childInfo = child;
         _routeData = route;
-        _notifications = notis;
         _todaySchedule = schedule;
         _isLoading = false;
         if (child != null) {
@@ -746,77 +742,6 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                             ),
                           ),
                         const SizedBox(height: 24),
-
-                        // Notification Inbox
-                        InkWell(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(builder: (_) => const NotificationListScreen()),
-                            ).then((_) {
-                              _loadUnreadCount();
-                              _loadAllData();
-                            });
-                          },
-                          child: Row(
-                            children: [
-                              const Icon(Icons.notifications_outlined, size: 18, color: Color(0xFF0F172A)),
-                              const SizedBox(width: 6),
-                              const Text(
-                                '수신함',
-                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
-                              ),
-                              const Spacer(),
-                              if (_notifications.isNotEmpty)
-                                Text(
-                                  '전체보기 (${_notifications.length})',
-                                  style: const TextStyle(fontSize: 12, color: Color(0xFF2563EB), fontWeight: FontWeight.bold),
-                                ),
-                              const Icon(Icons.chevron_right, size: 18, color: Color(0xFF94A3B8)),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-
-                        if (_notifications.isEmpty)
-                          Container(
-                            padding: const EdgeInsets.symmetric(vertical: 24),
-                            alignment: Alignment.center,
-                            child: const Text('새로운 공지나 알림이 없습니다.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
-                          )
-                        else
-                          ListView.separated(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: _notifications.length,
-                            separatorBuilder: (context, index) => const SizedBox(height: 8),
-                            itemBuilder: (ctx, idx) {
-                              final noti = _notifications[idx];
-                              return Container(
-                                padding: const EdgeInsets.all(14),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: const Color(0xFFF1F5F9)),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      DateFormat('HH:mm').format(noti.createdAt),
-                                      style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8), fontWeight: FontWeight.w600),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      noti.message,
-                                      style: const TextStyle(fontSize: 13, color: Color(0xFF334155), height: 1.4),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                        const SizedBox(height: 30),
                       ],
                     ),
                   ),

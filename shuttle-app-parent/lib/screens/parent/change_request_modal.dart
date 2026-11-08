@@ -512,92 +512,97 @@ class _ChangeRequestModalState extends State<ChangeRequestModal> {
           style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
         ),
         const SizedBox(height: 12),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: 1.25,
-          ),
-          itemCount: _types.length,
-          itemBuilder: (ctx, i) {
-            final t = _types[i];
-            final isSelected = _selectedType == t['code'];
-            return InkWell(
-              onTap: () {
-                setState(() {
-                  _selectedType = t['code'];
-                });
-              },
-              borderRadius: BorderRadius.circular(16),
-              child: Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: isSelected ? (t['bg'] as Color) : Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: isSelected ? (t['color'] as Color) : const Color(0xFFE2E8F0),
-                    width: isSelected ? 2.5 : 1,
-                  ),
-                  boxShadow: isSelected
-                      ? [
-                          BoxShadow(
-                            color: (t['color'] as Color).withValues(alpha: 0.15),
-                            blurRadius: 8,
-                            offset: const Offset(0, 4),
-                          )
-                        ]
-                      : [],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: (t['color'] as Color).withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Icon(t['icon'] as IconData, color: t['color'] as Color, size: 22),
-                        ),
-                        if (isSelected)
-                          Icon(Icons.check_circle, color: t['color'] as Color, size: 22),
-                      ],
-                    ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          t['title'] as String,
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                            color: isSelected ? (t['color'] as Color) : const Color(0xFF0F172A),
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          t['desc'] as String,
-                          style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B), height: 1.2),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+        for (int i = 0; i < _types.length; i += 2)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: _buildTypeCard(_types[i])),
+                  const SizedBox(width: 10),
+                  if (i + 1 < _types.length)
+                    Expanded(child: _buildTypeCard(_types[i + 1]))
+                  else
+                    const Spacer(),
+                ],
               ),
-            );
-          },
-        ),
+            ),
+          ),
       ],
+    );
+  }
+
+  Widget _buildTypeCard(Map<String, dynamic> t) {
+    final isSelected = _selectedType == t['code'];
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _selectedType = t['code'];
+        });
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: isSelected ? (t['bg'] as Color) : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? (t['color'] as Color) : const Color(0xFFE2E8F0),
+            width: isSelected ? 2.5 : 1,
+          ),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: (t['color'] as Color).withValues(alpha: 0.15),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  )
+                ]
+              : [],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: (t['color'] as Color).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(t['icon'] as IconData, color: t['color'] as Color, size: 22),
+                ),
+                if (isSelected)
+                  Icon(Icons.check_circle, color: t['color'] as Color, size: 22),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  t['title'] as String,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: isSelected ? (t['color'] as Color) : const Color(0xFF0F172A),
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  t['desc'] as String,
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), height: 1.25),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
