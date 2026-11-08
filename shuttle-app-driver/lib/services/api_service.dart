@@ -258,6 +258,41 @@ class ApiService {
   // ----------------------------------------------------
   // PARENT & STUDENT
   // ----------------------------------------------------
+  Future<List<NotificationModel>> getDriverNotifications() async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications');
+    final res = await getWithAuth(url);
+    if (res.statusCode == 200) {
+      final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
+      return list.map((item) => NotificationModel.fromJson(item as Map<String, dynamic>)).toList();
+    }
+    return [];
+  }
+
+  Future<int> getDriverUnreadCount() async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications/unread-count');
+    final res = await getWithAuth(url);
+    if (res.statusCode == 200) {
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      return (data['count'] as num?)?.toInt() ?? 0;
+    }
+    return 0;
+  }
+
+  Future<bool> markDriverNotificationRead({int? id, String? key}) async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications/read');
+    final body = <String, dynamic>{};
+    if (id != null) body['id'] = id;
+    if (key != null) body['key'] = key;
+    final res = await postWithAuth(url, body);
+    return res.statusCode == 200 || res.statusCode == 201;
+  }
+
+  Future<bool> markAllDriverNotificationsRead() async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications/read-all');
+    final res = await postWithAuth(url, {});
+    return res.statusCode == 200 || res.statusCode == 201;
+  }
+
   Future<List<NotificationModel>> getNotifications(String email) async {
     final url = Uri.parse('${AppConfig.apiHost}/parent/notifications?email=${Uri.encodeComponent(email)}');
     final res = await getWithAuth(url);

@@ -193,9 +193,11 @@ export class ParentService {
         let type = 'NOTICE';
         let title = '공지 알림';
         if (msg.includes('운행이 시작')) {
+          if (user.notifyShuttleOperation === false) continue;
           type = 'SHUTTLE';
           title = '셔틀 운행 시작';
         } else if (msg.includes('운행이 종료')) {
+          if (user.notifyShuttleOperation === false) continue;
           type = 'SHUTTLE';
           title = '셔틀 운행 종료';
         } else if (msg.includes('탑승')) {
@@ -244,7 +246,7 @@ export class ParentService {
 
     // 3. New Board Posts (새 알림장 글)
     const academyId = student?.academy?.id || user.academyId;
-    if (academyId) {
+    if (academyId && user.notifyBoardPost !== false) {
       const className = student ? getStudentClassName(student) : null;
       const postQb = this.boardPostRepository.createQueryBuilder('post')
         .where('post.academyId = :aid', { aid: academyId });
@@ -300,6 +302,34 @@ export class ParentService {
       .catch(() => {});
 
     return { success: true };
+  }
+
+  async getNotificationSettings(email: string) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('User not found');
+    return {
+      notifyShuttleOperation: user.notifyShuttleOperation !== false,
+      notifyBoardPost: user.notifyBoardPost !== false,
+    };
+  }
+
+  async updateNotificationSettings(email: string, settings: { notifyShuttleOperation?: boolean; notifyBoardPost?: boolean }) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('User not found');
+    if (settings.notifyShuttleOperation !== undefined) {
+      user.notifyShuttleOperation = !!settings.notifyShuttleOperation;
+    }
+    if (settings.notifyBoardPost !== undefined) {
+      user.notifyBoardPost = !!settings.notifyBoardPost;
+    }
+    await this.userRepository.save(user);
+    return {
+      success: true,
+      settings: {
+        notifyShuttleOperation: user.notifyShuttleOperation !== false,
+        notifyBoardPost: user.notifyBoardPost !== false,
+      },
+    };
   }
 
   async getRoute(email: string) {

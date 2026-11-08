@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
+import '../../services/socket_service.dart';
 import '../settings_screen.dart';
 import '../staff/teacher_board_view.dart';
 import '../staff/teacher_message_view.dart';
 import 'homeroom_attendance_view.dart';
 import 'homeroom_change_requests_view.dart';
+import 'teacher_notification_screen.dart';
 
 class HomeroomTeacherHomeScreen extends StatefulWidget {
   const HomeroomTeacherHomeScreen({super.key});
@@ -16,6 +19,78 @@ class HomeroomTeacherHomeScreen extends StatefulWidget {
 class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
   int _selectedTabIndex = 0;
   bool _isRefreshing = false;
+  int _unreadNotificationCount = 0;
+  Timer? _notificationPollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUnreadCount();
+    _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) => _loadUnreadCount());
+    SocketService().connect(ApiService().token);
+    SocketService().onNotificationReceived((_) {
+      if (mounted) _loadUnreadCount();
+    });
+  }
+
+  @override
+  void dispose() {
+    _notificationPollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadUnreadCount() async {
+    try {
+      final count = await ApiService().getTeacherUnreadCount();
+      if (mounted) setState(() => _unreadNotificationCount = count);
+    } catch (_) {}
+  }
+
+  Widget _buildNotificationButton() {
+    return Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.center,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.notifications, color: Color(0xFF0F172A), size: 24),
+          tooltip: '알림',
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const TeacherNotificationScreen()),
+            ).then((_) => _loadUnreadCount());
+          },
+        ),
+        if (_unreadNotificationCount > 0)
+          Positioned(
+            right: 4,
+            bottom: 4,
+            child: IgnorePointer(
+              child: Container(
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                alignment: Alignment.center,
+                child: Text(
+                  _unreadNotificationCount > 9 ? '9+' : '$_unreadNotificationCount',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    height: 1,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -35,6 +110,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
           backgroundColor: Colors.white,
           elevation: 0,
           actions: [
+            _buildNotificationButton(),
             IconButton(
               icon: const Icon(Icons.settings_outlined, color: Color(0xFF475569)),
               onPressed: () {
@@ -170,6 +246,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
         backgroundColor: Colors.white,
         elevation: 0,
         actions: [
+          _buildNotificationButton(),
           IconButton(
             icon: const Icon(Icons.settings_outlined, color: Color(0xFF475569)),
             onPressed: () {

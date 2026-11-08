@@ -71,6 +71,12 @@ export class User {
   @Column({ type: 'simple-array', nullable: true })
   readNotificationKeys: string[];
 
+  @Column({ default: true })
+  notifyShuttleOperation: boolean; // 기사 운행 알림 수신 여부 (기본 켜짐)
+
+  @Column({ default: true })
+  notifyBoardPost: boolean; // 담임 알림장 알림 수신 여부 (기본 켜짐)
+
   @CreateDateColumn()
   createdAt: Date;
 

@@ -82,6 +82,21 @@ export class ParentController {
     return this.parentService.readAllNotifications(email);
   }
 
+  @Get('notification-settings')
+  async getNotificationSettings(@AuthEmail() email: string) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.getNotificationSettings(email);
+  }
+
+  @Post('notification-settings')
+  async updateNotificationSettings(
+    @AuthEmail() email: string,
+    @Body() body: { notifyShuttleOperation?: boolean; notifyBoardPost?: boolean }
+  ) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.updateNotificationSettings(email, body);
+  }
+
   @Get('route')
   async getRoute(@AuthEmail() email: string) {
     if (!email) throw new BadRequestException('Email is required');

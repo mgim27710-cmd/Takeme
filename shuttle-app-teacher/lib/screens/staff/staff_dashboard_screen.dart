@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,7 @@ import '../../models/student_model.dart';
 import '../../models/route_model.dart';
 import '../../widgets/kakao_map_view.dart';
 import '../settings_screen.dart';
+import '../teacher/teacher_notification_screen.dart';
 
 class StaffDashboardScreen extends StatefulWidget {
   const StaffDashboardScreen({super.key});
@@ -28,6 +30,8 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   String? _escortName;
   String? _escortConfirmedAt;
   bool _isCheckingIn = false;
+  int _unreadNotificationCount = 0;
+  Timer? _notificationPollTimer;
 
   int _currentRunNumber = 1;
   bool _isBottomPanelExpanded = false;
@@ -46,15 +50,29 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     super.initState();
     _initTts();
     _loadAllData();
+    _loadUnreadCount();
+    _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) => _loadUnreadCount());
+    SocketService().connect(ApiService().token);
+    SocketService().onNotificationReceived((_) {
+      if (mounted) _loadUnreadCount();
+    });
   }
 
   @override
   void dispose() {
+    _notificationPollTimer?.cancel();
     _scrollController.dispose();
     _broadcastMessageController.dispose();
     _memoController.dispose();
     _flutterTts.stop();
     super.dispose();
+  }
+
+  Future<void> _loadUnreadCount() async {
+    try {
+      final count = await ApiService().getTeacherUnreadCount();
+      if (mounted) setState(() => _unreadNotificationCount = count);
+    } catch (_) {}
   }
 
   void _initTts() async {
@@ -613,6 +631,49 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
           IconButton(
             icon: const Icon(Icons.refresh, color: Color(0xFF64748B)),
             onPressed: _loadAllData,
+          ),
+          Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications, color: Color(0xFF0F172A), size: 24),
+                tooltip: '알림',
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const TeacherNotificationScreen()),
+                  ).then((_) => _loadUnreadCount());
+                },
+              ),
+              if (_unreadNotificationCount > 0)
+                Positioned(
+                  right: 4,
+                  bottom: 4,
+                  child: IgnorePointer(
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEF4444),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                      alignment: Alignment.center,
+                      child: Text(
+                        _unreadNotificationCount > 9 ? '9+' : '$_unreadNotificationCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          height: 1,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
           IconButton(
             icon: const Icon(Icons.settings_outlined, color: Color(0xFF475569)),

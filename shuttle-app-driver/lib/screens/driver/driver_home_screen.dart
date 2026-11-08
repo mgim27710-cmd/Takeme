@@ -15,6 +15,7 @@ import '../settings_screen.dart';
 import '../login_screen.dart';
 import '../../services/api_service.dart';
 import 'operation_log_screen.dart';
+import 'driver_notification_screen.dart';
 
 /// 기사 전용 화면 (팀 앱과 같은 크기·글꼴)
 /// - 1단계(운행 준비): 전체 지도 + 하단 준비 패널('경로 탐색' 버튼)
@@ -63,6 +64,15 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
   io_client.Socket? _escortSocket;
   String? _changeBannerText;
   Timer? _changeBannerTimer;
+  int _unreadNotificationCount = 0;
+  Timer? _notificationPollTimer;
+
+  Future<void> _loadUnreadCount() async {
+    try {
+      final count = await ApiService().getDriverUnreadCount();
+      if (mounted) setState(() => _unreadNotificationCount = count);
+    } catch (_) {}
+  }
 
   void _showChangeBanner(String text) {
     _changeBannerTimer?.cancel();
@@ -83,6 +93,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     _map = NavMapController();
     _nav = DriverNavigator(_map)..init();
     _initEscortSocket();
+    _loadUnreadCount();
+    _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) => _loadUnreadCount());
     _ticker = Timer.periodic(const Duration(seconds: 2), (_) {
       if (!mounted) return;
       if (_nav.driving) {
@@ -129,6 +141,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
 
     _escortSocket!.on('escortConfirmed', (data) {
       if (!mounted) return;
+      _loadUnreadCount();
       setState(() {
         if (data is Map) {
           _escortName = data['escortName']?.toString();
@@ -140,6 +153,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
 
     _escortSocket!.on('changeRequestDecided', (data) {
       if (!mounted) return;
+      _loadUnreadCount();
       if (data is Map) {
         final studentName = data['studentName']?.toString() ?? '원아';
         final status = data['status']?.toString();
@@ -168,6 +182,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
         }
       }
     });
+
+    _escortSocket!.on('notificationReceived', (_) {
+      if (mounted) _loadUnreadCount();
+    });
   }
 
   Future<void> _fetchEscortStatus() async {
@@ -192,6 +210,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     if (state == AppLifecycleState.resumed) {
       _nav.refreshOverlayPermission();
       _fetchEscortStatus();
+      _loadUnreadCount();
     }
   }
 
@@ -199,6 +218,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
+    _notificationPollTimer?.cancel();
     _changeBannerTimer?.cancel();
     _flutterTts.stop();
     _escortSocket?.disconnect();
@@ -552,7 +572,52 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                             : (_nav.vehicleName.isEmpty ? '기사님 운행 대시보드' : '${_nav.vehicleName} 운행 준비')),
                     style: TextStyle(color: _nav.testMode ? _C.orange : _C.slate800),
                   ),
-                  actions: [_menu()],
+                  actions: [
+                    Stack(
+                      clipBehavior: Clip.none,
+                      alignment: Alignment.center,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.notifications, color: Color(0xFF0F172A), size: 24),
+                          tooltip: '알림',
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const DriverNotificationScreen()),
+                            ).then((_) => _loadUnreadCount());
+                          },
+                        ),
+                        if (_unreadNotificationCount > 0)
+                          Positioned(
+                            right: 4,
+                            bottom: 4,
+                            child: IgnorePointer(
+                              child: Container(
+                                padding: const EdgeInsets.all(3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFEF4444),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white, width: 2),
+                                ),
+                                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  _unreadNotificationCount > 9 ? '9+' : '$_unreadNotificationCount',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w900,
+                                    height: 1,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    _menu(),
+                  ],
                   bottom: PreferredSize(
                     preferredSize: const Size.fromHeight(1),
                     child: Container(color: _C.slate100, height: 1),

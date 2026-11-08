@@ -200,6 +200,19 @@ class SocketService {
     });
   }
 
+  void onNotificationReceived(Function(Map<String, dynamic> data) callback) {
+    _socket?.off('notificationReceived');
+    _socket?.on('notificationReceived', (data) {
+      if (data is Map<String, dynamic>) {
+        callback(data);
+      } else if (data is Map) {
+        callback(Map<String, dynamic>.from(data));
+      } else {
+        callback(<String, dynamic>{});
+      }
+    });
+  }
+
   void disconnect() {
     _socket?.disconnect();
     _socket = null;

@@ -36,6 +36,34 @@ export class TeacherController {
     return this.teacherService.getInbox(email);
   }
 
+  @Get('notifications')
+  async getNotifications(@AuthEmail() email: string) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.getTeacherNotifications(email);
+  }
+
+  @Get('notifications/unread-count')
+  async getUnreadNotificationCount(@AuthEmail() email: string) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.getTeacherUnreadCount(email);
+  }
+
+  @Post('notifications/read-all')
+  async readAllNotifications(@AuthEmail() email: string) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.markAllTeacherNotificationsRead(email);
+  }
+
+  @Post('notifications/read')
+  async readNotification(
+    @AuthEmail() email: string,
+    @Body('id') id?: number,
+    @Body('key') key?: string,
+  ) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.markTeacherNotificationRead(email, id, key);
+  }
+
   @Get('operation-logs')
   async getOperationLogs(@AuthEmail() email: string, @Query('month') month: string) {
     if (!email) throw new BadRequestException('이메일이 필요합니다.');

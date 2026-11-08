@@ -523,6 +523,29 @@ export class TeacherService {
       }
     }
 
+    // 기사 대상 알림 생성
+    try {
+      const escortNoti = this.notificationRepository.create({
+        vehicle,
+        recipient: vehicle.driverUser || undefined,
+        recipientRole: 'DRIVER',
+        type: 'ESCORT_CONFIRMED',
+        message: `${escortName} 지도교사가 동승 확인을 완료하였습니다.`,
+        academy: vehicle.academy || undefined,
+      });
+      await this.notificationRepository.save(escortNoti);
+
+      if (vehicle.driverUser && this.locationGateway?.server) {
+        this.locationGateway.server.to(`user_${vehicle.driverUser.id}`).emit('notificationReceived', {
+          id: escortNoti.id,
+          title: '동승 확인 완료',
+          message: escortNoti.message,
+          type: 'ESCORT_CONFIRMED',
+          createdAt: escortNoti.createdAt,
+        });
+      }
+    } catch (_) {}
+
     return { success: true, escortName, confirmedAt };
   }
 
@@ -584,9 +607,14 @@ export class TeacherService {
     if (!user) throw new BadRequestException('User not found');
     const vehicle = await this.findAssignedVehicle(user.id);
     if (vehicle) {
+      const busName = (vehicle.busNumber || '').trim().endsWith('호차')
+        ? (vehicle.busNumber || '').trim()
+        : `${(vehicle.busNumber || '셔틀').trim()}호차`;
+
       const noti = this.notificationRepository.create({
         vehicle: vehicle,
-        message: `${vehicle.busNumber}호차 운행이 시작되었습니다. (${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})`
+        message: `${busName} 운행이 시작되었습니다.`,
+        type: 'SHUTTLE',
       });
       await this.notificationRepository.save(noti);
 
@@ -612,9 +640,14 @@ export class TeacherService {
     if (!user) throw new BadRequestException('User not found');
     const vehicle = await this.findAssignedVehicle(user.id);
     if (vehicle) {
+      const busName = (vehicle.busNumber || '').trim().endsWith('호차')
+        ? (vehicle.busNumber || '').trim()
+        : `${(vehicle.busNumber || '셔틀').trim()}호차`;
+
       const noti = this.notificationRepository.create({
         vehicle: vehicle,
-        message: `${vehicle.busNumber}호차 운행이 종료되었습니다. (${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})`
+        message: `${busName} 운행이 종료되었습니다.`,
+        type: 'SHUTTLE',
       });
       await this.notificationRepository.save(noti);
 
@@ -1299,5 +1332,151 @@ export class TeacherService {
       submission: savedSubmission,
       message: `${assignedClass} 출석부가 성공적으로 제출되었습니다.`,
     };
+  }
+
+  /**
+   * 교사/기사용 알림 목록 조회
+   */
+  async getTeacherNotifications(email: string) {
+    const user = await this.userRepository.findOne({
+      where: { email },
+      relations: { academy: true },
+    });
+    if (!user) throw new BadRequestException('User not found');
+
+    const readKeys = new Set(Array.isArray(user.readNotificationKeys) ? user.readNotificationKeys : []);
+    const items: Array<{
+      id: number;
+      key: string;
+      title: string;
+      message: string;
+      type: string;
+      isRead: boolean;
+      createdAt: Date;
+    }> = [];
+
+    const assignedVehicle = await this.findAssignedVehicle(user.id);
+
+    // 1. Notification entity
+    const notiQb = this.notificationRepository.createQueryBuilder('noti')
+      .leftJoinAndSelect('noti.vehicle', 'vehicle')
+      .leftJoinAndSelect('noti.approvalRequest', 'approvalRequest')
+      .leftJoinAndSelect('approvalRequest.student', 'student')
+      .where('noti.recipientId = :uid', { uid: user.id });
+
+    if (assignedVehicle) {
+      notiQb.orWhere('(noti.vehicleId = :vid AND noti.type IN (:...vTypes))', {
+        vid: assignedVehicle.id,
+        vTypes: ['SCHEDULE_CHANGE', 'ESCORT_CONFIRMED', 'APPROVAL_RESULT', 'NOTICE'],
+      });
+    }
+
+    if (user.role === 'HOMEROOM_TEACHER' && user.assignedClass) {
+      notiQb.orWhere('(noti.recipientRole = :rRole AND noti.academyId = :aid)', {
+        rRole: 'HOMEROOM_TEACHER',
+        aid: user.academy?.id,
+      });
+    }
+
+    const notis = await notiQb.orderBy('noti.createdAt', 'DESC').take(30).getMany();
+
+    for (const n of notis) {
+      const key = `n_${n.id}`;
+      let title = '공지 알림';
+      if (n.type === 'ESCORT_CONFIRMED') title = '동승 확인';
+      else if (n.type === 'SCHEDULE_CHANGE' || n.type === 'APPROVAL_RESULT') title = '통학 변동 안내';
+      else if (n.type === 'APPROVAL_REQUEST') title = '통학 변경 신청';
+      else if (n.message && (n.message.includes('운행이 시작') || n.message.includes('운행이 종료'))) title = '운행 알림';
+
+      items.push({
+        id: n.id,
+        key,
+        title,
+        message: n.message,
+        type: n.type,
+        isRead: n.isRead || readKeys.has(key),
+        createdAt: n.createdAt,
+      });
+    }
+
+    // 2. Direct Messages (Admin / Parent messages)
+    const msgQb = this.messageRepository.createQueryBuilder('msg')
+      .leftJoinAndSelect('msg.student', 'student')
+      .where('msg.receiverUserId = :uid', { uid: user.id });
+
+    if (user.role === 'DRIVER') {
+      msgQb.orWhere("msg.targetRoles LIKE :dRole", { dRole: '%DRIVER%' });
+    } else if (user.role === 'HOMEROOM_TEACHER' || user.role === 'TEACHER') {
+      msgQb.orWhere("msg.targetRoles LIKE :tRole", { tRole: '%TEACHER%' });
+    }
+
+    const msgs = await msgQb.orderBy('msg.createdAt', 'DESC').take(30).getMany();
+
+    for (const m of msgs) {
+      const key = `m_${m.id}`;
+      const senderTitle = m.student ? `${m.student.name} 학부모 메시지` : '기관 관리자 메시지';
+      items.push({
+        id: m.id,
+        key,
+        title: senderTitle,
+        message: m.message,
+        type: 'MESSAGE',
+        isRead: m.isRead || readKeys.has(key),
+        createdAt: m.createdAt,
+      });
+    }
+
+    items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return items.slice(0, 50);
+  }
+
+  async getTeacherUnreadCount(email: string): Promise<{ count: number }> {
+    const list = await this.getTeacherNotifications(email);
+    const unread = list.filter(item => !item.isRead);
+    return { count: unread.length };
+  }
+
+  async markAllTeacherNotificationsRead(email: string) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('User not found');
+
+    const list = await this.getTeacherNotifications(email);
+    const keys = list.map(item => item.key);
+    const existingKeys = new Set(Array.isArray(user.readNotificationKeys) ? user.readNotificationKeys : []);
+    keys.forEach(k => existingKeys.add(k));
+
+    user.readNotificationKeys = Array.from(existingKeys);
+    await this.userRepository.save(user);
+
+    const notiIds = list.filter(item => item.key.startsWith('n_')).map(item => item.id);
+    if (notiIds.length > 0) {
+      await this.notificationRepository.createQueryBuilder()
+        .update(Notification)
+        .set({ isRead: true })
+        .whereInIds(notiIds)
+        .execute()
+        .catch(() => {});
+    }
+
+    return { success: true };
+  }
+
+  async markTeacherNotificationRead(email: string, id?: number, key?: string) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('User not found');
+
+    const notiKey = key || (id ? `n_${id}` : undefined);
+    const existingKeys = new Set(Array.isArray(user.readNotificationKeys) ? user.readNotificationKeys : []);
+    if (notiKey) {
+      existingKeys.add(notiKey);
+      user.readNotificationKeys = Array.from(existingKeys);
+      await this.userRepository.save(user);
+    }
+
+    if (id) {
+      await this.notificationRepository.update(id, { isRead: true }).catch(() => {});
+    }
+
+    return { success: true };
   }
 }

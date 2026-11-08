@@ -280,6 +280,44 @@ class ApiService {
   }
 
   // ----------------------------------------------------
+  // TEACHER NOTIFICATIONS
+  // ----------------------------------------------------
+  Future<List<NotificationModel>> getTeacherNotifications() async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications');
+    final res = await getWithAuth(url);
+    if (res.statusCode == 200) {
+      final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
+      return list.map((item) => NotificationModel.fromJson(item as Map<String, dynamic>)).toList();
+    }
+    return [];
+  }
+
+  Future<int> getTeacherUnreadCount() async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications/unread-count');
+    final res = await getWithAuth(url);
+    if (res.statusCode == 200) {
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      return (data['count'] as num?)?.toInt() ?? 0;
+    }
+    return 0;
+  }
+
+  Future<bool> markTeacherNotificationRead({int? id, String? key}) async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications/read');
+    final body = <String, dynamic>{};
+    if (id != null) body['id'] = id;
+    if (key != null) body['key'] = key;
+    final res = await postWithAuth(url, body);
+    return res.statusCode == 200 || res.statusCode == 201;
+  }
+
+  Future<bool> markAllTeacherNotificationsRead() async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications/read-all');
+    final res = await postWithAuth(url, {});
+    return res.statusCode == 200 || res.statusCode == 201;
+  }
+
+  // ----------------------------------------------------
   // PARENT & STUDENT
   // ----------------------------------------------------
   Future<List<NotificationModel>> getNotifications(String email) async {

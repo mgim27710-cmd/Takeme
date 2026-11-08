@@ -117,6 +117,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
         );
       });
 
+      SocketService().onNotificationReceived((_) {
+        if (mounted) _loadUnreadCount();
+      });
+
       _loadUnreadCount();
     }
   }
@@ -351,10 +355,12 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
             },
           ),
           Stack(
+            clipBehavior: Clip.none,
             alignment: Alignment.center,
             children: [
               IconButton(
-                icon: const Icon(Icons.notifications_outlined, color: Color(0xFF475569)),
+                icon: const Icon(Icons.notifications, color: Color(0xFF0F172A), size: 24),
+                tooltip: '알림',
                 onPressed: () {
                   Navigator.push(
                     context,
@@ -367,23 +373,24 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
               ),
               if (_unreadNotificationCount > 0)
                 Positioned(
-                  right: 6,
-                  top: 8,
+                  right: 4,
+                  bottom: 4,
                   child: IgnorePointer(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      padding: const EdgeInsets.all(3),
                       decoration: BoxDecoration(
                         color: const Color(0xFFEF4444),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.white, width: 1.5),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
                       ),
-                      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                      alignment: Alignment.center,
                       child: Text(
                         _unreadNotificationCount > 9 ? '9+' : '$_unreadNotificationCount',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 10,
-                          fontWeight: FontWeight.bold,
+                          fontWeight: FontWeight.w900,
                           height: 1,
                         ),
                         textAlign: TextAlign.center,

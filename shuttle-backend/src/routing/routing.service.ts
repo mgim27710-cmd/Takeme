@@ -2206,7 +2206,7 @@ export class RoutingService {
       content: body.content,
       imageUrl: toStoredMediaRef(body.imageUrl) || null,
       images: toStoredMediaRefs(body.images),
-      authorName: body.authorName || '원장선생님',
+      authorName: body.authorName || '기관 관리자',
       authorRole,
       visibility: body.visibility || 'ALL',
       targetClass,
@@ -2216,6 +2216,9 @@ export class RoutingService {
       likedUserIds: [],
     } as any);
     const saved = (await this.boardPostRepository.save(post)) as unknown as BoardPost;
+    if (academy?.id) {
+      this.notifyRouteUpdated(academy.id, '새 알림장이 등록되었습니다.');
+    }
     return this.hydratePostMedia(saved);
   }
 
