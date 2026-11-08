@@ -133,6 +133,20 @@ class ApiService {
     return res;
   }
 
+  Future<http.Response> putWithAuth(Uri url, dynamic body, [Map<String, String>? extra]) async {
+    final encoded = body is String ? body : jsonEncode(body);
+    var res = await http.put(url, headers: _headers(extra), body: encoded);
+    if (res.statusCode == 401 && _refreshToken != null) {
+      final refreshed = await tryRefreshToken();
+      if (refreshed) {
+        res = await http.put(url, headers: _headers(extra), body: encoded);
+      } else {
+        await logout();
+      }
+    }
+    return res;
+  }
+
   Future<http.Response> deleteWithAuth(Uri url, [Map<String, String>? extra]) async {
     var res = await http.delete(url, headers: _headers(extra));
     if (res.statusCode == 401 && _refreshToken != null) {
@@ -600,6 +614,32 @@ class ApiService {
       };
     } catch (e) {
       return {'success': false, 'message': '댓글 작성에 실패했습니다.'};
+    }
+  }
+
+  Future<Map<String, dynamic>> updateBoardPost(int postId, {
+    String? title,
+    String? content,
+    String? visibility,
+    String? targetClass,
+    List<String>? images,
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId');
+      final body = <String, dynamic>{};
+      if (title != null) body['title'] = title;
+      if (content != null) body['content'] = content;
+      if (visibility != null) body['visibility'] = visibility;
+      if (targetClass != null) body['targetClass'] = targetClass;
+      if (images != null) body['images'] = images;
+      final res = await putWithAuth(url, body);
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'data': data,
+      };
+    } catch (e) {
+      return {'success': false, 'message': '게시글 수정에 실패했습니다.'};
     }
   }
 

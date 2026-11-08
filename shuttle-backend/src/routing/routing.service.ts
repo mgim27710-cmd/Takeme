@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
@@ -2208,6 +2208,7 @@ export class RoutingService {
       images: toStoredMediaRefs(body.images),
       authorName: body.authorName || '기관 관리자',
       authorRole,
+      authorUserId: userId || null,
       visibility: body.visibility || 'ALL',
       targetClass,
       className: targetClass,
@@ -2229,9 +2230,13 @@ export class RoutingService {
     images?: string[];
     visibility?: string;
     targetClass?: string;
-  }) {
+  }, userId?: number, userRole?: string) {
     const post = await this.boardPostRepository.findOne({ where: { id } });
     if (!post) throw new BadRequestException('게시글을 찾을 수 없습니다.');
+    const isAdmin = userRole === 'ADMIN' || userRole === 'ACADEMY_ADMIN';
+    if (!isAdmin && userId && post.authorUserId && post.authorUserId !== userId) {
+      throw new ForbiddenException('작성자 본인 또는 기관 관리자만 수정할 수 있습니다.');
+    }
     if (body.title !== undefined) post.title = body.title;
     if (body.content !== undefined) post.content = body.content;
     if (body.imageUrl !== undefined) (post as any).imageUrl = toStoredMediaRef(body.imageUrl) || null;
@@ -2242,7 +2247,13 @@ export class RoutingService {
     return this.hydratePostMedia(saved);
   }
 
-  async deleteBoardPost(id: number) {
+  async deleteBoardPost(id: number, userId?: number, userRole?: string) {
+    const post = await this.boardPostRepository.findOne({ where: { id } });
+    if (!post) throw new BadRequestException('게시글을 찾을 수 없습니다.');
+    const isAdmin = userRole === 'ADMIN' || userRole === 'ACADEMY_ADMIN';
+    if (!isAdmin && userId && post.authorUserId && post.authorUserId !== userId) {
+      throw new ForbiddenException('작성자 본인 또는 기관 관리자만 삭제할 수 있습니다.');
+    }
     await this.boardPostRepository.delete(id);
     return { success: true };
   }
