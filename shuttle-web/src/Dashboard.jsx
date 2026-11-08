@@ -3208,6 +3208,18 @@ const parseKindergartenExcelSheet = (sheet) => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
           </svg>
         </button>
+        <button 
+          onClick={() => handleTabChange('teacher_web')} 
+          className={`relative p-4 rounded-2xl transition-all ${activeTab === 'teacher_web' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} 
+          title="담임교사 웹 화면 (출결·원아 명단·결재)"
+        >
+          {/* 교사/학사모 아이콘 */}
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l9-5-9-5-9 5 9 5z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14v7" />
+          </svg>
+        </button>
         <button onClick={() => handleTabChange('log')} className={`p-4 rounded-2xl transition-all ${activeTab === 'log' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="캘린더 및 로그보기">
           {/* 캘린더 달력 아이콘 */}
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3247,7 +3259,7 @@ const parseKindergartenExcelSheet = (sheet) => {
       </div>
 
       {/* Sidebar Content Panel */}
-      <div className={`bg-white shadow-lg z-10 flex flex-col w-[380px] shrink-0 break-keep ${activeTab === 'messages' ? 'hidden' : ''}`}>
+      <div className={`bg-white shadow-lg z-10 flex flex-col w-[380px] shrink-0 break-keep ${(activeTab === 'messages' || activeTab === 'teacher_web') ? 'hidden' : ''}`}>
 
         {(activeTab === 'status' || activeTab === 'buses') && (
           <div className="p-6 h-full flex flex-col overflow-y-auto break-keep">
@@ -3449,15 +3461,29 @@ const parseKindergartenExcelSheet = (sheet) => {
                 sortedBuses.map(bus => {
                   const isSelected = selectedBusId === bus.id;
                   const busStudents = students.filter(st => st.assignedBusId === bus.id);
+                  const capacity = Number(bus.capacity) || 25;
+                  const isFull = busStudents.length >= capacity;
+                  const isOverCapacity = busStudents.length > capacity;
 
                   return (
                     <div 
                       key={bus.id} 
-                      className={`p-4 border rounded-2xl transition-all shadow-xs ${
-                        isSelected 
-                          ? 'border-blue-500 bg-blue-50/20 ring-2 ring-blue-100' 
-                          : 'border-slate-200 bg-white hover:border-slate-300'
+                      className={`p-4 border rounded-2xl transition-all shadow-xs relative overflow-hidden ${
+                        isOverCapacity
+                          ? 'border-rose-400 bg-rose-50/30 ring-2 ring-rose-200'
+                          : isFull
+                            ? 'border-amber-400 bg-amber-50/20 ring-1 ring-amber-200'
+                            : isSelected 
+                              ? 'border-blue-500 bg-blue-50/20 ring-2 ring-blue-100' 
+                              : 'border-slate-200 bg-white hover:border-slate-300'
                       }`}
+                      style={
+                        isOverCapacity
+                          ? { backgroundImage: 'repeating-linear-gradient(45deg, rgba(254, 226, 226, 0.4), rgba(254, 226, 226, 0.4) 10px, rgba(255, 255, 255, 0.9) 10px, rgba(255, 255, 255, 0.9) 20px)' }
+                          : isFull
+                            ? { backgroundImage: 'repeating-linear-gradient(45deg, rgba(241, 245, 249, 0.7), rgba(241, 245, 249, 0.7) 10px, rgba(255, 255, 255, 0.9) 10px, rgba(255, 255, 255, 0.9) 20px)' }
+                            : {}
+                      }
                     >
                       {/* Bus Card Header */}
                       <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
@@ -3479,20 +3505,30 @@ const parseKindergartenExcelSheet = (sheet) => {
                                   운행중
                                 </span>
                               )}
+                              {/* Capacity Badge */}
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-black border ${
+                                isOverCapacity
+                                  ? 'bg-rose-100 text-rose-700 border-rose-300 animate-pulse'
+                                  : isFull
+                                    ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              }`}>
+                                {busStudents.length}/{capacity} {isOverCapacity ? `초과 (+${busStudents.length - capacity})` : isFull ? '만석(빗금)' : '탑승가능'}
+                              </span>
                             </div>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0">
                           <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingBus(bus);
-                          }}
-                          className="text-xs bg-slate-100 text-slate-700 font-bold px-2.5 py-1.5 rounded-lg hover:bg-blue-50 hover:text-blue-600 transition-colors whitespace-nowrap shrink-0 border border-slate-200/80"
-                        >
-                          상세 설정
-                        </button>
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingBus(bus);
+                            }}
+                            className="text-xs bg-slate-100 text-slate-700 font-bold px-2.5 py-1.5 rounded-lg hover:bg-blue-50 hover:text-blue-600 transition-colors whitespace-nowrap shrink-0 border border-slate-200/80 cursor-pointer"
+                          >
+                            상세 설정
+                          </button>
                           <button 
                             type="button"
                             onClick={(e) => {
@@ -3509,29 +3545,61 @@ const parseKindergartenExcelSheet = (sheet) => {
 
                       {/* Info Summary Grid */}
                       <div className="grid grid-cols-2 gap-2 text-xs mb-3">
-                        <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                          <span className="text-slate-400 block text-xs font-medium">기사님</span>
+                        <div className="bg-slate-50/90 p-2 rounded-xl border border-slate-100">
+                          <span className="text-slate-400 block text-[11px] font-medium">기사님</span>
                           <span className="font-bold text-slate-800 truncate block mt-0.5">
                             {bus.driverName || '미등록'}
                           </span>
                         </div>
-                        <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                          <span className="text-slate-400 block text-xs font-medium">지도교사</span>
+                        <div className="bg-slate-50/90 p-2 rounded-xl border border-slate-100">
+                          <span className="text-slate-400 block text-[11px] font-medium">지도교사</span>
                           <span className="font-bold text-slate-800 truncate block mt-0.5">
                             {bus.teacherName || '미등록'}
                           </span>
                         </div>
                       </div>
 
+                      {/* Overcapacity Auto-Rebalance Action Banner */}
+                      {isOverCapacity && (
+                        <div className="mb-3 p-2.5 bg-rose-50 border border-rose-200 rounded-xl space-y-1.5">
+                          <div className="flex items-center justify-between text-xs text-rose-800 font-bold">
+                            <span>정원 초과 경고 (+{busStudents.length - capacity}명)</span>
+                            <span className="text-[10px] bg-rose-200 text-rose-900 px-1.5 py-0.5 rounded">과밀 위험</span>
+                          </div>
+                          <p className="text-[11px] text-rose-700 leading-tight">
+                            정원 {capacity}명을 초과하였습니다. 외곽 탑승 학생을 인접 여유 호차로 즉시 자동 재배정할 수 있습니다.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAutoRebalance(bus);
+                            }}
+                            className="w-full py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-black transition flex items-center justify-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                            </svg>
+                            <span>인접 여유 호차로 원아 자동 재배정</span>
+                          </button>
+                        </div>
+                      )}
+
                       {/* Zone & Students Status Bar */}
                       <div 
-                        className="flex items-center justify-between text-xs cursor-pointer p-2 rounded-xl bg-slate-50/70 hover:bg-slate-100/70 transition-colors"
+                        className="flex items-center justify-between text-xs cursor-pointer p-2 rounded-xl bg-slate-50/80 hover:bg-slate-100/80 transition-colors"
                         onClick={() => setSelectedBusId(isSelected ? null : bus.id)}
                       >
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-slate-700">배정 원아</span>
-                          <span className="bg-blue-100 text-blue-700 font-bold px-1.5 py-0.2 rounded text-xs">
-                            {busStudents.length}명
+                          <span className={`font-black px-1.5 py-0.2 rounded text-xs ${
+                            isOverCapacity 
+                              ? 'bg-rose-100 text-rose-700' 
+                              : isFull 
+                                ? 'bg-amber-100 text-amber-800' 
+                                : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            {busStudents.length}/{capacity}명
                           </span>
                         </div>
                         <div className="flex items-center gap-1 text-slate-400">
@@ -3547,18 +3615,41 @@ const parseKindergartenExcelSheet = (sheet) => {
                         <div className="mt-3 border-t border-slate-100 pt-3 space-y-1.5">
                           <div className="text-xs font-bold text-slate-500 flex justify-between px-1 mb-1">
                             <span>배정 학생 명단</span>
-                            <span>{busStudents.length}명</span>
+                            <span>{busStudents.length}명 ({isOverCapacity ? '초과 탑승원아 표시' : '정상'})</span>
                           </div>
                           {busStudents.length > 0 ? (
-                            <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
-                              {busStudents.map(st => (
-                                <div key={st.id} className="text-xs flex justify-between items-center bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                  <span className="font-bold text-slate-700 truncate">{st.name}</span>
-                                  <span className="text-slate-400 truncate max-w-[150px] text-right" title={st.address || st.boardingLocation}>
-                                    {st.boardingLocation || st.address || '위치 미등록'}
-                                  </span>
-                                </div>
-                              ))}
+                            <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
+                              {busStudents.map((st, idx) => {
+                                const isOverLimitStudent = idx >= capacity;
+                                const isTemporary = Boolean(st.isTemporaryRide || st.isSingleDayRide || st.raw?.['일일탑승']);
+                                return (
+                                  <div 
+                                    key={st.id} 
+                                    className={`text-xs flex justify-between items-center p-2 rounded-lg border transition-all ${
+                                      isOverLimitStudent
+                                        ? 'bg-rose-50 border-rose-200 text-rose-900 font-bold'
+                                        : 'bg-slate-50 border-slate-100 text-slate-700'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-1.5 truncate pr-2">
+                                      <span className="truncate">{st.name}</span>
+                                      {isOverLimitStudent && (
+                                        <span className="text-[10px] bg-rose-200 text-rose-900 px-1 py-0.2 rounded font-extrabold shrink-0">
+                                          초과
+                                        </span>
+                                      )}
+                                      {isTemporary && (
+                                        <span className="text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 px-1 py-0.2 rounded font-bold shrink-0">
+                                          당일 1회
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="text-slate-400 text-[11px] truncate max-w-[130px] text-right" title={st.address || st.boardingLocation}>
+                                      {st.boardingLocation || st.address || '위치 미등록'}
+                                    </span>
+                                  </div>
+                                );
+                              })}
                             </div>
                           ) : (
                             <div className="text-center text-xs text-slate-400 py-3 bg-slate-50 rounded-xl">
@@ -4778,6 +4869,27 @@ const parseKindergartenExcelSheet = (sheet) => {
           />
         )}
 
+        {activeTab === 'teacher_web' && (
+          <div className="absolute inset-0 z-50 bg-white">
+            <TeacherDashboard
+              currentUser={currentUser}
+              academy={academy}
+              buses={buses}
+              students={students}
+              availableClasses={availableClasses}
+              selectedAcademyId={selectedAcademyId}
+              socket={socketRef.current}
+              onLogout={handleLogout}
+              onRefreshData={() => {
+                loadInitialState(selectedAcademyId);
+              }}
+              boardPosts={boardPosts}
+              setBoardPosts={setBoardPosts}
+              onBackToAdmin={() => handleTabChange('status')}
+            />
+          </div>
+        )}
+
         {/* Zone Editing Overlay */}
         {isZoneEditingMode && (
           <div className="absolute top-4 left-16 z-[1000] bg-white/95 backdrop-blur-sm p-4 rounded-2xl shadow-xl border border-blue-100 flex flex-col gap-3 min-w-[200px]">
@@ -4831,6 +4943,20 @@ const parseKindergartenExcelSheet = (sheet) => {
 
         {/* Top-Right Controls: SuperAdmin Switcher & Day Filter */}
         <div className="absolute top-4 right-4 z-[1000] flex items-center gap-2 flex-wrap">
+          {/* Direct Switch to Teacher Web */}
+          <button
+            type="button"
+            onClick={() => handleTabChange('teacher_web')}
+            className="px-3.5 py-2 bg-white hover:bg-slate-50 text-blue-700 rounded-xl shadow-lg text-xs font-black flex items-center gap-1.5 active:scale-95 transition border border-blue-200 cursor-pointer"
+            title="담임교사 웹 화면으로 즉시 전환"
+          >
+            <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l9-5-9-5-9 5 9 5z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
+            </svg>
+            <span>담임교사 웹 화면 전환</span>
+          </button>
+
           {/* Explicit Save Changes Button */}
           <button
             type="button"

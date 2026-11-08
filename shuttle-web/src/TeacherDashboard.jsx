@@ -45,6 +45,7 @@ export default function TeacherDashboard({
   onRefreshData,
   boardPosts = [],
   setBoardPosts,
+  onBackToAdmin,
 }) {
   // Navigation State on Left Rail: 'home' | 'board' | 'cloud'
   const [activeNavTab, setActiveNavTab] = useState('home');
@@ -175,8 +176,15 @@ export default function TeacherDashboard({
 
   // Teacher Profile & Class State
   const [localTeacherUser, setLocalTeacherUser] = useState(currentUser);
-  const teacherClass = localTeacherUser?.assignedClass || '';
-  const isAssigned = Boolean(teacherClass && teacherClass !== '미배정');
+  const isDirector = currentUser?.role === 'ACADEMY_ADMIN' || currentUser?.role === 'SUPER_ADMIN';
+  const [directorSelectedClass, setDirectorSelectedClass] = useState(() => {
+    return availableClasses[0] || '햇살반';
+  });
+
+  const teacherClass = isDirector
+    ? directorSelectedClass
+    : (localTeacherUser?.assignedClass || '');
+  const isAssigned = isDirector ? true : Boolean(teacherClass && teacherClass !== '미배정');
 
   // Refresh Teacher Profile (check if Director assigned a class)
   const [isCheckingProfile, setIsCheckingProfile] = useState(false);
@@ -207,11 +215,12 @@ export default function TeacherDashboard({
   // Filter students belonging to this teacher's assigned class
   const myStudents = useMemo(() => {
     if (!isAssigned) return [];
+    if (isDirector && teacherClass === 'ALL') return students;
     return students.filter(st => {
       const cls = st.raw?.['반명'] || st.raw?.['반'] || '';
       return cls.trim() === teacherClass.trim();
     });
-  }, [students, teacherClass, isAssigned]);
+  }, [students, teacherClass, isAssigned, isDirector]);
 
   // Search and status filter
   const [searchQuery, setSearchQuery] = useState('');
@@ -839,6 +848,20 @@ export default function TeacherDashboard({
           {teacherClass ? `${localTeacherUser?.name || '교사'} (${teacherClass})` : (localTeacherUser?.name || '교사')}
         </div>
 
+        {/* 원장 대시보드로 복귀 버튼 */}
+        {onBackToAdmin && (
+          <button
+            type="button"
+            onClick={onBackToAdmin}
+            className="p-3.5 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white shadow-lg transition-all cursor-pointer"
+            title="원장 대시보드로 돌아가기"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+          </button>
+        )}
+
         {/* Tab 1: 교실 홈 */}
         <button
           onClick={() => setActiveNavTab('home')}
@@ -914,7 +937,42 @@ export default function TeacherDashboard({
       {/* ======================================================== */}
       {/* 2. Main Area (To the right of the Left Rail) */}
       {/* ======================================================== */}
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 flex flex-col overflow-hidden relative">
+        {/* Top Director Mode Switcher Banner */}
+        {isDirector && (
+          <div className="bg-amber-50 border-b border-amber-200 px-6 py-2.5 flex items-center justify-between text-xs shrink-0 z-30 shadow-xs">
+            <div className="flex items-center gap-3">
+              <span className="font-extrabold text-amber-900 bg-amber-200/90 px-2.5 py-1 rounded-md">
+                원장 모드: 담임교사 웹 화면 열람 중
+              </span>
+              <span className="text-amber-800 font-bold">열람 반 선택:</span>
+              <select
+                value={directorSelectedClass}
+                onChange={(e) => setDirectorSelectedClass(e.target.value)}
+                className="bg-white border border-amber-300 text-amber-900 font-bold px-3 py-1 rounded-lg outline-none cursor-pointer"
+              >
+                <option value="ALL">전체 반 통합 열람 ({students.length}명)</option>
+                {availableClasses.map(cls => (
+                  <option key={cls} value={cls}>{cls}</option>
+                ))}
+              </select>
+            </div>
+            {onBackToAdmin && (
+              <button
+                type="button"
+                onClick={onBackToAdmin}
+                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow-xs transition flex items-center gap-1 cursor-pointer"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                <span>원장 대시보드로 복귀</span>
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="flex-1 flex overflow-hidden relative">
         {/* VIEW A: Board Mode (Only assigned class, no side buttons) */}
         {activeNavTab === 'board' ? (
           <div className="flex-1 relative z-0 overflow-hidden h-full w-full">
@@ -1926,6 +1984,7 @@ export default function TeacherDashboard({
             )}
           </div>
         )}
+        </div>
       </div>
 
       {/* --- MODAL 1: Individual Student Memo Modal (1:1 개별 알림장) --- */}
