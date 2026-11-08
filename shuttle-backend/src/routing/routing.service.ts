@@ -2451,17 +2451,12 @@ export class RoutingService {
     return vehicle;
   }
 
-  async getDailyLogs(date: string, vehicleId?: number) {
+  async getDailyLogs(date: string, vehicleId: number) {
     const logs = [];
 
-    // 1. Get OperationLogs for the date and vehicle (or all vehicles if vehicleId is undefined)
-    const opLogWhere: any = { dateString: date };
-    if (vehicleId) {
-      opLogWhere.vehicle = { id: vehicleId };
-    }
-    const opLogs = await this.operationLogRepository.find({
-      where: opLogWhere,
-      relations: { vehicle: true },
+    // 1. Get OperationLogs for the date and vehicle
+    const opLog = await this.operationLogRepository.findOne({
+      where: { dateString: date, vehicle: { id: vehicleId } },
     });
 
     const toSafeIsoString = (val: any) => {
@@ -2470,13 +2465,12 @@ export class RoutingService {
       return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
     };
 
-    for (const opLog of opLogs) {
-      const vPrefix = opLog.vehicle?.busNumber ? `[${opLog.vehicle.busNumber}] ` : '';
+    if (opLog) {
       if (opLog.startTime) {
         logs.push({
           time: toSafeIsoString(opLog.startTime),
           type: 'OPERATION_START',
-          message: `${vPrefix}운행을 시작했습니다.`,
+          message: '운행을 시작했습니다.',
           icon: '🚌'
         });
       }
@@ -2492,17 +2486,15 @@ export class RoutingService {
             time: toSafeIsoString(b.time),
             type: 'PARENT_MESSAGE',
             message: `[공지] ${b.message || ''}`,
-            icon: '📢',
-            studentName: b.studentName
+            icon: '📢'
           });
           return;
         }
         logs.push({
           time: toSafeIsoString(b.boardTime),
           type: 'BOARDING',
-          message: `${vPrefix}${b.studentName || '원생'} 탑승 완료 (${b.method || '확인'})`,
-          icon: '🟢',
-          studentName: b.studentName
+          message: `${b.studentName || '원생'} 탑승 완료 (${b.method || '확인'})`,
+          icon: '🟢'
         });
       });
 
@@ -2510,25 +2502,29 @@ export class RoutingService {
         logs.push({
           time: toSafeIsoString(opLog.endTime),
           type: 'OPERATION_END',
-          message: `${vPrefix}운행을 종료했습니다.`,
+          message: '운행을 종료했습니다.',
           icon: '🏁'
         });
       }
     }
 
-    // 2. Get ParentMessages for students on this date
+    // 2. Get ParentMessages for students in this vehicle on this date
+    const startOfDay = new Date(`${date}T00:00:00.000Z`);
+    const endOfDay = new Date(`${date}T23:59:59.999Z`);
+    
+    // adjust for KST (+9 hours) to UTC matching, actually let's assume the DB uses UTC and the date parameter is local date.
+    // If the date parameter is KST '2026-07-27', then in UTC it's '2026-07-26T15:00' to '2026-07-27T14:59'
+    // To keep it simple, we can just query using Between with the date string if DB is setup with local timezone,
+    // or just construct KST boundaries in UTC.
+    // Let's use simple new Date(date).
     const startOfKSTDay = new Date(`${date}T00:00:00+09:00`);
     const endOfKSTDay = new Date(`${date}T23:59:59+09:00`);
 
-    const msgWhere: any = {
-      createdAt: Between(startOfKSTDay, endOfKSTDay)
-    };
-    if (vehicleId) {
-      msgWhere.student = { assignedVehicle: { id: vehicleId } };
-    }
-
     const messages = await this.parentMessageRepository.find({
-      where: msgWhere,
+      where: {
+        student: { assignedVehicle: { id: vehicleId } },
+        createdAt: Between(startOfKSTDay, endOfKSTDay)
+      },
       relations: { student: true }
     });
 
@@ -2538,8 +2534,7 @@ export class RoutingService {
         time: new Date(msg.createdAt).toISOString(),
         type: 'PARENT_MESSAGE',
         message: `${studentName} 학부모: ${msg.message} (읽음: ${msg.isRead ? 'O' : 'X'})`,
-        icon: '💬',
-        studentName
+        icon: '💬'
       });
     });
 

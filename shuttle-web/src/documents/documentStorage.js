@@ -22,7 +22,7 @@ function openDB() {
   });
 }
 
-export async function saveDocument({ academyId, title, category, file, note = '', uploadedBy = '관리자', expiryDate = null }) {
+export async function saveDocument({ academyId, title, category, file, note = '', uploadedBy = '관리자' }) {
   const db = await openDB();
   const id = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -37,7 +37,6 @@ export async function saveDocument({ academyId, title, category, file, note = ''
     uploadedAt: new Date().toISOString(),
     uploadedBy,
     note,
-    expiryDate: expiryDate || null,
     fileBlob: file, // IndexedDB natively supports storing File/Blob
   };
 
@@ -274,10 +273,10 @@ export function calculateDday(dateStr) {
       color: 'text-red-700',
       bg: 'bg-red-100',
       border: 'border-red-300',
-      badge: '기간 만료 (즉시 갱신 필요)',
+      badge: '만료',
     };
   }
-  if (diffDays <= 30) {
+  if (diffDays <= 7) {
     return {
       days: diffDays,
       status: 'urgent',
@@ -285,10 +284,10 @@ export function calculateDday(dateStr) {
       color: 'text-rose-700',
       bg: 'bg-rose-100',
       border: 'border-rose-300',
-      badge: '만료 임박 (1달 이내)',
+      badge: '긴급 임박',
     };
   }
-  if (diffDays <= 60) {
+  if (diffDays <= 30) {
     return {
       days: diffDays,
       status: 'warning',
@@ -296,7 +295,7 @@ export function calculateDday(dateStr) {
       color: 'text-amber-700',
       bg: 'bg-amber-100',
       border: 'border-amber-300',
-      badge: '주의 (2달 전 사전 알림)',
+      badge: '갱신 주의',
     };
   }
   return {

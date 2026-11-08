@@ -45,7 +45,6 @@ export default function TeacherDashboard({
   onRefreshData,
   boardPosts = [],
   setBoardPosts,
-  onBackToAdmin,
 }) {
   // Navigation State on Left Rail: 'home' | 'board' | 'cloud'
   const [activeNavTab, setActiveNavTab] = useState('home');
@@ -176,15 +175,8 @@ export default function TeacherDashboard({
 
   // Teacher Profile & Class State
   const [localTeacherUser, setLocalTeacherUser] = useState(currentUser);
-  const isDirector = currentUser?.role === 'ACADEMY_ADMIN' || currentUser?.role === 'SUPER_ADMIN';
-  const [directorSelectedClass, setDirectorSelectedClass] = useState(() => {
-    return availableClasses[0] || '햇살반';
-  });
-
-  const teacherClass = isDirector
-    ? directorSelectedClass
-    : (localTeacherUser?.assignedClass || '');
-  const isAssigned = isDirector ? true : Boolean(teacherClass && teacherClass !== '미배정');
+  const teacherClass = localTeacherUser?.assignedClass || '';
+  const isAssigned = Boolean(teacherClass && teacherClass !== '미배정');
 
   // Refresh Teacher Profile (check if Director assigned a class)
   const [isCheckingProfile, setIsCheckingProfile] = useState(false);
@@ -215,12 +207,11 @@ export default function TeacherDashboard({
   // Filter students belonging to this teacher's assigned class
   const myStudents = useMemo(() => {
     if (!isAssigned) return [];
-    if (isDirector && teacherClass === 'ALL') return students;
     return students.filter(st => {
       const cls = st.raw?.['반명'] || st.raw?.['반'] || '';
       return cls.trim() === teacherClass.trim();
     });
-  }, [students, teacherClass, isAssigned, isDirector]);
+  }, [students, teacherClass, isAssigned]);
 
   // Search and status filter
   const [searchQuery, setSearchQuery] = useState('');
@@ -784,155 +775,6 @@ export default function TeacherDashboard({
     });
   }, [myStudents, searchQuery, filterMode, rideRequests]);
 
-  // Pinned Changes & Pending Approvals (오늘 변동사항 및 결재 진행 원아)
-  const changedStudents = useMemo(() => {
-    return displayedStudents.filter(st => {
-      const rideReq = rideRequests[st.id];
-      const hasReq = rideReq && (rideReq.status === 'PENDING' || rideReq.status === 'RE_REQUESTED' || rideReq.status === 'APPROVED');
-      const eff = getStudentEffectiveBoardStatus(st);
-      const isAbsent = eff === 'ABSENT' || eff === '결석';
-      const isPickup = eff === 'SELF_PICKUP' || eff === '부모님직접픽업';
-      const isTemp = Boolean(st.isTemporaryRide || st.raw?.['isTemporaryRide']);
-      return hasReq || isAbsent || isPickup || isTemp;
-    });
-  }, [displayedStudents, rideRequests]);
-
-  // Regular Students (일반 원아)
-  const regularStudents = useMemo(() => {
-    return displayedStudents.filter(st => !changedStudents.some(cs => cs.id === st.id));
-  }, [displayedStudents, changedStudents]);
-
-  // Group regular students by age and sort by gender (남, 여 살짝 띄워서)
-  const groupedRegularStudents = useMemo(() => {
-    const groups = {};
-    regularStudents.forEach(st => {
-      const rawAge = st.raw?.['만나이'] || st.raw?.['나이'] || st.age;
-      const ageKey = rawAge ? `${rawAge}세` : '연령 미지정';
-      if (!groups[ageKey]) {
-        groups[ageKey] = { boys: [], girls: [] };
-      }
-      const gender = (st.raw?.['성별'] || st.gender || '').trim();
-      if (gender === '여' || gender === '여자' || gender === 'F' || gender === 'female') {
-        groups[ageKey].girls.push(st);
-      } else {
-        groups[ageKey].boys.push(st);
-      }
-    });
-
-    // Sort alphabetically within gender
-    Object.keys(groups).forEach(k => {
-      groups[k].boys.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-      groups[k].girls.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-    });
-
-    return groups;
-  }, [regularStudents]);
-
-  // Render Table Row for Cell View
-  const renderStudentRow = (st, i, isPinned = false) => {
-    const rideReq = rideRequests[st.id];
-    const isRidePending = rideReq && rideReq.status === 'PENDING';
-    const isRideApproved = rideReq && rideReq.status === 'APPROVED';
-    const isRideReRequested = rideReq && rideReq.status === 'RE_REQUESTED';
-    const effectiveStatus = getStudentEffectiveBoardStatus(st);
-    const isAbsent = effectiveStatus === 'ABSENT' || effectiveStatus === '결석';
-    const isPickup = (effectiveStatus === 'SELF_PICKUP' || effectiveStatus === '부모님직접픽업') && !isRideApproved;
-    const isShuttle = (!isPickup && !isAbsent) || isRideApproved;
-
-    const amBus = buses.find(b => b.id === (st.assignedBusId || st.assignedVehicle?.id || st.assignedVehicleId));
-    const pmBus = buses.find(b => b.id === (st.assignedDepartureBusId || st.assignedDepartureVehicle?.id || st.assignedDepartureVehicleId));
-    const amBusName = amBus?.name || st.raw?.['등원차량'] || '미배정';
-    const pmBusName = pmBus?.name || st.raw?.['하원차량'] || '미배정';
-
-    const genderStr = st.raw?.['성별'] || st.gender || '-';
-    const ageStr = st.raw?.['만나이'] || st.raw?.['나이'] || st.age || '-';
-    const birthStr = st.raw?.['생년월일'] || st.raw?.['생일'] || st.birthDate || '-';
-    const phoneStr = st.raw?.['학부모전화번호'] || st.raw?.['연락처'] || st.parentPhone || '-';
-    const locStr = st.boardingLocation || st.address || st.raw?.['탑승지'] || '미등록';
-
-    return (
-      <tr 
-        key={st.id} 
-        className={`border-b transition-colors ${
-          isPinned ? 'bg-amber-50/50 hover:bg-amber-100/60' : 'hover:bg-slate-50/80'
-        }`}
-      >
-        <td className="py-2.5 px-3 text-center text-xs text-slate-400 font-mono">{i + 1}</td>
-        <td className="py-2.5 px-3">
-          <div className="flex items-center gap-1.5">
-            <span className="font-extrabold text-slate-900 text-xs">{st.name}</span>
-            <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.2 rounded font-semibold">
-              {genderStr} / {ageStr ? `${ageStr}세` : '-'}
-            </span>
-          </div>
-        </td>
-        <td className="py-2.5 px-3 text-xs text-slate-600 font-mono">{birthStr}</td>
-        <td className="py-2.5 px-3 text-xs text-slate-600 font-mono">{phoneStr}</td>
-        <td className="py-2.5 px-3 text-xs font-bold text-blue-700">{amBusName}</td>
-        <td className="py-2.5 px-3 text-xs font-bold text-indigo-700">{pmBusName}</td>
-        <td className="py-2.5 px-3 text-xs text-slate-500 max-w-[140px] truncate" title={locStr}>{locStr}</td>
-        <td className="py-2.5 px-3">
-          {isRidePending ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
-              결재 승인 대기
-            </span>
-          ) : isRideApproved ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
-              결재 승인 완료
-            </span>
-          ) : isRideReRequested ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-purple-100 text-purple-800 border border-purple-300">
-              새 탑승지 재요청
-            </span>
-          ) : isAbsent ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300">
-              결석
-            </span>
-          ) : isPickup ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-slate-100 text-slate-700 border border-slate-300">
-              개별 하원 (픽업)
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-blue-100 text-blue-800 border border-blue-200">
-              정규 셔틀 탑승
-            </span>
-          )}
-        </td>
-        <td className="py-2.5 px-3 text-right">
-          <div className="flex items-center justify-end gap-1.5">
-            {(!isShuttle || isPickup) ? (
-              <button
-                type="button"
-                onClick={() => handlePromptShuttleRideRequest(st)}
-                className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-black transition shadow-xs cursor-pointer"
-              >
-                셔틀 결재 신청
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => handlePromptShuttleRideRequest(st)}
-                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer"
-              >
-                차량 변경 결재
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedStudentForMemo(st);
-                setMemoInput(st.attendanceMemo || st.teacherMemo || '');
-              }}
-              className="px-2 py-1 bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-600 rounded-lg text-xs font-bold transition cursor-pointer"
-            >
-              알림장
-            </button>
-          </div>
-        </td>
-      </tr>
-    );
-  };
-
   // Update Student Boarding Mode
   const handleUpdateBoardStatus = async (studentId, newStatus) => {
     try {
@@ -996,20 +838,6 @@ export default function TeacherDashboard({
         <div className="text-[10px] text-blue-200 text-center truncate max-w-[70px] mb-4 font-medium" title={localTeacherUser?.name}>
           {teacherClass ? `${localTeacherUser?.name || '교사'} (${teacherClass})` : (localTeacherUser?.name || '교사')}
         </div>
-
-        {/* 원장 대시보드로 복귀 버튼 */}
-        {onBackToAdmin && (
-          <button
-            type="button"
-            onClick={onBackToAdmin}
-            className="p-3.5 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white shadow-lg transition-all cursor-pointer"
-            title="원장 대시보드로 돌아가기"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-          </button>
-        )}
 
         {/* Tab 1: 교실 홈 */}
         <button
@@ -1086,42 +914,7 @@ export default function TeacherDashboard({
       {/* ======================================================== */}
       {/* 2. Main Area (To the right of the Left Rail) */}
       {/* ======================================================== */}
-      <div className="flex-1 flex flex-col overflow-hidden relative">
-        {/* Top Director Mode Switcher Banner */}
-        {isDirector && (
-          <div className="bg-amber-50 border-b border-amber-200 px-6 py-2.5 flex items-center justify-between text-xs shrink-0 z-30 shadow-xs">
-            <div className="flex items-center gap-3">
-              <span className="font-extrabold text-amber-900 bg-amber-200/90 px-2.5 py-1 rounded-md">
-                원장 모드: 담임교사 웹 화면 열람 중
-              </span>
-              <span className="text-amber-800 font-bold">열람 반 선택:</span>
-              <select
-                value={directorSelectedClass}
-                onChange={(e) => setDirectorSelectedClass(e.target.value)}
-                className="bg-white border border-amber-300 text-amber-900 font-bold px-3 py-1 rounded-lg outline-none cursor-pointer"
-              >
-                <option value="ALL">전체 반 통합 열람 ({students.length}명)</option>
-                {availableClasses.map(cls => (
-                  <option key={cls} value={cls}>{cls}</option>
-                ))}
-              </select>
-            </div>
-            {onBackToAdmin && (
-              <button
-                type="button"
-                onClick={onBackToAdmin}
-                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow-xs transition flex items-center gap-1 cursor-pointer"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                </svg>
-                <span>원장 대시보드로 복귀</span>
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 flex overflow-hidden relative">
         {/* VIEW A: Board Mode (Only assigned class, no side buttons) */}
         {activeNavTab === 'board' ? (
           <div className="flex-1 relative z-0 overflow-hidden h-full w-full">
@@ -2133,7 +1926,6 @@ export default function TeacherDashboard({
             )}
           </div>
         )}
-        </div>
       </div>
 
       {/* --- MODAL 1: Individual Student Memo Modal (1:1 개별 알림장) --- */}

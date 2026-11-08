@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { formatTeacherName, formatPhoneNumber } from './utils/formatters';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { API_BASE_URL } from './config';
@@ -220,7 +219,6 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     longitude: 127.123,
     rideType: 'REGULAR', // 'REGULAR' | 'TODAY_ONLY'
     requestDate: new Date().toISOString().split('T')[0],
-    isPublicContest: false,
     note: '학부모 상담 후 신규 탑승지 지정 및 결재 승인 요청',
   });
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
@@ -457,69 +455,6 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       }
     } catch (e) {
       alert('오류가 발생했습니다.');
-    } finally {
-      setIsCreatingRoom(false);
-    }
-  };
-
-  const handleCreateVehicleGroupRooms = async () => {
-    setIsCreatingRoom(true);
-    try {
-      const q = new URLSearchParams();
-      if (targetAcademyId) q.append('academyId', String(targetAcademyId));
-      const res = await fetch(`${API_BASE_URL}/routing/initial-state?${q.toString()}`, {
-        headers: getAuthHeaders(),
-      });
-      let vehicleList = [];
-      if (res.ok) {
-        const d = await res.json();
-        vehicleList = Array.isArray(d.buses) ? d.buses : [];
-      }
-      if (vehicleList.length === 0) {
-        vehicleList = [
-          { id: '1', name: '1호차' },
-          { id: '2', name: '2호차' },
-          { id: '3', name: '3호차' },
-        ];
-      }
-
-      const uRes = await fetch(`${API_BASE_URL}/chat/users?${q.toString()}`, {
-        headers: getAuthHeaders(),
-      });
-      let allUsers = [];
-      if (uRes.ok) {
-        const ud = await uRes.json();
-        allUsers = [...(ud.teachers || []), ...(ud.drivers || []), ...(ud.parents || [])];
-      }
-
-      let createdCount = 0;
-      for (const v of vehicleList) {
-        const busName = v.name || v.busNumber || `${v.id}호차`;
-        const groupTitle = `[${busName}] 동승 지도교사 및 학부모 단톡방`;
-        const exists = rooms.some((r) => r.name === groupTitle);
-        if (!exists) {
-          const targetUserIds = allUsers.slice(0, 5).map((u) => u.id);
-          const createRes = await fetch(`${API_BASE_URL}/chat/rooms`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({
-              userIds: targetUserIds,
-              name: groupTitle,
-              type: 'GROUP',
-              creatorEmail: myUser.email,
-            }),
-          });
-          if (createRes.ok) {
-            createdCount++;
-          }
-        }
-      }
-
-      await fetchRooms();
-      alert(`[호차별 단톡방 개설 완료]\n총 ${vehicleList.length}개 호차의 지도교사 및 학부모 단톡방이 준비되었습니다.`);
-    } catch (e) {
-      console.error(e);
-      alert('호차별 단톡방 개설 중 오류가 발생했습니다.');
     } finally {
       setIsCreatingRoom(false);
     }
@@ -888,8 +823,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       return alert('원생(학생) 이름을 선택하거나 입력해주세요.');
     }
 
-    if (!paymentForm.isPublicContest && !paymentForm.selectedVehicleId) {
-      return alert('담당 차량(호차)을 선택하거나 공모 결재를 체크해주세요.');
+    if (!paymentForm.selectedVehicleId) {
+      return alert('담당 차량(호차)을 선택해주세요.');
     }
 
     const boardingLocation = paymentForm.boardingLocation.trim();
@@ -906,17 +841,14 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         body: JSON.stringify({
           studentId: paymentForm.selectedStudentId ? Number(paymentForm.selectedStudentId) : undefined,
           studentName,
-          vehicleId: paymentForm.isPublicContest ? null : (paymentForm.selectedVehicleId ? Number(paymentForm.selectedVehicleId) : undefined),
+          vehicleId: Number(paymentForm.selectedVehicleId),
           boardingLocation,
           address: paymentForm.address.trim() || boardingLocation,
           latitude: paymentForm.latitude || undefined,
           longitude: paymentForm.longitude || undefined,
           locationType: paymentForm.locationType || 'PIN',
           requestDate: paymentForm.requestDate,
-          isPublicContest: !!paymentForm.isPublicContest,
-          note: paymentForm.isPublicContest
-            ? `[공모 결재] ${paymentForm.note.trim() || `${studentName} 학생 탑승 희망 - 가능한 호차 확인 부탁드립니다.`}`
-            : (paymentForm.note.trim() || '학부모 상담 후 신규 탑승지 지정 및 결재 승인 요청'),
+          note: paymentForm.note.trim() || '학부모 상담 후 신규 탑승지 지정 및 결재 승인 요청',
           requesterEmail: myUser.email,
         }),
       });
@@ -1158,29 +1090,17 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             </div>
           </div>
 
-          {/* Action Buttons: 호차별 단톡방 개설 + 새 대화 */}
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={handleCreateVehicleGroupRooms}
-              className="flex items-center gap-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 active:scale-95 font-bold text-xs py-2 px-2.5 rounded-xl transition-all"
-              title="각 호차별 동승 지도교사와 해당 호차 탑승 학부모를 자동으로 묶은 단톡방 개설"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-              </svg>
-              <span>호차별 톡방</span>
-            </button>
-            <button
-              onClick={handleOpenNewChatModal}
-              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs py-2 px-3 rounded-xl shadow-sm transition-all"
-              title="새로운 상대 또는 그룹에게 메세지 보내기"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-              </svg>
-              <span>메세지 보내기</span>
-            </button>
-          </div>
+          {/* 메세지 보내기 (새 대화) 버튼 */}
+          <button
+            onClick={handleOpenNewChatModal}
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs py-2 px-3 rounded-xl shadow-sm transition-all"
+            title="새로운 상대 또는 그룹에게 메세지 보내기"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+            </svg>
+            <span>메세지 보내기</span>
+          </button>
         </div>
 
         {/* Room Search Bar */}
@@ -1429,11 +1349,6 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
                               {/* Status & Ride Type Badges */}
                               <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                                {payload.isPublicContest && (
-                                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-300 animate-pulse">
-                                    공모 결재 (전체 호차)
-                                  </span>
-                                )}
                                 {payload.rideType === 'TODAY_ONLY' ? (
                                   <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
                                     당일 1회 탑승
@@ -2230,60 +2145,24 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     )}
                   </div>
 
-                  {/* Public Contest (공모 결재) Toggle */}
-                  <div className="bg-purple-50/70 p-3 rounded-xl border border-purple-200">
-                    <label className="flex items-start gap-2.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={!!paymentForm.isPublicContest}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          setPaymentForm((prev) => ({
-                            ...prev,
-                            isPublicContest: checked,
-                            note: checked
-                              ? `[공모 결재] ${prev.customStudentName || '원아'} 학생 여기서 탑승하고 싶은데 가능한 호차 및 선생님 있으실까요?`
-                              : prev.note.replace(/^\[공모 결재\]\s*/, ''),
-                          }));
-                        }}
-                        className="mt-0.5 rounded text-purple-600 focus:ring-purple-500"
-                      />
-                      <div>
-                        <span className="text-xs font-black text-purple-900 flex items-center gap-1.5">
-                          <span>공모 결재 (전체 호차 대상 오픈 요청)</span>
-                          <span className="text-[10px] bg-purple-200 text-purple-800 px-1.5 py-0.2 rounded font-extrabold">공모</span>
-                        </span>
-                        <p className="text-[11px] text-purple-700/80 mt-0.5 leading-normal">
-                          "ㅇㅇㅇ학생 여기서 탑승하고 싶은데 가능한 선생님 있으실까요?" - 특정 호차 대신 전체 호차 지도교사에게 오픈 공모 결재를 올립니다.
-                        </p>
-                      </div>
-                    </label>
-                  </div>
-
                   {/* 2. 담당 차량(호차) 및 지도교사 선택 */}
                   <div className="space-y-1.5">
                     <label className="text-xs font-black text-slate-800 flex items-center gap-1">
                       <span>배정 희망 차량 (호차)</span>
-                      {!paymentForm.isPublicContest && <span className="text-red-500">*</span>}
+                      <span className="text-red-500">*</span>
                     </label>
-                    {paymentForm.isPublicContest ? (
-                      <div className="w-full p-2.5 bg-purple-50 border border-purple-200 rounded-xl text-xs text-purple-800 font-bold">
-                        전체 호차 오픈 공모 결재 (모든 호차의 지도교사 및 원장님께 전달됩니다)
-                      </div>
-                    ) : (
-                      <select
-                        value={paymentForm.selectedVehicleId}
-                        onChange={(e) => setPaymentForm((prev) => ({ ...prev, selectedVehicleId: e.target.value }))}
-                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      >
-                        <option value="">-- 차량(호차)을 선택하세요 --</option>
-                        {(paymentContext.vehicles || []).map((v) => (
-                          <option key={v.id} value={v.id}>
-                            {v.busNumber} (담당 지도교사: {v.teacherName} / 기사: {v.driverName})
-                          </option>
-                        ))}
-                      </select>
-                    )}
+                    <select
+                      value={paymentForm.selectedVehicleId}
+                      onChange={(e) => setPaymentForm((prev) => ({ ...prev, selectedVehicleId: e.target.value }))}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                      <option value="">-- 차량(호차)을 선택하세요 --</option>
+                      {(paymentContext.vehicles || []).map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.busNumber} (담당 지도교사: {v.teacherName} / 기사: {v.driverName})
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   {/* 3. 탑승 희망 위치 등록 (핀으로 찍기 vs 주소로 등록하기) */}

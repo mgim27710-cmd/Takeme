@@ -15,12 +15,10 @@ import { openPrintDocument } from './pdfDocumentGenerator';
 
 const CATEGORIES = [
   { id: 'all', label: '전체 서류' },
-  { id: 'registration', label: '학원 등록 문서' },
-  { id: 'vehicle_consent', label: '차량이용 동의서' },
-  { id: 'privacy', label: '개인정보동의서' },
-  { id: 'driver_location', label: '기사 위치정보·자격 증명' },
-  { id: 'accounting', label: '회계문서' },
-  { id: 'declaration', label: '신고문서' },
+  { id: 'safety', label: '안전·점검' },
+  { id: 'vehicle', label: '차량·보험' },
+  { id: 'companion', label: '동승보호자' },
+  { id: 'consent', label: '원생·동의서' },
   { id: 'etc', label: '기타 서류' },
 ];
 
@@ -61,42 +59,9 @@ export default function DocumentManager({
   // Form states for upload modal
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadTitle, setUploadTitle] = useState('');
-  const [uploadCategory, setUploadCategory] = useState('registration');
+  const [uploadCategory, setUploadCategory] = useState('safety');
   const [uploadNote, setUploadNote] = useState('');
-  const [uploadExpiryDate, setUploadExpiryDate] = useState('');
-  const [ocrDetectedDate, setOcrDetectedDate] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Photo-to-Student Intake States
-  const [showPhotoIntakeModal, setShowPhotoIntakeModal] = useState(false);
-  const [intakePhotoFile, setIntakePhotoFile] = useState(null);
-  const [intakeFormData, setIntakeFormData] = useState({
-    name: '',
-    birthDate: '',
-    gender: '남',
-    phone: '',
-    address: '',
-    transportMode: '셔틀이용',
-  });
-  const photoInputRef = useRef(null);
-
-  // Fullscreen Pad Electronic Consultation Form States
-  const [showPadModal, setShowPadModal] = useState(false);
-  const [padFormData, setPadFormData] = useState({
-    name: '',
-    birthDate: '',
-    gender: '남',
-    guardianName: '',
-    phone: '',
-    address: '',
-    boardingStop: '',
-    transportMode: '셔틀이용',
-    consentPrivacy: true,
-    consentSafety: true,
-    consentLocation: true,
-  });
-  const canvasRef = useRef(null);
-  const [hasSignature, setHasSignature] = useState(false);
 
   // Document Preview Modal States
   const [previewDoc, setPreviewDoc] = useState(null);
@@ -146,18 +111,6 @@ export default function DocumentManager({
 
 
   // Handle Drag & Drop
-  const extractDateFromText = (text) => {
-    if (!text) return '';
-    const m = text.match(/(\d{4})[.\-/년]\s*(\d{1,2})[.\-/월]\s*(\d{1,2})/);
-    if (m) {
-      const y = m[1];
-      const mo = String(m[2]).padStart(2, '0');
-      const d = String(m[3]).padStart(2, '0');
-      return `${y}-${mo}-${d}`;
-    }
-    return '';
-  };
-
   const handleDragOver = (e) => {
     e.preventDefault();
     setIsDragging(true);
@@ -175,14 +128,6 @@ export default function DocumentManager({
       const file = e.dataTransfer.files[0];
       setUploadFile(file);
       setUploadTitle(file.name.replace(/\.[^/.]+$/, ''));
-      const detected = extractDateFromText(file.name);
-      if (detected) {
-        setUploadExpiryDate(detected);
-        setOcrDetectedDate(detected);
-      } else {
-        setUploadExpiryDate('');
-        setOcrDetectedDate('');
-      }
       setShowUploadModal(true);
     }
   };
@@ -192,31 +137,6 @@ export default function DocumentManager({
       const file = e.target.files[0];
       setUploadFile(file);
       setUploadTitle(file.name.replace(/\.[^/.]+$/, ''));
-      const detected = extractDateFromText(file.name);
-      if (detected) {
-        setUploadExpiryDate(detected);
-        setOcrDetectedDate(detected);
-      } else {
-        setUploadExpiryDate('');
-        setOcrDetectedDate('');
-      }
-    }
-  };
-
-  const handleOcrAutoExtract = () => {
-    const raw = `${uploadTitle} ${uploadNote} ${uploadFile?.name || ''}`;
-    const detected = extractDateFromText(raw);
-    if (detected) {
-      setUploadExpiryDate(detected);
-      setOcrDetectedDate(detected);
-      alert(`[OCR 인식 완료] 서류 내 만료일 '${detected}'을(를) 자동 인식하여 저장 일정으로 설정했습니다.`);
-    } else {
-      const defaultD = new Date();
-      defaultD.setFullYear(defaultD.getFullYear() + 1);
-      const autoStr = defaultD.toISOString().split('T')[0];
-      setUploadExpiryDate(autoStr);
-      setOcrDetectedDate(autoStr);
-      alert(`[OCR 보정] 서류 등록일 기준 1년 뒤('${autoStr}')로 갱신 만료일을 자동 설정했습니다.`);
     }
   };
 
@@ -240,17 +160,14 @@ export default function DocumentManager({
         category: categoryLabel,
         file: uploadFile,
         note: uploadNote.trim(),
-        expiryDate: uploadExpiryDate || null,
         uploadedBy: currentUser?.name ? `${currentUser.name} 관리자` : '관리자',
       });
 
       // Reset modal form
       setUploadFile(null);
       setUploadTitle('');
-      setUploadCategory('registration');
+      setUploadCategory('safety');
       setUploadNote('');
-      setUploadExpiryDate('');
-      setOcrDetectedDate('');
       setShowUploadModal(false);
       await loadDocs();
     } catch (err) {
@@ -258,154 +175,6 @@ export default function DocumentManager({
       alert('문서 저장 중 오류가 발생했습니다.');
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const handlePhotoSelect = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setIntakePhotoFile(file);
-      const sampleNames = ['김하람', '박시우', '이지안', '최서준', '윤다은', '정예준'];
-      const pickedName = sampleNames[Math.floor(Math.random() * sampleNames.length)];
-      const d = new Date();
-      d.setFullYear(d.getFullYear() - 5);
-      const birthStr = d.toISOString().split('T')[0];
-
-      setIntakeFormData({
-        name: pickedName,
-        birthDate: birthStr,
-        gender: Math.random() > 0.5 ? '남' : '여',
-        phone: '010-' + Math.floor(1000 + Math.random() * 9000) + '-' + Math.floor(1000 + Math.random() * 9000),
-        address: '서울특별시 서초구 서초대로 301',
-        transportMode: '셔틀이용',
-      });
-      setShowPhotoIntakeModal(true);
-    }
-  };
-
-  const handleConfirmPhotoIntake = async () => {
-    if (!intakeFormData.name.trim()) return alert('원아 이름을 입력해주세요.');
-    try {
-      if (intakePhotoFile) {
-        await saveDocument({
-          academyId,
-          title: `[원서] ${intakeFormData.name} 입학등록원서 (사진 촬영)`,
-          category: '학원 등록 문서',
-          file: intakePhotoFile,
-          note: `OCR 촬영 등록: ${intakeFormData.phone}, ${intakeFormData.address}, ${intakeFormData.transportMode}`,
-          uploadedBy: currentUser?.name ? `${currentUser.name}` : '관리자',
-        });
-      }
-
-      const newSt = {
-        id: `st_ocr_${Date.now()}`,
-        name: intakeFormData.name,
-        birthDate: intakeFormData.birthDate,
-        gender: intakeFormData.gender,
-        parentPhone: intakeFormData.phone,
-        address: intakeFormData.address,
-        transportMode: intakeFormData.transportMode,
-        shuttleRequired: intakeFormData.transportMode === '셔틀이용',
-        approvalStatus: 'APPROVED',
-        isRegistered: true,
-      };
-
-      window.dispatchEvent(new CustomEvent('takeme_student_created', { detail: newSt }));
-      try {
-        const existing = JSON.parse(localStorage.getItem('takeme_custom_students') || '[]');
-        existing.push(newSt);
-        localStorage.setItem('takeme_custom_students', JSON.stringify(existing));
-      } catch {
-        // ignore
-      }
-
-      alert(`'${intakeFormData.name}' 원아가 신규 회원으로 등록되었습니다!\n학원 등록 문서함에 촬영 원서가 저장되었습니다.`);
-      setShowPhotoIntakeModal(false);
-      setIntakePhotoFile(null);
-      await loadDocs();
-    } catch (err) {
-      console.error(err);
-      alert('원아 등록 중 오류가 발생했습니다.');
-    }
-  };
-
-  const handleConfirmPadIntake = async () => {
-    if (!padFormData.name.trim()) return alert('원아 성명을 입력해주세요.');
-    if (!padFormData.phone.trim()) return alert('보호자 연락처를 입력해주세요.');
-    if (!padFormData.consentPrivacy || !padFormData.consentSafety || !padFormData.consentLocation) {
-      return alert('법적 필수 동의 항목에 모두 동의 체크를 해주셔야 합니다.');
-    }
-
-    try {
-      const docContent = `
-[전자 원아 등록 원서 - 패드 상담 접수]
-- 학원명: ${academyName || '학원'}
-- 원아 성명: ${padFormData.name} (${padFormData.gender}, 생년월일: ${padFormData.birthDate || '미기재'})
-- 보호자 성명: ${padFormData.guardianName || '보호자'}
-- 보호자 연락처: ${padFormData.phone}
-- 자택 주소: ${padFormData.address || '미기재'}
-- 승하차 희망 위치: ${padFormData.boardingStop || '자택 인근'}
-- 등하원 방식: ${padFormData.transportMode}
-- 개인정보 수집 및 이용 동의: [동의 완료]
-- 통학차량 안전 수칙 및 운행 규정 동의: [동의 완료]
-- 보호자 위치기반 서비스 제공 동의: [동의 완료]
-- 전자 서명 확인: [서명 완료] (접수일시: ${new Date().toLocaleString('ko-KR')})
-      `.trim();
-
-      const blob = new Blob([docContent], { type: 'text/plain;charset=utf-8' });
-      const file = new File([blob], `${padFormData.name}_전자등록원서.txt`, { type: 'text/plain' });
-
-      await saveDocument({
-        academyId,
-        title: `[전자원서] ${padFormData.name} 입학등록원서`,
-        category: '학원 등록 문서',
-        file,
-        note: `태블릿 전자접수: ${padFormData.phone}, ${padFormData.address}, ${padFormData.transportMode}`,
-        uploadedBy: '태블릿 전자 접수',
-      });
-
-      const newSt = {
-        id: `st_pad_${Date.now()}`,
-        name: padFormData.name,
-        birthDate: padFormData.birthDate,
-        gender: padFormData.gender,
-        parentPhone: padFormData.phone,
-        address: padFormData.address,
-        transportMode: padFormData.transportMode,
-        shuttleRequired: padFormData.transportMode === '셔틀이용',
-        approvalStatus: 'APPROVED',
-        isRegistered: true,
-      };
-
-      window.dispatchEvent(new CustomEvent('takeme_student_created', { detail: newSt }));
-      try {
-        const existing = JSON.parse(localStorage.getItem('takeme_custom_students') || '[]');
-        existing.push(newSt);
-        localStorage.setItem('takeme_custom_students', JSON.stringify(existing));
-      } catch {
-        // ignore
-      }
-
-      alert(`'${padFormData.name}' 원아의 전자 원서 등록이 성공적으로 완료되었습니다!\n행정 서류함에 전자 등록 원서가 안전하게 보관되었습니다.`);
-      setShowPadModal(false);
-      setPadFormData({
-        name: '',
-        birthDate: '',
-        gender: '남',
-        guardianName: '',
-        phone: '',
-        address: '',
-        boardingStop: '',
-        transportMode: '셔틀이용',
-        consentPrivacy: true,
-        consentSafety: true,
-        consentLocation: true,
-      });
-      setHasSignature(false);
-      await loadDocs();
-    } catch (err) {
-      console.error(err);
-      alert('전자 원서 저장 중 오류가 발생했습니다.');
     }
   };
 
@@ -459,7 +228,7 @@ export default function DocumentManager({
         setPreviewType('text');
         setPreviewUrl('');
         setPreviewDoc(doc);
-      } catch {
+      } catch (e) {
         setPreviewType('unsupported');
         setPreviewUrl('');
         setPreviewDoc(doc);
@@ -532,7 +301,7 @@ export default function DocumentManager({
         ...expiryFormData,
       });
       setEditingBusExpiry(null);
-    } catch {
+    } catch (err) {
       alert('만료일 정보 저장 중 오류가 발생했습니다.');
     }
   };
@@ -569,13 +338,11 @@ export default function DocumentManager({
   const filteredDocs = documents.filter((doc) => {
     const matchCategory =
       selectedCategory === 'all' ||
-      (selectedCategory === 'registration' && (doc.category.includes('등록') || doc.category.includes('원서'))) ||
-      (selectedCategory === 'vehicle_consent' && (doc.category.includes('차량') || doc.category.includes('동의'))) ||
-      (selectedCategory === 'privacy' && doc.category.includes('개인정보')) ||
-      (selectedCategory === 'driver_location' && (doc.category.includes('위치') || doc.category.includes('자격') || doc.category.includes('기사'))) ||
-      (selectedCategory === 'accounting' && doc.category.includes('회계')) ||
-      (selectedCategory === 'declaration' && doc.category.includes('신고')) ||
-      (selectedCategory === 'etc' && !['등록', '원서', '차량', '개인정보', '위치', '자격', '기사', '회계', '신고'].some(k => doc.category.includes(k)));
+      (selectedCategory === 'safety' && doc.category.includes('안전')) ||
+      (selectedCategory === 'vehicle' && doc.category.includes('차량')) ||
+      (selectedCategory === 'companion' && doc.category.includes('동승')) ||
+      (selectedCategory === 'consent' && doc.category.includes('동의')) ||
+      (selectedCategory === 'etc' && !doc.category.includes('안전') && !doc.category.includes('차량') && !doc.category.includes('동승') && !doc.category.includes('동의'));
 
     const query = searchQuery.trim().toLowerCase();
     const matchQuery =
@@ -647,49 +414,12 @@ export default function DocumentManager({
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 flex-wrap">
-          {/* Pad Electronic Consultation Form Button */}
-          <button
-            onClick={() => setShowPadModal(true)}
-            className="flex items-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all active:scale-95"
-            title="태블릿/아이패드에서 학부모 직접 서명 및 원아 즉시 접수"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-            </svg>
-            패드용 전자원서 접수
-          </button>
-
-          {/* Photo OCR Student Registration Button */}
-          <button
-            onClick={() => {
-              if (photoInputRef.current) photoInputRef.current.click();
-            }}
-            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all active:scale-95"
-            title="종이 원서 사진을 촬영하거나 올려 OCR로 신규 원아 등록"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            원서 사진으로 원아 등록
-          </button>
-          <input
-            type="file"
-            ref={photoInputRef}
-            accept="image/*"
-            onChange={handlePhotoSelect}
-            className="hidden"
-          />
-
-          {/* Standard Document Upload Button */}
+        <div className="flex items-center gap-3">
           <button
             onClick={() => {
               setUploadFile(null);
               setUploadTitle('');
               setUploadNote('');
-              setUploadExpiryDate('');
-              setOcrDetectedDate('');
               setShowUploadModal(true);
             }}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all active:scale-95"
@@ -1395,29 +1125,10 @@ export default function DocumentManager({
                         {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString('ko-KR') : '-'}
                       </span>
                     </div>
-                    {doc.expiryDate && (
-                      <div className="flex justify-between items-center pt-1 border-t border-slate-200/60">
-                        <span className="text-slate-400 font-semibold">만료일정:</span>
-                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border ${calculateDday(doc.expiryDate).bg} ${calculateDday(doc.expiryDate).color} ${calculateDday(doc.expiryDate).border}`}>
-                          {doc.expiryDate} ({calculateDday(doc.expiryDate).label})
-                        </span>
-                      </div>
-                    )}
                     {doc.note && (
                       <div className="pt-1 text-[11px] text-slate-600 border-t border-slate-200/60 break-all leading-relaxed">
                         {doc.note}
                       </div>
-                    )}
-                    {doc.expiryDate && calculateDday(doc.expiryDate).status === 'expired' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          alert(`[재갱신 요청 알림 발송 완료]\n'${doc.title}' 서류의 유효기간이 지났습니다.\n해당 서류 담당 기사 및 동승 지도교사에게 갱신 요청 푸시가 전송되었습니다.\n(*교사에게는 관할 교육청/국가 갱신 공문이 선행 발송됩니다.)`);
-                        }}
-                        className="w-full mt-2 py-1.5 px-2 bg-red-100 hover:bg-red-200 text-red-700 font-black text-[11px] rounded-lg border border-red-300 transition-colors flex items-center justify-center gap-1"
-                      >
-                        담당 기사·교사에게 갱신 알림 전송
-                      </button>
                     )}
                   </div>
                 </div>
@@ -1503,51 +1214,12 @@ export default function DocumentManager({
                   onChange={(e) => setUploadCategory(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                 >
-                  <option value="registration">학원 등록 문서 (입학원서, 등록신청서 등)</option>
-                  <option value="vehicle_consent">차량이용 동의서 (통학차량 이용 및 인수인계)</option>
-                  <option value="privacy">개인정보동의서 (개인정보 수집 및 활용동의)</option>
-                  <option value="driver_location">기사 위치정보·자격 증명 (운전면허, 적성검사, 위치수집)</option>
-                  <option value="accounting">회계문서 (수납영수증, 지출증빙, 급여대장 등)</option>
-                  <option value="declaration">신고문서 (경찰서 어린이통학버스 신고필증 등)</option>
-                  <option value="etc">기타 서류 (공문, 일반 증명서 등)</option>
+                  <option value="safety">안전·점검 (체크리스트, 안전점검표 등)</option>
+                  <option value="vehicle">차량·보험 (차량등록증, 자동차종합보험 등)</option>
+                  <option value="companion">동승보호자 (탑승일지, 보호자명부 등)</option>
+                  <option value="consent">원생·동의서 (차량이용신청서, 응급처치동의서 등)</option>
+                  <option value="etc">기타 서류 (공문, 증명서 등)</option>
                 </select>
-              </div>
-
-              {/* OCR Automatic Expiry Date Parsing */}
-              <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-200 space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-black text-blue-900 flex items-center gap-1.5">
-                    <span>만료일자 / 갱신 예정일 (OCR 자동 설정)</span>
-                    {ocrDetectedDate && (
-                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-extrabold px-2 py-0.5 rounded-md border border-emerald-300">
-                        OCR 인식 성공
-                      </span>
-                    )}
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleOcrAutoExtract}
-                    className="text-[11px] font-bold text-blue-600 hover:text-blue-800 bg-white px-2.5 py-1 rounded-lg border border-blue-200 shadow-2xs hover:bg-blue-50 transition-colors"
-                  >
-                    OCR 날짜 자동 인식
-                  </button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="date"
-                    value={uploadExpiryDate}
-                    onChange={(e) => setUploadExpiryDate(e.target.value)}
-                    className="flex-1 px-3 py-2 bg-white border border-blue-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  />
-                  {uploadExpiryDate && (
-                    <span className={`text-[10px] font-extrabold px-2 py-1 rounded-md border shrink-0 ${calculateDday(uploadExpiryDate).bg} ${calculateDday(uploadExpiryDate).color} ${calculateDday(uploadExpiryDate).border}`}>
-                      {calculateDday(uploadExpiryDate).label} ({calculateDday(uploadExpiryDate).badge})
-                    </span>
-                  )}
-                </div>
-                <p className="text-[10px] text-blue-700/80 leading-normal">
-                  * 서류 내 날짜가 포함된 경우 자동으로 읽어와 만료일을 설정합니다. (만료 2달 전 주의, 1달 전 만료 임박 알림)
-                </p>
               </div>
 
               <div>
@@ -1897,425 +1569,6 @@ export default function DocumentManager({
                   </button>
                 </div>
               )}
-            </div>
-          </div>
-        </div>
-      )}
-      {/* 1. Photo OCR Student Registration Modal */}
-      {showPhotoIntakeModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-[2250] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <span className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-sm">
-                  OCR
-                </span>
-                <div>
-                  <h3 className="text-base font-black text-slate-800">원서 사진 분석 - 신규 원아 등록</h3>
-                  <p className="text-[11px] text-slate-500">종이 등록원서에서 추출된 정보를 확인 후 등록하세요.</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPhotoIntakeModal(false);
-                  setIntakePhotoFile(null);
-                }}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg text-lg"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3.5 py-4">
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center gap-2 text-xs text-emerald-800 font-semibold">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>원서 사진 인식 성공! 등록 시 사진은 '학원 등록 문서'에 자동 보관됩니다.</span>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">원아 성명 *</label>
-                <input
-                  type="text"
-                  value={intakeFormData.name}
-                  onChange={(e) => setIntakeFormData({ ...intakeFormData, name: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">생년월일</label>
-                  <input
-                    type="date"
-                    value={intakeFormData.birthDate}
-                    onChange={(e) => setIntakeFormData({ ...intakeFormData, birthDate: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">성별</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {['남', '여'].map((g) => (
-                      <button
-                        key={g}
-                        type="button"
-                        onClick={() => setIntakeFormData({ ...intakeFormData, gender: g })}
-                        className={`py-2 text-xs font-extrabold rounded-xl border transition-all ${
-                          intakeFormData.gender === g
-                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        {g}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">보호자 연락처 *</label>
-                <input
-                  type="text"
-                  value={intakeFormData.phone}
-                  onChange={(e) => setIntakeFormData({ ...intakeFormData, phone: e.target.value })}
-                  placeholder="010-0000-0000"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">자택 주소 / 승하차 위치</label>
-                <input
-                  type="text"
-                  value={intakeFormData.address}
-                  onChange={(e) => setIntakeFormData({ ...intakeFormData, address: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">등하원 방식 선택</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { id: '셔틀이용', label: '셔틀버스 탑승' },
-                    { id: '개별픽업', label: '학부모 직접 픽업' }
-                  ].map((mode) => (
-                    <button
-                      key={mode.id}
-                      type="button"
-                      onClick={() => setIntakeFormData({ ...intakeFormData, transportMode: mode.id })}
-                      className={`py-2 text-xs font-black rounded-xl border transition-all ${
-                        intakeFormData.transportMode === mode.id
-                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      {mode.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowPhotoIntakeModal(false);
-                  setIntakePhotoFile(null);
-                }}
-                className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
-              >
-                취소
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmPhotoIntake}
-                className="px-5 py-2.5 text-xs font-black text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md transition-all active:scale-98"
-              >
-                신규 원아 정식 등록
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 2. Fullscreen Tablet / iPad Consultation Form Modal */}
-      {showPadModal && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[2300] p-4 sm:p-6 overflow-y-auto">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full border border-slate-200 overflow-hidden flex flex-col my-auto animate-in fade-in zoom-in-95 duration-150">
-            {/* Pad Modal Header */}
-            <div className="bg-gradient-to-r from-purple-700 to-indigo-700 px-8 py-5 text-white flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-black uppercase tracking-wider bg-white/20 px-2 py-0.5 rounded-md inline-block mb-1">
-                  태블릿 전용 상담·접수 모드
-                </span>
-                <h2 className="text-xl font-black tracking-tight">{academyName || '학원'} 전자 입학 등록 원서</h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowPadModal(false)}
-                className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center text-lg font-bold transition-colors"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Pad Modal Body */}
-            <div className="p-6 sm:p-8 space-y-5 max-h-[75vh] overflow-y-auto">
-              {/* Basic Info Group */}
-              <div className="space-y-3 bg-purple-50/50 p-4 rounded-2xl border border-purple-100">
-                <h4 className="text-xs font-black text-purple-900">1. 원아 기본 정보</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">원아 성명 *</label>
-                    <input
-                      type="text"
-                      placeholder="예: 김민준"
-                      value={padFormData.name}
-                      onChange={(e) => setPadFormData({ ...padFormData, name: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">생년월일</label>
-                    <input
-                      type="date"
-                      value={padFormData.birthDate}
-                      onChange={(e) => setPadFormData({ ...padFormData, birthDate: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">성별</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {['남', '여'].map((g) => (
-                      <button
-                        key={g}
-                        type="button"
-                        onClick={() => setPadFormData({ ...padFormData, gender: g })}
-                        className={`py-2.5 text-xs font-black rounded-xl border transition-all ${
-                          padFormData.gender === g
-                            ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
-                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        {g}아
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Guardian Info Group */}
-              <div className="space-y-3 bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">
-                <h4 className="text-xs font-black text-indigo-900">2. 보호자 정보 및 승하차</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">보호자(학부모) 성함</label>
-                    <input
-                      type="text"
-                      placeholder="예: 김학부"
-                      value={padFormData.guardianName}
-                      onChange={(e) => setPadFormData({ ...padFormData, guardianName: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">휴대폰 번호 *</label>
-                    <input
-                      type="text"
-                      placeholder="010-0000-0000"
-                      value={padFormData.phone}
-                      onChange={(e) => setPadFormData({ ...padFormData, phone: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">자택 주소</label>
-                    <input
-                      type="text"
-                      placeholder="주소를 입력하세요"
-                      value={padFormData.address}
-                      onChange={(e) => setPadFormData({ ...padFormData, address: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">희망 승하차 위치 (핀/정류장)</label>
-                    <input
-                      type="text"
-                      placeholder="예: 아파트 정문 101동 앞"
-                      value={padFormData.boardingStop}
-                      onChange={(e) => setPadFormData({ ...padFormData, boardingStop: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">등하원 방식 선택</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { id: '셔틀이용', label: '셔틀버스 이용 (기본)' },
-                      { id: '개별픽업', label: '학부모 개별 픽업' }
-                    ].map((mode) => (
-                      <button
-                        key={mode.id}
-                        type="button"
-                        onClick={() => setPadFormData({ ...padFormData, transportMode: mode.id })}
-                        className={`py-2.5 text-xs font-black rounded-xl border transition-all ${
-                          padFormData.transportMode === mode.id
-                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        {mode.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Legal Consents 3 items */}
-              <div className="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                <h4 className="text-xs font-black text-slate-800">3. 법적 필수 동의 항목</h4>
-                <label className="flex items-start gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer py-1">
-                  <input
-                    type="checkbox"
-                    checked={padFormData.consentPrivacy}
-                    onChange={(e) => setPadFormData({ ...padFormData, consentPrivacy: e.target.checked })}
-                    className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span>[필수] 개인정보 수집 및 이용 동의 (원생 관리 및 알림 전송 목적)</span>
-                </label>
-                <label className="flex items-start gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer py-1">
-                  <input
-                    type="checkbox"
-                    checked={padFormData.consentSafety}
-                    onChange={(e) => setPadFormData({ ...padFormData, consentSafety: e.target.checked })}
-                    className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span>[필수] 통학차량 안전 수칙 및 운행 규정 준수 동의</span>
-                </label>
-                <label className="flex items-start gap-2.5 text-xs text-slate-700 font-semibold cursor-pointer py-1">
-                  <input
-                    type="checkbox"
-                    checked={padFormData.consentLocation}
-                    onChange={(e) => setPadFormData({ ...padFormData, consentLocation: e.target.checked })}
-                    className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span>[필수] 보호자 위치기반 서비스(실시간 승하차 푸시) 활용 동의</span>
-                </label>
-              </div>
-
-              {/* Signature Area */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-black text-slate-800">4. 보호자 전자 서명</h4>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (canvasRef.current) {
-                        const ctx = canvasRef.current.getContext('2d');
-                        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-                        setHasSignature(false);
-                      }
-                    }}
-                    className="text-[11px] font-bold text-slate-500 hover:text-slate-800 bg-slate-100 px-2 py-0.5 rounded-md"
-                  >
-                    서명 지우기
-                  </button>
-                </div>
-                <div className="border-2 border-dashed border-slate-300 rounded-2xl bg-slate-50/70 p-1 relative">
-                  <canvas
-                    ref={canvasRef}
-                    width={560}
-                    height={120}
-                    className="w-full h-28 bg-white rounded-xl cursor-crosshair touch-none"
-                    onMouseDown={(e) => {
-                      const canvas = canvasRef.current;
-                      if (!canvas) return;
-                      const ctx = canvas.getContext('2d');
-                      ctx.lineWidth = 2.5;
-                      ctx.lineCap = 'round';
-                      ctx.strokeStyle = '#1e293b';
-                      const rect = canvas.getBoundingClientRect();
-                      ctx.beginPath();
-                      ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
-                      const moveHandler = (ev) => {
-                        ctx.lineTo(ev.clientX - rect.left, ev.clientY - rect.top);
-                        ctx.stroke();
-                        setHasSignature(true);
-                      };
-                      const upHandler = () => {
-                        window.removeEventListener('mousemove', moveHandler);
-                        window.removeEventListener('mouseup', upHandler);
-                      };
-                      window.addEventListener('mousemove', moveHandler);
-                      window.addEventListener('mouseup', upHandler);
-                    }}
-                    onTouchStart={(e) => {
-                      const canvas = canvasRef.current;
-                      if (!canvas || !e.touches[0]) return;
-                      const ctx = canvas.getContext('2d');
-                      ctx.lineWidth = 2.5;
-                      ctx.lineCap = 'round';
-                      ctx.strokeStyle = '#1e293b';
-                      const rect = canvas.getBoundingClientRect();
-                      const touch = e.touches[0];
-                      ctx.beginPath();
-                      ctx.moveTo(touch.clientX - rect.left, touch.clientY - rect.top);
-                      const moveHandler = (ev) => {
-                        if (!ev.touches[0]) return;
-                        ctx.lineTo(ev.touches[0].clientX - rect.left, ev.touches[0].clientY - rect.top);
-                        ctx.stroke();
-                        setHasSignature(true);
-                      };
-                      const endHandler = () => {
-                        window.removeEventListener('touchmove', moveHandler);
-                        window.removeEventListener('touchend', endHandler);
-                      };
-                      window.addEventListener('touchmove', moveHandler);
-                      window.addEventListener('touchend', endHandler);
-                    }}
-                  />
-                  {!hasSignature && (
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-xs text-slate-400 font-medium">
-                      손가락 또는 펜으로 서명해주세요
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Pad Modal Footer */}
-            <div className="bg-slate-50 px-8 py-4 border-t border-slate-200 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setShowPadModal(false)}
-                className="px-5 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors"
-              >
-                닫기
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmPadIntake}
-                className="px-6 py-2.5 text-xs font-black text-white bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 rounded-xl shadow-md transition-all active:scale-98"
-              >
-                전자 원서 제출 및 원아 등록 완료
-              </button>
             </div>
           </div>
         </div>
