@@ -24,15 +24,21 @@ const toDateStr = (val) => {
   return String(val);
 };
 
-export default function LogViewer({ buses, students, currentTab = 'LOG', isClosing }) {
+export default function LogViewer({ buses: _buses, students, currentTab = 'LOG', isClosing }) {
   const [selectedDate, setSelectedDate] = useState(() => new Date());
-  const [selectedBusId, setSelectedBusId] = useState(buses?.length > 0 ? buses[0].id : null);
 
-  useEffect(() => {
-    if ((!selectedBusId || !buses?.some(b => b.id === selectedBusId)) && buses?.length > 0) {
-      setSelectedBusId(buses[0].id);
+  // Available classes for classification tabs
+  const classList = useMemo(() => {
+    const set = new Set();
+    (students || []).forEach(s => {
+      const cls = (s.className || s.raw?.['반명'] || s.raw?.['반'] || s.raw?.['학급'] || s.assignedClass || '').trim();
+      if (cls) set.add(cls);
+    });
+    if (set.size === 0) {
+      ['햇살반', '열매반', '새싹반', '풀잎반'].forEach(c => set.add(c));
     }
-  }, [buses, selectedBusId]);
+    return ['ALL', ...Array.from(set)];
+  }, [students]);
 
   // LOG state & in-memory cache for instant date switching
   const [logs, setLogs] = useState([]);
@@ -130,13 +136,13 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
 
   const fetchAbsences = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/routing/absences${selectedBusId ? `?vehicleId=${selectedBusId}` : ''}`);
+      const res = await fetch(`${API_BASE_URL}/routing/absences`);
       const data = await res.json();
       setAbsences(data || []);
     } catch (e) {
       console.error(e);
     }
-  }, [selectedBusId]);
+  }, []);
 
   const fetchHolidays = useCallback(async () => {
     try {
@@ -158,8 +164,8 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
 
   // Fetch logs with cache + AbortController for fast, non-blocking date selection
   useEffect(() => {
-    if (currentTab === 'LOG' && selectedBusId) {
-      const cacheKey = `${selectedDateStr}_${selectedBusId}`;
+    if (currentTab === 'LOG') {
+      const cacheKey = `${selectedDateStr}`;
       const cached = logsCacheRef.current.get(cacheKey);
 
       if (cached) {
@@ -173,7 +179,7 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
       const fetchLogs = async () => {
         try {
           const res = await fetch(
-            `${API_BASE_URL}/routing/daily-logs?date=${selectedDateStr}&vehicleId=${selectedBusId}`,
+            `${API_BASE_URL}/routing/daily-logs?date=${selectedDateStr}`,
             { signal: controller.signal }
           );
           const data = await res.json();
@@ -198,20 +204,20 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
     } else if (currentTab === 'HOLIDAY') {
       fetchHolidays();
     }
-  }, [currentTab, selectedDateStr, selectedBusId, fetchAbsences, fetchHolidays]);
+  }, [currentTab, selectedDateStr, fetchAbsences, fetchHolidays]);
 
-  // Background prefetch recent 5 days for the selected bus to make clicking recent dates instant
+  // Background prefetch recent 5 days to make clicking recent dates instant
   useEffect(() => {
-    if (currentTab !== 'LOG' || !selectedBusId) return;
+    if (currentTab !== 'LOG') return;
     const timer = setTimeout(() => {
       const base = new Date();
       for (let i = 0; i < 5; i++) {
         const d = new Date(base);
         d.setDate(base.getDate() - i);
         const dStr = toDateStr(d);
-        const key = `${dStr}_${selectedBusId}`;
+        const key = `${dStr}`;
         if (!logsCacheRef.current.has(key)) {
-          fetch(`${API_BASE_URL}/routing/daily-logs?date=${dStr}&vehicleId=${selectedBusId}`)
+          fetch(`${API_BASE_URL}/routing/daily-logs?date=${dStr}`)
             .then(r => r.json())
             .then(data => {
               if (Array.isArray(data)) {
@@ -223,7 +229,7 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
       }
     }, 150);
     return () => clearTimeout(timer);
-  }, [currentTab, selectedBusId]);
+  }, [currentTab]);
 
   // Precompute O(1) lookup structures for holidays and absences
   const holidayRanges = useMemo(() => {
@@ -242,22 +248,23 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
     return false;
   }, [holidayRanges]);
 
-  const absenceRanges = useMemo(() => {
-    return absences.map(a => ({
-      start: toDateStr(a.startDate),
-      end: toDateStr(a.endDate),
-    }));
-  }, [absences]);
-
   const getAbsenceCountForDate = useCallback((dateStr) => {
     let count = 0;
-    for (let i = 0; i < absenceRanges.length; i++) {
-      if (dateStr >= absenceRanges[i].start && dateStr <= absenceRanges[i].end) {
+    for (let i = 0; i < absences.length; i++) {
+      const a = absences[i];
+      const sDate = toDateStr(a.startDate);
+      const eDate = toDateStr(a.endDate);
+      if (dateStr >= sDate && dateStr <= eDate) {
+        if (selectedClassFilter !== 'ALL') {
+          const st = a.student || (students || []).find(s => s.id === (a.studentId || a.student?.id));
+          const cls = (st?.className || st?.raw?.['반명'] || st?.raw?.['반'] || st?.raw?.['학급'] || st?.assignedClass || '').trim();
+          if (cls !== selectedClassFilter) continue;
+        }
         count++;
       }
     }
     return count;
-  }, [absenceRanges]);
+  }, [absences, selectedClassFilter, students]);
 
   const handleDateClick = (year, month, day) => {
     const clickedDate = new Date(year, month, day);
@@ -394,17 +401,11 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
     return classes + 'hover:bg-slate-100 text-slate-700';
   };
 
-  const busStudents = useMemo(() => {
-    if (!students || !selectedBusId) return [];
+  const filteredStudents = useMemo(() => {
+    if (!students || !Array.isArray(students)) return [];
     return students.filter(s => {
-      const isAssigned = s.assignedBusId === selectedBusId ||
-        s.assignedVehicle?.id === selectedBusId ||
-        s.assignedVehicleId === selectedBusId ||
-        s.schedules?.some(sch => sch.assignedVehicle?.id === selectedBusId || sch.assignedVehicleId === selectedBusId);
-      if (!isAssigned) return false;
-
       if (selectedClassFilter !== 'ALL') {
-        const c = s.raw?.['반명'] || s.raw?.['반'] || s.assignedClass;
+        const c = (s.className || s.raw?.['반명'] || s.raw?.['반'] || s.raw?.['학급'] || s.assignedClass || '').trim();
         if (c !== selectedClassFilter) return false;
       }
 
@@ -417,7 +418,31 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
 
       return true;
     });
-  }, [students, selectedBusId, selectedClassFilter, absenceSearchKeyword]);
+  }, [students, selectedClassFilter, absenceSearchKeyword]);
+
+  const filteredLogs = useMemo(() => {
+    if (!logs || !Array.isArray(logs)) return [];
+    if (selectedClassFilter === 'ALL') return logs;
+
+    const classStudentNames = new Set(
+      (students || [])
+        .filter(s => {
+          const c = (s.className || s.raw?.['반명'] || s.raw?.['반'] || s.raw?.['학급'] || s.assignedClass || '').trim();
+          return c === selectedClassFilter;
+        })
+        .map(s => s.name?.trim())
+        .filter(Boolean)
+    );
+
+    return logs.filter(log => {
+      if (log.type === 'OPERATION_START' || log.type === 'OPERATION_END') return true;
+      if (log.studentName && classStudentNames.has(log.studentName.trim())) return true;
+      for (const name of classStudentNames) {
+        if (log.message && log.message.includes(name)) return true;
+      }
+      return false;
+    });
+  }, [logs, selectedClassFilter, students]);
 
   const renderDots = (dateStr) => {
     if (isDateHoliday(dateStr)) {
@@ -646,10 +671,13 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
           <>
           <div className="p-4 border-b border-slate-200 bg-white shadow-sm z-10">
             {currentTab === 'LOG' && (
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-3">
                 <h2 className="text-lg font-black text-slate-800">
                   {selectedDate.getFullYear()}년 {selectedDate.getMonth() + 1}월 {selectedDate.getDate()}일 운행 일지
                 </h2>
+                <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg">
+                  {filteredLogs.length}건
+                </span>
               </div>
             )}
             {currentTab === 'ABSENCE' && (
@@ -658,21 +686,9 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
                 <h2 className="text-lg font-black text-slate-800">
                   원생 결석관리
                 </h2>
-                <div className="flex items-center gap-2">
-                  <select
-                    value={selectedClassFilter}
-                    onChange={(e) => setSelectedClassFilter(e.target.value)}
-                    className="bg-white text-xs font-bold py-1 px-2 rounded-lg border border-slate-200 text-slate-700 outline-none cursor-pointer"
-                  >
-                    <option value="ALL">전체 반</option>
-                    {Array.from(new Set(students.map(s => s.raw?.['반명'] || s.raw?.['반'] || s.assignedClass).filter(Boolean))).map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                  <span className="text-xs font-bold text-slate-400">
-                    {busStudents.length}명
-                  </span>
-                </div>
+                <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg">
+                  {filteredStudents.length}명
+                </span>
               </div>
               <div className="relative mb-3">
                 <input
@@ -689,22 +705,30 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
               </>
             )}
             
-            {/* Bus Selection Tabs */}
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-              {buses.map(bus => (
-                <button
-                  key={bus.id}
-                  onClick={() => { setSelectedBusId(bus.id); setSelectedStudentForAbsence(null); }}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${
-                    selectedBusId === bus.id 
-                      ? 'bg-slate-800 text-white shadow-md transform scale-105' 
-                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: bus.color }}></span>
-                  {bus.name}
-                </button>
-              ))}
+            {/* Class Selection Tabs (분반별 분류 버튼) */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
+              {classList.map(cls => {
+                const isSelected = selectedClassFilter === cls;
+                const label = cls === 'ALL' ? '전체 반' : cls;
+                return (
+                  <button
+                    key={cls}
+                    type="button"
+                    onClick={() => {
+                      setSelectedClassFilter(cls);
+                      setSelectedStudentForAbsence(null);
+                    }}
+                    className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${
+                      isSelected
+                        ? 'bg-blue-600 text-white shadow-md transform scale-105'
+                        : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${isSelected ? 'bg-white' : 'bg-blue-400'}`}></span>
+                    {label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -716,14 +740,14 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
                     <div className="text-4xl animate-bounce mb-4">📝</div>
                     <p className="text-sm font-bold text-slate-500">로그 데이터를 불러오는 중...</p>
                   </div>
-                ) : logs.length === 0 ? (
+                ) : filteredLogs.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full opacity-50">
                     <div className="text-4xl mb-4 grayscale">📭</div>
-                    <p className="text-sm font-bold text-slate-500">선택한 날짜에 기록된 로그가 없습니다.</p>
+                    <p className="text-sm font-bold text-slate-500">선택한 날짜 및 분반에 기록된 로그가 없습니다.</p>
                   </div>
                 ) : (
                   <div className="space-y-6 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-200 before:to-transparent">
-                    {logs.map((log, index) => {
+                    {filteredLogs.map((log, index) => {
                       const getTypeStyle = (type) => {
                         switch (type) {
                           case 'OPERATION_START': return 'text-blue-600 bg-blue-50 border-blue-100';
@@ -767,14 +791,23 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
 
             {currentTab === 'ABSENCE' && (
               <div className="grid grid-cols-1 gap-4">
-                {busStudents.map(student => {
+                {filteredStudents.map(student => {
                   const studentAbsences = absences.filter(a => (a.student?.id || a.studentId) === student.id);
                   const isSelected = selectedStudentForAbsence?.id === student.id;
+                  const stClass = student.className || student.raw?.['반명'] || student.raw?.['반'] || student.assignedClass || '반 미지정';
                   
                   return (
                     <div key={student.id} className={`bg-white rounded-2xl border p-4 transition-all shadow-sm ${isSelected ? 'ring-2 ring-red-500 border-transparent' : 'hover:border-slate-300'}`}>
                       <div className="flex justify-between items-center">
-                        <div className="font-black text-slate-800 text-lg">{student.name} <span className="text-xs text-slate-400 font-normal ml-2">{student.raw?.['유치원명'] || student.raw?.['학교명']}</span></div>
+                        <div className="font-black text-slate-800 text-base flex items-center gap-2">
+                          <span>{student.name}</span>
+                          <span className="text-xs bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded-full border border-blue-100">
+                            {stClass}
+                          </span>
+                          <span className="text-xs text-slate-400 font-normal ml-1">
+                            {student.raw?.['유치원명'] || student.raw?.['학교명']}
+                          </span>
+                        </div>
                         <button 
                           onClick={() => {
                             setSelectedStudentForAbsence(isSelected ? null : student);
@@ -802,8 +835,10 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
                     </div>
                   );
                 })}
-                {busStudents.length === 0 && (
-                  <div className="text-center p-8 text-slate-500 font-bold">이 차량에 배정된 원생이 없습니다.</div>
+                {filteredStudents.length === 0 && (
+                  <div className="text-center p-8 text-slate-400 font-bold bg-white rounded-2xl border border-dashed border-slate-200">
+                    해당 분반에 등록된 원생이 없습니다.
+                  </div>
                 )}
               </div>
             )}

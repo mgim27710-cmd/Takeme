@@ -69,9 +69,9 @@ export class RoutingController {
   @Get('daily-logs')
   async getDailyLogs(
     @Query('date') date: string,
-    @Query('vehicleId') vehicleId: string,
+    @Query('vehicleId') vehicleId?: string,
   ) {
-    return this.routingService.getDailyLogs(date, Number(vehicleId));
+    return this.routingService.getDailyLogs(date, vehicleId ? Number(vehicleId) : undefined);
   }
 
   @Post('generate-auth-code')
