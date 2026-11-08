@@ -43,6 +43,12 @@ const formatBusinessNumber = (value) => {
   return `${nums.slice(0, 3)}-${nums.slice(3, 5)}-${nums.slice(5, 10)}`;
 };
 
+const formatTeacherName = (name) => {
+  if (!name) return '';
+  const clean = String(name).replace(/\s*선생님\s*/g, '').trim();
+  return clean ? `${clean} 선생님` : '';
+};
+
 function MapBoundsFit({ buses, academy }) {
   const map = useMap();
   useEffect(() => {
