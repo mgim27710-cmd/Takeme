@@ -305,6 +305,37 @@ class ApiService {
     }
   }
 
+  Future<Map<String, bool>> getNotificationSettings() async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/parent/notification-settings');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        return {
+          'notifyShuttleOperation': data['notifyShuttleOperation'] != false,
+          'notifyBoardPost': data['notifyBoardPost'] != false,
+        };
+      }
+    } catch (_) {}
+    return {
+      'notifyShuttleOperation': true,
+      'notifyBoardPost': true,
+    };
+  }
+
+  Future<bool> updateNotificationSettings({bool? notifyShuttleOperation, bool? notifyBoardPost}) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/parent/notification-settings');
+      final body = <String, dynamic>{};
+      if (notifyShuttleOperation != null) body['notifyShuttleOperation'] = notifyShuttleOperation;
+      if (notifyBoardPost != null) body['notifyBoardPost'] = notifyBoardPost;
+      final res = await postWithAuth(url, body);
+      return res.statusCode == 200 || res.statusCode == 201;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<List<Map<String, dynamic>>> getClassBoardPosts(String email) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/parent/class-board?email=${Uri.encodeComponent(email)}');

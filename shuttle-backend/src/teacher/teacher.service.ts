@@ -607,9 +607,10 @@ export class TeacherService {
     if (!user) throw new BadRequestException('User not found');
     const vehicle = await this.findAssignedVehicle(user.id);
     if (vehicle) {
-      const busName = (vehicle.busNumber || '').trim().endsWith('호차')
-        ? (vehicle.busNumber || '').trim()
-        : `${(vehicle.busNumber || '셔틀').trim()}호차`;
+      const rawBus = (vehicle.busNumber || '셔틀').trim();
+      const busName = rawBus.endsWith('호차')
+        ? rawBus
+        : (rawBus.endsWith('호') ? `${rawBus}차` : `${rawBus}호차`);
 
       const noti = this.notificationRepository.create({
         vehicle: vehicle,
@@ -640,9 +641,10 @@ export class TeacherService {
     if (!user) throw new BadRequestException('User not found');
     const vehicle = await this.findAssignedVehicle(user.id);
     if (vehicle) {
-      const busName = (vehicle.busNumber || '').trim().endsWith('호차')
-        ? (vehicle.busNumber || '').trim()
-        : `${(vehicle.busNumber || '셔틀').trim()}호차`;
+      const rawBus = (vehicle.busNumber || '셔틀').trim();
+      const busName = rawBus.endsWith('호차')
+        ? rawBus
+        : (rawBus.endsWith('호') ? `${rawBus}차` : `${rawBus}호차`);
 
       const noti = this.notificationRepository.create({
         vehicle: vehicle,

@@ -16,6 +16,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isSavingAllergy = false;
   bool _isDeletingAccount = false;
   String _userPhone = '';
+  bool _notifyShuttleOperation = true;
+  bool _notifyBoardPost = true;
 
   @override
   void initState() {
@@ -34,6 +36,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (user != null && (user.role == 'PARENT' || user.role == 'STUDENT')) {
       final child = await ApiService().getMyChild(user.email);
       final profile = await ApiService().getParentProfile();
+      final notiSettings = await ApiService().getNotificationSettings();
       if (mounted) {
         setState(() {
           _childInfo = child;
@@ -43,6 +46,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           if (profile != null && profile['phone'] != null) {
             _userPhone = profile['phone'].toString();
           }
+          _notifyShuttleOperation = notiSettings['notifyShuttleOperation'] ?? true;
+          _notifyBoardPost = notiSettings['notifyBoardPost'] ?? true;
         });
       }
     }
@@ -413,6 +418,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             child: _isSavingAllergy
                                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                                 : const Text('알레르기 저장', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+
+                  // Notification Settings (Parent / Student)
+                  if (user?.role == 'PARENT' || user?.role == 'STUDENT') ...[
+                    const Text(
+                      '알림 수신 설정',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF64748B)),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        children: [
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            activeTrackColor: const Color(0xFF93C5FD),
+                            thumbColor: WidgetStateProperty.resolveWith<Color>((states) {
+                              if (states.contains(WidgetState.selected)) {
+                                return const Color(0xFF2563EB);
+                              }
+                              return Colors.white;
+                            }),
+                            title: const Text('기사 운행 알림', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF0F172A))),
+                            subtitle: const Text('셔틀 운행 시작 및 종료 알림을 받습니다', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                            value: _notifyShuttleOperation,
+                            onChanged: (val) async {
+                              setState(() => _notifyShuttleOperation = val);
+                              await ApiService().updateNotificationSettings(notifyShuttleOperation: val);
+                            },
+                          ),
+                          const Divider(height: 1, color: Color(0xFFF1F5F9)),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            activeTrackColor: const Color(0xFF93C5FD),
+                            thumbColor: WidgetStateProperty.resolveWith<Color>((states) {
+                              if (states.contains(WidgetState.selected)) {
+                                return const Color(0xFF2563EB);
+                              }
+                              return Colors.white;
+                            }),
+                            title: const Text('담임 알림장 알림', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF0F172A))),
+                            subtitle: const Text('우리 반 새 알림장 글 및 사진 등록 알림을 받습니다', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                            value: _notifyBoardPost,
+                            onChanged: (val) async {
+                              setState(() => _notifyBoardPost = val);
+                              await ApiService().updateNotificationSettings(notifyBoardPost: val);
+                            },
                           ),
                         ],
                       ),
