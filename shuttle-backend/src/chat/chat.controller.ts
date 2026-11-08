@@ -1,9 +1,14 @@
-import { Controller, Get, Post, Body, Query, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Req, Param, UseGuards } from '@nestjs/common';
 import { ChatService } from './chat.service';
+import { ApprovalService } from '../approval/approval.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('chat')
 export class ChatController {
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly approvalService: ApprovalService,
+  ) {}
 
   @Get('users')
   async getUsers(
@@ -53,6 +58,46 @@ export class ChatController {
   ) {
     const email = req?.user?.email || senderEmail;
     return this.chatService.sendMessageAndBroadcast(Number(roomId), email, text);
+  }
+
+  /**
+   * 메신저 결재 요청 생성 브리지 (웹 MessagePanel.jsx / TeacherDashboard.jsx 호환)
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('payment-request')
+  async createPaymentRequest(@Req() req: any, @Body() body: any) {
+    const user = req.dbUser;
+    return this.approvalService.createPaymentRequestFromChat(user, body);
+  }
+
+  /**
+   * 메신저 결재 결정 브리지
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('payment-request/:id/decision')
+  async decidePaymentRequest(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body('decision') decision: 'APPROVE' | 'REJECT',
+    @Body('rejectionReason') rejectionReason?: string,
+  ) {
+    const user = req.dbUser;
+    return this.approvalService.decidePaymentRequestFromChat(
+      user,
+      parseInt(id, 10),
+      decision,
+      rejectionReason,
+    );
+  }
+
+  /**
+   * 메신저 재결재 요청 브리지
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('payment-request/:id/re-request')
+  async reRequestPaymentRequest(@Req() req: any, @Body() body: any) {
+    const user = req.dbUser;
+    return this.approvalService.createPaymentRequestFromChat(user, body);
   }
 }
 

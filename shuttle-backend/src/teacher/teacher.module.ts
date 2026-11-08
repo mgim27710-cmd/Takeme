@@ -22,6 +22,7 @@ import { RoutingModule } from '../routing/routing.module';
     RoutingModule
   ],
   controllers: [TeacherController],
-  providers: [TeacherService, LocationGateway]
+  providers: [TeacherService, LocationGateway],
+  exports: [TeacherService, LocationGateway],
 })
 export class TeacherModule {}

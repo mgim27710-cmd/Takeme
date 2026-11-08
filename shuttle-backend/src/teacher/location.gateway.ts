@@ -96,6 +96,41 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.server.to(`academy_${academyId}`).emit('attendanceSubmitted', data);
   }
 
+  /**
+   * Broadcast change request creation to academy room: academy_{id}
+   * (server.emit 전체 전송 금지)
+   */
+  broadcastChangeRequestCreated(academyId: number, data: any) {
+    if (!this.server || !academyId) return;
+    this.server.to(`academy_${academyId}`).emit('changeRequestCreated', data);
+  }
+
+  /**
+   * Broadcast change request decision:
+   * - to academy room: academy_{id}
+   * - to vehicle room: vehicle_{vehicleId} (if vehicle involved)
+   * - to user room: user_{parentUserId}
+   * (server.emit 전체 전송 금지)
+   */
+  broadcastChangeRequestDecided(data: {
+    academyId: number;
+    vehicleId?: number;
+    parentUserId?: number;
+    request: any;
+  }) {
+    if (!this.server) return;
+    if (data.academyId) {
+      this.server.to(`academy_${data.academyId}`).emit('changeRequestDecided', data.request);
+    }
+    if (data.vehicleId) {
+      this.server.to(`vehicle_${data.vehicleId}`).emit('changeRequestDecided', data.request);
+      this.server.to(`vehicle_${data.vehicleId}`).emit('routeNeedsRefresh', { vehicleId: data.vehicleId });
+    }
+    if (data.parentUserId) {
+      this.server.to(`user_${data.parentUserId}`).emit('changeRequestDecided', data.request);
+    }
+  }
+
   @SubscribeMessage('joinVehicleRoom')
   async handleJoinVehicleRoom(
     @MessageBody() data: { vehicleId: number },
@@ -168,6 +203,9 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     const room = `academy_${academyId}`;
     client.join(room);
+    if (user?.sub) {
+      client.join(`user_${user.sub}`);
+    }
     console.log(`Client ${client.id} joined academy room: ${room}`);
     return { success: true, room, academyId };
   }

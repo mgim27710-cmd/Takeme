@@ -13,9 +13,24 @@ import { RoutingModule } from '../routing/routing.module';
 import { PickupPoint } from '../entities/pickup-point.entity';
 
 import { BoardPost } from '../entities/board-post.entity';
+import { ApprovalModule } from '../approval/approval.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ScheduleOverride, Notification, Student, StudentSchedule, User, Vehicle, ParentMessage, PickupPoint, BoardPost]), RoutingModule],
+  imports: [
+    TypeOrmModule.forFeature([
+      ScheduleOverride,
+      Notification,
+      Student,
+      StudentSchedule,
+      User,
+      Vehicle,
+      ParentMessage,
+      PickupPoint,
+      BoardPost,
+    ]),
+    RoutingModule,
+    ApprovalModule,
+  ],
   controllers: [ParentController],
   providers: [ParentService],
 })

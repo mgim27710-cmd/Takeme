@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { ScheduleOverride, OverrideType } from '../entities/schedule-override.entity';
+import { ApprovalService } from '../approval/approval.service';
+import { ChangeRequestType } from '../entities/approval-request.entity';
 import { Notification } from '../entities/notification.entity';
 import { Student } from '../entities/student.entity';
 import { Vehicle } from '../entities/vehicle.entity';
@@ -29,6 +31,7 @@ export class ParentService {
     @InjectRepository(PickupPoint) private pickupPointRepository: Repository<PickupPoint>,
     @InjectRepository(BoardPost) private boardPostRepository: Repository<BoardPost>,
     private routingService: RoutingService,
+    private approvalService: ApprovalService,
   ) {}
 
   private isPointInPolygon(point: number[], vs: number[][]) {
@@ -132,21 +135,26 @@ export class ParentService {
       }
     }
 
-    // 3. Create Override
-    const override = this.overrideRepository.create({
-      student,
-      startDate: targetDate,
-      endDate: targetDate,
-      overrideType,
+    // 3. 통학 변경 신청 (ApprovalRequest) 단일 생성 및 기관 관리자 승인 절차 연동
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('사용자를 찾을 수 없습니다.');
+    const appType = overrideType === OverrideType.ABSENCE ? ChangeRequestType.ABSENCE : ChangeRequestType.CHANGE_LOCATION;
+    const reqRes = await this.approvalService.createRequest(user, {
+      studentId: student.id,
+      type: appType,
+      targetDate,
       reason,
-      newAddress,
-      latitude,
-      longitude,
-      newVehicleId
-    } as any);
+      newAddress: newAddress || undefined,
+      newLatitude: latitude || undefined,
+      newLongitude: longitude || undefined,
+      targetVehicleId: newVehicleId || undefined,
+    });
 
-    await this.overrideRepository.save(override);
-    return { success: true, message: '성공적으로 신청되었습니다.' };
+    return {
+      success: true,
+      message: '성공적으로 신청되었습니다. 기관 관리자의 승인 후 최종 반영됩니다.',
+      request: reqRes.request,
+    };
   }
 
   async getNotifications(email: string) {

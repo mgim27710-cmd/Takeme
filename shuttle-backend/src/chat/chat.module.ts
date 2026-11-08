@@ -10,6 +10,7 @@ import { User } from '../entities/user.entity';
 import { Student } from '../entities/student.entity';
 import { Vehicle } from '../entities/vehicle.entity';
 import { Academy } from '../entities/academy.entity';
+import { ApprovalModule } from '../approval/approval.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { Academy } from '../entities/academy.entity';
       Vehicle,
       Academy,
     ]),
+    ApprovalModule,
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway],

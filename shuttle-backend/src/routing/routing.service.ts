@@ -6,6 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { Vehicle } from '../entities/vehicle.entity';
 import { Student } from '../entities/student.entity';
+import { StudentSchedule } from '../entities/student-schedule.entity';
 import { Academy } from '../entities/academy.entity';
 import { User, UserRole } from '../entities/user.entity';
 import { OperationLog } from '../entities/operation-log.entity';
@@ -698,6 +699,9 @@ export class RoutingService {
         id: st.id,
         name: st.adminDisplayName || st.name,
         realName: st.name,
+        gender: st.gender || parsedRaw['성별'] || '',
+        birthDate: st.birthDate || parsedRaw['생년월일'] || parsedRaw['생일'] || '',
+        className: st.className || getStudentClassName(st),
         address: st.address,
         boardingLocation: st.boardingLocation,
         lat: st.latitude,
@@ -706,7 +710,7 @@ export class RoutingService {
         color: st.assignedVehicle ? (st.assignedVehicle.colorHex || '#64748b') : '#64748b',
         allergies: st.allergies || parsedRaw['알레르기'] || parsedRaw['알러지'] || '',
         raw: parsedRaw,
-        parentPhone: st.parentUser?.phone || parsedRaw['부모연락처'] || parsedRaw['연락처'] || parsedRaw['보호자연락처'] || parsedRaw['보호자 연락처'] || parsedRaw['전화번호'] || parsedRaw['학부모전화번호'] || '',
+        parentPhone: st.phone || st.parentUser?.phone || parsedRaw['부모연락처'] || parsedRaw['연락처'] || parsedRaw['보호자연락처'] || parsedRaw['보호자 연락처'] || parsedRaw['전화번호'] || parsedRaw['학부모전화번호'] || '',
         parentName: st.parentUser?.name || parsedRaw['보호자 성함'] || parsedRaw['학부모 성함'] || parsedRaw['학부모명'] || '',
         schedules: st.schedules,
         isRegistered: !!st.studentUser || !!st.parentUser,
@@ -721,12 +725,44 @@ export class RoutingService {
 
     if (userId) {
       const callingUser = await this.userRepository.findOne({ where: { id: userId } });
-      if (callingUser && ((callingUser.role as string) === 'HOMEROOM_TEACHER' || callingUser.role === UserRole.HOMEROOM_TEACHER)) {
-        const assignedClass = callingUser.assignedClass;
-        if (!hasAssignedClass(assignedClass)) {
-          formattedStudents = [];
-        } else {
-          formattedStudents = formattedStudents.filter(s => isSameClass(getStudentClassName(s), assignedClass));
+      if (callingUser) {
+        const role = callingUser.role as string;
+        const isAdminOrDesk =
+          role === 'ACADEMY_ADMIN' ||
+          callingUser.role === UserRole.ACADEMY_ADMIN ||
+          role === 'SUPER_ADMIN' ||
+          callingUser.role === UserRole.SUPER_ADMIN ||
+          role === 'DESK_STAFF' ||
+          callingUser.role === UserRole.DESK_STAFF;
+
+        const isHomeroom =
+          role === 'HOMEROOM_TEACHER' || callingUser.role === UserRole.HOMEROOM_TEACHER;
+
+        if (isHomeroom) {
+          const assignedClass = callingUser.assignedClass;
+          if (!hasAssignedClass(assignedClass)) {
+            formattedStudents = [];
+          } else {
+            formattedStudents = formattedStudents.filter(s =>
+              isSameClass(getStudentClassName(s), assignedClass),
+            );
+          }
+        } else if (!isAdminOrDesk) {
+          // 관리자·담당 담임교사 외(기사, 지도교사 등)는 개인정보(전화번호·생년월일) 마스킹 처리
+          formattedStudents = formattedStudents.map(s => ({
+            ...s,
+            parentPhone: null,
+            birthDate: null,
+            raw: {
+              ...s.raw,
+              부모연락처: undefined,
+              연락처: undefined,
+              학부모연락처: undefined,
+              전화번호: undefined,
+              생년월일: undefined,
+              생일: undefined,
+            },
+          }));
         }
       }
     }
@@ -2287,6 +2323,7 @@ export class RoutingService {
     rawObj['반명'] = className || '';
     rawObj['반'] = className || '';
     student.raw = rawObj;
+    student.className = className || '';
     await this.studentRepository.save(student);
     return { success: true, studentId: student.id, className };
   }
@@ -2304,9 +2341,114 @@ export class RoutingService {
       rawObj['반명'] = className || '';
       rawObj['반'] = className || '';
       st.raw = rawObj;
+      st.className = className || '';
     }
     await this.studentRepository.save(students);
     return { success: true, count: students.length, className };
+  }
+
+  async batchUpdateStudents(
+    updates: Array<{
+      id: number;
+      name?: string;
+      gender?: string;
+      birthDate?: string;
+      phone?: string;
+      className?: string;
+      inBusId?: number;
+      outBusId?: number;
+    }>,
+    academyId?: number,
+    userId?: number,
+  ) {
+    if (!Array.isArray(updates) || updates.length === 0) return { success: true, count: 0 };
+    const academy = await this.getAcademy(academyId, userId);
+    if (!academy) throw new BadRequestException('기관 정보를 찾을 수 없습니다.');
+
+    let updatedCount = 0;
+    const scheduleRepo = this.studentRepository.manager.getRepository(StudentSchedule);
+    for (const item of updates) {
+      if (!item.id) continue;
+      const student = await this.studentRepository.findOne({
+        where: { id: item.id, academy: { id: academy.id } },
+        relations: { schedules: { assignedVehicle: true }, assignedVehicle: true },
+      });
+      if (!student) continue;
+
+      let rawObj: any = student.raw;
+      if (typeof rawObj === 'string') {
+        try { rawObj = JSON.parse(rawObj); } catch { rawObj = {}; }
+      }
+      if (!rawObj || typeof rawObj !== 'object') rawObj = {};
+
+      if (item.name && item.name.trim()) {
+        student.name = item.name.trim();
+        student.adminDisplayName = item.name.trim();
+      }
+      if (item.gender !== undefined) {
+        student.gender = item.gender;
+        rawObj['성별'] = item.gender;
+      }
+      if (item.birthDate !== undefined) {
+        student.birthDate = item.birthDate;
+        rawObj['생년월일'] = item.birthDate;
+      }
+      if (item.className !== undefined) {
+        student.className = item.className;
+        rawObj['반명'] = item.className;
+        rawObj['반'] = item.className;
+      }
+      if (item.phone !== undefined) {
+        student.phone = item.phone;
+        rawObj['학부모연락처'] = item.phone;
+        rawObj['연락처'] = item.phone;
+      }
+
+      // 등원 차량 반영
+      if (item.inBusId !== undefined) {
+        const inVehicle = item.inBusId ? await this.vehicleRepository.findOne({ where: { id: item.inBusId } }) : null;
+        let inSched = student.schedules?.find(s => s.type === 'BOARDING');
+        if (inSched) {
+          inSched.assignedVehicle = inVehicle as any;
+          await scheduleRepo.save(inSched);
+        } else if (inVehicle) {
+          const newSched = scheduleRepo.create({
+            student,
+            type: 'BOARDING',
+            dayOfWeek: 'MON',
+            address: student.address || '',
+            assignedVehicle: inVehicle,
+          });
+          await scheduleRepo.save(newSched);
+        }
+        if (inVehicle) student.assignedVehicle = inVehicle;
+      }
+
+      // 하원 차량 반영
+      if (item.outBusId !== undefined) {
+        const outVehicle = item.outBusId ? await this.vehicleRepository.findOne({ where: { id: item.outBusId } }) : null;
+        let outSched = student.schedules?.find(s => s.type === 'ALIGHTING');
+        if (outSched) {
+          outSched.assignedVehicle = outVehicle as any;
+          await scheduleRepo.save(outSched);
+        } else if (outVehicle) {
+          const newSched = scheduleRepo.create({
+            student,
+            type: 'ALIGHTING',
+            dayOfWeek: 'MON',
+            address: student.address || '',
+            assignedVehicle: outVehicle,
+          });
+          await scheduleRepo.save(newSched);
+        }
+      }
+
+      student.raw = rawObj;
+      await this.studentRepository.save(student);
+      updatedCount++;
+    }
+
+    return { success: true, count: updatedCount };
   }
 
   async uploadMedia(data: { base64Data: string; filename?: string; mimeType?: string }, reqHost?: string) {

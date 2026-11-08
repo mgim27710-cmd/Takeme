@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ApprovalService } from './approval.service';
 import { ApprovalController } from './approval.controller';
@@ -10,6 +10,9 @@ import { User } from '../entities/user.entity';
 import { Vehicle } from '../entities/vehicle.entity';
 import { Academy } from '../entities/academy.entity';
 import { Notification } from '../entities/notification.entity';
+import { AcademyHoliday } from '../entities/academy-holiday.entity';
+import { StudentSchedule } from '../entities/student-schedule.entity';
+import { TeacherModule } from '../teacher/teacher.module';
 
 @Module({
   imports: [
@@ -22,7 +25,10 @@ import { Notification } from '../entities/notification.entity';
       Vehicle,
       Academy,
       Notification,
+      AcademyHoliday,
+      StudentSchedule,
     ]),
+    forwardRef(() => TeacherModule),
   ],
   controllers: [ApprovalController],
   providers: [ApprovalService],
