@@ -3,8 +3,9 @@ import '../../services/api_service.dart';
 
 class ClassBoardScreen extends StatefulWidget {
   final String? childClassName;
+  final bool isEmbeddedTab;
 
-  const ClassBoardScreen({super.key, this.childClassName});
+  const ClassBoardScreen({super.key, this.childClassName, this.isEmbeddedTab = false});
 
   @override
   State<ClassBoardScreen> createState() => _ClassBoardScreenState();
@@ -62,6 +63,7 @@ class _ClassBoardScreenState extends State<ClassBoardScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
+        automaticallyImplyLeading: !widget.isEmbeddedTab,
         title: Text(
           classLabel,
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF0F172A)),

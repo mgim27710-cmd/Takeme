@@ -4,7 +4,8 @@ import '../../services/api_service.dart';
 import 'class_board_screen.dart';
 
 class NotificationListScreen extends StatefulWidget {
-  const NotificationListScreen({super.key});
+  final bool isEmbeddedTab;
+  const NotificationListScreen({super.key, this.isEmbeddedTab = false});
 
   @override
   State<NotificationListScreen> createState() => _NotificationListScreenState();
@@ -282,6 +283,7 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
+        automaticallyImplyLeading: !widget.isEmbeddedTab,
         title: const Text(
           '알림 목록',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF0F172A)),

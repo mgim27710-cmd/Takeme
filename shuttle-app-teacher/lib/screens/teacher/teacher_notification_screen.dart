@@ -4,7 +4,8 @@ import '../../models/notification_model.dart';
 import '../../services/api_service.dart';
 
 class TeacherNotificationScreen extends StatefulWidget {
-  const TeacherNotificationScreen({super.key});
+  final bool isEmbeddedTab;
+  const TeacherNotificationScreen({super.key, this.isEmbeddedTab = false});
 
   @override
   State<TeacherNotificationScreen> createState() => _TeacherNotificationScreenState();
@@ -241,10 +242,13 @@ class _TeacherNotificationScreenState extends State<TeacherNotificationScreen> {
         ),
         backgroundColor: Colors.white,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Color(0xFF334155), size: 20),
-          onPressed: () => Navigator.pop(context),
-        ),
+        automaticallyImplyLeading: !widget.isEmbeddedTab,
+        leading: widget.isEmbeddedTab
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Color(0xFF334155), size: 20),
+                onPressed: () => Navigator.pop(context),
+              ),
         actions: [
           if (unreadCount > 0)
             TextButton(

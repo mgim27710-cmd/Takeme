@@ -30,6 +30,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   Timer? _notificationPollTimer;
   Map<String, dynamic>? _todaySchedule;
 
+  int _selectedTabIndex = 0;
+  late final PageController _pageController;
+
   double? _busLat;
   double? _busLng;
   List<dynamic>? _actualRoadPath;
@@ -45,6 +48,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   @override
   void initState() {
     super.initState();
+    _pageController = PageController(initialPage: _selectedTabIndex);
     _loadAllData();
     _loadUnreadCount();
     _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
@@ -54,6 +58,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
 
   @override
   void dispose() {
+    _pageController.dispose();
     _allergyController.dispose();
     _notificationPollTimer?.cancel();
     final vehicleId = _routeData?.vehicleId;
@@ -61,6 +66,86 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
       SocketService().leaveVehicleRoom(vehicleId);
     }
     super.dispose();
+  }
+
+  Widget _buildBottomNavItem({
+    required int index,
+    required IconData icon,
+    required String label,
+    int badgeCount = 0,
+  }) {
+    final isSelected = _selectedTabIndex == index;
+    return Expanded(
+      child: InkWell(
+        onTap: () {
+          _pageController.animateToPage(
+            index,
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeInOut,
+          );
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isSelected ? const Color(0xFFF1F5F9) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(
+                      icon,
+                      size: 24,
+                      color: isSelected ? const Color(0xFF0F172A) : const Color(0xFF94A3B8),
+                    ),
+                    if (badgeCount > 0)
+                      Positioned(
+                        right: -7,
+                        bottom: -4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEF4444),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
+                          constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                          alignment: Alignment.center,
+                          child: Text(
+                            badgeCount > 9 ? '9+' : '$badgeCount',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                              height: 1,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+                  color: isSelected ? const Color(0xFF0F172A) : const Color(0xFF94A3B8),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _loadUnreadCount() async {
@@ -359,140 +444,17 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildHomeContent() {
     final user = ApiService().currentUser;
     final isStudent = user?.role == 'STUDENT';
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
-      appBar: AppBar(
-        title: const Text(
-          'TAKEME',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Color(0xFF2563EB), letterSpacing: -0.5),
-        ),
-        backgroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Color(0xFF64748B)),
-            onPressed: () {
-              _loadAllData();
-              _loadUnreadCount();
-            },
-          ),
-          Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.center,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.notifications, color: Color(0xFF0F172A), size: 24),
-                tooltip: '알림',
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const NotificationListScreen()),
-                  ).then((_) {
-                    _loadUnreadCount();
-                    _loadAllData();
-                  });
-                },
-              ),
-              if (_unreadNotificationCount > 0)
-                Positioned(
-                  right: 4,
-                  bottom: 4,
-                  child: IgnorePointer(
-                    child: Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEF4444),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
-                      ),
-                      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-                      alignment: Alignment.center,
-                      child: Text(
-                        _unreadNotificationCount > 9 ? '9+' : '$_unreadNotificationCount',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w900,
-                          height: 1,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.center,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.forum_outlined, color: Color(0xFF0F172A), size: 24),
-                tooltip: '메신저 대화',
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const ChatRoomListScreen()),
-                  ).then((_) {
-                    _loadUnreadCount();
-                    _loadAllData();
-                  });
-                },
-              ),
-              if (_unreadChatCount > 0)
-                Positioned(
-                  right: 4,
-                  bottom: 4,
-                  child: IgnorePointer(
-                    child: Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEF4444),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
-                      ),
-                      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-                      alignment: Alignment.center,
-                      child: Text(
-                        _unreadChatCount > 9 ? '9+' : '$_unreadChatCount',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w900,
-                          height: 1,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined, color: Color(0xFF475569)),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              ).then((_) => _loadAllData());
-            },
-          ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(color: const Color(0xFFF1F5F9), height: 1),
-        ),
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)))
-          : RefreshIndicator(
-              onRefresh: _loadAllData,
-              child: SingleChildScrollView(
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)));
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadAllData,
+      child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                 child: Center(
@@ -506,13 +468,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                           color: Colors.transparent,
                           child: InkWell(
                             onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => ClassBoardScreen(
-                                    childClassName: _childInfo?.className,
-                                  ),
-                                ),
+                              _pageController.animateToPage(
+                                1,
+                                duration: const Duration(milliseconds: 250),
+                                curve: Curves.easeInOut,
                               );
                             },
                             borderRadius: BorderRadius.circular(16),
@@ -581,9 +540,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                         // Tabs: 등원 / 하원
                         Row(
                           children: [
-                            _buildTabItem('goto', '등원'),
+                            _buildDirectionTab('goto', '등원'),
                             const SizedBox(width: 8),
-                            _buildTabItem('gohome', '하원'),
+                            _buildDirectionTab('gohome', '하원'),
                           ],
                         ),
                         const SizedBox(height: 16),
@@ -829,11 +788,75 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                   ),
                 ),
               ),
+            );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      appBar: _selectedTabIndex == 0
+          ? AppBar(
+              title: const Text(
+                'TAKEME',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Color(0xFF2563EB), letterSpacing: -0.5),
+              ),
+              backgroundColor: Colors.white,
+              elevation: 0,
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.refresh, color: Color(0xFF64748B)),
+                  onPressed: () {
+                    _loadAllData();
+                    _loadUnreadCount();
+                  },
+                ),
+              ],
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(1),
+                child: Container(color: const Color(0xFFF1F5F9), height: 1),
+              ),
+            )
+          : null,
+      body: PageView(
+        controller: _pageController,
+        onPageChanged: (idx) => setState(() => _selectedTabIndex = idx),
+        children: [
+          _buildHomeContent(),
+          ClassBoardScreen(childClassName: _childInfo?.className, isEmbeddedTab: true),
+          const ChatRoomListScreen(isEmbeddedTab: true),
+          const NotificationListScreen(isEmbeddedTab: true),
+          const SettingsScreen(isEmbeddedTab: true),
+        ],
+      ),
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(
+            top: BorderSide(color: Color(0xFFE2E8F0), width: 1),
+          ),
+        ),
+        child: SafeArea(
+          top: false,
+          bottom: true,
+          child: SizedBox(
+            height: 56,
+            child: Row(
+              children: [
+                _buildBottomNavItem(index: 0, icon: Icons.home_outlined, label: '홈'),
+                _buildBottomNavItem(index: 1, icon: Icons.article_outlined, label: '알림장'),
+                _buildBottomNavItem(index: 2, icon: Icons.forum_outlined, label: '메신저', badgeCount: _unreadChatCount),
+                _buildBottomNavItem(index: 3, icon: Icons.notifications_outlined, label: '알림', badgeCount: _unreadNotificationCount),
+                _buildBottomNavItem(index: 4, icon: Icons.settings_outlined, label: '설정'),
+              ],
             ),
+          ),
+        ),
+      ),
     );
   }
 
-  Widget _buildTabItem(String tab, String label) {
+  Widget _buildDirectionTab(String tab, String label) {
     final isSelected = _activeTab == tab;
     return Expanded(
       child: GestureDetector(
