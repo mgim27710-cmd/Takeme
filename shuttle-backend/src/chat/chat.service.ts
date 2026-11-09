@@ -348,6 +348,47 @@ export class ChatService {
       this.chatGateway.broadcastMessageToRoom(roomId, fullMessage);
     }
 
+    // [교사/기사 앱 수신함 즉시 동기화]
+    // 관리자(원장님) 또는 다른 사용자가 메시지를 보냈을 때,
+    // 이 방의 다른 멤버들(교사, 기사 등)의 앱 수신함(ParentMessage)으로 자동 전달!
+    try {
+      const room = await this.roomRepo.findOne({
+        where: { id: roomId },
+        relations: { members: { user: true } },
+      });
+      if (room && room.members) {
+        const isSenderAdmin = user.role === 'ACADEMY_ADMIN' || user.role === 'SUPER_ADMIN';
+        const isDirect = room.type === ChatRoomType.DIRECT || room.members.length <= 2;
+        const prefix = isSenderAdmin
+          ? (isDirect ? '[원장님 1:1 개인 메세지]' : '[원장님 공지]')
+          : `[${user.name || '알림'}]`;
+
+        for (const m of room.members) {
+          if (m.user && m.user.id !== user.id) {
+            const receiverRole = m.user.role || '';
+            const targetRoles = [receiverRole];
+            if (
+              receiverRole.includes('TEACHER') ||
+              receiverRole === 'HOMEROOM_TEACHER' ||
+              receiverRole === 'SHUTTLE_TEACHER'
+            ) {
+              targetRoles.push('TEACHER', 'HOMEROOM_TEACHER', 'SHUTTLE_TEACHER');
+            }
+
+            const pMsg = this.parentMessageRepo.create({
+              receiverUser: m.user,
+              targetRoles: targetRoles,
+              message: `${prefix} ${text.trim()}`,
+              isRead: false,
+            });
+            await this.parentMessageRepo.save(pMsg);
+          }
+        }
+      }
+    } catch (bridgeErr) {
+      console.warn('[ChatService] ParentMessage sync error:', bridgeErr);
+    }
+
     return fullMessage;
   }
 

@@ -523,7 +523,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           }).catch((err) => console.warn('교사 앱 수신함 백엔드 전송:', err));
 
           // 2. 모바일 앱 프록시 실시간 수신함 큐 동기화 (1:1 개인 메세지 플래그 및 수신자 명시)
-          fetch(`http://localhost:8083/api/bridge-admin-message`, {
+          const bridgeHost = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : 'localhost';
+          fetch(`http://${bridgeHost}:8083/api/bridge-admin-message`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

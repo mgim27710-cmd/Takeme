@@ -150,7 +150,6 @@ class ApiService {
   // AUTH
   // ----------------------------------------------------
   Future<Map<String, dynamic>> login(String email, String password, {String? otpToken, String? clientType = 'app'}) async {
-    final url = Uri.parse('${AppConfig.apiHost}/auth/login');
     final body = {
       'email': email.trim(),
       'password': password,
@@ -159,8 +158,42 @@ class ApiService {
     if (otpToken != null && otpToken.isNotEmpty) {
       body['otpToken'] = otpToken.trim();
     }
+    final encodedBody = jsonEncode(body);
+    final headers = {'Content-Type': 'application/json'};
 
-    final res = await http.post(url, headers: _headers(), body: jsonEncode(body));
+    http.Response? res;
+    dynamic lastError;
+
+    // 1차 시도 (기본 apiHost: https://52.63.245.203.sslip.io 또는 kIsWeb origin)
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/auth/login');
+      res = await http.post(url, headers: headers, body: encodedBody).timeout(const Duration(seconds: 7));
+    } catch (e) {
+      lastError = e;
+      print('[ApiService] Primary host (${AppConfig.apiHost}) failed: $e');
+    }
+
+    // 모바일 환경에서 1차 실패 또는 502/503 에러 발생 시 fallback host (http://52.63.245.203:3000) 자동 재시도
+    if (res == null || res.statusCode >= 500) {
+      try {
+        final fallbackUrl = Uri.parse('${AppConfig.fallbackApiHost}/auth/login');
+        print('[ApiService] Attempting fallback host: $fallbackUrl');
+        final fallbackRes = await http.post(fallbackUrl, headers: headers, body: encodedBody).timeout(const Duration(seconds: 7));
+        if (fallbackRes.statusCode < 500) {
+          res = fallbackRes;
+          AppConfig.useFallback();
+          print('[ApiService] Fallback successful! Active host switched to: ${AppConfig.apiHost}');
+        }
+      } catch (e) {
+        lastError ??= e;
+        print('[ApiService] Fallback host failed: $e');
+      }
+    }
+
+    if (res == null) {
+      throw Exception('서버에 연결할 수 없습니다. ($lastError)');
+    }
+
     final data = jsonDecode(utf8.decode(res.bodyBytes));
 
     if (data['isWebAccount'] == true) {

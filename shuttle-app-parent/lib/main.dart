@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'services/api_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/parent/parent_home_screen.dart';
+import 'utils/network_helper.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  setupNetworkSecurity();
   await ApiService().init();
   runApp(const TakeMeParentApp());
 }

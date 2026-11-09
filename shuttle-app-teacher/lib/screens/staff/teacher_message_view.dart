@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../services/api_service.dart';
@@ -15,6 +16,7 @@ class _TeacherMessageViewState extends State<TeacherMessageView> with SingleTick
   late TabController _tabController;
   List<Map<String, dynamic>> _inboxMessages = [];
   bool _isLoadingInbox = true;
+  Timer? _pollingTimer;
 
   // Send Message form state
   final _messageController = TextEditingController();
@@ -36,10 +38,18 @@ class _TeacherMessageViewState extends State<TeacherMessageView> with SingleTick
     _tabController = TabController(length: 2, vsync: this);
     _loadInbox();
     _loadStaffInfo();
+
+    // 4초 주기로 수신함 자동 새로고침 (원장님 실시간 메시지 즉시 수신)
+    _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (mounted && _tabController.index == 0) {
+        _silentReloadInbox();
+      }
+    });
   }
 
   @override
   void dispose() {
+    _pollingTimer?.cancel();
     _tabController.dispose();
     _messageController.dispose();
     super.dispose();
@@ -47,13 +57,23 @@ class _TeacherMessageViewState extends State<TeacherMessageView> with SingleTick
 
   Future<void> _loadInbox() async {
     setState(() => _isLoadingInbox = true);
+    await _fetchInboxData();
+    if (mounted) {
+      setState(() => _isLoadingInbox = false);
+    }
+  }
+
+  Future<void> _silentReloadInbox() async {
+    await _fetchInboxData();
+  }
+
+  Future<void> _fetchInboxData() async {
     final user = ApiService().currentUser;
     if (user != null) {
       final list = await ApiService().getTeacherInbox(user.email);
       if (mounted) {
         setState(() {
           _inboxMessages = list;
-          _isLoadingInbox = false;
         });
       }
     }
@@ -91,6 +111,15 @@ class _TeacherMessageViewState extends State<TeacherMessageView> with SingleTick
         message: text,
         staffUserIds: adminId != null ? [adminId] : [],
       );
+
+      // 관리자 웹 1:1 실시간 대화방으로도 즉시 전달
+      try {
+        await ApiService().sendDirectChatMessageToAdmin(
+          teacherEmail: user.email,
+          adminId: adminId,
+          message: text,
+        );
+      } catch (_) {}
     } else {
       // Send to parents
       final targetIds = _selectedStudentId != null

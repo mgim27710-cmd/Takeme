@@ -13,6 +13,9 @@ import { StudentSchedule } from '../entities/student-schedule.entity';
 import { ScheduleOverride } from '../entities/schedule-override.entity';
 import { AcademyHoliday } from '../entities/academy-holiday.entity';
 import { PickupPoint } from '../entities/pickup-point.entity';
+import { ChatMessage } from '../entities/chat-message.entity';
+import { ChatRoom } from '../entities/chat-room.entity';
+import { ChatRoomMember } from '../entities/chat-room-member.entity';
 import { RoutingModule } from '../routing/routing.module';
 
 @Module({
@@ -28,6 +31,9 @@ import { RoutingModule } from '../routing/routing.module';
       ScheduleOverride,
       AcademyHoliday,
       PickupPoint,
+      ChatMessage,
+      ChatRoom,
+      ChatRoomMember,
     ]),
     RoutingModule,
   ],

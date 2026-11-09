@@ -3,6 +3,7 @@ import '../../services/api_service.dart';
 import '../settings_screen.dart';
 import '../staff/teacher_board_view.dart';
 import '../staff/teacher_message_view.dart';
+import 'homeroom_students_view.dart';
 
 class HomeroomTeacherHomeScreen extends StatefulWidget {
   const HomeroomTeacherHomeScreen({super.key});
@@ -13,6 +14,19 @@ class HomeroomTeacherHomeScreen extends StatefulWidget {
 
 class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
   int _selectedTabIndex = 0;
+
+  String _getAppTitle() {
+    switch (_selectedTabIndex) {
+      case 0:
+        return '우리 반 원아 명단';
+      case 1:
+        return '클라우드 게시판';
+      case 2:
+        return '학급 메시지 소통';
+      default:
+        return '담임교사 홈';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +45,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
             Row(
               children: [
                 Text(
-                  _selectedTabIndex == 0 ? '클라우드 게시판' : '학급 메시지 소통',
+                  _getAppTitle(),
                   style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF1E293B)),
                 ),
                 const SizedBox(width: 8),
@@ -77,6 +91,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
       body: IndexedStack(
         index: _selectedTabIndex,
         children: const [
+          HomeroomStudentsView(),
           TeacherBoardView(),
           TeacherMessageView(),
         ],
@@ -91,6 +106,11 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
         selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
         unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
         items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.people_alt_outlined),
+            activeIcon: Icon(Icons.people_alt),
+            label: '우리 반 원아',
+          ),
           BottomNavigationBarItem(
             icon: Icon(Icons.photo_library_outlined),
             activeIcon: Icon(Icons.photo_library),

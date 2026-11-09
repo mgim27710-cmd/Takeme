@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
+import { Repository, LessThanOrEqual, MoreThanOrEqual, In } from 'typeorm';
 import { Student } from '../entities/student.entity';
 import { StudentSchedule } from '../entities/student-schedule.entity';
 import { Vehicle } from '../entities/vehicle.entity';
@@ -11,6 +11,8 @@ import { OperationLog } from '../entities/operation-log.entity';
 import { ScheduleOverride, OverrideType } from '../entities/schedule-override.entity';
 import { AcademyHoliday } from '../entities/academy-holiday.entity';
 import { PickupPoint } from '../entities/pickup-point.entity';
+import { ChatMessage } from '../entities/chat-message.entity';
+import { ChatRoomMember } from '../entities/chat-room-member.entity';
 import { LocationGateway } from './location.gateway';
 
 @Injectable()
@@ -27,6 +29,8 @@ export class TeacherService {
     @InjectRepository(AcademyHoliday) private academyHolidayRepository: Repository<AcademyHoliday>,
     private readonly locationGateway: LocationGateway,
     @Optional() @InjectRepository(PickupPoint) private pickupPointRepository?: Repository<PickupPoint>,
+    @Optional() @InjectRepository(ChatMessage) private chatMessageRepository?: Repository<ChatMessage>,
+    @Optional() @InjectRepository(ChatRoomMember) private chatRoomMemberRepository?: Repository<ChatRoomMember>,
   ) {}
 
   private async isTodayHoliday(): Promise<boolean> {
@@ -223,7 +227,50 @@ export class TeacherService {
     if (!user) throw new BadRequestException('User not found');
 
     const vehicle = await this.findAssignedVehicle(user.id);
-    if (!vehicle) return []; // No assigned vehicle
+    if (!vehicle) {
+      // 담임교사(HOMEROOM_TEACHER)이거나 차량 미배정 교사인 경우:
+      // 교사의 담당 학급(assignedClass) 원아들 또는 소속 유치원의 전체 원아 조회
+      const assignedClass = (user.assignedClass || '').trim();
+      let query = this.studentRepository.createQueryBuilder('student')
+        .leftJoinAndSelect('student.assignedVehicle', 'assignedVehicle')
+        .leftJoinAndSelect('student.assignedDepartureVehicle', 'assignedDepartureVehicle');
+      
+      if (user.academyId) {
+        query = query.andWhere('student.academyId = :academyId', { academyId: user.academyId });
+      }
+
+      const allStudents = await query.getMany();
+
+      // 담당 학급이 지정되어 있으면 해당 반 학생 우선 필터링, 없으면 전체 반 학생 반환
+      const classStudents = assignedClass
+        ? allStudents.filter(s => {
+            const rawObj = typeof s.raw === 'string' ? JSON.parse(s.raw || '{}') : (s.raw || {});
+            const sClass = (rawObj['반명'] || rawObj['반'] || '').toString().trim();
+            return sClass === assignedClass || !sClass;
+          })
+        : allStudents;
+
+      return (classStudents.length > 0 ? classStudents : allStudents).map(s => {
+        const rawObj = typeof s.raw === 'string' ? JSON.parse(s.raw || '{}') : (s.raw || {});
+        return {
+          id: s.id,
+          name: s.adminDisplayName || s.name,
+          address: s.address,
+          latitude: s.latitude,
+          longitude: s.longitude,
+          boarded: s.boardStatus === 'BOARDED',
+          absent: s.boardStatus === 'ABSENT',
+          expectedTime: rawObj['예상탑승시간'] || '15:30',
+          allergies: s.allergies || rawObj['알레르기'] || '',
+          teacherMemo: s.teacherMemo,
+          runNumber: s.runNumber || 1,
+          isOverride: false,
+          className: rawObj['반명'] || rawObj['반'] || user.assignedClass || '우리반',
+          parentPhone: rawObj['부모연락처'] || rawObj['보호자연락처'] || rawObj['연락처'] || '',
+          assignedVehicleName: s.assignedVehicle ? (s.assignedVehicle.busNumber || s.assignedVehicle.name) : '차량 미배정'
+        };
+      });
+    }
 
     const students = await this.getTodayStudentsForVehicle(vehicle.id);
     
@@ -371,27 +418,96 @@ export class TeacherService {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
 
+    const resultList: any[] = [];
+    const seenTexts = new Set<string>();
+
+    // 1. ParentMessage 조회 (공지 및 직접 지정된 메시지)
     const messages = await this.messageRepository.find({
       relations: { student: true, receiverUser: true },
       order: { createdAt: 'DESC' }
     });
 
-    return messages
-      .filter(m => {
-        if (m.receiverUser) return m.receiverUser.id === user.id;
-        if (m.targetRoles && Array.isArray(m.targetRoles)) {
-          return m.targetRoles.includes('TEACHER') || m.targetRoles.includes('HOMEROOM_TEACHER') || m.targetRoles.includes('SHUTTLE_TEACHER') || m.targetRoles.includes('ALL');
+    for (const m of messages) {
+      const isTarget =
+        (m.receiverUser && m.receiverUser.id === user.id) ||
+        (m.targetRoles &&
+          Array.isArray(m.targetRoles) &&
+          (m.targetRoles.includes('TEACHER') ||
+            m.targetRoles.includes('HOMEROOM_TEACHER') ||
+            m.targetRoles.includes('SHUTTLE_TEACHER') ||
+            m.targetRoles.includes('ALL')));
+
+      if (isTarget) {
+        const dedupeKey = `${m.message}_${new Date(m.createdAt).getMinutes()}`;
+        seenTexts.add(dedupeKey);
+        resultList.push({
+          id: m.id,
+          message: m.message,
+          createdAt: m.createdAt,
+          isRead: m.isRead,
+          isPersonal:
+            (m.receiverUser && m.receiverUser.id === user.id) ||
+            m.message.includes('1:1') ||
+            m.message.includes('개인'),
+          type: (m.receiverUser && m.receiverUser.id === user.id) ? 'PERSONAL' : 'NOTICE',
+          student: m.student ? { id: m.student.id, name: m.student.adminDisplayName || m.student.name } : null,
+          receiverUser: m.receiverUser ? { id: m.receiverUser.id, name: m.receiverUser.name } : { id: user.id, name: user.name }
+        });
+      }
+    }
+
+    // 2. ChatMessage 조회 (원장님과의 1:1 대화방 및 단체 채팅방에서 원장님이 보낸 메시지)
+    if (this.chatRoomMemberRepository && this.chatMessageRepository) {
+      try {
+        const myMemberships = await this.chatRoomMemberRepository.find({
+          where: { user: { id: user.id } },
+          relations: { room: true },
+        });
+
+        const roomIds = myMemberships.map(m => m.room?.id).filter(Boolean);
+
+        if (roomIds.length > 0) {
+          const chatMsgs = await this.chatMessageRepository.find({
+            where: { room: { id: In(roomIds) } },
+            relations: { sender: true, room: true },
+            order: { createdAt: 'DESC' },
+            take: 50,
+          });
+
+          for (const cm of chatMsgs) {
+            // 본인이 보낸 것은 제외하고 상대방(원장님 등)이 보낸 것만 수신함에 추가
+            if (cm.sender && cm.sender.id !== user.id) {
+              const isDirect = cm.room?.type === 'DIRECT';
+              const prefix = isDirect ? '[원장님 1:1 개인 메세지]' : `[${cm.sender.name || '공지'}]`;
+              const displayMsg = cm.text.startsWith('[') ? cm.text : `${prefix} ${cm.text}`;
+
+              const dedupeKey = `${displayMsg}_${new Date(cm.createdAt).getMinutes()}`;
+              if (!seenTexts.has(dedupeKey)) {
+                seenTexts.add(dedupeKey);
+                resultList.push({
+                  id: `chat_${cm.id}`,
+                  message: displayMsg,
+                  createdAt: cm.createdAt,
+                  isRead: (cm.readBy || []).includes(user.id),
+                  isPersonal: isDirect,
+                  type: isDirect ? 'PERSONAL' : 'NOTICE',
+                  sender: { id: cm.sender.id, name: cm.sender.name, email: cm.sender.email },
+                  receiverUser: { id: user.id, name: user.name },
+                  student: null,
+                });
+              }
+            }
+          }
         }
-        return true;
-      })
-      .map(m => ({
-      id: m.id,
-      message: m.message,
-      createdAt: m.createdAt,
-      isRead: m.isRead,
-      student: m.student ? { id: m.student.id, name: m.student.adminDisplayName || m.student.name } : null,
-      receiverUser: m.receiverUser ? { id: m.receiverUser.id, name: m.receiverUser.name } : null
-    }));
+      } catch (chatQueryErr) {
+        console.warn('[TeacherService] ChatMessage inbox merge error:', chatQueryErr);
+      }
+    }
+
+    // 3. 최신 날짜 순 정렬
+    resultList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    return resultList;
   }
 
   async updateMemo(email: string, studentId: number, memo: string) {
@@ -572,7 +688,7 @@ export class TeacherService {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
     const vehicle = await this.findAssignedVehicle(user.id);
-    if (!vehicle) throw new BadRequestException('Assigned vehicle not found');
+    // 담임교사 등 차량이 배정되지 않은 교사도 원장님 및 학부모에게 메시지 발송 허용
 
     this.locationGateway?.broadcastDepartSignal(vehicle.id, stopName);
     const label = stopName ? ` (${stopName})` : '';
@@ -661,7 +777,7 @@ export class TeacherService {
     if (!user) throw new BadRequestException('User not found');
 
     const vehicle = await this.findAssignedVehicle(user.id);
-    if (!vehicle) throw new BadRequestException('Assigned vehicle not found');
+    // 담임교사 등 차량이 배정되지 않은 교사도 원장님 및 학부모에게 메시지 발송 허용
 
     let sentCount = 0;
     

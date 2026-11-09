@@ -205,7 +205,8 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (e) {
       setState(() => _isLoading = false);
-      _showError('서버 연결에 실패했습니다.');
+      final msg = e.toString().replaceAll('Exception: ', '');
+      _showError(msg.isNotEmpty ? msg : '서버 연결에 실패했습니다. 네트워크 상태를 확인해주세요.');
     }
   }
 
