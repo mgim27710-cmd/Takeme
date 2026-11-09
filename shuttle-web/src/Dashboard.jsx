@@ -572,8 +572,30 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   };
 
   // Sort students list based on current sort criterion: 이름순, 나이순, 반 순서
+  // 변동사항(당일 1회 탑승, 결석, 픽업, 셔틀 대기 등)이 있는 원아는 최상단에 우선 정렬
   const sortStudentsList = useCallback((list) => {
     return [...list].sort((a, b) => {
+      const aHasChange = Boolean(
+        a.isOneTimeRide || 
+        a.oneTimeType || 
+        a.boardStatus === 'ABSENT' || 
+        a.boardStatus === 'SELF_PICKUP' || 
+        (a.isNotRiding && (a.boardStatus === 'WAITING' || a.boardStatus === 'BOARDED')) ||
+        a.raw?.isTemporaryRide || 
+        a.raw?.isTemporaryLocation
+      );
+      const bHasChange = Boolean(
+        b.isOneTimeRide || 
+        b.oneTimeType || 
+        b.boardStatus === 'ABSENT' || 
+        b.boardStatus === 'SELF_PICKUP' || 
+        (b.isNotRiding && (b.boardStatus === 'WAITING' || b.boardStatus === 'BOARDED')) ||
+        b.raw?.isTemporaryRide || 
+        b.raw?.isTemporaryLocation
+      );
+      if (aHasChange && !bHasChange) return -1;
+      if (!aHasChange && bHasChange) return 1;
+
       const rawA = getStudentRaw(a);
       const rawB = getStudentRaw(b);
 
@@ -4027,6 +4049,21 @@ const parseKindergartenExcelSheet = (sheet) => {
                               <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b') }}></div>
                               <span className="font-bold text-slate-800 text-sm shrink-0">{st.name}</span>
                               <div className="flex items-center gap-1 overflow-hidden truncate">
+                                {st.boardStatus === 'ABSENT' && (
+                                  <span className="text-xs bg-red-100 text-red-700 font-extrabold px-1.5 py-0.5 rounded border border-red-300 shrink-0">
+                                    결석
+                                  </span>
+                                )}
+                                {st.boardStatus === 'SELF_PICKUP' && (
+                                  <span className="text-xs bg-blue-100 text-blue-700 font-extrabold px-1.5 py-0.5 rounded border border-blue-300 shrink-0">
+                                    개별 픽업
+                                  </span>
+                                )}
+                                {(st.isOneTimeRide || (st.isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))) && (
+                                  <span className="text-xs bg-rose-100 text-rose-700 font-extrabold px-1.5 py-0.5 rounded border border-rose-300 shrink-0 animate-pulse">
+                                    당일 1회 탑승
+                                  </span>
+                                )}
                                 {needsAddress && (
                                   <span className="text-xs bg-red-100 text-red-700 font-extrabold px-1.5 py-0.5 rounded border border-red-300 shrink-0 animate-pulse">
                                     주소 입력 필요

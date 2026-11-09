@@ -1547,7 +1547,11 @@ export default function TeacherDashboard({
                 </div>
               ) : attendanceData?.students && attendanceData.students.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {attendanceData.students.map((st) => {
+                  {[...attendanceData.students].sort((a, b) => {
+                    const aChanged = a.boardStatus === 'ABSENT' || a.status === 'ABSENT' || a.status === 'LATE' || a.status === 'EARLY_LEAVE' || a.boardStatus === 'SELF_PICKUP' ? 1 : 0;
+                    const bChanged = b.boardStatus === 'ABSENT' || b.status === 'ABSENT' || b.status === 'LATE' || b.status === 'EARLY_LEAVE' || b.boardStatus === 'SELF_PICKUP' ? 1 : 0;
+                    return bChanged - aChanged;
+                  }).map((st) => {
                     return (
                       <div
                         key={st.studentId}
@@ -2310,7 +2314,7 @@ export default function TeacherDashboard({
                     /* Existing Card View */
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
 
-                      {displayedStudents.map(student => {
+                      {sortedDisplayedStudents.map(student => {
                         const isNonShuttle = checkIsNonShuttle(student);
                         const effectiveStatus = getStudentEffectiveBoardStatus(student);
                         const rideReq = rideRequests[student.id];

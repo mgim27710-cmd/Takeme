@@ -431,6 +431,35 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     });
   };
 
+  // 역할별 일괄 선택/해제 토글
+  const handleToggleSelectRole = (userList) => {
+    if (!userList || userList.length === 0) return;
+    const targetIds = userList.map((u) => u.id);
+    setSelectedUserIds((prev) => {
+      const allSelected = targetIds.every((id) => prev.includes(id));
+      if (allSelected) {
+        return prev.filter((id) => !targetIds.includes(id));
+      } else {
+        const next = new Set([...prev, ...targetIds]);
+        return Array.from(next);
+      }
+    });
+  };
+
+  // 관련 인원 전체 선택/해제 토글
+  const handleToggleSelectAllUsers = () => {
+    const allUsers = [...filteredDrivers, ...filteredTeachers, ...filteredParents, ...filteredAdmins];
+    const allIds = allUsers.map((u) => u.id);
+    setSelectedUserIds((prev) => {
+      const allSelected = allIds.length > 0 && allIds.every((id) => prev.includes(id));
+      if (allSelected) {
+        return [];
+      } else {
+        return allIds;
+      }
+    });
+  };
+
   const handleStartChat = async () => {
     if (selectedUserIds.length === 0) {
       return alert('대화할 상대를 최소 1명 이상 선택해주세요.');
@@ -1097,12 +1126,26 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     return `${date.getMonth() + 1}월 ${date.getDate()}일`;
   };
 
-  const filteredRooms = rooms.filter((r) => {
-    const title = getRoomTitle(r).toLowerCase();
-    const lastText = (r.latestMessage?.text || '').toLowerCase();
-    const q = searchRoomQuery.toLowerCase();
-    return title.includes(q) || lastText.includes(q);
-  });
+  const filteredRooms = rooms
+    .filter((r) => {
+      const title = getRoomTitle(r).toLowerCase();
+      const lastText = (r.latestMessage?.text || '').toLowerCase();
+      const q = searchRoomQuery.toLowerCase();
+      return title.includes(q) || lastText.includes(q);
+    })
+    .sort((a, b) => {
+      if (a.type === 'PAYMENT_SYSTEM') return -1;
+      if (b.type === 'PAYMENT_SYSTEM') return 1;
+      if (a.type === 'NOTIFICATION_SYSTEM') return -1;
+      if (b.type === 'NOTIFICATION_SYSTEM') return 1;
+      // Rooms with unread messages or recent updates float to top
+      const unreadA = (a.unreadCount || 0) > 0 ? 1 : 0;
+      const unreadB = (b.unreadCount || 0) > 0 ? 1 : 0;
+      if (unreadA !== unreadB) return unreadB - unreadA;
+      const tA = a.latestMessage ? new Date(a.latestMessage.createdAt).getTime() : new Date(a.updatedAt || a.createdAt).getTime();
+      const tB = b.latestMessage ? new Date(b.latestMessage.createdAt).getTime() : new Date(b.updatedAt || b.createdAt).getTime();
+      return tB - tA;
+    });
 
   // Filter users inside New Chat modal
   const filterUserList = (list) => {
@@ -1901,6 +1944,58 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
               </div>
             </div>
 
+            {/* Quick Role Select Toolbar (역할별 및 관련인원 전체 선택 툴바) */}
+            <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-1 flex-wrap">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleToggleSelectAllUsers}
+                  className="px-2.5 py-1 text-xs font-black rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition shadow-2xs cursor-pointer"
+                >
+                  관련인원 전체 {selectedUserIds.length === (filteredDrivers.length + filteredTeachers.length + filteredParents.length + filteredAdmins.length) && selectedUserIds.length > 0 ? '해제' : '선택'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleSelectRole(filteredTeachers)}
+                  className="px-2 py-1 text-xs font-bold rounded-lg bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition cursor-pointer"
+                >
+                  교사 전체 ({filteredTeachers.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleSelectRole(filteredDrivers)}
+                  className="px-2 py-1 text-xs font-bold rounded-lg bg-blue-100 text-blue-800 hover:bg-blue-200 transition cursor-pointer"
+                >
+                  기사 전체 ({filteredDrivers.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleSelectRole(filteredParents)}
+                  className="px-2 py-1 text-xs font-bold rounded-lg bg-amber-100 text-amber-800 hover:bg-amber-200 transition cursor-pointer"
+                >
+                  학부모 전체 ({filteredParents.length})
+                </button>
+                {filteredAdmins.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleToggleSelectRole(filteredAdmins)}
+                    className="px-2 py-1 text-xs font-bold rounded-lg bg-purple-100 text-purple-800 hover:bg-purple-200 transition cursor-pointer"
+                  >
+                    관리자 전체 ({filteredAdmins.length})
+                  </button>
+                )}
+              </div>
+              {selectedUserIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedUserIds([])}
+                  className="text-[11px] text-slate-400 hover:text-rose-600 font-bold underline cursor-pointer"
+                >
+                  선택 초기화 ({selectedUserIds.length}명)
+                </button>
+              )}
+            </div>
+
             {/* Categorized Users List */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {isLoadingUsers ? (
@@ -1912,11 +2007,20 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   {/* Category 1: 기사 (Drivers) */}
                   {filteredDrivers.length > 0 && (
                     <div className="space-y-1.5">
-                      <div className="flex items-center gap-1.5 text-xs font-black text-blue-700 bg-blue-50/80 px-2.5 py-1.5 rounded-lg border border-blue-100">
-                        <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                        </svg>
-                        <span>기사 ({filteredDrivers.length}명)</span>
+                      <div className="flex items-center justify-between text-xs font-black text-blue-700 bg-blue-50/80 px-2.5 py-1.5 rounded-lg border border-blue-100">
+                        <div className="flex items-center gap-1.5">
+                          <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                          </svg>
+                          <span>기사 ({filteredDrivers.length}명)</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSelectRole(filteredDrivers)}
+                          className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                        >
+                          기사 전체 {filteredDrivers.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
+                        </button>
                       </div>
                       <div className="grid grid-cols-1 gap-1 pl-1">
                         {filteredDrivers.map((u) => {
@@ -1951,11 +2055,20 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   {/* Category 2: 교사 (Teachers) */}
                   {filteredTeachers.length > 0 && (
                     <div className="space-y-1.5">
-                      <div className="flex items-center gap-1.5 text-xs font-black text-emerald-700 bg-emerald-50/80 px-2.5 py-1.5 rounded-lg border border-emerald-100">
-                        <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                        </svg>
-                        <span>교사 ({filteredTeachers.length}명)</span>
+                      <div className="flex items-center justify-between text-xs font-black text-emerald-700 bg-emerald-50/80 px-2.5 py-1.5 rounded-lg border border-emerald-100">
+                        <div className="flex items-center gap-1.5">
+                          <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                          </svg>
+                          <span>교사 ({filteredTeachers.length}명)</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSelectRole(filteredTeachers)}
+                          className="text-[11px] font-bold text-emerald-600 hover:text-emerald-800 hover:underline cursor-pointer"
+                        >
+                          교사 전체 {filteredTeachers.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
+                        </button>
                       </div>
                       <div className="grid grid-cols-1 gap-1 pl-1">
                         {filteredTeachers.map((u) => {
@@ -1990,11 +2103,20 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   {/* Category 3: 학부모 (Parents) */}
                   {filteredParents.length > 0 && (
                     <div className="space-y-1.5">
-                      <div className="flex items-center gap-1.5 text-xs font-black text-amber-800 bg-amber-50/80 px-2.5 py-1.5 rounded-lg border border-amber-100">
-                        <svg className="w-3.5 h-3.5 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                        </svg>
-                        <span>학부모 ({filteredParents.length}명)</span>
+                      <div className="flex items-center justify-between text-xs font-black text-amber-800 bg-amber-50/80 px-2.5 py-1.5 rounded-lg border border-amber-100">
+                        <div className="flex items-center gap-1.5">
+                          <svg className="w-3.5 h-3.5 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                          </svg>
+                          <span>학부모 ({filteredParents.length}명)</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSelectRole(filteredParents)}
+                          className="text-[11px] font-bold text-amber-800 hover:text-amber-950 hover:underline cursor-pointer"
+                        >
+                          학부모 전체 {filteredParents.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
+                        </button>
                       </div>
                       <div className="grid grid-cols-1 gap-1 pl-1">
                         {filteredParents.map((u) => {
@@ -2029,11 +2151,20 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   {/* Category 4: 관리자 (Admins) */}
                   {filteredAdmins.length > 0 && (
                     <div className="space-y-1.5">
-                      <div className="flex items-center gap-1.5 text-xs font-black text-purple-700 bg-purple-50/80 px-2.5 py-1.5 rounded-lg border border-purple-100">
-                        <svg className="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                        </svg>
-                        <span>관리자 ({filteredAdmins.length}명)</span>
+                      <div className="flex items-center justify-between text-xs font-black text-purple-700 bg-purple-50/80 px-2.5 py-1.5 rounded-lg border border-purple-100">
+                        <div className="flex items-center gap-1.5">
+                          <svg className="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                          </svg>
+                          <span>관리자 ({filteredAdmins.length}명)</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSelectRole(filteredAdmins)}
+                          className="text-[11px] font-bold text-purple-600 hover:text-purple-800 hover:underline cursor-pointer"
+                        >
+                          관리자 전체 {filteredAdmins.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
+                        </button>
                       </div>
                       <div className="grid grid-cols-1 gap-1 pl-1">
                         {filteredAdmins.map((u) => {
