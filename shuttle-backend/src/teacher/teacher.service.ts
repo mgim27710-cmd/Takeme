@@ -258,7 +258,7 @@ export class TeacherService {
           isOverride: false,
           className: rawObj['반명'] || rawObj['반'] || user.assignedClass || '우리반',
           parentPhone: rawObj['부모연락처'] || rawObj['보호자연락처'] || rawObj['연락처'] || '',
-          assignedVehicleName: s.assignedVehicle ? (s.assignedVehicle.busNumber || s.assignedVehicle.name) : '차량 미배정'
+          assignedVehicleName: s.assignedVehicle ? (s.assignedVehicle.busNumber || (s.assignedVehicle as any).plateNumber || '차량') : '차량 미배정'
         };
       });
     }
@@ -806,28 +806,6 @@ export class TeacherService {
     return { success: true };
   }
 
-  async readyToDepart(email: string, stopName?: string) {
-    const user = await this.userRepository.findOne({ where: { email } });
-    if (!user) throw new BadRequestException('User not found');
-    const vehicle = await this.findAssignedVehicle(user.id);
-    if (!vehicle) return { success: false, message: '배정된 차량이 없습니다.' };
-
-    this.locationGateway?.broadcastDepartSignal(vehicle.id, stopName);
-    const label = stopName ? ` (${stopName})` : '';
-    await this.appendBoardingLog(vehicle.id, null, `지도교사 출발 가능 신호 발송${label}`, 'SYSTEM');
-    return { success: true, message: '기사님께 출발 신호를 전달했습니다.' };
-  }
-
-  async logDrivingEvent(email: string, type?: string, detail?: string) {
-    const user = await this.userRepository.findOne({ where: { email } });
-    if (!user) throw new BadRequestException('User not found');
-    const vehicle = await this.findAssignedVehicle(user.id);
-    if (!vehicle) return { success: false };
-
-    const text = detail && detail.trim().length > 0 ? detail.trim() : `안전운전 기록 (${type || 'EVENT'})`;
-    await this.appendBoardingLog(vehicle.id, null, `⚠️ ${text}`, 'SYSTEM');
-    return { success: true };
-  }
   async studentBoardByQR(studentEmail: string, teacherEmail: string) {
     const studentUser = await this.userRepository.findOne({ where: { email: studentEmail } });
     if (!studentUser) throw new BadRequestException('Student user not found');
@@ -1640,7 +1618,7 @@ export class TeacherService {
     if (!vehicle) return { success: false };
 
     const text = detail && detail.trim().length > 0 ? detail.trim() : `안전운전 기록 (${type || 'EVENT'})`;
-    await this.appendBoardingLog(vehicle.id, null, `🛡️ ${text}`, 'SYSTEM');
+    await this.appendBoardingLog(vehicle.id, null, `${text}`, 'SYSTEM');
     return { success: true };
   }
 

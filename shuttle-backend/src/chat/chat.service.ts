@@ -366,7 +366,7 @@ export class ChatService {
         for (const m of room.members) {
           if (m.user && m.user.id !== user.id) {
             const receiverRole = m.user.role || '';
-            const targetRoles = [receiverRole];
+            const targetRoles: string[] = [String(receiverRole)];
             if (
               receiverRole.includes('TEACHER') ||
               receiverRole === 'HOMEROOM_TEACHER' ||
