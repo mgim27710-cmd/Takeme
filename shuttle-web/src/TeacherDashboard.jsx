@@ -604,9 +604,8 @@ export default function TeacherDashboard({
   const handleExecuteQuickRideRequest = async () => {
     if (!quickRequestModal || !quickRequestModal.student) return;
     const { student, targetBus } = quickRequestModal;
-    const isContest = quickRequestMode === 'CONTEST';
 
-    if (!isContest && !targetBus) {
+    if (!targetBus) {
       alert('배차 가능한 셔틀 차량 정보가 없습니다. 관리자님께 문의해주세요.');
       return;
     }
@@ -627,18 +626,14 @@ export default function TeacherDashboard({
         body: JSON.stringify({
           studentId: student.id,
           studentName: student.name,
-          vehicleId: isContest ? undefined : Number(targetBus.id),
-          isPublicContest: isContest,
-          requestType: isContest ? 'CONTEST' : 'ONE_ON_ONE',
+          vehicleId: Number(targetBus.id),
           boardingLocation: dropoffLocation,
           address: student.address || dropoffLocation,
           latitude: student.latitude || student.lat,
           longitude: student.longitude || student.lng,
           rideType: quickRequestRideType,
           requestDate: new Date().toISOString().split('T')[0],
-          note: isContest
-            ? (isTodayOnly ? '지도교사 오픈 공모: 오늘 하루 하원 탑승 선착순 배정 희망' : '지도교사 오픈 공모: 정규 셔틀 등록 희망')
-            : (isTodayOnly ? '오늘 하루 하원 셔틀 탑승 희망 (하차 결재 신청, 익일 자동 픽업 원복)' : '정규 셔틀 탑승 등록 희망 (하차 결재 신청 및 구역 편입)'),
+          note: isTodayOnly ? '오늘 하루 하원 셔틀 탑승 희망 (하차 결재 신청, 익일 자동 픽업 원복)' : '정규 셔틀 탑승 등록 희망 (하차 결재 신청 및 구역 편입)',
           requesterEmail: email
         })
       });
@@ -650,24 +645,17 @@ export default function TeacherDashboard({
           [student.id]: {
             messageId: data.id,
             status: 'PENDING',
-            isPublicContest: isContest,
-            vehicleId: isContest ? null : targetBus?.id,
-            busNumber: isContest ? '오픈 공모 (선착순)' : (targetBus?.name || targetBus?.busNumber),
-            teacherName: isContest ? '전체 지도교사' : (targetBus?.teacherName || targetBus?.teacherUser?.name || '담당 지도교사'),
-            driverName: isContest ? '미정' : (targetBus?.driverName || '기사님'),
+            vehicleId: targetBus?.id,
+            busNumber: targetBus?.name || targetBus?.busNumber,
+            teacherName: targetBus?.teacherName || targetBus?.teacherUser?.name || '담당 지도교사',
+            driverName: targetBus?.driverName || '기사님',
             boardingLocation: dropoffLocation,
             rideType: quickRequestRideType,
-            note: isContest
-              ? (isTodayOnly ? '오픈 공모: 오늘 하루 하원 탑승 (선착순 배정)' : '오픈 공모: 정규 셔틀 등록')
-              : (isTodayOnly ? '오늘 하루 하원 탑승 희망 (익일 자동 원복)' : '정규 셔틀 등록 희망')
+            note: isTodayOnly ? '오늘 하루 탑승 희망 (익일 자동 원복)' : '정규 셔틀 등록 희망'
           }
         }));
 
-        if (isContest) {
-          alert(`[${student.name}] 원아의 ${isTodayOnly ? '당일 1회' : '정규'} 탑승 오픈 공모가 전체 지도교사님께 발송되었습니다.\n가장 먼저 수락하는 지도교사님의 차량으로 자동 배정됩니다.`);
-        } else {
-          alert(`[${student.name}] 원아의 ${isTodayOnly ? '당일 1회' : '정규'} 탑승 결제 요청이 ${targetBus.name} ${targetBus.teacherName || ''} 지도교사님께 자동으로 발송되었습니다.\n지도교사 수락 시 카드가 초록색으로 변경됩니다.`);
-        }
+        alert(`[${student.name}] 원아의 ${isTodayOnly ? '당일 1회' : '정규'} 탑승 결제 요청이 ${targetBus.name} ${targetBus.teacherName || ''} 지도교사님께 자동으로 발송되었습니다.\n지도교사 수락 시 카드가 초록색으로 변경됩니다.`);
         setQuickRequestModal(null);
       } else {
         const err = await res.json().catch(() => ({}));
@@ -3087,46 +3075,6 @@ export default function TeacherDashboard({
                 </div>
               </div>
 
-              {/* Mode Selection: 1:1 차량 신청 vs 지도교사 오픈 공모 */}
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
-                <label className="text-xs font-black text-slate-700 block">
-                  신청 방식 선택 (1:1 지정 vs 지도교사 공모)
-                </label>
-                <div className="grid grid-cols-2 gap-2 bg-slate-200/60 p-1 rounded-xl">
-                  <button
-                    type="button"
-                    onClick={() => setQuickRequestMode('ONE_ON_ONE')}
-                    className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
-                      quickRequestMode === 'ONE_ON_ONE'
-                        ? 'bg-white text-indigo-950 shadow-xs border border-indigo-200'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <span>1:1 차량 신청</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setQuickRequestMode('CONTEST')}
-                    className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
-                      quickRequestMode === 'CONTEST'
-                        ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <span>지도교사 오픈 공모 (선착순)</span>
-                  </button>
-                </div>
-
-                {quickRequestMode === 'CONTEST' && (
-                  <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl text-xs space-y-1 animate-fade-in">
-                    <span className="font-extrabold text-purple-900 block">선착순 배정 오픈 공모</span>
-                    <p className="text-[11px] text-purple-700 font-medium leading-relaxed">
-                      전체 지도교사에게 공개 모집 결재를 올립니다. <strong>가장 먼저 수락한 지도교사님의 차량으로 즉시 배정</strong>되며 추가 결재가 마감됩니다.
-                    </p>
-                  </div>
-                )}
-              </div>
-
               {/* Ride Type Selection (1번: 당일 1회 vs 정규 등록) */}
               <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
                 <label className="text-xs font-black text-slate-700 block">
@@ -3246,15 +3194,7 @@ export default function TeacherDashboard({
               )}
 
               <p className="text-xs text-slate-600 font-medium leading-relaxed text-center px-2">
-                {quickRequestMode === 'CONTEST' ? (
-                  <span>
-                    전체 지도교사를 대상으로 <strong className="text-purple-700">오픈 공모(선착순 배정)</strong>로 {quickRequestRideType === 'TODAY_ONLY' ? '오늘 하루 하원 탑승' : '정규 셔틀 등록'} 결제를 신청하시겠습니까?
-                  </span>
-                ) : (
-                  <span>
-                    위 원아의 하차 위치를 담당하는 <strong className="text-indigo-600">{quickRequestModal.targetBus?.name} {quickRequestModal.targetBus?.teacherName || ''} 지도교사님</strong>께 {quickRequestRideType === 'TODAY_ONLY' ? '오늘 하루 하원 탑승' : '정규 셔틀 등록'} 결제를 신청하시겠습니까?
-                  </span>
-                )}
+                위 원아의 하차 위치를 담당하는 <strong className="text-indigo-600">{quickRequestModal.targetBus?.name} {quickRequestModal.targetBus?.teacherName || ''} 지도교사님</strong>께 {quickRequestRideType === 'TODAY_ONLY' ? '오늘 하루 하원 탑승' : '정규 셔틀 등록'} 결제를 신청하시겠습니까?
               </p>
             </div>
 
@@ -3270,7 +3210,7 @@ export default function TeacherDashboard({
               </button>
               <button
                 type="button"
-                disabled={isSendingQuickRequest || (quickRequestMode !== 'CONTEST' && !quickRequestModal.targetBus)}
+                disabled={isSendingQuickRequest || !quickRequestModal.targetBus}
                 onClick={handleExecuteQuickRideRequest}
                 className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-black rounded-xl shadow-md shadow-blue-500/20 transition flex items-center gap-1.5 disabled:opacity-50"
               >

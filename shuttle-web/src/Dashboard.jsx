@@ -203,6 +203,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const [isDocumentsClosing, setIsDocumentsClosing] = useState(false);
   const [isBoardClosing, setIsBoardClosing] = useState(false);
   const [isClassesClosing, setIsClassesClosing] = useState(false);
+  const [hasUnsavedClassChanges, setHasUnsavedClassChanges] = useState(false);
   const [isAuthClosing, setIsAuthClosing] = useState(false);
   const [authTab, setAuthTab] = useState('STUDENT'); // 'STUDENT' | 'STAFF' | 'TEACHER'
   const [boardSelectedClass, setBoardSelectedClass] = useState('ALL');
@@ -442,6 +443,14 @@ export default function Dashboard({ initialEducationLevel } = {}) {
 
   const handleTabChange = (newTab) => {
     const targetTab = newTab === 'buses' ? 'status' : newTab;
+
+    if (activeTab === 'classes' && targetTab !== 'classes' && hasUnsavedClassChanges) {
+      const confirmLeave = window.confirm(
+        '저장되지 않은 반배정 변경사항이 있습니다.\n저장하지 않고 이동하시면 변경한 반배정 내용이 취소됩니다.\n그래도 다른 메뉴로 이동하시겠습니까?'
+      );
+      if (!confirmLeave) return;
+      setHasUnsavedClassChanges(false);
+    }
     if (activeTab === 'log' && targetTab !== 'log') {
       setIsLogClosing(true);
       setTimeout(() => {
@@ -5051,6 +5060,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             onRefreshData={refreshAllData}
             isClosing={isClassesClosing}
             onClose={() => handleTabChange('status')}
+            onDirtyChange={setHasUnsavedClassChanges}
           />
         )}
 

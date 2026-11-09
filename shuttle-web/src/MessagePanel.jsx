@@ -288,8 +288,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           }
           return r;
         }).sort((a, b) => {
-          if (a.type === 'PAYMENT_SYSTEM') return -1;
-          if (b.type === 'PAYMENT_SYSTEM') return 1;
+          if (a.type === 'NOTIFICATION_SYSTEM') return -1;
+          if (b.type === 'NOTIFICATION_SYSTEM') return 1;
           const tA = a.latestMessage ? new Date(a.latestMessage.createdAt).getTime() : new Date(a.updatedAt || a.createdAt).getTime();
           const tB = b.latestMessage ? new Date(b.latestMessage.createdAt).getTime() : new Date(b.updatedAt || b.createdAt).getTime();
           return tB - tA;
@@ -962,9 +962,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         body: JSON.stringify({
           studentId: paymentForm.selectedStudentId ? Number(paymentForm.selectedStudentId) : undefined,
           studentName,
-          vehicleId: paymentForm.isPublicContest ? undefined : Number(paymentForm.selectedVehicleId),
-          isPublicContest: Boolean(paymentForm.isPublicContest),
-          requestType: paymentForm.isPublicContest ? 'CONTEST' : 'ONE_ON_ONE',
+          roomId: activeRoom?.id,
+          vehicleId: Number(paymentForm.selectedVehicleId),
           rideType: paymentForm.rideType || 'TODAY_ONLY',
           boardingLocation,
           address: paymentForm.address.trim() || boardingLocation,
@@ -972,7 +971,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           longitude: paymentForm.longitude || undefined,
           locationType: paymentForm.locationType || 'PIN',
           requestDate: paymentForm.requestDate,
-          note: paymentForm.note.trim() || (paymentForm.isPublicContest ? '지도교사 오픈 공모 선착순 탑승 신청' : '학부모 상담 후 신규 탑승지 지정 및 결재 승인 요청'),
+          note: paymentForm.note.trim() || '학부모 상담 후 신규 탑승지 지정 및 결재 승인 요청',
           requesterEmail: myUser.email,
         }),
       });
@@ -981,7 +980,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         const createdMsg = await res.json();
         setIsPaymentModalOpen(false);
         // If current active room is payment system room, append message
-        if (activeRoom && activeRoom.type === 'PAYMENT_SYSTEM') {
+        if (activeRoom && (!createdMsg.roomId || Number(createdMsg.roomId) === Number(activeRoom.id))) {
           setMessages((prev) => {
             if (prev.some((m) => m.id === createdMsg.id)) return prev;
             return [...prev, createdMsg];
@@ -1154,8 +1153,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     return rooms
       .filter((r) => {
         if (r.type === 'PAYMENT_SYSTEM') {
-          if (seenSpecial.has('PAYMENT_SYSTEM')) return false;
-          seenSpecial.add('PAYMENT_SYSTEM');
+          return false; // Hide payment system channel
         } else if (r.type === 'NOTIFICATION_SYSTEM') {
           if (seenSpecial.has('NOTIFICATION_SYSTEM')) return false;
           seenSpecial.add('NOTIFICATION_SYSTEM');
@@ -1166,8 +1164,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         return !q || title.includes(q) || lastText.includes(q);
       })
       .sort((a, b) => {
-        if (a.type === 'PAYMENT_SYSTEM' && b.type !== 'PAYMENT_SYSTEM') return -1;
-        if (b.type === 'PAYMENT_SYSTEM' && a.type !== 'PAYMENT_SYSTEM') return 1;
+
         if (a.type === 'NOTIFICATION_SYSTEM' && b.type !== 'NOTIFICATION_SYSTEM') return -1;
         if (b.type === 'NOTIFICATION_SYSTEM' && a.type !== 'NOTIFICATION_SYSTEM') return 1;
         // Rooms with unread messages or recent updates float to top
@@ -1417,8 +1414,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
               </div>
 
               <div className="flex items-center gap-2">
-                {/* 결재 신청 버튼 (학부모는 이용 불가) */}
-                {isCurrentRoomPaymentSystem && !isParent && (
+                {/* 결재 신청 버튼 (학부모는 이용 불가, 실시간 알림 채널 제외) */}
+                {!isCurrentRoomNotificationSystem && !isParent && (
                   <button
                     type="button"
                     onClick={handleOpenPaymentModal}
@@ -1618,25 +1615,19 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                 </div>
                                 <div>
                                   <h4 className="text-xs font-black text-indigo-950">
-                                    {isContest ? '지도교사 오픈 공모 (선착순 배정)' : '신규 탑승 및 결재 승인 요청'}
+                                    '신규 탑승 및 결재 승인 요청'
                                   </h4>
                                   <span className="text-[10px] text-indigo-600 font-medium">
-                                    {isContest ? '전체 지도교사 대상 선착순 수락' : '담당 차량 지도교사 수락/거절'}
+                                    '담당 차량 지도교사 수락/거절'
                                   </span>
                                 </div>
                               </div>
 
                               {/* Status & Ride Type Badges */}
                               <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                                {isContest ? (
-                                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-300">
-                                    오픈 공모 (선착순)
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-300">
-                                    1:1 지정 결재
-                                  </span>
-                                )}
+                                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-300">
+                                  1:1 지정 결재
+                                </span>
 
                                 {payload.rideType === 'TODAY_ONLY' ? (
                                   <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
@@ -1716,9 +1707,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     {isContest && payload.status === 'PENDING' ? '오픈 공모 (선착순 배정)' : payload.busNumber}
                                   </span>
                                   <span className="text-[10px] text-blue-600 block truncate">
-                                    {isContest && payload.status === 'PENDING'
-                                      ? '전체 지도교사 대상'
-                                      : `교사: ${formatTeacherName(payload.teacherName) || '담당 교사'}`}
+`교사: ${formatTeacherName(payload.teacherName) || '담당 교사'}`
                                   </span>
                                 </div>
                               </div>
@@ -1788,9 +1777,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     </svg>
                                     <div>
                                       <span>
-                                        {isContest
-                                          ? `✓ [공모 결재 완료] ${payload.contestWinner?.teacherName || payload.decidedBy || '지도교사'} 선착순 수락 (${payload.contestWinner?.busNumber || payload.busNumber} 배정, 추가 결재 마감)`
-                                          : `✓ 결재 수락 완료: ${payload.busNumber} 노선 및 구역 배정 완료`}
+                                        {`✓ 결재 수락 완료: ${payload.busNumber} 노선 및 구역 배정 완료`}
                                       </span>
                                       {payload.decidedBy && (
                                         <span className="block text-[10px] text-emerald-600 font-normal">
@@ -1844,7 +1831,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                   </svg>
                                   <div>
                                     <span>
-                                      {isContest ? '오픈 공모가 반려되었습니다.' : '탑승 및 결재 요청이 거절되었습니다.'}
+                                      '탑승 및 결재 요청이 거절되었습니다.'
                                     </span>
                                     {payload.decidedBy && (
                                       <span className="block text-[10px] text-rose-600 font-normal">
@@ -1923,7 +1910,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     </button>
                                   </div>
                                   <p className="text-[10px] text-center text-purple-700 font-semibold">
-                                    선착순 배정: 가장 먼저 수락하는 지도교사님의 차량으로 즉시 배정되며 추가 결재가 마감됩니다.
+                                    담당 지도교사 또는 원장님께서 수락하시면 해당 차량의 탑승 노선에 자동 반영됩니다.
                                   </p>
                                 </div>
                               ) : (isTargetTeacher || isAdmin) ? (
@@ -2657,71 +2644,24 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     })()}
                   </div>
 
-                  {/* 2. 신청 방식 선택: 1:1 차량 지정 vs 지도교사 오픈 공모 */}
-                  <div className="space-y-2 border border-slate-200 rounded-2xl p-3.5 bg-slate-50/50">
-                    <label className="text-xs font-black text-slate-800 flex items-center justify-between">
-                      <span>신청 방식 (1:1 지정 vs 지도교사 공모)</span>
-                      <span className="text-[11px] font-bold text-indigo-600">
-                        {paymentForm.isPublicContest ? '오픈 공모 (선착순 배정)' : '1:1 차량 지정'}
-                      </span>
+                  {/* 2. 배정 희망 차량 (호차) */}
+                  <div className="space-y-1.5 border border-slate-200 rounded-2xl p-3.5 bg-slate-50/50">
+                    <label className="text-xs font-black text-slate-800 flex items-center gap-1">
+                      <span>배정 희망 차량 (호차)</span>
+                      <span className="text-red-500">*</span>
                     </label>
-                    <div className="grid grid-cols-2 gap-2 bg-slate-200/60 p-1 rounded-xl">
-                      <button
-                        type="button"
-                        onClick={() => setPaymentForm((prev) => ({ ...prev, isPublicContest: false, requestType: 'ONE_ON_ONE' }))}
-                        className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
-                          !paymentForm.isPublicContest
-                            ? 'bg-white text-indigo-950 shadow-xs border border-indigo-200'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        <span>1:1 차량 지정 신청</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPaymentForm((prev) => ({ ...prev, isPublicContest: true, requestType: 'CONTEST', selectedVehicleId: '' }))}
-                        className={`py-2 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
-                          paymentForm.isPublicContest
-                            ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-xs'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        <span>지도교사 오픈 공모 (선착순)</span>
-                      </button>
-                    </div>
-
-                    {paymentForm.isPublicContest ? (
-                      <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl text-xs space-y-1 animate-fade-in">
-                        <div className="font-extrabold text-purple-900 flex items-center gap-1">
-                          <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
-                          </svg>
-                          <span>전체 지도교사 대상 오픈 공모</span>
-                        </div>
-                        <p className="text-[11px] text-purple-700 leading-relaxed font-medium">
-                          전체 지도교사를 대상으로 공개 모집 결재를 올립니다. <strong>가장 먼저 수락한 지도교사님의 차량으로 즉시 배정</strong>되며, 수락 즉시 추가 결재가 마감됩니다.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="space-y-1.5 pt-1 animate-fade-in">
-                        <label className="text-xs font-black text-slate-800 flex items-center gap-1">
-                          <span>배정 희망 차량 (호차)</span>
-                          <span className="text-red-500">*</span>
-                        </label>
-                        <select
-                          value={paymentForm.selectedVehicleId}
-                          onChange={(e) => setPaymentForm((prev) => ({ ...prev, selectedVehicleId: e.target.value }))}
-                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        >
-                          <option value="">-- 차량(호차)을 선택하세요 --</option>
-                          {(paymentContext.vehicles || []).map((v) => (
-                            <option key={v.id} value={v.id}>
-                              {v.busNumber} (담당 지도교사: {formatTeacherName(v.teacherName)} / 기사: {v.driverName})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
+                    <select
+                      value={paymentForm.selectedVehicleId}
+                      onChange={(e) => setPaymentForm((prev) => ({ ...prev, selectedVehicleId: e.target.value }))}
+                      className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                      <option value="">-- 차량(호차)을 선택하세요 --</option>
+                      {(paymentContext.vehicles || []).map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.busNumber} (담당 지도교사: {formatTeacherName(v.teacherName)} / 기사: {v.driverName})
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   {/* 3. 탑승 희망 위치 등록 (핀으로 찍기 vs 주소로 등록하기) */}
