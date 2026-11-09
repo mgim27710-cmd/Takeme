@@ -78,6 +78,52 @@ function MapCenterOnStudent({ selectedStudentLocation }) {
   return null;
 }
 
+// 차량 만석 시 45도 대각선 빗금(Hatched Pattern)을 Leaflet SVG 레이어에 주입하는 컴포넌트
+function MapPatternDefs({ buses }) {
+  const map = useMap();
+  useEffect(() => {
+    const updateDefs = () => {
+      try {
+        const overlayPane = map.getPanes()?.overlayPane;
+        if (!overlayPane) return;
+        const svg = overlayPane.querySelector('svg');
+        if (!svg) return;
+
+        let defs = svg.querySelector('defs#leaflet-hatched-defs');
+        if (!defs) {
+          defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+          defs.setAttribute('id', 'leaflet-hatched-defs');
+          svg.insertBefore(defs, svg.firstChild);
+        }
+
+        let innerContent = '';
+        (buses || []).forEach(bus => {
+          const busColor = bus.color || '#2563eb';
+          innerContent += `
+            <pattern id="stripe-pattern-${bus.id}" patternUnits="userSpaceOnUse" width="16" height="16" patternTransform="rotate(45 0 0)">
+              <rect width="16" height="16" fill="${busColor}" fill-opacity="0.22" />
+              <line x1="0" y1="0" x2="0" y2="16" stroke="${busColor}" stroke-width="4.5" stroke-opacity="0.85" stroke-linecap="square" />
+            </pattern>
+          `;
+        });
+        defs.innerHTML = innerContent;
+      } catch (err) {
+        console.warn('MapPatternDefs inject error:', err);
+      }
+    };
+
+    updateDefs();
+    map.on('layeradd layerremove zoomend moveend', updateDefs);
+    const timer = setTimeout(updateDefs, 300);
+    return () => {
+      map.off('layeradd layerremove zoomend moveend', updateDefs);
+      clearTimeout(timer);
+    };
+  }, [buses, map]);
+
+  return null;
+}
+
 function ZoneEditEvents({ isAddingPoint, onAddPoint }) {
   useMapEvents({
     click(e) {
@@ -1045,22 +1091,171 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   };
 
 
-  // Auto-rebalance suggestion when bus is over capacity
-  const handleAutoRebalance = (fullBus) => {
+  /**
+   * 25인승 차량 만석 시, 신규 원아 1명을 포함한 총 26명 후보군을 기준으로
+   * 지리적 중심점(Centroid)을 계산하고, 중심점으로부터 가장 먼 최외곽 원아를 산출하여
+   * 잔여 좌석이 있는 인접 여유 호차로 분산 배정하는 알고리즘
+   */
+  const rebalanceFullBusWith26Pool = (fullBus, newCandidateStudent = null, currentStudentsList = students, currentBusesList = buses) => {
+    if (!fullBus) return null;
     const capacity = Number(fullBus.capacity) || 25;
-    const busStudents = students.filter(st => st.assignedBusId === fullBus.id);
-    const candidateBuses = buses.filter(b => b.id !== fullBus.id && (students.filter(st => st.assignedBusId === b.id).length < (Number(b.capacity) || 25)));
+
+    // 1. 현재 해당 호차에 배정된 탑승 원아 목록 (미탑승 제외)
+    const assignedStudents = currentStudentsList.filter(
+      st => st.assignedBusId === fullBus.id && !st.isNotRiding
+    );
+
+    // 2. 신규 원아 포함 총 후보군 풀(Pool) 형성 (25명 + 1명 = 최대 26명)
+    const pool = [...assignedStudents];
+    if (newCandidateStudent && !pool.some(s => (s.id && s.id === newCandidateStudent.id) || (s.name === newCandidateStudent.name && s.address === newCandidateStudent.address))) {
+      pool.push(newCandidateStudent);
+    }
+
+    if (pool.length < 2) return null;
+
+    // 3. 유효한 좌표를 가진 원아들 필터링 및 중심점(Centroid) 계산
+    const validCoordsStudents = pool.filter(
+      s => s.lat != null && s.lng != null && !isNaN(Number(s.lat)) && !isNaN(Number(s.lng))
+    );
+
+    let centroidPt = null;
+    if (validCoordsStudents.length > 0) {
+      const avgLat = validCoordsStudents.reduce((sum, s) => sum + Number(s.lat), 0) / validCoordsStudents.length;
+      const avgLng = validCoordsStudents.reduce((sum, s) => sum + Number(s.lng), 0) / validCoordsStudents.length;
+      centroidPt = turf.point([avgLng, avgLat]);
+    }
+
+    // 4. 중심점으로부터 각 원아의 거리 계산 및 최외곽(가장 먼) 원아 산출
+    let furthestStudent = pool[pool.length - 1];
+    let maxDistance = -1;
+
+    pool.forEach(st => {
+      let dist = 0;
+      if (centroidPt && st.lat != null && st.lng != null && !isNaN(Number(st.lat)) && !isNaN(Number(st.lng))) {
+        const pt = turf.point([Number(st.lng), Number(st.lat)]);
+        dist = turf.distance(centroidPt, pt, { units: 'kilometers' });
+      } else {
+        dist = 0;
+      }
+      if (dist > maxDistance) {
+        maxDistance = dist;
+        furthestStudent = st;
+      }
+    });
+
+    // 5. 정원 미달인 인접 여유 호차 탐색
+    const candidateBuses = currentBusesList.filter(b => {
+      if (b.id === fullBus.id) return false;
+      const bCap = Number(b.capacity) || 25;
+      const bCount = currentStudentsList.filter(st => st.assignedBusId === b.id && !st.isNotRiding).length;
+      return bCount < bCap;
+    });
+
     if (candidateBuses.length === 0) {
-      alert('다른 모든 차량도 만석이어서 자동 재배정할 수 있는 인접 여유 차량이 없습니다.');
+      return {
+        canRebalance: false,
+        originalBus: fullBus,
+        message: '다른 모든 통학 차량도 만석이어서 분산 배정할 수 있는 여유 차량이 없습니다.'
+      };
+    }
+
+    // 6. 최외곽 원아와 가장 인접한 대체 호차 선택 (구역 폴리곤 포함 여부 최우선, 운행 지점 최소 거리 차선)
+    let targetAltBus = candidateBuses[0];
+    let minAltDist = Infinity;
+
+    if (furthestStudent && furthestStudent.lat != null && furthestStudent.lng != null && !isNaN(Number(furthestStudent.lat)) && !isNaN(Number(furthestStudent.lng))) {
+      const fPt = turf.point([Number(furthestStudent.lng), Number(furthestStudent.lat)]);
+      for (const altBus of candidateBuses) {
+        if (altBus.turfPolygon && turf.booleanPointInPolygon(fPt, altBus.turfPolygon)) {
+          targetAltBus = altBus;
+          minAltDist = 0;
+          break;
+        }
+        if (altBus.points && altBus.points.length > 0) {
+          for (const pt of altBus.points) {
+            const pNode = turf.point([pt[1], pt[0]]);
+            const d = turf.distance(fPt, pNode, { units: 'kilometers' });
+            if (d < minAltDist) {
+              minAltDist = d;
+              targetAltBus = altBus;
+            }
+          }
+        }
+      }
+    }
+
+    const isNewStudentFurthest = Boolean(
+      newCandidateStudent && 
+      (furthestStudent === newCandidateStudent || 
+       (furthestStudent.id && furthestStudent.id === newCandidateStudent.id) || 
+       (furthestStudent.name === newCandidateStudent.name && furthestStudent.address === newCandidateStudent.address))
+    );
+
+    return {
+      canRebalance: true,
+      originalBus: fullBus,
+      furthestStudent,
+      maxDistance: maxDistance > 0 ? maxDistance : 0,
+      targetAltBus,
+      isNewStudentFurthest,
+      poolSize: pool.length
+    };
+  };
+
+  // Auto-rebalance suggestion when bus is at or over capacity (26명 클러스터 기준 외곽 원아 분산 배차)
+  const handleAutoRebalance = async (fullBus) => {
+    const capacity = Number(fullBus.capacity) || 25;
+    const busStudents = students.filter(st => st.assignedBusId === fullBus.id && !st.isNotRiding);
+
+    if (busStudents.length === 0) {
+      alert(`[${fullBus.name}]에 배정된 탑승 원아가 없습니다.`);
       return;
     }
-    const targetBus = candidateBuses[0];
-    const candidateStudent = busStudents[busStudents.length - 1];
-    if (!candidateStudent) return;
 
-    if (window.confirm(`[${fullBus.name}]이(가) 정원(${capacity}명) 초과 상태입니다.\n\n외곽 원아 [${candidateStudent.name}] 원아를 여유 좌석이 있는 [${targetBus.name}]으로 인접 재배정하시겠습니까?`)) {
-      setStudents(prev => prev.map(s => s.id === candidateStudent.id ? { ...s, assignedBusId: targetBus.id } : s));
-      alert(`[${candidateStudent.name}] 원아가 [${targetBus.name}]으로 재배정되었습니다.\n상단의 [변경사항 저장] 버튼을 눌러 확정해주세요.`);
+    const result = rebalanceFullBusWith26Pool(fullBus, null, students, buses);
+    if (!result || !result.canRebalance) {
+      alert(result?.message || '분산 배정할 수 있는 여유 차량이 없습니다.');
+      return;
+    }
+
+    const { furthestStudent, targetAltBus, maxDistance } = result;
+
+    const confirmMsg = 
+      `[${fullBus.name}] 만석 현황 (${busStudents.length}명 / 정원 ${capacity}명)\n\n` +
+      `26명(전체 탑승 원아) 좌표 클러스터 기준 중심점에서 가장 먼 최외곽 원아:\n` +
+      `• 대상 원아: [${furthestStudent.name}] (중심 거리: ${maxDistance.toFixed(2)}km)\n` +
+      `• 이동 추천 차량: [${targetAltBus.name}] (잔여 좌석 여유)\n\n` +
+      `[${furthestStudent.name}] 원아를 [${targetAltBus.name}]으로 분산 재배정하시겠습니까?`;
+
+    if (window.confirm(confirmMsg)) {
+      try {
+        const token = localStorage.getItem('takeme_token');
+        const activeAcadId = selectedAcademyId || currentUser?.academyId;
+
+        // DB 즉시 동기화
+        await fetch(`${API_BASE_URL}/routing/students/batch-update`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({
+            academyId: activeAcadId,
+            students: [{
+              id: furthestStudent.id,
+              inBusId: targetAltBus.id,
+              outBusId: targetAltBus.id
+            }]
+          })
+        });
+
+        setStudents(prev => prev.map(s => s.id === furthestStudent.id ? { ...s, assignedBusId: targetAltBus.id } : s));
+        alert(`[${furthestStudent.name}] 원아가 [${targetAltBus.name}]으로 안전하게 재배정 및 저장되었습니다.`);
+      } catch (err) {
+        console.error(err);
+        setStudents(prev => prev.map(s => s.id === furthestStudent.id ? { ...s, assignedBusId: targetAltBus.id } : s));
+        alert(`[${furthestStudent.name}] 원아가 로컬 상태에서 [${targetAltBus.name}]으로 재배정되었습니다.\n상단의 [변경사항 저장] 버튼을 눌러 확정해주세요.`);
+      }
     }
   };
 
@@ -2296,6 +2491,11 @@ const parseKindergartenExcelSheet = (sheet) => {
         let successCount = 0;
         let failedCount = 0;
         const newStudents = [];
+        const busLoadTracker = {};
+        buses.forEach(b => {
+          busLoadTracker[b.id] = students.filter(s => s.assignedBusId === b.id && !s.isNotRiding).length;
+        });
+        const rebalanceLogs = [];
 
         addressMap.forEach((item, idx) => {
           const coords = item.address ? geocodeLookup.get(item.address) : null;
@@ -2348,6 +2548,44 @@ const parseKindergartenExcelSheet = (sheet) => {
                   }
                 }
               }
+            }
+
+            // 4. 만석 검사 및 신규 원아 포함 26명 클러스터 기준 외곽 원아 분산 배차
+            if (assignedBus) {
+              const capacity = Number(assignedBus.capacity) || 25;
+              const currentBusCount = busLoadTracker[assignedBus.id] || 0;
+              if (currentBusCount >= capacity) {
+                const newCandidate = {
+                  id: idx + 1,
+                  name: item.name,
+                  address: address,
+                  lat: lat,
+                  lng: lng
+                };
+                const currentPool = [
+                  ...students.filter(s => s.assignedBusId === assignedBus.id && !s.isNotRiding),
+                  ...newStudents.filter(s => s.assignedBusId === assignedBus.id && !s.isNotRiding)
+                ];
+                const rebalanceRes = rebalanceFullBusWith26Pool(assignedBus, newCandidate, [...students, ...newStudents], buses);
+                if (rebalanceRes && rebalanceRes.canRebalance) {
+                  if (rebalanceRes.isNewStudentFurthest) {
+                    assignedBus = rebalanceRes.targetAltBus;
+                    rebalanceLogs.push(`신규 원아 [${item.name}]: [${rebalanceRes.originalBus.name}] 만석(${capacity}명) -> 26명 중 최외곽으로 [${assignedBus.name}] 분산 배정`);
+                  } else if (rebalanceRes.furthestStudent) {
+                    const moved = rebalanceRes.furthestStudent;
+                    const altBus = rebalanceRes.targetAltBus;
+                    const existingInNew = newStudents.find(s => s.id === moved.id);
+                    if (existingInNew) {
+                      existingInNew.assignedBusId = altBus.id;
+                      existingInNew.color = altBus.color || '#64748b';
+                    }
+                    busLoadTracker[assignedBus.id] = (busLoadTracker[assignedBus.id] || 1) - 1;
+                    busLoadTracker[altBus.id] = (busLoadTracker[altBus.id] || 0) + 1;
+                    rebalanceLogs.push(`기존 외곽 원아 [${moved.name}]: [${assignedBus.name}] 만석 -> [${altBus.name}] 이동 (신규 [${item.name}] 본 차량 배정)`);
+                  }
+                }
+              }
+              busLoadTracker[assignedBus.id] = (busLoadTracker[assignedBus.id] || 0) + 1;
             }
           } else {
             // Geocoding failed: remove road address, mark for manual input
@@ -2409,10 +2647,15 @@ const parseKindergartenExcelSheet = (sheet) => {
           setStudents(newStudents);
         }
         
+        const rebalanceSummary = rebalanceLogs.length > 0
+          ? `\n\n[만석 스마트 분산 배차 내역 (${rebalanceLogs.length}건)]\n` + rebalanceLogs.slice(0, 5).join('\n') + (rebalanceLogs.length > 5 ? `\n...외 ${rebalanceLogs.length - 5}건` : '')
+          : '';
+
         alert(
           `총 ${newStudents.length}명의 원아 등록이 완료되었습니다!\n\n` +
           `• 정상 배차: ${successCount}명\n` +
-          `• 주소 수동 입력 필요: ${failedCount}명\n\n` +
+          `• 주소 수동 입력 필요: ${failedCount}명` +
+          rebalanceSummary + `\n\n` +
           (failedCount > 0 
             ? '※ 주소 읽기에 실패한 원아는 목록에 [빨간색 테두리]로 표시됩니다. 클릭하여 올바른 도로명 주소를 수동으로 입력해 주세요.'
             : '모든 원아의 주소가 정상적으로 지도 구역에 배차되었습니다.')
@@ -2942,6 +3185,65 @@ const parseKindergartenExcelSheet = (sheet) => {
         }
       }
 
+      // 만석 차량(25인승 기준) 검사 및 신규 원아 포함 26명 클러스터 기준 최외곽 원아 분산 배차
+      let rebalanceNotice = '';
+      if (!studentForm.isNotRiding && assignedBus) {
+        const capacity = Number(assignedBus.capacity) || 25;
+        const currentBusStudents = students.filter(st => st.assignedBusId === assignedBus.id && !st.isNotRiding && st.id !== editingStudentId);
+        
+        if (currentBusStudents.length >= capacity) {
+          const newStudentCandidate = {
+            id: editingStudentId || 999999,
+            name: studentForm.name.trim(),
+            address: studentForm.address.trim(),
+            lat: coords ? coords.lat : undefined,
+            lng: coords ? coords.lng : undefined
+          };
+          
+          const rebalanceResult = rebalanceFullBusWith26Pool(assignedBus, newStudentCandidate, students, buses);
+          if (rebalanceResult && rebalanceResult.canRebalance) {
+            if (rebalanceResult.isNewStudentFurthest) {
+              // 신규 학생이 26명 중 중심점에서 가장 먼 경우: 신규 원아를 대체 호차로 배정
+              const altBus = rebalanceResult.targetAltBus;
+              assignedBus = altBus;
+              assignedBusId = altBus.id;
+              rebalanceNotice = `\n\n[26명 기준 외곽 원아 분산 배차 안내]\n기존 배정 구역 차량인 [${rebalanceResult.originalBus.name}]이(가) 정원(${capacity}명) 만석입니다.\n신규 원아를 포함한 26명의 위치를 분석한 결과, 신규 등록 원아 [${studentForm.name}]이(가) 최외곽으로 산출되어 여유 좌석이 있는 [${altBus.name}]으로 자동 분산 배정되었습니다.`;
+            } else if (rebalanceResult.furthestStudent) {
+              // 기존 탑승 원아가 26명 중 가장 먼 경우: 기존 외곽 원아를 대체 호차로 이동하고, 신규 학생은 본 차량에 배정
+              const altBus = rebalanceResult.targetAltBus;
+              const movedStudent = rebalanceResult.furthestStudent;
+              
+              // 기존 외곽 원아 DB 업데이트
+              try {
+                const token = localStorage.getItem('takeme_token');
+                fetch(`${API_BASE_URL}/routing/students/batch-update`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                  },
+                  body: JSON.stringify({
+                    academyId: targetAcademyId,
+                    students: [{
+                      id: movedStudent.id,
+                      inBusId: altBus.id,
+                      outBusId: altBus.id
+                    }]
+                  })
+                }).catch(err => console.error('Failed to move furthest student:', err));
+                
+                // 로컬 상태 동기화
+                setStudents(prev => prev.map(s => s.id === movedStudent.id ? { ...s, assignedBusId: altBus.id } : s));
+              } catch (rebalanceErr) {
+                console.error('Failed to move furthest student:', rebalanceErr);
+              }
+              
+              rebalanceNotice = `\n\n[26명 기준 외곽 원아 분산 배차 안내]\n[${assignedBus.name}]이(가) 정원(${capacity}명) 만석 상태에서 신규 원아 [${studentForm.name}]이(가) 추가되었습니다.\n26명(기존 25명 + 신규 1명) 기준 중심점에서 가장 먼 기존 최외곽 원아 [${movedStudent.name}] 원아를 여유 차량인 [${altBus.name}]으로 이동 배정하고, 신규 원아를 [${assignedBus.name}]에 안전하게 배정하였습니다.`;
+            }
+          }
+        }
+      }
+
       // 3. Prepare payload matching all 17 Excel columns
       const inLoc = studentForm.inLocation?.trim() || studentForm.address.trim();
       const outLoc = studentForm.dropoffLocation?.trim() || studentForm.outLocation?.trim() || studentForm.address.trim();
@@ -3015,8 +3317,8 @@ const parseKindergartenExcelSheet = (sheet) => {
         : '(구역 미배정)';
       alert(
         editingStudentId
-          ? `'${studentForm.name}' 원아 정보 및 주소가 성공적으로 수정되었습니다!\n${busInfo}`
-          : `'${studentForm.name}' 원아가 성공적으로 추가되었습니다!\n${busInfo}`
+          ? `'${studentForm.name}' 원아 정보 및 주소가 성공적으로 수정되었습니다!\n${busInfo}${rebalanceNotice}`
+          : `'${studentForm.name}' 원아가 성공적으로 추가되었습니다!\n${busInfo}${rebalanceNotice}`
       );
       setShowAddStudentModal(false);
       setEditingStudentId(null);
@@ -3712,7 +4014,9 @@ const parseKindergartenExcelSheet = (sheet) => {
               ) : (
                 sortedBuses.map(bus => {
                   const isSelected = selectedBusId === bus.id;
-                  const busStudents = students.filter(st => st.assignedBusId === bus.id);
+                  const busStudents = students.filter(st => st.assignedBusId === bus.id && !st.isNotRiding);
+                  const busCapacity = Number(bus.capacity) || 25;
+                  const isFull = busStudents.length >= busCapacity;
 
                   return (
                     <div 
@@ -3720,6 +4024,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                       className={`p-4 border rounded-2xl transition-all shadow-xs ${
                         isSelected 
                           ? 'border-blue-500 bg-blue-50/20 ring-2 ring-blue-100' 
+                          : isFull 
+                          ? 'border-rose-300 bg-rose-50/15 hover:border-rose-400' 
                           : 'border-slate-200 bg-white hover:border-slate-300'
                       }`}
                     >
@@ -3733,6 +4039,12 @@ const parseKindergartenExcelSheet = (sheet) => {
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-bold text-slate-900 text-base">{bus.name}</span>
+                              {isFull && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-700 border border-rose-300 shadow-2xs" title="25인승 정원 만석 (지도 구역 대각선 빗금 표시)">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
+                                  만석 ({busStudents.length}/${busCapacity}명) 빗금
+                                </span>
+                              )}
                               {bus.plateNumber && (
                                 <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded font-mono">
                                   {bus.plateNumber}
@@ -3794,8 +4106,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                       >
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-slate-700">배정 원아</span>
-                          <span className="bg-blue-100 text-blue-700 font-bold px-1.5 py-0.2 rounded text-xs">
-                            {busStudents.length}명
+                          <span className={`font-bold px-1.5 py-0.2 rounded text-xs ${isFull ? 'bg-rose-100 text-rose-700 border border-rose-200' : 'bg-blue-100 text-blue-700'}`}>
+                            {busStudents.length} / {busCapacity}명 {isFull ? '(만석)' : ''}
                           </span>
                         </div>
                         <div className="flex items-center gap-1 text-slate-400">
@@ -3805,6 +4117,24 @@ const parseKindergartenExcelSheet = (sheet) => {
                           </svg>
                         </div>
                       </div>
+
+                      {/* 26명 기준 외곽 원아 분산 배차 버튼 (만석 시 노출) */}
+                      {isFull && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAutoRebalance(bus);
+                          }}
+                          className="w-full mt-2 py-1.5 px-3 bg-gradient-to-r from-rose-50 to-amber-50 hover:from-rose-100 hover:to-amber-100 border border-rose-200 text-rose-800 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                          title="26명(탑승 원아 클러스터) 기준 최외곽 원아를 인접 여유 호차로 분산 배차합니다."
+                        >
+                          <svg className="w-3.5 h-3.5 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                          </svg>
+                          <span>26명 기준 외곽 원아 분산 배차</span>
+                        </button>
+                      )}
 
                       {/* Expandable Students List */}
                       {isSelected && (
@@ -5270,6 +5600,18 @@ const parseKindergartenExcelSheet = (sheet) => {
           </div>
         )}
 
+        {/* Universal SVG Hatch Pattern Defs for Leaflet Polygons */}
+        <svg style={{ position: 'absolute', width: 0, height: 0, pointerEvents: 'none', opacity: 0 }} aria-hidden="true">
+          <defs>
+            {buses.map(bus => (
+              <pattern key={`global-stripe-${bus.id}`} id={`stripe-pattern-${bus.id}`} patternUnits="userSpaceOnUse" width="16" height="16" patternTransform="rotate(45 0 0)">
+                <rect width="16" height="16" fill={bus.color || '#2563eb'} fillOpacity="0.22" />
+                <line x1="0" y1="0" x2="0" y2="16" stroke={bus.color || '#2563eb'} strokeWidth="4.5" strokeOpacity="0.85" strokeLinecap="square" />
+              </pattern>
+            ))}
+          </defs>
+        </svg>
+
         <MapContainer 
           center={academy && !isNaN(academy.lat) && !isNaN(academy.lng) ? [academy.lat, academy.lng] : [37.5650, 126.9750]} 
           zoom={14} 
@@ -5281,6 +5623,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
+          <MapPatternDefs buses={buses} />
           <MapBoundsFit buses={buses} academy={academy} />
           <MapCenterOnStudent selectedStudentLocation={highlightedStudentLocation} />
 
@@ -5416,6 +5759,10 @@ const parseKindergartenExcelSheet = (sheet) => {
             const isEditingThis = isZoneEditingMode && editingZoneBusId === bus.id;
             const polygonPoints = isEditingThis ? editingPolygon : bus.polygon;
             
+            const busStudents = students.filter(st => st.assignedBusId === bus.id && !st.isNotRiding);
+            const busCapacity = Number(bus.capacity) || 25;
+            const isFull = busStudents.length >= busCapacity;
+
             return (
             <Fragment key={bus.id}>
               {polygonPoints && polygonPoints.length > 0 ? (
@@ -5424,12 +5771,36 @@ const parseKindergartenExcelSheet = (sheet) => {
                     positions={polygonPoints} 
                     pathOptions={{ 
                       color: bus.color, 
-                      fillColor: bus.color, 
-                      fillOpacity: isEditingThis ? 0.1 : 0.3,
-                      weight: isEditingThis ? 3 : 2,
-                      dashArray: isEditingThis ? '5, 10' : null
+                      fillColor: isFull ? `url(#stripe-pattern-${bus.id})` : bus.color, 
+                      fillOpacity: isFull ? 1 : (isEditingThis ? 0.1 : 0.3),
+                      weight: isFull ? 3.5 : (isEditingThis ? 3 : 2),
+                      dashArray: isEditingThis ? '5, 10' : (isFull ? '6, 6' : null)
                     }} 
-                  />
+                  >
+                    <Popup>
+                      <div className="p-2 text-center min-w-[190px]">
+                        <div className="font-extrabold text-sm" style={{ color: bus.color }}>{bus.name}</div>
+                        <div className="text-xs text-slate-600 mt-1 font-medium">
+                          탑승 인원: <span className="font-bold text-slate-900">{busStudents.length}명</span> / 정원 {busCapacity}명
+                        </div>
+                        {isFull ? (
+                          <div className="mt-2 p-2 bg-rose-50 border border-rose-300 rounded-xl text-rose-800 text-xs font-bold flex flex-col items-center justify-center gap-1 shadow-2xs">
+                            <div className="flex items-center gap-1.5 text-[11px] font-black">
+                              <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+                              <span>만석 구역 (대각선 빗금 표시)</span>
+                            </div>
+                            <p className="text-[10px] text-rose-700 font-normal leading-tight">
+                              25인승 만석 구역입니다. 신규 원아 진입 시 26명 중 중심점에서 가장 먼 최외곽 원아가 인접 호차로 자동 분산 배정됩니다.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="mt-1 text-[11px] text-emerald-600 font-bold">
+                            잔여 좌석: {busCapacity - busStudents.length}석 여유
+                          </div>
+                        )}
+                      </div>
+                    </Popup>
+                  </Polygon>
                   {isEditingThis && polygonPoints.map((pt, i) => {
                     const editIcon = L.divIcon({
                       className: 'edit-marker',
@@ -5661,6 +6032,19 @@ const parseKindergartenExcelSheet = (sheet) => {
             <span className="text-[10px] text-slate-400 font-normal">고대비 색상</span>
           </div>
           <div className="space-y-1.5 text-xs font-bold text-slate-700">
+            {/* Full vehicle hatched pattern indicator */}
+            <div className="flex items-center gap-2 p-1.5 rounded-lg bg-amber-50/80 border border-amber-200 text-amber-900">
+              <div 
+                className="w-5 h-5 rounded-md border border-amber-400 shrink-0 shadow-2xs"
+                style={{
+                  background: 'repeating-linear-gradient(45deg, #d97706 0, #d97706 2.5px, #fef3c7 2.5px, #fef3c7 6px)'
+                }}
+              ></div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] font-black leading-tight">만석 구역 (빗금 표시)</div>
+                <div className="text-[10px] text-amber-700 font-normal">25인승 정원 도달 · 26명 외곽 분산 배차</div>
+              </div>
+            </div>
             {/* One-time rider indicator */}
             <div className="flex items-center gap-2 p-1.5 rounded-lg bg-rose-50/80 border border-rose-200 text-rose-900">
               <div className="relative w-5 h-5 flex items-center justify-center shrink-0">
