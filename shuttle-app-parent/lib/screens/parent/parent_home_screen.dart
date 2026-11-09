@@ -91,7 +91,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                 decoration: BoxDecoration(
                   color: isSelected ? const Color(0xFFF1F5F9) : Colors.transparent,
                   borderRadius: BorderRadius.circular(16),
@@ -135,6 +135,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
               const SizedBox(height: 2),
               Text(
                 label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.2),
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
@@ -840,7 +843,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
           top: false,
           bottom: true,
           child: SizedBox(
-            height: 56,
+            height: 64,
             child: Row(
               children: [
                 _buildBottomNavItem(index: 0, icon: Icons.home_outlined, label: '홈'),
