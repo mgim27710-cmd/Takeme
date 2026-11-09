@@ -569,11 +569,40 @@ export class ChatService {
     };
   }
 
+  async getPaymentRequests(academyId?: number) {
+    const qb = this.messageRepo
+      .createQueryBuilder('m')
+      .leftJoinAndSelect('m.room', 'room')
+      .leftJoinAndSelect('m.sender', 'sender')
+      .where("m.type = 'PAYMENT_REQUEST'");
+
+    if (academyId) {
+      qb.andWhere('(room.academyId = :aId OR room.academyId IS NULL)', { aId: Number(academyId) });
+    }
+
+    const messages = await qb.orderBy('m.createdAt', 'DESC').getMany();
+
+    return messages.map((m) => {
+      const payload = m.payload || {};
+      return {
+        id: m.id,
+        messageId: m.id,
+        ...payload,
+        senderName: m.sender?.name || m.sender?.email,
+        senderEmail: m.sender?.email,
+        createdAt: m.createdAt,
+      };
+    });
+  }
+
   async createPaymentRequest(
     data: {
       studentId?: number;
       studentName?: string;
-      vehicleId: number;
+      vehicleId?: number;
+      isPublicContest?: boolean;
+      requestType?: 'ONE_ON_ONE' | 'CONTEST';
+      rideType?: 'TODAY_ONLY' | 'REGULAR';
       boardingLocation: string;
       address?: string;
       latitude?: number;
@@ -592,13 +621,22 @@ export class ChatService {
       throw new ForbiddenException('학부모 계정은 결재 신청 기능을 이용할 수 없습니다.');
     }
 
-    const vehicle = await this.vehicleRepo.findOne({
-      where: { id: Number(data.vehicleId) },
-      relations: { teacherUser: true, driverUser: true, academy: true },
-    });
-    if (!vehicle) throw new BadRequestException('지정된 차량을 찾을 수 없습니다.');
+    const isPublicContest = Boolean(data.isPublicContest || data.requestType === 'CONTEST');
 
-    if (vehicle.academy?.id && requester.academyId && vehicle.academy.id !== requester.academyId) {
+    let vehicle: Vehicle | null = null;
+    if (data.vehicleId) {
+      vehicle = await this.vehicleRepo.findOne({
+        where: { id: Number(data.vehicleId) },
+        relations: { teacherUser: true, driverUser: true, academy: true },
+      });
+    }
+
+    // 1:1 지정 결재인 경우 차량 필수
+    if (!isPublicContest && !vehicle) {
+      throw new BadRequestException('1:1 결재 신청을 위한 지정 차량을 찾을 수 없습니다.');
+    }
+
+    if (vehicle?.academy?.id && requester.academyId && vehicle.academy.id !== requester.academyId) {
       throw new ForbiddenException('다른 유치원의 차량에는 신청할 수 없습니다.');
     }
 
@@ -628,7 +666,7 @@ export class ChatService {
     }
     studentName = studentName || '신규 원생';
 
-    const targetAcademyId = vehicle.academy?.id || requester.academyId;
+    const targetAcademyId = vehicle?.academy?.id || requester.academyId;
 
     // 결제 시스템 방 찾기 또는 생성
     let sysRoom = await this.roomRepo.findOne({
@@ -648,35 +686,53 @@ export class ChatService {
       sysRoom = await this.roomRepo.save(sysRoom);
     }
 
-    const rideType = (data as any).rideType || 'TODAY_ONLY'; // 'TODAY_ONLY' | 'REGULAR'
+    const rideType = data.rideType || 'TODAY_ONLY'; // 'TODAY_ONLY' | 'REGULAR'
 
     const payload = {
       studentId: data.studentId ? Number(data.studentId) : (studentObj?.id || null),
       studentName,
-      vehicleId: vehicle.id,
-      busNumber: vehicle.busNumber,
-      teacherName: vehicle.teacherUser?.name || vehicle.teacherName || '담당 지도교사',
-      teacherEmail: vehicle.teacherUser?.email || null,
-      driverName: vehicle.driverUser?.name || vehicle.driverName || '기사님',
+      vehicleId: vehicle ? vehicle.id : null,
+      busNumber: vehicle ? vehicle.busNumber : '오픈 공모 (선착순 배정)',
+      teacherName: vehicle ? (vehicle.teacherUser?.name || vehicle.teacherName || '담당 지도교사') : '전체 지도교사 대상',
+      teacherEmail: vehicle?.teacherUser?.email || null,
+      driverName: vehicle ? (vehicle.driverUser?.name || vehicle.driverName || '기사님') : '수락 시 확정',
+      isPublicContest,
+      requestType: isPublicContest ? 'CONTEST' : 'ONE_ON_ONE',
+      targetTeacherId: vehicle?.teacherUser?.id || null,
+      targetTeacherEmail: vehicle?.teacherUser?.email || null,
+      targetTeacherName: vehicle ? (vehicle.teacherUser?.name || vehicle.teacherName || '담당 지도교사') : '전체 지도교사',
+      requesterId: requester.id,
+      requesterEmail: requester.email,
+      requesterName: requester.name || requester.email,
+      requesterRole: requester.role,
       boardingLocation: data.boardingLocation || '지정 탑승지',
       address: data.address || data.boardingLocation || '',
-      latitude: data.latitude ? Number(data.latitude) : (studentObj?.latitude || vehicle.academy?.latitude || 37.842),
-      longitude: data.longitude ? Number(data.longitude) : (studentObj?.longitude || vehicle.academy?.longitude || 127.123),
+      latitude: data.latitude ? Number(data.latitude) : (studentObj?.latitude || vehicle?.academy?.latitude || 37.842),
+      longitude: data.longitude ? Number(data.longitude) : (studentObj?.longitude || vehicle?.academy?.longitude || 127.123),
       locationType: (data as any).locationType || 'PIN',
       rideType,
       requestDate: data.requestDate || new Date().toISOString().split('T')[0],
-      note: data.note || (rideType === 'TODAY_ONLY' ? `오늘 하루 하원 셔틀 탑승 희망 (익일 자동 픽업 원복)` : `정규 셔틀 탑승 및 구역 편입 희망`),
+      note: data.note || (isPublicContest
+        ? (rideType === 'TODAY_ONLY' ? '지도교사 오픈 공모: 오늘 하루 하원 탑승 선착순 배정 희망' : '지도교사 오픈 공모: 정규 셔틀 탑승 선착순 배정 희망')
+        : (rideType === 'TODAY_ONLY' ? '오늘 하루 하원 셔틀 탑승 희망 (익일 자동 픽업 원복)' : '정규 셔틀 탑승 및 구역 편입 희망')),
       status: 'PENDING',
-      requesterName: requester.name || requester.email,
-      requesterRole: requester.role,
     };
+
+    let requestMsgText = '';
+    if (isPublicContest) {
+      requestMsgText = rideType === 'TODAY_ONLY'
+        ? `[공모 당일 탑승 신청] ${studentName} 원아 - 전체 지도교사 오픈 공모 (선착순 배정, 당일 1회 탑승)`
+        : `[공모 정규 탑승 신청] ${studentName} 원아 - 전체 지도교사 오픈 공모 (선착순 배정, 정규 노선 등록)`;
+    } else {
+      requestMsgText = rideType === 'TODAY_ONLY'
+        ? `[당일 1회 탑승 신청] ${studentName} 원아 - ${vehicle?.busNumber} 하원 탑승 요청 (내일 자동 원복)`
+        : `[정규 셔틀 신청] ${studentName} 원아 - ${vehicle?.busNumber} 정규 노선 편입 요청`;
+    }
 
     const message = this.messageRepo.create({
       room: sysRoom,
       sender: requester,
-      text: rideType === 'TODAY_ONLY'
-        ? `[당일 1회 탑승 신청] ${studentName} 원아 - ${vehicle.busNumber} 하원 탑승 요청 (내일 자동 원복)`
-        : `[정규 셔틀 신청] ${studentName} 원아 - ${vehicle.busNumber} 정규 노선 편입 요청`,
+      text: requestMsgText,
       type: 'PAYMENT_REQUEST',
       payload,
       readBy: [requester.id],
@@ -701,6 +757,7 @@ export class ChatService {
     messageId: number,
     decision: 'APPROVED' | 'REJECTED',
     decidedByEmail: string,
+    vehicleId?: number,
   ) {
     if (!decidedByEmail) throw new BadRequestException('승인자 정보가 필요합니다.');
     const decider = await this.userRepo.findOne({ where: { email: decidedByEmail } });
@@ -723,19 +780,77 @@ export class ChatService {
       throw new ForbiddenException('다른 유치원의 결재 신청을 처리할 수 없습니다.');
     }
 
-    if (message.payload?.status && message.payload.status !== 'PENDING' && message.payload.status !== 'RE_REQUESTED') {
-      throw new BadRequestException('이미 처리가 완료된 결재 신청 건입니다.');
-    }
-
     const payload = message.payload || {};
 
+    // 1. 이미 결재 완료된 건 추가 결재 차단 (선착순 수락 완료 시 차단)
+    if (payload.status && payload.status !== 'PENDING' && payload.status !== 'RE_REQUESTED') {
+      const alreadyDecidedBy = payload.contestWinner?.teacherName || payload.decidedBy || '다른 담당자';
+      const alreadyDecidedBus = payload.contestWinner?.busNumber || payload.busNumber || '';
+      throw new BadRequestException(
+        `이미 ${alreadyDecidedBy} 지도교사에 의해 결재가 완료되었습니다. (${alreadyDecidedBus}) 추가 결재가 불가능합니다.`
+      );
+    }
+
+    // 2. 자가 승인 금지: 신청자 본인은 자신이 올린 결재 건을 결재할 수 없음
+    const isRequester =
+      (message.sender && message.sender.id === decider.id) ||
+      (payload.requesterEmail && payload.requesterEmail.toLowerCase() === decider.email.toLowerCase()) ||
+      (payload.requesterId && Number(payload.requesterId) === decider.id);
+
+    if (isRequester) {
+      throw new ForbiddenException(
+        '본인이 직접 신청한 결재 건은 본인이 결재할 수 없습니다. 상대방(담당 지도교사 또는 원장님)만 결재 가능합니다.'
+      );
+    }
+
+    // 3. 1:1 결재 시 상대방(지정된 지도교사 또는 관리자)만 결재 가능
+    const isContest = Boolean(payload.isPublicContest || payload.requestType === 'CONTEST');
+    const isAdmin = decider.role === UserRole.ACADEMY_ADMIN || decider.role === UserRole.SUPER_ADMIN;
+
+    if (!isContest) {
+      const isDesignatedTeacher =
+        (payload.targetTeacherId && Number(payload.targetTeacherId) === decider.id) ||
+        (payload.targetTeacherEmail && payload.targetTeacherEmail.toLowerCase() === decider.email.toLowerCase()) ||
+        (payload.teacherEmail && payload.teacherEmail.toLowerCase() === decider.email.toLowerCase());
+
+      if (!isDesignatedTeacher && !isAdmin) {
+        throw new ForbiddenException('해당 1:1 결재 건은 지정된 담당 지도교사 또는 원장님만 결재할 수 있습니다.');
+      }
+    }
+
     if (decision === 'APPROVED') {
-      // 1. Assign student to vehicle
-      const vehicle = await this.vehicleRepo.findOne({
-        where: { id: Number(payload.vehicleId) },
-        relations: { academy: true },
-      });
-      if (!vehicle) throw new BadRequestException('지정된 차량을 찾을 수 없습니다.');
+      // 4. 차량 결정 및 배정
+      let vehicle: Vehicle | null = null;
+      if (vehicleId) {
+        vehicle = await this.vehicleRepo.findOne({
+          where: { id: Number(vehicleId) },
+          relations: { academy: true, teacherUser: true, driverUser: true },
+        });
+      }
+
+      if (!vehicle && isContest) {
+        // 공모 수락자의 담당 차량 찾기
+        vehicle = await this.vehicleRepo.findOne({
+          where: { teacherUser: { id: decider.id } },
+          relations: { academy: true, teacherUser: true, driverUser: true },
+        });
+        if (!vehicle && isAdmin) {
+          const acadId = decider.academyId || message.room?.academyId;
+          vehicle = await this.vehicleRepo.findOne({
+            where: acadId ? { academy: { id: acadId } } : {},
+            relations: { academy: true, teacherUser: true, driverUser: true },
+          });
+        }
+      } else if (!vehicle && payload.vehicleId) {
+        vehicle = await this.vehicleRepo.findOne({
+          where: { id: Number(payload.vehicleId) },
+          relations: { academy: true, teacherUser: true, driverUser: true },
+        });
+      }
+
+      if (!vehicle) {
+        throw new BadRequestException('배정할 통학 차량을 찾을 수 없습니다. 배정 차량을 지정해주세요.');
+      }
 
       let student: Student | null = null;
       if (payload.studentId) {
@@ -839,7 +954,9 @@ export class ChatService {
       // 3. Notify Route Updated (노선에 자동 반영)
       const targetAcadId = vehicle.academy?.id || student.academy?.id || decider.academyId;
       if (targetAcadId) {
-        const updateTitle = isTodayOnly
+        const updateTitle = isContest
+          ? `[공모 배정 완료] ${payload.studentName} 원아가 ${decider.name || '선생님'} 지도교사의 ${vehicle.busNumber} 노선에 배정되었습니다.`
+          : isTodayOnly
           ? `[당일 임시 탑승 승인] ${payload.studentName} 원아가 오늘 하루 ${vehicle.busNumber} 노선에 추가되었습니다. (내일 자동 원복)`
           : `[정규 셔틀 탑승 승인] ${payload.studentName} 원아가 ${vehicle.busNumber} 정규 노선에 등록되었습니다.`;
         this.routingService.notifyRouteUpdated(targetAcadId, updateTitle);
@@ -849,18 +966,38 @@ export class ChatService {
       payload.status = 'APPROVED';
       payload.decidedBy = decider.name || decider.email;
       payload.decidedAt = new Date().toISOString();
+      payload.vehicleId = vehicle.id;
+      payload.busNumber = vehicle.busNumber;
+      payload.teacherName = decider.name || vehicle.teacherUser?.name || '지도교사';
+      payload.teacherEmail = decider.email;
+      payload.driverName = vehicle.driverUser?.name || vehicle.driverName || '기사님';
+
+      if (isContest) {
+        payload.contestWinner = {
+          teacherId: decider.id,
+          teacherName: decider.name || decider.email,
+          vehicleId: vehicle.id,
+          busNumber: vehicle.busNumber,
+          acceptedAt: new Date().toISOString(),
+        };
+      }
+
       message.payload = payload;
       await this.messageRepo.save(message);
 
       // 5. Send automated confirmation chat message in the room
-      const isCounterApproved = Boolean(payload.counterProposal);
       let confText = '';
-      if (isCounterApproved) {
-        confText = `✓ [재결재 수락 완료] 지도교사 제안 탑승지(${finalBoardingLocation})로 최종 승인되었습니다. (${payload.studentName} 원아 -> ${payload.busNumber}, ${isTodayOnly ? '오늘 하루 탑승' : '정규 등록'})`;
+      if (isContest) {
+        confText = `✓ [공모 결재 완료] ${decider.name || '선생님'} 지도교사님이 먼저 수락하여 ${vehicle.busNumber}에 배정이 완료되었습니다. (추가 결재 마감)`;
       } else {
-        confText = isTodayOnly
-          ? `✓ [당일 탑승 수락 완료] 오늘 하루만 ${payload.studentName} 원아가 ${payload.busNumber}에 임시 탑승합니다. (익일 자정 픽업으로 자동 원복, 담당: ${decider.name || '선생님'})`
-          : `✓ [정규 셔틀 등록 완료] ${payload.studentName} 원아가 ${payload.busNumber} 정규 운행 구역 및 노선에 편입되었습니다. (담당: ${decider.name || '선생님'})`;
+        const isCounterApproved = Boolean(payload.counterProposal);
+        if (isCounterApproved) {
+          confText = `✓ [재결재 수락 완료] 지도교사 제안 탑승지(${finalBoardingLocation})로 최종 승인되었습니다. (${payload.studentName} 원아 -> ${payload.busNumber}, ${isTodayOnly ? '오늘 하루 탑승' : '정규 등록'})`;
+        } else {
+          confText = isTodayOnly
+            ? `✓ [당일 탑승 수락 완료] 오늘 하루만 ${payload.studentName} 원아가 ${payload.busNumber}에 임시 탑승합니다. (익일 자정 픽업으로 자동 원복, 담당: ${decider.name || '선생님'})`
+            : `✓ [정규 셔틀 등록 완료] ${payload.studentName} 원아가 ${payload.busNumber} 정규 운행 구역 및 노선에 편입되었습니다. (담당: ${decider.name || '선생님'})`;
+        }
       }
 
       const confirmationMsg = this.messageRepo.create({
@@ -875,21 +1012,27 @@ export class ChatService {
       this.chatGateway.broadcastMessageToRoom(message.room.id, message);
       this.chatGateway.broadcastMessageToRoom(message.room.id, savedConf);
 
-      const decisionText = decision === 'APPROVED' ? '최종 승인' : '반려';
+      const notifyTitle = isContest ? '공모 결재 완료 알림' : '결재 승인 알림';
+      const notifyText = isContest
+        ? `[공모 결재 완료] ${payload.studentName} 학생의 오픈 공모를 ${decider.name || decider.email} 지도교사님이 먼저 수락하여 [${vehicle.busNumber}]에 배정되었습니다. (추가 결재 마감)`
+        : `${payload.studentName} 학생의 [${payload.busNumber || '셔틀'}] 차량 탑승 결재가 최종 승인되었습니다. (결재자: ${decider.name || decider.email})`;
+
       await this.sendSystemNotification(
         targetAcadId || null,
         'PAYMENT_DECISION',
-        `결재 ${decisionText} 알림`,
-        `${payload.studentName} 학생의 [${payload.busNumber || '셔틀'}] 차량 탑승 결재가 ${decisionText}되었습니다. (결재자: ${decider.name || decider.email})`,
+        notifyTitle,
+        notifyText,
         {
           messageId: message.id,
           studentName: payload.studentName,
           decision,
           decidedBy: decider.name || decider.email,
+          busNumber: vehicle.busNumber,
+          isPublicContest: isContest,
         }
       );
 
-      // 6. Automatically push notification to parent (Requirement 4)
+      // 6. Automatically push notification to parent
       try {
         await this.pushParentNotification(message.id, decider.email);
       } catch (err) {
@@ -906,7 +1049,9 @@ export class ChatService {
       const rejectMsg = this.messageRepo.create({
         room: message.room,
         sender: decider,
-        text: `✕ [결재 반려] ${payload.studentName} 원아의 탑승 요청이 반려되었습니다. (처리: ${decider.name || '선생님'})`,
+        text: isContest
+          ? `✕ [공모 결재 반려] ${payload.studentName} 원아의 오픈 공모가 반려되었습니다. (처리: ${decider.name || '선생님'})`
+          : `✕ [결재 반려] ${payload.studentName} 원아의 탑승 요청이 반려되었습니다. (처리: ${decider.name || '선생님'})`,
         type: 'TEXT',
         readBy: [decider.id],
       });
@@ -914,6 +1059,20 @@ export class ChatService {
 
       this.chatGateway.broadcastMessageToRoom(message.room.id, message);
       this.chatGateway.broadcastMessageToRoom(message.room.id, savedReject);
+
+      const targetAcadId = payload.vehicleId ? (await this.vehicleRepo.findOne({ where: { id: payload.vehicleId } }))?.academy?.id : decider.academyId;
+      await this.sendSystemNotification(
+        targetAcadId || null,
+        'PAYMENT_DECISION',
+        '결재 반려 알림',
+        `${payload.studentName} 학생의 차량 탑승 결재가 반려되었습니다. (반려자: ${decider.name || decider.email})`,
+        {
+          messageId: message.id,
+          studentName: payload.studentName,
+          decision: 'REJECTED',
+          decidedBy: decider.name || decider.email,
+        }
+      );
     }
 
     return { success: true, message };
