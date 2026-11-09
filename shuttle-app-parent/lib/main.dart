@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'services/api_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/parent/parent_home_screen.dart';
@@ -7,6 +9,7 @@ import 'utils/network_helper.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   setupNetworkSecurity();
+  await initializeDateFormatting('ko_KR', null);
   await ApiService().init();
   runApp(const TakeMeParentApp());
 }
@@ -19,6 +22,16 @@ class TakeMeParentApp extends StatelessWidget {
     return MaterialApp(
       title: 'TakeMe 학부모',
       debugShowCheckedModeBanner: false,
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('ko', 'KR'),
+        Locale('en', 'US'),
+      ],
+      locale: const Locale('ko', 'KR'),
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(

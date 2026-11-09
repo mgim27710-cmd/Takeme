@@ -19,17 +19,23 @@ export class BoardPost {
   @Column({ type: 'json', nullable: true })
   images: string[];
 
-  @Column({ type: 'varchar', length: 100, default: '원장선생님' })
+  @Column({ type: 'varchar', length: 100, default: '기관 관리자' })
   authorName: string;
 
   @Column({ type: 'varchar', length: 50, default: 'ADMIN' })
   authorRole: string;
+
+  @Column({ type: 'int', nullable: true })
+  authorUserId: number;
 
   @Column({ type: 'varchar', length: 20, default: 'ALL' })
   visibility: string; // 'ALL' | 'CLASS'
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   targetClass: string; // e.g. '햇살반'
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  className: string; // e.g. '햇살반'
 
   @Column({ type: 'int', default: 0 })
   likeCount: number;

@@ -16,6 +16,8 @@ import { PickupPoint } from '../entities/pickup-point.entity';
 import { ChatMessage } from '../entities/chat-message.entity';
 import { ChatRoom } from '../entities/chat-room.entity';
 import { ChatRoomMember } from '../entities/chat-room-member.entity';
+import { Attendance } from '../entities/attendance.entity';
+import { AttendanceSubmission } from '../entities/attendance-submission.entity';
 import { RoutingModule } from '../routing/routing.module';
 
 @Module({
@@ -34,11 +36,13 @@ import { RoutingModule } from '../routing/routing.module';
       ChatMessage,
       ChatRoom,
       ChatRoomMember,
+      Attendance,
+      AttendanceSubmission,
     ]),
     RoutingModule,
   ],
   controllers: [TeacherController],
   providers: [TeacherService, LocationGateway],
-  exports: [LocationGateway],
+  exports: [TeacherService, LocationGateway],
 })
 export class TeacherModule {}

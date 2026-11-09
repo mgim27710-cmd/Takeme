@@ -25,6 +25,38 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## 개발용 로컬 데이터베이스 (PostgreSQL) 분리 안내
+
+팀 공용 실제 운영 DB(AWS RDS)는 `synchronize: true` 설정 시 엔티티 변경에 따라 스키마가 즉시 변경될 위험이 있습니다. 따라서 **로컬 개발 시에는 개발용 PostgreSQL(Docker 또는 로컬 설치)을 사용**합니다.
+
+### 1. 개발용 DB 실행 방법 (Docker Compose 활용)
+```bash
+# shuttle-backend 디렉터리에서 로컬 PostgreSQL 컨테이너 시작
+$ docker compose -f docker-compose.dev.yml up -d
+```
+또는 직접 Docker 명령 실행:
+```bash
+$ docker run --name takeme-dev-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=takeme_dev -p 5432:5432 -d postgres:15-alpine
+```
+
+### 2. .env.development 파일 생성 및 적용
+`shuttle-backend/.env.development.example` 파일을 복사하여 `.env.development`를 만듭니다:
+```bash
+$ cp .env.development.example .env.development
+```
+
+내용 예시:
+```env
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=postgres
+DB_PASSWORD=postgres
+DB_NAME=takeme_dev
+DB_SSL=false
+```
+
+NestJS 실행 시 `.env.development` 파일이 있으면 실제 RDS 접속 정보 대신 로컬 개발 DB를 최우선으로 바라보므로 안전하게 엔티티 및 스키마 변경 작업을 진행할 수 있습니다.
+
 ## Project setup
 
 ```bash

@@ -6,6 +6,7 @@ import {
   ConnectedSocket,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
@@ -14,10 +15,11 @@ import { Repository } from 'typeorm';
 import { RoutingService } from '../routing/routing.service';
 import { Vehicle } from '../entities/vehicle.entity';
 import { Student } from '../entities/student.entity';
+import { User } from '../entities/user.entity';
 import { JwtPayload } from '../auth/auth-user.decorator';
 
 @WebSocketGateway({ cors: { origin: '*' } })
-export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
@@ -29,12 +31,21 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
     private readonly jwtService: JwtService,
     @InjectRepository(Vehicle) private readonly vehicleRepository: Repository<Vehicle>,
     @InjectRepository(Student) private readonly studentRepository: Repository<Student>,
+    @InjectRepository(User) private readonly userRepository: Repository<User>,
   ) {
     this.routingService.registerRouteUpdateNotifier((academyId, message) => {
       if (message) {
         this.broadcastTeacherPush(message, academyId);
       }
       this.broadcastRouteUpdated(academyId);
+    });
+  }
+
+  afterInit(server: Server) {
+    this.routingService.registerRouteUpdateNotifier((academyId, msg) => {
+      if (this.server && academyId) {
+        this.server.to(`academy_${academyId}`).emit('notificationReceived', { message: msg });
+      }
     });
   }
 
@@ -47,6 +58,12 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (token) {
       try {
         client.data.user = await this.jwtService.verifyAsync<JwtPayload>(token);
+        if (client.data.user?.sub) {
+          client.join(`user_${client.data.user.sub}`);
+        }
+        if (client.data.user?.academyId) {
+          client.join(`academy_${client.data.user.academyId}`);
+        }
       } catch {
         // Allow unauthenticated connection fallback so telemetry is not blocked
       }
@@ -65,8 +82,11 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
     console.log(`Client disconnected: ${client.id}`);
   }
 
-  /** Broadcast operation status to room and all dashboards */
-  broadcastOperationStatus(vehicleId: number, isOperating: boolean, busNumber?: string) {
+  /**
+   * Broadcast operation status to vehicle room and academy room
+   * (server.emit 전체 전송 금지 - 유치원 방 또는 차량 방에만 전송)
+   */
+  async broadcastOperationStatus(vehicleId: number, isOperating: boolean, busNumber?: string, targetAcademyId?: number) {
     this.operatingVehicles.set(vehicleId, isOperating);
     const room = `vehicle_${vehicleId}`;
     const payload = {
@@ -77,7 +97,65 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
     };
     if (this.server) {
       this.server.to(room).emit('vehicleOperatingStatus', payload);
-      this.server.emit('vehicleOperatingStatus', payload);
+      this.server.to(room).emit('notificationReceived', { type: 'SHUTTLE', payload });
+
+      let academyId = targetAcademyId;
+      if (!academyId) {
+        const v = await this.vehicleRepository.findOne({ where: { id: vehicleId }, relations: { academy: true } });
+        academyId = v?.academy?.id;
+      }
+      if (academyId) {
+        this.server.to(`academy_${academyId}`).emit('vehicleOperatingStatus', payload);
+        this.server.to(`academy_${academyId}`).emit('notificationReceived', { type: 'SHUTTLE', payload });
+      }
+    }
+  }
+
+  /**
+   * Broadcast attendance submission ONLY to academy room: academy_{id}
+   * (server.emit 전체 전송 금지)
+   */
+  broadcastAttendanceSubmitted(academyId: number, data: any) {
+    if (!this.server || !academyId) return;
+    this.server.to(`academy_${academyId}`).emit('attendanceSubmitted', data);
+  }
+
+  /**
+   * Broadcast change request creation to academy room: academy_{id}
+   * (server.emit 전체 전송 금지)
+   */
+  broadcastChangeRequestCreated(academyId: number, data: any) {
+    if (!this.server || !academyId) return;
+    this.server.to(`academy_${academyId}`).emit('changeRequestCreated', data);
+    this.server.to(`academy_${academyId}`).emit('notificationReceived', { type: 'APPROVAL_REQUEST', data });
+  }
+
+  /**
+   * Broadcast change request decision:
+   * - to academy room: academy_{id}
+   * - to vehicle room: vehicle_{vehicleId} (if vehicle involved)
+   * - to user room: user_{parentUserId}
+   * (server.emit 전체 전송 금지)
+   */
+  broadcastChangeRequestDecided(data: {
+    academyId: number;
+    vehicleId?: number;
+    parentUserId?: number;
+    request: any;
+  }) {
+    if (!this.server) return;
+    if (data.academyId) {
+      this.server.to(`academy_${data.academyId}`).emit('changeRequestDecided', data.request);
+      this.server.to(`academy_${data.academyId}`).emit('notificationReceived', { type: 'APPROVAL_RESULT', request: data.request });
+    }
+    if (data.vehicleId) {
+      this.server.to(`vehicle_${data.vehicleId}`).emit('changeRequestDecided', data.request);
+      this.server.to(`vehicle_${data.vehicleId}`).emit('routeNeedsRefresh', { vehicleId: data.vehicleId });
+      this.server.to(`vehicle_${data.vehicleId}`).emit('notificationReceived', { type: 'SCHEDULE_CHANGE', request: data.request });
+    }
+    if (data.parentUserId) {
+      this.server.to(`user_${data.parentUserId}`).emit('changeRequestDecided', data.request);
+      this.server.to(`user_${data.parentUserId}`).emit('notificationReceived', { type: 'APPROVAL_RESULT', request: data.request });
     }
   }
 
@@ -146,6 +224,64 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (data?.vehicleId) client.leave(`vehicle_${data.vehicleId}`);
   }
 
+  @SubscribeMessage('joinAcademyRoom')
+  async handleJoinAcademyRoom(
+    @MessageBody() data: { academyId?: number; token?: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const token =
+      data?.token ||
+      (client.handshake.auth?.token as string | undefined) ||
+      (client.handshake.query?.token as string | undefined);
+
+    let user = client.data.user;
+    if (!user && token) {
+      try {
+        user = await this.jwtService.verifyAsync<JwtPayload>(token);
+        client.data.user = user;
+      } catch (_) {}
+    }
+
+    if (!user) {
+      console.warn(`[joinAcademyRoom] Unauthorized join attempt: ${client.id}`);
+      return { success: false, message: '인증 토큰이 필요합니다.' };
+    }
+
+    let academyId: number | undefined;
+    if (user.academyId) {
+      academyId = Number(user.academyId);
+    } else if (user.email) {
+      const dbUser = await this.userRepository.findOne({
+        where: { email: user.email },
+        relations: { academy: true }
+      });
+      if (dbUser?.academyId || dbUser?.academy?.id) {
+        academyId = Number(dbUser.academyId || dbUser.academy.id);
+      }
+    }
+
+    if (!academyId) {
+      console.warn(`[joinAcademyRoom] Academy not found for client: ${client.id}`);
+      return { success: false, message: '유효한 유치원 정보가 없습니다.' };
+    }
+
+    const room = `academy_${academyId}`;
+    client.join(room);
+    if (user?.sub) {
+      client.join(`user_${user.sub}`);
+    }
+    console.log(`Client ${client.id} joined academy room: ${room}`);
+    return { success: true, room, academyId };
+  }
+
+  @SubscribeMessage('leaveAcademyRoom')
+  handleLeaveAcademyRoom(
+    @MessageBody() data: { academyId: number },
+    @ConnectedSocket() client: Socket,
+  ) {
+    if (data?.academyId) client.leave(`academy_${data.academyId}`);
+  }
+
   @SubscribeMessage('driverOperationStatus')
   handleDriverOperationStatus(
     @MessageBody() data: { vehicleId: number; isOperating: boolean },
@@ -188,6 +324,12 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
     // Mark vehicle as operating
     this.operatingVehicles.set(vehicleId, true);
 
+    const vehicle = await this.vehicleRepository.findOne({
+      where: { id: vehicleId },
+      relations: { academy: true }
+    });
+    const academyId = vehicle?.academy?.id;
+
     const room = `vehicle_${vehicleId}`;
     const payload = {
       vehicleId,
@@ -201,23 +343,25 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
       timestamp: new Date().toISOString(),
     };
 
-    // Emit to vehicle room AND broadcast to all dashboards
+    // Emit ONLY to vehicle room and academy room
     this.server.to(room).emit('locationUpdated', payload);
-    this.server.emit('locationUpdated', payload);
-
-    // Also emit operation status as true
-    this.server.emit('vehicleOperatingStatus', {
-      vehicleId,
-      isOperating: true,
-      timestamp: new Date().toISOString(),
-    });
+    if (academyId) {
+      this.server.to(`academy_${academyId}`).emit('locationUpdated', payload);
+      this.server.to(`academy_${academyId}`).emit('vehicleOperatingStatus', {
+        vehicleId,
+        isOperating: true,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     // 도착 5분 전 알림 체크 로직
     try {
       const notificationsToEmit = await this.routingService.checkArrivalAndNotify(vehicleId, lat, lng);
       for (const noti of notificationsToEmit) {
         this.server.to(room).emit('busArriving', noti);
-        this.server.emit('busArriving', noti);
+        if (academyId) {
+          this.server.to(`academy_${academyId}`).emit('busArriving', noti);
+        }
       }
     } catch (e) {
       console.error('Error during checkArrivalAndNotify:', e);
