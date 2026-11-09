@@ -13,6 +13,7 @@ import { AcademyHoliday } from '../entities/academy-holiday.entity';
 import { LessThanOrEqual, MoreThanOrEqual, Between } from 'typeorm';
 import { LocationGateway } from './location.gateway';
 import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE, kstDateString, isValidDateString } from '../utils/school.util';
+import { isNotificationEnabled } from '../utils/notification.util';
 import { Attendance, AttendanceStatus } from '../entities/attendance.entity';
 import { AttendanceSubmission } from '../entities/attendance-submission.entity';
 
@@ -583,24 +584,26 @@ export class TeacherService {
 
     // 기사 대상 알림 생성
     try {
-      const escortNoti = this.notificationRepository.create({
-        vehicle,
-        recipient: vehicle.driverUser || undefined,
-        recipientRole: 'DRIVER',
-        type: 'ESCORT_CONFIRMED',
-        message: `${escortName} 지도교사가 동승 확인을 완료하였습니다.`,
-        academy: vehicle.academy || undefined,
-      });
-      await this.notificationRepository.save(escortNoti);
-
-      if (vehicle.driverUser && this.locationGateway?.server) {
-        this.locationGateway.server.to(`user_${vehicle.driverUser.id}`).emit('notificationReceived', {
-          id: escortNoti.id,
-          title: '동승 확인 완료',
-          message: escortNoti.message,
+      if (vehicle.driverUser && isNotificationEnabled(vehicle.driverUser, 'escort')) {
+        const escortNoti = this.notificationRepository.create({
+          vehicle,
+          recipient: vehicle.driverUser || undefined,
+          recipientRole: 'DRIVER',
           type: 'ESCORT_CONFIRMED',
-          createdAt: escortNoti.createdAt,
+          message: `${escortName} 지도교사가 동승 확인을 완료하였습니다.`,
+          academy: vehicle.academy || undefined,
         });
+        await this.notificationRepository.save(escortNoti);
+
+        if (this.locationGateway?.server) {
+          this.locationGateway.server.to(`user_${vehicle.driverUser.id}`).emit('notificationReceived', {
+            id: escortNoti.id,
+            title: '동승 확인 완료',
+            message: escortNoti.message,
+            type: 'ESCORT_CONFIRMED',
+            createdAt: escortNoti.createdAt,
+          });
+        }
       }
     } catch (_) {}
 
@@ -1486,8 +1489,30 @@ export class TeacherService {
       });
     }
 
-    items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    return items.slice(0, 50);
+    if (user.notificationSettings && user.notificationSettings.all === false) {
+      return [];
+    }
+
+    const s = user.notificationSettings;
+    const filtered = items.filter(item => {
+      if (!s) return true;
+      if (item.type === 'APPROVAL_REQUEST' || item.type === 'APPROVAL_RESULT' || item.type === 'SCHEDULE_CHANGE') {
+        if (s.change_request === false) return false;
+      }
+      if (item.type === 'ESCORT_CONFIRMED') {
+        if (s.escort === false) return false;
+      }
+      if (item.type === 'NOTICE') {
+        if (s.notice === false) return false;
+      }
+      if (item.type === 'MESSAGE') {
+        if (s.chat === false) return false;
+      }
+      return true;
+    });
+
+    filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return filtered.slice(0, 50);
   }
 
   async getTeacherUnreadCount(email: string): Promise<{ count: number }> {

@@ -77,6 +77,9 @@ export class User {
   @Column({ default: true })
   notifyBoardPost: boolean; // 담임 알림장 알림 수신 여부 (기본 켜짐)
 
+  @Column({ type: 'simple-json', nullable: true })
+  notificationSettings: Record<string, boolean> | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

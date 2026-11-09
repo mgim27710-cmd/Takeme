@@ -133,6 +133,20 @@ class ApiService {
     return res;
   }
 
+  Future<http.Response> putWithAuth(Uri url, dynamic body, [Map<String, String>? extra]) async {
+    final encoded = body is String ? body : jsonEncode(body);
+    var res = await http.put(url, headers: _headers(extra), body: encoded).timeout(const Duration(seconds: 10));
+    if (res.statusCode == 401 && _refreshToken != null) {
+      final refreshed = await tryRefreshToken();
+      if (refreshed) {
+        res = await http.put(url, headers: _headers(extra), body: encoded).timeout(const Duration(seconds: 10));
+      } else {
+        await logout();
+      }
+    }
+    return res;
+  }
+
   Future<http.Response> deleteWithAuth(Uri url, [Map<String, String>? extra]) async {
     var res = await http.delete(url, headers: _headers(extra)).timeout(const Duration(seconds: 10));
     if (res.statusCode == 401 && _refreshToken != null) {
@@ -636,5 +650,25 @@ class ApiService {
     } catch (e) {
       return {'success': false, 'message': '메시지 전송에 실패했습니다.'};
     }
+  }
+
+  Future<Map<String, dynamic>> getMyNotificationSettings() async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/me/notification-settings');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  Future<bool> updateMyNotificationSettings(Map<String, bool> settings) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/me/notification-settings');
+      final res = await putWithAuth(url, settings);
+      return res.statusCode == 200;
+    } catch (_) {}
+    return false;
   }
 }

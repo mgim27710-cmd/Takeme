@@ -30,6 +30,7 @@ import {
   kstDateString,
   isValidDateString,
 } from '../utils/school.util';
+import { isNotificationEnabled } from '../utils/notification.util';
 
 function typeToKorean(type: ChangeRequestType | string): string {
   switch (type) {
@@ -529,9 +530,9 @@ export class ApprovalService {
     const decisionKr = decision === ApprovalStatus.APPROVED ? '승인' : '반려';
     const message = `[신청 ${decisionKr}] ${student.adminDisplayName || student.name} 원아의 ${typeKr} 신청이 ${decisionKr}되었습니다.${decision === ApprovalStatus.REJECTED ? ` (사유: ${rejectionReason})` : ''}`;
 
-    // 1. 신청 학부모에게 알림
+    // 1. 신청 학부모에게 알림 (설정 확인)
     const parentUser = student.parentUser || req.requester;
-    if (parentUser) {
+    if (parentUser && isNotificationEnabled(parentUser, 'change_request')) {
       const noti = this.notificationRepo.create({
         recipient: parentUser,
         recipientRole: 'PARENT',
@@ -542,16 +543,19 @@ export class ApprovalService {
       await this.notificationRepo.save(noti);
     }
 
-    // 2. 차량 기사 및 지도교사 알림 (승인인 경우)
+    // 2. 차량 기사 및 지도교사 알림 (승인인 경우, 기사 알림 수신 설정 확인)
     const affectedVehicle = req.targetVehicle || student.assignedVehicle;
     if (decision === ApprovalStatus.APPROVED && affectedVehicle) {
-      const vNoti = this.notificationRepo.create({
-        vehicle: affectedVehicle,
-        type: 'SCHEDULE_CHANGE',
-        approvalRequest: req,
-        message: `[운행 변동] ${student.adminDisplayName || student.name} (${targetDate} ${typeKr})`,
-      });
-      await this.notificationRepo.save(vNoti);
+      const driver = affectedVehicle.driverUser;
+      if (!driver || isNotificationEnabled(driver, 'change_request')) {
+        const vNoti = this.notificationRepo.create({
+          vehicle: affectedVehicle,
+          type: 'SCHEDULE_CHANGE',
+          approvalRequest: req,
+          message: `[운행 변동] ${student.adminDisplayName || student.name} (${targetDate} ${typeKr})`,
+        });
+        await this.notificationRepo.save(vNoti);
+      }
     }
 
     // 소켓 브로드캐스트

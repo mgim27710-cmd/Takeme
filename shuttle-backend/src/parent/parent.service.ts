@@ -171,6 +171,10 @@ export class ParentService {
       .getOne();
 
     const readKeys = new Set(Array.isArray(user.readNotificationKeys) ? user.readNotificationKeys : []);
+    if (user.notificationSettings && user.notificationSettings.all === false) {
+      return [];
+    }
+
     const items: Array<{
       id: number;
       key: string;
@@ -247,7 +251,7 @@ export class ParentService {
 
     // 3. New Board Posts (새 알림장 글)
     const academyId = student?.academy?.id || user.academyId;
-    if (academyId && user.notifyBoardPost !== false) {
+    if (academyId && user.notifyBoardPost !== false && user.notificationSettings?.notifyBoardPost !== false) {
       const className = student ? getStudentClassName(student) : null;
       const postQb = this.boardPostRepository.createQueryBuilder('post')
         .where('post.academyId = :aid', { aid: academyId });
@@ -308,15 +312,22 @@ export class ParentService {
   async getNotificationSettings(email: string) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
+    const s = user.notificationSettings || {};
     return {
-      notifyShuttleOperation: user.notifyShuttleOperation !== false,
-      notifyBoardPost: user.notifyBoardPost !== false,
+      all: s.all ?? true,
+      notifyShuttleOperation: s.notifyShuttleOperation ?? (user.notifyShuttleOperation !== false),
+      notifyBoardPost: s.notifyBoardPost ?? (user.notifyBoardPost !== false),
+      change_request: s.change_request ?? true,
+      chat: s.chat ?? true,
+      notice: s.notice ?? true,
     };
   }
 
-  async updateNotificationSettings(email: string, settings: { notifyShuttleOperation?: boolean; notifyBoardPost?: boolean }) {
+  async updateNotificationSettings(email: string, settings: Record<string, boolean>) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
+    const current = user.notificationSettings || {};
+    user.notificationSettings = { ...current, ...settings };
     if (settings.notifyShuttleOperation !== undefined) {
       user.notifyShuttleOperation = !!settings.notifyShuttleOperation;
     }
@@ -327,8 +338,12 @@ export class ParentService {
     return {
       success: true,
       settings: {
+        all: user.notificationSettings.all ?? true,
         notifyShuttleOperation: user.notifyShuttleOperation !== false,
         notifyBoardPost: user.notifyBoardPost !== false,
+        change_request: user.notificationSettings.change_request ?? true,
+        chat: user.notificationSettings.chat ?? true,
+        notice: user.notificationSettings.notice ?? true,
       },
     };
   }

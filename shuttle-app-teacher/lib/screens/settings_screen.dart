@@ -16,6 +16,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isSavingAllergy = false;
   bool _isDeletingAccount = false;
 
+  bool _notiAll = true;
+  bool _notiChangeRequest = true;
+  bool _notiChat = true;
+  bool _notiNotice = true;
+
   @override
   void initState() {
     super.initState();
@@ -41,6 +46,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
         });
       }
     }
+
+    try {
+      final noti = await ApiService().getMyNotificationSettings();
+      if (mounted) {
+        setState(() {
+          _notiAll = noti['all'] ?? true;
+          _notiChangeRequest = noti['change_request'] ?? true;
+          _notiChat = noti['chat'] ?? true;
+          _notiNotice = noti['notice'] ?? true;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _updateNotiSetting(String key, bool val) async {
+    setState(() {
+      if (key == 'all') _notiAll = val;
+      if (key == 'change_request') _notiChangeRequest = val;
+      if (key == 'chat') _notiChat = val;
+      if (key == 'notice') _notiNotice = val;
+    });
+    await ApiService().updateMyNotificationSettings({
+      'all': _notiAll,
+      'change_request': _notiChangeRequest,
+      'chat': _notiChat,
+      'notice': _notiNotice,
+    });
   }
 
   Future<void> _handleSaveAllergy() async {
@@ -206,6 +238,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 24),
                   ],
 
+                  // Notification Settings (담임 / 지도교사)
+                  _buildTeacherNotificationSection(),
+
                   // Account Info
                   const Text(
                     '계정 정보',
@@ -268,6 +303,115 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildTeacherNotificationSection() {
+    final subEnabled = _notiAll;
+    const disabledColor = Color(0xFF94A3B8);
+    const activeTextColor = Color(0xFF0F172A);
+    const activeSubColor = Color(0xFF64748B);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          '알림 수신 설정',
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF64748B)),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Column(
+            children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                activeTrackColor: const Color(0xFF93C5FD),
+                activeColor: const Color(0xFF2563EB),
+                title: const Text('전체', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF0F172A))),
+                subtitle: const Text('모든 알림을 수신합니다', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                value: _notiAll,
+                onChanged: (val) => _updateNotiSetting('all', val),
+              ),
+              const Divider(height: 1, color: Color(0xFFF1F5F9)),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                activeTrackColor: subEnabled ? const Color(0xFF93C5FD) : const Color(0xFFE2E8F0),
+                activeColor: subEnabled ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
+                title: Text(
+                  '통학 변동 신청',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: subEnabled ? activeTextColor : disabledColor,
+                  ),
+                ),
+                subtitle: Text(
+                  '결석·지각·하원 방식 변경 등 원아 변동 신청 알림',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: subEnabled ? activeSubColor : disabledColor,
+                  ),
+                ),
+                value: subEnabled ? _notiChangeRequest : false,
+                onChanged: subEnabled ? (val) => _updateNotiSetting('change_request', val) : null,
+              ),
+              const Divider(height: 1, color: Color(0xFFF1F5F9)),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                activeTrackColor: subEnabled ? const Color(0xFF93C5FD) : const Color(0xFFE2E8F0),
+                activeColor: subEnabled ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
+                title: Text(
+                  '메시지',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: subEnabled ? activeTextColor : disabledColor,
+                  ),
+                ),
+                subtitle: Text(
+                  '학부모 및 원내 교직원과의 1:1/단체 메시지 알림',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: subEnabled ? activeSubColor : disabledColor,
+                  ),
+                ),
+                value: subEnabled ? _notiChat : false,
+                onChanged: subEnabled ? (val) => _updateNotiSetting('chat', val) : null,
+              ),
+              const Divider(height: 1, color: Color(0xFFF1F5F9)),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                activeTrackColor: subEnabled ? const Color(0xFF93C5FD) : const Color(0xFFE2E8F0),
+                activeColor: subEnabled ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
+                title: Text(
+                  '공지',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: subEnabled ? activeTextColor : disabledColor,
+                  ),
+                ),
+                subtitle: Text(
+                  '유치원 휴원일, 행사 일정 등 기관 공지 알림',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: subEnabled ? activeSubColor : disabledColor,
+                  ),
+                ),
+                value: subEnabled ? _notiNotice : false,
+                onChanged: subEnabled ? (val) => _updateNotiSetting('notice', val) : null,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+      ],
     );
   }
 
