@@ -3,14 +3,22 @@ class RouteStop {
   final double latitude;
   final double longitude;
   final String? address;
+  final String? stopMemo;
   final String? expectedTime;
+  final bool isOneTimeBoarding;
+  final bool isOverride;
+  final String? overrideType;
 
   RouteStop({
     required this.name,
     required this.latitude,
     required this.longitude,
     this.address,
+    this.stopMemo,
     this.expectedTime,
+    this.isOneTimeBoarding = false,
+    this.isOverride = false,
+    this.overrideType,
   });
 
   factory RouteStop.fromJson(Map<String, dynamic> json) {
@@ -24,7 +32,11 @@ class RouteStop {
       latitude: parseCoord(json['latitude'] ?? json['lat']),
       longitude: parseCoord(json['longitude'] ?? json['lng']),
       address: json['address'],
+      stopMemo: json['stopMemo'] ?? json['memo'] ?? json['address'],
       expectedTime: json['expectedTime'],
+      isOneTimeBoarding: json['isOneTimeBoarding'] == true,
+      isOverride: json['isOverride'] == true,
+      overrideType: json['overrideType']?.toString(),
     );
   }
 }

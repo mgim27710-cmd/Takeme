@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
@@ -6,6 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { Vehicle } from '../entities/vehicle.entity';
 import { Student } from '../entities/student.entity';
+import { StudentSchedule } from '../entities/student-schedule.entity';
 import { Academy } from '../entities/academy.entity';
 import { User, UserRole } from '../entities/user.entity';
 import { OperationLog } from '../entities/operation-log.entity';
@@ -20,6 +21,19 @@ import { AuditLog } from '../entities/audit-log.entity';
 import { YearlyZoneMapping } from '../entities/yearly-zone-mapping.entity';
 import { Between } from 'typeorm';
 import * as ExcelJS from 'exceljs';
+import {
+  S3_REF_PREFIX,
+  isS3Enabled,
+  resolveMediaRef,
+  resolveMediaRefs,
+  signS3Key,
+  toStoredMediaRef,
+  toStoredMediaRefs,
+  uploadToS3,
+} from '../utils/s3.util';
+import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE, kstDateString, isValidDateString } from '../utils/school.util';
+import { Attendance, AttendanceStatus } from '../entities/attendance.entity';
+import { AttendanceSubmission } from '../entities/attendance-submission.entity';
 
 @Injectable()
 export class RoutingService {
@@ -53,6 +67,10 @@ export class RoutingService {
     private auditLogRepository: Repository<AuditLog>,
     @InjectRepository(YearlyZoneMapping)
     private yearlyZoneMappingRepository: Repository<YearlyZoneMapping>,
+    @InjectRepository(Attendance)
+    private attendanceRepository: Repository<Attendance>,
+    @InjectRepository(AttendanceSubmission)
+    private submissionRepository: Repository<AttendanceSubmission>,
     private httpService: HttpService,
     private configService: ConfigService,
   ) {}
@@ -1161,7 +1179,6 @@ export class RoutingService {
       where: { academy: { id: academy.id } },
       relations: { assignedVehicle: true, assignedDepartureVehicle: true, studentUser: true, parentUser: true, schedules: { assignedVehicle: true } } 
     });
-
     // Auto-rollback expired temporary rides (당일 1회 탑승 원아 익일 픽업으로 자동 원복)
     const todayStr = new Date().toISOString().split('T')[0];
     const expiredStudents: Student[] = [];
@@ -1187,7 +1204,7 @@ export class RoutingService {
       await this.studentRepository.save(expiredStudents).catch(err => console.error('Failed to rollback expired temporary rides:', err));
     }
 
-    const formattedStudents = dbStudents.map(st => {
+    let formattedStudents = dbStudents.map(st => {
       let parsedRaw: any = {};
       try {
         parsedRaw = typeof st.raw === 'string' ? JSON.parse(st.raw) : (st.raw || {});
@@ -1200,6 +1217,9 @@ export class RoutingService {
         id: st.id,
         name: st.adminDisplayName || st.name,
         realName: st.name,
+        gender: st.gender || parsedRaw['성별'] || '',
+        birthDate: st.birthDate || parsedRaw['생년월일'] || parsedRaw['생일'] || '',
+        className: st.className || getStudentClassName(st),
         address: st.address || '',
         boardingLocation: st.boardingLocation || '',
         dropoffLocation: st.dropoffLocation || parsedRaw['하차지'] || parsedRaw['하원지'] || '',
@@ -1213,7 +1233,7 @@ export class RoutingService {
         color: st.assignedVehicle ? (st.assignedVehicle.colorHex || '#64748b') : '#64748b',
         allergies: st.allergies || parsedRaw['알레르기'] || parsedRaw['알러지'] || '',
         raw: parsedRaw,
-        parentPhone: st.parentUser?.phone || parsedRaw['부모연락처'] || parsedRaw['연락처'] || parsedRaw['보호자연락처'] || parsedRaw['보호자 연락처'] || parsedRaw['전화번호'] || parsedRaw['학부모전화번호'] || '',
+        parentPhone: st.phone || st.parentUser?.phone || parsedRaw['부모연락처'] || parsedRaw['연락처'] || parsedRaw['보호자연락처'] || parsedRaw['보호자 연락처'] || parsedRaw['전화번호'] || parsedRaw['학부모전화번호'] || '',
         parentName: st.parentUser?.name || parsedRaw['보호자 성함'] || parsedRaw['학부모 성함'] || parsedRaw['학부모명'] || '',
         schedules: st.schedules,
         isRegistered: !!st.studentUser || !!st.parentUser,
@@ -1225,6 +1245,50 @@ export class RoutingService {
         boardStatus: st.boardStatus || 'WAITING'
       };
     });
+
+    if (userId) {
+      const callingUser = await this.userRepository.findOne({ where: { id: userId } });
+      if (callingUser) {
+        const role = callingUser.role as string;
+        const isAdminOrDesk =
+          role === 'ACADEMY_ADMIN' ||
+          callingUser.role === UserRole.ACADEMY_ADMIN ||
+          role === 'SUPER_ADMIN' ||
+          callingUser.role === UserRole.SUPER_ADMIN ||
+          role === 'DESK_STAFF' ||
+          callingUser.role === UserRole.DESK_STAFF;
+
+        const isHomeroom =
+          role === 'HOMEROOM_TEACHER' || callingUser.role === UserRole.HOMEROOM_TEACHER;
+
+        if (isHomeroom) {
+          const assignedClass = callingUser.assignedClass;
+          if (!hasAssignedClass(assignedClass)) {
+            formattedStudents = [];
+          } else {
+            formattedStudents = formattedStudents.filter(s =>
+              isSameClass(getStudentClassName(s), assignedClass),
+            );
+          }
+        } else if (!isAdminOrDesk) {
+          // 관리자·담당 담임교사 외(기사, 지도교사 등)는 개인정보(전화번호·생년월일) 마스킹 처리
+          formattedStudents = formattedStudents.map(s => ({
+            ...s,
+            parentPhone: null,
+            birthDate: null,
+            raw: {
+              ...s.raw,
+              부모연락처: undefined,
+              연락처: undefined,
+              학부모연락처: undefined,
+              전화번호: undefined,
+              생년월일: undefined,
+              생일: undefined,
+            },
+          }));
+        }
+      }
+    }
 
     return { academy, buses: formattedVehicles, students: formattedStudents };
   }
@@ -2858,11 +2922,35 @@ export class RoutingService {
       qb.andWhere('(post.visibility = :allVis OR post.targetClass = :tc)', { allVis: 'ALL', tc: targetClass });
     }
 
+    if (userId) {
+      const callingUser = await this.userRepository.findOne({ where: { id: userId } });
+      if (callingUser && ((callingUser.role as string) === 'HOMEROOM_TEACHER' || callingUser.role === UserRole.HOMEROOM_TEACHER)) {
+        const assignedClass = callingUser.assignedClass;
+        if (!hasAssignedClass(assignedClass)) {
+          qb.andWhere('1 = 0');
+        } else {
+          qb.andWhere('(post.visibility = :vAll OR post.targetClass = :tc)', { vAll: 'ALL', tc: assignedClass });
+        }
+      }
+    }
+
     if (search && search.trim()) {
       qb.andWhere('(post.title ILIKE :kw OR post.content ILIKE :kw OR post.authorName ILIKE :kw)', { kw: `%${search.trim()}%` });
     }
 
-    return qb.getMany();
+    const posts = await qb.getMany();
+    return Promise.all(posts.map(p => this.hydratePostMedia(p)));
+  }
+
+  private async hydratePostMedia(post: BoardPost): Promise<BoardPost> {
+    if (!post) return post;
+    const resolvedImageUrl = await resolveMediaRef(post.imageUrl);
+    const resolvedImages = await resolveMediaRefs(post.images);
+    return {
+      ...post,
+      imageUrl: resolvedImageUrl,
+      images: resolvedImages,
+    } as BoardPost;
   }
 
   async getBoardPostById(id: number) {
@@ -2871,7 +2959,7 @@ export class RoutingService {
       relations: { comments: true }
     });
     if (!post) throw new BadRequestException('게시글을 찾을 수 없습니다.');
-    return post;
+    return this.hydratePostMedia(post);
   }
 
   async createBoardPost(body: {
@@ -2886,20 +2974,40 @@ export class RoutingService {
     academyId?: number;
   }, academyId?: number, userId?: number) {
     const academy = await this.getAcademy(body.academyId || academyId, userId);
+    let targetClass = body.targetClass || null;
+    let authorRole = body.authorRole || 'ADMIN';
+
+    if (userId) {
+      const callingUser = await this.userRepository.findOne({ where: { id: userId } });
+      if (callingUser && ((callingUser.role as string) === 'HOMEROOM_TEACHER' || callingUser.role === UserRole.HOMEROOM_TEACHER)) {
+        if (!hasAssignedClass(callingUser.assignedClass)) {
+          throw new BadRequestException('관리자에게 반 배정을 요청하세요.');
+        }
+        targetClass = callingUser.assignedClass;
+        authorRole = 'HOMEROOM_TEACHER';
+      }
+    }
+
     const post = this.boardPostRepository.create({
       title: body.title,
       content: body.content,
-      imageUrl: body.imageUrl || null,
-      images: body.images || [],
-      authorName: body.authorName || '원장선생님',
-      authorRole: body.authorRole || 'ADMIN',
+      imageUrl: toStoredMediaRef(body.imageUrl) || null,
+      images: toStoredMediaRefs(body.images),
+      authorName: body.authorName || '기관 관리자',
+      authorRole,
+      authorUserId: userId || null,
       visibility: body.visibility || 'ALL',
-      targetClass: body.targetClass || null,
+      targetClass,
+      className: targetClass,
       academy: academy || undefined,
       likeCount: 0,
       likedUserIds: [],
     } as any);
-    return this.boardPostRepository.save(post);
+    const saved = (await this.boardPostRepository.save(post)) as unknown as BoardPost;
+    if (academy?.id) {
+      this.notifyRouteUpdated(academy.id, '새 알림장이 등록되었습니다.');
+    }
+    return this.hydratePostMedia(saved);
   }
 
   async updateBoardPost(id: number, body: {
@@ -2909,18 +3017,30 @@ export class RoutingService {
     images?: string[];
     visibility?: string;
     targetClass?: string;
-  }) {
-    const post = await this.getBoardPostById(id);
+  }, userId?: number, userRole?: string) {
+    const post = await this.boardPostRepository.findOne({ where: { id } });
+    if (!post) throw new BadRequestException('게시글을 찾을 수 없습니다.');
+    const isAdmin = userRole === 'ADMIN' || userRole === 'ACADEMY_ADMIN';
+    if (!isAdmin && userId && post.authorUserId && post.authorUserId !== userId) {
+      throw new ForbiddenException('작성자 본인 또는 기관 관리자만 수정할 수 있습니다.');
+    }
     if (body.title !== undefined) post.title = body.title;
     if (body.content !== undefined) post.content = body.content;
-    if (body.imageUrl !== undefined) post.imageUrl = body.imageUrl;
-    if (body.images !== undefined) post.images = body.images;
+    if (body.imageUrl !== undefined) (post as any).imageUrl = toStoredMediaRef(body.imageUrl) || null;
+    if (body.images !== undefined) post.images = toStoredMediaRefs(body.images);
     if (body.visibility !== undefined) post.visibility = body.visibility;
     if (body.targetClass !== undefined) post.targetClass = body.targetClass;
-    return this.boardPostRepository.save(post);
+    const saved = (await this.boardPostRepository.save(post)) as unknown as BoardPost;
+    return this.hydratePostMedia(saved);
   }
 
-  async deleteBoardPost(id: number) {
+  async deleteBoardPost(id: number, userId?: number, userRole?: string) {
+    const post = await this.boardPostRepository.findOne({ where: { id } });
+    if (!post) throw new BadRequestException('게시글을 찾을 수 없습니다.');
+    const isAdmin = userRole === 'ADMIN' || userRole === 'ACADEMY_ADMIN';
+    if (!isAdmin && userId && post.authorUserId && post.authorUserId !== userId) {
+      throw new ForbiddenException('작성자 본인 또는 기관 관리자만 삭제할 수 있습니다.');
+    }
     await this.boardPostRepository.delete(id);
     return { success: true };
   }
@@ -3004,6 +3124,7 @@ export class RoutingService {
     rawObj['반명'] = className || '';
     rawObj['반'] = className || '';
     student.raw = rawObj;
+    student.className = className || '';
     await this.studentRepository.save(student);
     return { success: true, studentId: student.id, className };
   }
@@ -3021,9 +3142,114 @@ export class RoutingService {
       rawObj['반명'] = className || '';
       rawObj['반'] = className || '';
       st.raw = rawObj;
+      st.className = className || '';
     }
     await this.studentRepository.save(students);
     return { success: true, count: students.length, className };
+  }
+
+  async batchUpdateStudents(
+    updates: Array<{
+      id: number;
+      name?: string;
+      gender?: string;
+      birthDate?: string;
+      phone?: string;
+      className?: string;
+      inBusId?: number;
+      outBusId?: number;
+    }>,
+    academyId?: number,
+    userId?: number,
+  ) {
+    if (!Array.isArray(updates) || updates.length === 0) return { success: true, count: 0 };
+    const academy = await this.getAcademy(academyId, userId);
+    if (!academy) throw new BadRequestException('기관 정보를 찾을 수 없습니다.');
+
+    let updatedCount = 0;
+    const scheduleRepo = this.studentRepository.manager.getRepository(StudentSchedule);
+    for (const item of updates) {
+      if (!item.id) continue;
+      const student = await this.studentRepository.findOne({
+        where: { id: item.id, academy: { id: academy.id } },
+        relations: { schedules: { assignedVehicle: true }, assignedVehicle: true },
+      });
+      if (!student) continue;
+
+      let rawObj: any = student.raw;
+      if (typeof rawObj === 'string') {
+        try { rawObj = JSON.parse(rawObj); } catch { rawObj = {}; }
+      }
+      if (!rawObj || typeof rawObj !== 'object') rawObj = {};
+
+      if (item.name && item.name.trim()) {
+        student.name = item.name.trim();
+        student.adminDisplayName = item.name.trim();
+      }
+      if (item.gender !== undefined) {
+        student.gender = item.gender;
+        rawObj['성별'] = item.gender;
+      }
+      if (item.birthDate !== undefined) {
+        student.birthDate = item.birthDate;
+        rawObj['생년월일'] = item.birthDate;
+      }
+      if (item.className !== undefined) {
+        student.className = item.className;
+        rawObj['반명'] = item.className;
+        rawObj['반'] = item.className;
+      }
+      if (item.phone !== undefined) {
+        student.phone = item.phone;
+        rawObj['학부모연락처'] = item.phone;
+        rawObj['연락처'] = item.phone;
+      }
+
+      // 등원 차량 반영
+      if (item.inBusId !== undefined) {
+        const inVehicle = item.inBusId ? await this.vehicleRepository.findOne({ where: { id: item.inBusId } }) : null;
+        let inSched = student.schedules?.find(s => s.type === 'BOARDING');
+        if (inSched) {
+          inSched.assignedVehicle = inVehicle as any;
+          await scheduleRepo.save(inSched);
+        } else if (inVehicle) {
+          const newSched = scheduleRepo.create({
+            student,
+            type: 'BOARDING',
+            dayOfWeek: 'MON',
+            address: student.address || '',
+            assignedVehicle: inVehicle,
+          });
+          await scheduleRepo.save(newSched);
+        }
+        if (inVehicle) student.assignedVehicle = inVehicle;
+      }
+
+      // 하원 차량 반영
+      if (item.outBusId !== undefined) {
+        const outVehicle = item.outBusId ? await this.vehicleRepository.findOne({ where: { id: item.outBusId } }) : null;
+        let outSched = student.schedules?.find(s => s.type === 'ALIGHTING');
+        if (outSched) {
+          outSched.assignedVehicle = outVehicle as any;
+          await scheduleRepo.save(outSched);
+        } else if (outVehicle) {
+          const newSched = scheduleRepo.create({
+            student,
+            type: 'ALIGHTING',
+            dayOfWeek: 'MON',
+            address: student.address || '',
+            assignedVehicle: outVehicle,
+          });
+          await scheduleRepo.save(newSched);
+        }
+      }
+
+      student.raw = rawObj;
+      await this.studentRepository.save(student);
+      updatedCount++;
+    }
+
+    return { success: true, count: updatedCount };
   }
 
   async uploadMedia(data: { base64Data: string; filename?: string; mimeType?: string }, reqHost?: string) {
@@ -3036,28 +3262,70 @@ export class RoutingService {
     const crypto = require('crypto');
 
     let base64String = data.base64Data;
-    let ext = 'jpg';
+    let ext = '';
+    let detectedMime = 'image/jpeg';
+
     if (base64String.includes(';base64,')) {
       const parts = base64String.split(';base64,');
       const mime = parts[0].replace('data:', '');
+      detectedMime = mime;
       if (mime.includes('png')) ext = 'png';
       else if (mime.includes('webp')) ext = 'webp';
-      else if (mime.includes('gif')) ext = 'gif';
       else if (mime.includes('jpeg') || mime.includes('jpg')) ext = 'jpg';
       base64String = parts[1];
     } else if (data.mimeType) {
+      detectedMime = data.mimeType;
       if (data.mimeType.includes('png')) ext = 'png';
       else if (data.mimeType.includes('webp')) ext = 'webp';
-      else if (data.mimeType.includes('gif')) ext = 'gif';
+      else if (data.mimeType.includes('jpeg') || data.mimeType.includes('jpg')) ext = 'jpg';
+    }
+
+    if (!ext && data.filename) {
+      const fileExt = path.extname(data.filename).toLowerCase().replace('.', '');
+      if (['jpg', 'jpeg', 'png', 'webp'].includes(fileExt)) {
+        ext = fileExt === 'jpeg' ? 'jpg' : fileExt;
+        if (ext === 'png') detectedMime = 'image/png';
+        else if (ext === 'webp') detectedMime = 'image/webp';
+        else detectedMime = 'image/jpeg';
+      }
+    }
+
+    if (!['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
+      throw new BadRequestException('jpg, png, webp 형식의 이미지만 업로드할 수 있습니다.');
     }
 
     const buffer = Buffer.from(base64String, 'base64');
+    const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+    if (buffer.length > MAX_SIZE) {
+      throw new BadRequestException('파일 크기는 10MB를 초과할 수 없습니다.');
+    }
+
+    const randomName = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${ext}`;
+
+    // S3 사용 (AWS_S3_BUCKET + AWS_REGION): 파일 키를 돌려주고, 화면 표시용 서명 URL 은 조회할 때마다 새로 만든다.
+    if (isS3Enabled()) {
+      try {
+        const s3Key = `board/${randomName}`;
+        await uploadToS3(s3Key, buffer, detectedMime);
+        return {
+          success: true,
+          ref: `${S3_REF_PREFIX}${s3Key}`, // DB 에 저장할 값
+          url: await signS3Key(s3Key), // 바로 미리보기용 (1시간). 저장하지 말 것
+          filename: randomName,
+          size: buffer.length,
+          createdAt: new Date().toISOString()
+        };
+      } catch (s3Err) {
+        console.error('S3 upload failed, falling back to local storage:', s3Err);
+      }
+    }
+
+    // Local disk fallback under uploads/board/
     const uploadsDir = path.join(process.cwd(), 'uploads', 'board');
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
     }
 
-    const randomName = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${ext}`;
     const filePath = path.join(uploadsDir, randomName);
     fs.writeFileSync(filePath, buffer);
 
@@ -3265,6 +3533,112 @@ export class RoutingService {
       assignedClass: teacher.assignedClass || '',
       academyId: teacher.academy?.id,
       academyName: teacher.academy?.name
+    };
+  }
+
+  async getAcademyAttendance(academyId?: number, userId?: number, dateInput?: string) {
+    const academy = await this.getAcademy(academyId, userId);
+    if (!academy) {
+      return { date: dateInput || kstDateString(), classes: [], submissions: [], summary: { totalStudents: 0, present: 0, absent: 0, late: 0, earlyLeave: 0, submittedClasses: 0, totalClasses: 0 } };
+    }
+
+    const date = (dateInput && isValidDateString(dateInput)) ? dateInput : kstDateString();
+
+    const students = await this.studentRepository.find({
+      where: { academy: { id: academy.id } },
+      relations: { assignedVehicle: true, parentUser: true },
+    });
+
+    const submissions = await this.submissionRepository.find({
+      where: { academy: { id: academy.id }, date },
+    });
+
+    const studentIds = students.map(s => s.id);
+    let attendances: Attendance[] = [];
+    if (studentIds.length > 0) {
+      attendances = await this.attendanceRepository.createQueryBuilder('att')
+        .leftJoinAndSelect('att.student', 'student')
+        .where('att.studentId IN (:...ids) AND att.date = :date', { ids: studentIds, date })
+        .getMany();
+    }
+
+    const attendanceMap = new Map<number, Attendance>();
+    for (const a of attendances) {
+      if (a.student?.id) attendanceMap.set(a.student.id, a);
+    }
+
+    const classMap = new Map<string, any[]>();
+    for (const s of students) {
+      const cName = getStudentClassName(s) || '미배정';
+      if (!classMap.has(cName)) classMap.set(cName, []);
+
+      const att = attendanceMap.get(s.id);
+      let status: AttendanceStatus = AttendanceStatus.PRESENT;
+      if (att) {
+        status = att.status;
+      } else if (s.boardStatus === 'ABSENT') {
+        status = AttendanceStatus.ABSENT;
+      }
+
+      classMap.get(cName)!.push({
+        id: s.id,
+        name: s.adminDisplayName || s.name,
+        status,
+        memo: att?.memo || '',
+        recordedByName: att?.recordedByName || '',
+        recordedAt: att?.recordedAt || null,
+        boardStatus: s.boardStatus || 'WAITING',
+        vehicleName: s.assignedVehicle?.busNumber || '미지정',
+      });
+    }
+
+    const classesList: any[] = [];
+    let grandTotal = 0;
+    let grandPresent = 0;
+    let grandAbsent = 0;
+    let grandLate = 0;
+    let grandEarlyLeave = 0;
+
+    for (const [className, stList] of classMap.entries()) {
+      const sub = submissions.find((s: any) => s.className === className);
+      const present = stList.filter(s => s.status === AttendanceStatus.PRESENT).length;
+      const absent = stList.filter(s => s.status === AttendanceStatus.ABSENT).length;
+      const late = stList.filter(s => s.status === AttendanceStatus.LATE).length;
+      const earlyLeave = stList.filter(s => s.status === AttendanceStatus.EARLY_LEAVE).length;
+
+      grandTotal += stList.length;
+      grandPresent += present;
+      grandAbsent += absent;
+      grandLate += late;
+      grandEarlyLeave += earlyLeave;
+
+      classesList.push({
+        className,
+        isSubmitted: !!sub,
+        submittedAt: sub?.submittedAt || null,
+        teacherName: sub?.teacherName || null,
+        total: stList.length,
+        present,
+        absent,
+        late,
+        earlyLeave,
+        students: stList,
+      });
+    }
+
+    return {
+      date,
+      summary: {
+        totalStudents: grandTotal,
+        present: grandPresent,
+        absent: grandAbsent,
+        late: grandLate,
+        earlyLeave: grandEarlyLeave,
+        submittedClasses: submissions.length,
+        totalClasses: classesList.filter(c => c.className !== '미배정').length,
+      },
+      submissions,
+      classes: classesList,
     };
   }
 }

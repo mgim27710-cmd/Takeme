@@ -14,6 +14,7 @@ import { PickupPoint } from '../entities/pickup-point.entity';
 import { ParentMessage } from '../entities/parent-message.entity';
 import { Notification } from '../entities/notification.entity';
 import { RoutingModule } from '../routing/routing.module';
+import { ApprovalModule } from '../approval/approval.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { RoutingModule } from '../routing/routing.module';
       Notification,
     ]),
     forwardRef(() => RoutingModule),
+    forwardRef(() => ApprovalModule),
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway],

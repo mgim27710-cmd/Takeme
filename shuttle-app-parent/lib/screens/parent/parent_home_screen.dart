@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -5,9 +6,11 @@ import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
 import '../../models/student_model.dart';
 import '../../models/route_model.dart';
-import '../../models/notification_model.dart';
 import '../../widgets/kakao_map_view.dart';
-import 'absence_modal.dart';
+import 'change_request_modal.dart';
+import 'my_requests_screen.dart';
+import 'notification_list_screen.dart';
+import 'class_board_screen.dart';
 import '../settings_screen.dart';
 
 class ParentHomeScreen extends StatefulWidget {
@@ -21,7 +24,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   String _activeTab = 'goto'; // 'goto' (등원) | 'gohome' (하원)
   StudentModel? _childInfo;
   RouteDataModel? _routeData;
-  List<NotificationModel> _notifications = [];
+  int _unreadNotificationCount = 0;
+  Timer? _notificationPollTimer;
   Map<String, dynamic>? _todaySchedule;
 
   double? _busLat;
@@ -38,16 +42,30 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   void initState() {
     super.initState();
     _loadAllData();
+    _loadUnreadCount();
+    _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) _loadUnreadCount();
+    });
   }
 
   @override
   void dispose() {
     _allergyController.dispose();
+    _notificationPollTimer?.cancel();
     final vehicleId = _routeData?.vehicleId;
     if (vehicleId != null) {
       SocketService().leaveVehicleRoom(vehicleId);
     }
     super.dispose();
+  }
+
+  Future<void> _loadUnreadCount() async {
+    final user = ApiService().currentUser;
+    if (user == null) return;
+    final count = await ApiService().getUnreadNotificationCount(user.email);
+    if (mounted) {
+      setState(() => _unreadNotificationCount = count);
+    }
   }
 
   Future<void> _loadAllData() async {
@@ -60,14 +78,12 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
 
     final child = await ApiService().getMyChild(user.email);
     final route = await ApiService().getParentRoute(user.email);
-    final notis = await ApiService().getNotifications(user.email);
     final schedule = await ApiService().getTodaySchedule(user.email);
 
     if (mounted) {
       setState(() {
         _childInfo = child;
         _routeData = route;
-        _notifications = notis;
         _todaySchedule = schedule;
         _isLoading = false;
         if (child != null) {
@@ -86,6 +102,26 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
           }
         });
       }
+
+      SocketService().onChangeRequestDecided((data) {
+        if (!mounted) return;
+        _loadUnreadCount();
+        final studentName = data['studentName'] ?? '원아';
+        final isApproved = data['status'] == 'APPROVED';
+        final statusText = isApproved ? '승인' : '반려';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('[$statusText] $studentName 원아의 신청이 $statusText되었습니다.'),
+            backgroundColor: isApproved ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+          ),
+        );
+      });
+
+      SocketService().onNotificationReceived((_) {
+        if (mounted) _loadUnreadCount();
+      });
+
+      _loadUnreadCount();
     }
   }
 
@@ -313,7 +349,56 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: Color(0xFF64748B)),
-            onPressed: _loadAllData,
+            onPressed: () {
+              _loadAllData();
+              _loadUnreadCount();
+            },
+          ),
+          Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications, color: Color(0xFF0F172A), size: 24),
+                tooltip: '알림',
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const NotificationListScreen()),
+                  ).then((_) {
+                    _loadUnreadCount();
+                    _loadAllData();
+                  });
+                },
+              ),
+              if (_unreadNotificationCount > 0)
+                Positioned(
+                  right: 4,
+                  bottom: 4,
+                  child: IgnorePointer(
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEF4444),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                      alignment: Alignment.center,
+                      child: Text(
+                        _unreadNotificationCount > 9 ? '9+' : '$_unreadNotificationCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          height: 1,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
           IconButton(
             icon: const Icon(Icons.settings_outlined, color: Color(0xFF475569)),
@@ -343,6 +428,83 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        // 우리 반 알림장 바로가기 카드
+                        Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => ClassBoardScreen(
+                                    childClassName: _childInfo?.className,
+                                  ),
+                                ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(16),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFF2563EB).withValues(alpha: 0.22),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 38,
+                                    height: 38,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: const Icon(Icons.article_rounded, color: Colors.white, size: 20),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          _childInfo?.className != null && _childInfo!.className!.isNotEmpty
+                                              ? '${_childInfo!.className} 알림장'
+                                              : '우리 반 알림장',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w800,
+                                            fontSize: 15,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        const Text(
+                                          '선생님이 올린 사진과 공지 확인하기',
+                                          style: TextStyle(
+                                            color: Color(0xFFDBEAFE),
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(Icons.chevron_right, color: Colors.white, size: 22),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+
                         // Tabs: 등원 / 하원
                         Row(
                           children: [
@@ -510,35 +672,66 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                             busLng: _busLng,
                             academyLat: _routeData?.academyLat,
                             academyLng: _routeData?.academyLng,
-                            academyName: _routeData?.academyName,
+                            academyName: _routeData?.academyName ?? _childInfo?.academyName,
+                            myChildName: _childInfo?.name,
+                            myChildAddress: _todaySchedule?['address'] ?? _childInfo?.boardingLocation ?? _childInfo?.address,
                           ),
                         ),
                         const SizedBox(height: 16),
 
                         // Action Buttons
                         if (!isStudent)
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              showDialog(
-                                context: context,
-                                builder: (_) => AbsenceModal(
-                                  email: user!.email,
-                                  onSuccess: _loadAllData,
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    showDialog(
+                                      context: context,
+                                      builder: (_) => ChangeRequestModal(
+                                        email: user!.email,
+                                        onSuccess: _loadAllData,
+                                      ),
+                                    );
+                                  },
+                                  icon: const Icon(Icons.edit_calendar, size: 20, color: Colors.white),
+                                  label: const Text(
+                                    '통학 일정 간편 변경',
+                                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Colors.white),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF2563EB),
+                                    elevation: 0,
+                                    padding: const EdgeInsets.symmetric(vertical: 16),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  ),
                                 ),
-                              );
-                            },
-                            icon: const Icon(Icons.calendar_today, size: 18, color: Color(0xFF2563EB)),
-                            label: const Text(
-                              '결석 / 탑승지 변경 / 메시지',
-                              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Color(0xFF2563EB)),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white,
-                              elevation: 0,
-                              side: const BorderSide(color: Color(0xFFE2E8F0)),
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                            ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                flex: 2,
+                                child: OutlinedButton.icon(
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(builder: (_) => const MyRequestsScreen()),
+                                    );
+                                  },
+                                  icon: const Icon(Icons.history, size: 18, color: Color(0xFF2563EB)),
+                                  label: const Text(
+                                    '신청 내역',
+                                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: Color(0xFF2563EB)),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    side: const BorderSide(color: Color(0xFFBFDBFE), width: 1.5),
+                                    backgroundColor: const Color(0xFFEFF6FF),
+                                    padding: const EdgeInsets.symmetric(vertical: 16),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  ),
+                                ),
+                              ),
+                            ],
                           )
                         else
                           ElevatedButton.icon(
@@ -556,65 +749,6 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                             ),
                           ),
                         const SizedBox(height: 24),
-
-                        // Notification Inbox
-                        Row(
-                          children: [
-                            const Icon(Icons.notifications_outlined, size: 18, color: Color(0xFF0F172A)),
-                            const SizedBox(width: 6),
-                            const Text(
-                              '수신함',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
-                            ),
-                            const Spacer(),
-                            if (_notifications.isNotEmpty)
-                              Text(
-                                '${_notifications.length}건',
-                                style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.bold),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-
-                        if (_notifications.isEmpty)
-                          Container(
-                            padding: const EdgeInsets.symmetric(vertical: 24),
-                            alignment: Alignment.center,
-                            child: const Text('새로운 공지나 알림이 없습니다.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
-                          )
-                        else
-                          ListView.separated(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: _notifications.length,
-                            separatorBuilder: (context, index) => const SizedBox(height: 8),
-                            itemBuilder: (ctx, idx) {
-                              final noti = _notifications[idx];
-                              return Container(
-                                padding: const EdgeInsets.all(14),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: const Color(0xFFF1F5F9)),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      DateFormat('HH:mm').format(noti.createdAt),
-                                      style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8), fontWeight: FontWeight.w600),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      noti.message,
-                                      style: const TextStyle(fontSize: 13, color: Color(0xFF334155), height: 1.4),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
-                        const SizedBox(height: 30),
                       ],
                     ),
                   ),

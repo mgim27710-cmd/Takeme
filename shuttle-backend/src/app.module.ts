@@ -1,17 +1,17 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { RoutingModule } from './routing/routing.module';
 import { User } from './entities/user.entity';
 import { Academy } from './entities/academy.entity';
 import { Vehicle } from './entities/vehicle.entity';
 import { Student } from './entities/student.entity';
+import { StudentSchedule } from './entities/student-schedule.entity';
 import { ScheduleOverride } from './entities/schedule-override.entity';
 import { Notification } from './entities/notification.entity';
 import { OperationLog } from './entities/operation-log.entity';
 import { ParentMessage } from './entities/parent-message.entity';
-import { StudentSchedule } from './entities/student-schedule.entity';
 import { AcademyHoliday } from './entities/academy-holiday.entity';
 import { PickupPoint } from './entities/pickup-point.entity';
 import { ChatRoom } from './entities/chat-room.entity';
@@ -21,6 +21,8 @@ import { BoardPost } from './entities/board-post.entity';
 import { BoardComment } from './entities/board-comment.entity';
 import { AuditLog } from './entities/audit-log.entity';
 import { YearlyZoneMapping } from './entities/yearly-zone-mapping.entity';
+import { Attendance } from './entities/attendance.entity';
+import { AttendanceSubmission } from './entities/attendance-submission.entity';
 import { ParentModule } from './parent/parent.module';
 import { TeacherModule } from './teacher/teacher.module';
 import { ChatModule } from './chat/chat.module';
@@ -30,17 +32,20 @@ import { DirectionsModule } from './directions/directions.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: ['.env.development', '.env'],
+    }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
-        host: config.get<string>('DB_HOST', 'database-1.cl0cmogqigis.ap-southeast-2.rds.amazonaws.com'),
-        port: parseInt(config.get<string>('DB_PORT', '5432'), 10),
-        username: config.get<string>('DB_USERNAME', 'postgres'),
-        password: config.get<string>('DB_PASSWORD', ''),
-        database: config.get<string>('DB_NAME', 'postgres'),
+        host: config.get<string>('DB_HOST', 'localhost'),
+        port: config.get<number>('DB_PORT', 5432),
+        username: config.get<string>('DB_USER', 'takeme'),
+        password: config.get<string>('DB_PASSWORD', 'takeme123'),
+        database: config.get<string>('DB_NAME', 'takeme_db'),
         entities: [
           User,
           Academy,
@@ -61,6 +66,8 @@ import { DirectionsModule } from './directions/directions.module';
           BoardComment,
           AuditLog,
           YearlyZoneMapping,
+          Attendance,
+          AttendanceSubmission,
         ],
         synchronize: true,
         ssl: config.get<string>('DB_SSL') === 'true' ? { rejectUnauthorized: false } : false,

@@ -2,6 +2,8 @@ import { Controller, Post, Body, Get, Param, Query, Res, Delete, Headers, Put, U
 import type { Response } from 'express';
 import { RoutingService } from './routing.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AuthUser } from '../auth/auth-user.decorator';
+import type { JwtPayload } from '../auth/auth-user.decorator';
 
 @Controller('routing')
 @UseGuards(JwtAuthGuard)
@@ -405,19 +407,44 @@ export class RoutingController {
     @Body() body: any,
     @Headers('x-academy-id') academyIdHeader?: string,
     @Headers('x-user-id') userIdHeader?: string,
+    @AuthUser() user?: JwtPayload,
   ) {
     const { academyId, userId } = this.resolveAcademyContext(req, academyIdHeader, userIdHeader);
     return this.routingService.createBoardPost(body, academyId, userId);
   }
 
   @Put('board/posts/:id')
-  async updateBoardPost(@Param('id') id: string, @Body() body: any) {
-    return this.routingService.updateBoardPost(Number(id), body);
+  async updateBoardPost(
+    @Param('id') id: string,
+    @Body() body: any,
+    @AuthUser() user?: JwtPayload,
+  ) {
+    return this.routingService.updateBoardPost(Number(id), body, user?.sub, user?.role);
+  }
+
+  @Put('board/:id')
+  async updateBoardAlias(
+    @Param('id') id: string,
+    @Body() body: any,
+    @AuthUser() user?: JwtPayload,
+  ) {
+    return this.routingService.updateBoardPost(Number(id), body, user?.sub, user?.role);
   }
 
   @Delete('board/posts/:id')
-  async deleteBoardPost(@Param('id') id: string) {
-    return this.routingService.deleteBoardPost(Number(id));
+  async deleteBoardPost(
+    @Param('id') id: string,
+    @AuthUser() user?: JwtPayload,
+  ) {
+    return this.routingService.deleteBoardPost(Number(id), user?.sub, user?.role);
+  }
+
+  @Delete('board/:id')
+  async deleteBoardAlias(
+    @Param('id') id: string,
+    @AuthUser() user?: JwtPayload,
+  ) {
+    return this.routingService.deleteBoardPost(Number(id), user?.sub, user?.role);
   }
 
   @Post('board/posts/:id/like')
@@ -465,6 +492,16 @@ export class RoutingController {
     return this.routingService.batchAssignStudentClass(body.studentIds || [], body.className);
   }
 
+  @Post('students/batch-update')
+  async batchUpdateStudents(
+    @Body('students') students: any[],
+    @Body('academyId') academyId?: number,
+    @Req() req?: any,
+  ) {
+    const userId = req?.user?.sub ? Number(req.user.sub) : undefined;
+    return this.routingService.batchUpdateStudents(students || [], academyId, userId);
+  }
+
   @Post('board/upload')
   async uploadBoardMedia(
     @Body() body: { base64Data: string; filename?: string; mimeType?: string },
@@ -503,5 +540,18 @@ export class RoutingController {
   async getAuditLogs(@Query('limit') limit?: string) {
     const take = Math.min(parseInt(limit || '50', 10), 100);
     return this.routingService.getAuditLogs(take);
+  }
+
+  @Get('attendance')
+  async getAcademyAttendance(
+    @Req() req: any,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+    @Query('academyId') academyIdQuery?: string,
+    @Query('userId') userIdQuery?: string,
+    @Query('date') dateQuery?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, academyIdHeader || academyIdQuery, userIdHeader || userIdQuery);
+    return this.routingService.getAcademyAttendance(academyId, userId, dateQuery);
   }
 }

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'services/api_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/staff/staff_dashboard_screen.dart';
@@ -6,6 +8,7 @@ import 'screens/teacher/homeroom_teacher_home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('ko_KR', null);
   await ApiService().init();
   runApp(const TakeMeTeacherApp());
 }
@@ -18,6 +21,16 @@ class TakeMeTeacherApp extends StatelessWidget {
     return MaterialApp(
       title: 'TakeMe 교사',
       debugShowCheckedModeBanner: false,
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('ko', 'KR'),
+        Locale('en', 'US'),
+      ],
+      locale: const Locale('ko', 'KR'),
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(

@@ -133,6 +133,20 @@ class ApiService {
     return res;
   }
 
+  Future<http.Response> putWithAuth(Uri url, dynamic body, [Map<String, String>? extra]) async {
+    final encoded = body is String ? body : jsonEncode(body);
+    var res = await http.put(url, headers: _headers(extra), body: encoded);
+    if (res.statusCode == 401 && _refreshToken != null) {
+      final refreshed = await tryRefreshToken();
+      if (refreshed) {
+        res = await http.put(url, headers: _headers(extra), body: encoded);
+      } else {
+        await logout();
+      }
+    }
+    return res;
+  }
+
   Future<http.Response> deleteWithAuth(Uri url, [Map<String, String>? extra]) async {
     var res = await http.delete(url, headers: _headers(extra));
     if (res.statusCode == 401 && _refreshToken != null) {
@@ -253,6 +267,68 @@ class ApiService {
       return {'success': true, 'message': data['message']};
     }
     return {'success': false, 'message': data['message'] ?? '탈퇴 처리에 실패했습니다.'};
+  }
+
+  Future<UserModel?> fetchTeacherProfile() async {
+    final user = _currentUser;
+    if (user == null || _accessToken == null) return null;
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/routing/teacher/profile/${user.id}');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        final updatedUser = UserModel(
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          name: data['name'] ?? user.name,
+          assignedClass: data['assignedClass'] ?? user.assignedClass,
+          academyId: data['academyId'] ?? user.academyId,
+          token: _accessToken,
+        );
+        await setAuth(_accessToken!, updatedUser, refreshToken: _refreshToken);
+        return updatedUser;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // ----------------------------------------------------
+  // TEACHER NOTIFICATIONS
+  // ----------------------------------------------------
+  Future<List<NotificationModel>> getTeacherNotifications() async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications');
+    final res = await getWithAuth(url);
+    if (res.statusCode == 200) {
+      final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
+      return list.map((item) => NotificationModel.fromJson(item as Map<String, dynamic>)).toList();
+    }
+    return [];
+  }
+
+  Future<int> getTeacherUnreadCount() async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications/unread-count');
+    final res = await getWithAuth(url);
+    if (res.statusCode == 200) {
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      return (data['count'] as num?)?.toInt() ?? 0;
+    }
+    return 0;
+  }
+
+  Future<bool> markTeacherNotificationRead({int? id, String? key}) async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications/read');
+    final body = <String, dynamic>{};
+    if (id != null) body['id'] = id;
+    if (key != null) body['key'] = key;
+    final res = await postWithAuth(url, body);
+    return res.statusCode == 200 || res.statusCode == 201;
+  }
+
+  Future<bool> markAllTeacherNotificationsRead() async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications/read-all');
+    final res = await postWithAuth(url, {});
+    return res.statusCode == 200 || res.statusCode == 201;
   }
 
   // ----------------------------------------------------
@@ -541,6 +617,32 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> updateBoardPost(int postId, {
+    String? title,
+    String? content,
+    String? visibility,
+    String? targetClass,
+    List<String>? images,
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId');
+      final body = <String, dynamic>{};
+      if (title != null) body['title'] = title;
+      if (content != null) body['content'] = content;
+      if (visibility != null) body['visibility'] = visibility;
+      if (targetClass != null) body['targetClass'] = targetClass;
+      if (images != null) body['images'] = images;
+      final res = await putWithAuth(url, body);
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'data': data,
+      };
+    } catch (e) {
+      return {'success': false, 'message': '게시글 수정에 실패했습니다.'};
+    }
+  }
+
   Future<Map<String, dynamic>> deleteBoardPost(int postId) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId');
@@ -600,6 +702,84 @@ class ApiService {
       };
     } catch (e) {
       return {'success': false, 'message': '메시지 전송에 실패했습니다.'};
+    }
+  }
+
+  // ==================== HOMEROOM ATTENDANCE APIs ====================
+  Future<Map<String, dynamic>?> getHomeroomAttendance({String? date}) async {
+    try {
+      final query = date != null && date.isNotEmpty ? '?date=${Uri.encodeComponent(date)}' : '';
+      final url = Uri.parse('${AppConfig.apiHost}/teacher/homeroom/attendance$query');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<Map<String, dynamic>> submitHomeroomAttendance({
+    required String date,
+    required List<Map<String, dynamic>> attendances,
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/teacher/homeroom/attendance');
+      final res = await postWithAuth(url, jsonEncode({
+        'date': date,
+        'attendances': attendances,
+      }));
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'message': data['message'] ?? (res.statusCode == 200 || res.statusCode == 201 ? '출석부가 제출되었습니다.' : '제출 실패'),
+        'data': data,
+      };
+    } catch (e) {
+      return {'success': false, 'message': '출석부 제출에 실패했습니다.'};
+    }
+  }
+
+  // ==================== CHANGE REQUEST APIs ====================
+  Future<Map<String, dynamic>?> getClassTodayChangeRequests() async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/approval/class-today');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<Map<String, dynamic>> createChangeRequest({
+    required int studentId,
+    required String type,
+    required String targetDate,
+    String? direction,
+    String? targetTime,
+    String? targetAddress,
+    String? reason,
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/approval/request');
+      final payload = {
+        'studentId': studentId,
+        'type': type,
+        'targetDate': targetDate,
+        if (direction != null) 'direction': direction,
+        if (targetTime != null && targetTime.isNotEmpty) 'targetTime': targetTime,
+        if (targetAddress != null && targetAddress.isNotEmpty) 'newAddress': targetAddress,
+        if (reason != null && reason.isNotEmpty) 'reason': reason,
+      };
+      final res = await postWithAuth(url, jsonEncode(payload));
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'message': data['message'] ?? (res.statusCode == 200 || res.statusCode == 201 ? '신청이 정상 등록되었습니다.' : '신청 등록 실패'),
+        'data': data,
+      };
+    } catch (e) {
+      return {'success': false, 'message': '네트워크 오류로 신청에 실패했습니다.'};
     }
   }
 }

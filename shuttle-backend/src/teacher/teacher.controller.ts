@@ -36,6 +36,34 @@ export class TeacherController {
     return this.teacherService.getInbox(email);
   }
 
+  @Get('notifications')
+  async getNotifications(@AuthEmail() email: string) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.getTeacherNotifications(email);
+  }
+
+  @Get('notifications/unread-count')
+  async getUnreadNotificationCount(@AuthEmail() email: string) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.getTeacherUnreadCount(email);
+  }
+
+  @Post('notifications/read-all')
+  async readAllNotifications(@AuthEmail() email: string) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.markAllTeacherNotificationsRead(email);
+  }
+
+  @Post('notifications/read')
+  async readNotification(
+    @AuthEmail() email: string,
+    @Body('id') id?: number,
+    @Body('key') key?: string,
+  ) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.markTeacherNotificationRead(email, id, key);
+  }
+
   @Get('operation-logs')
   async getOperationLogs(@AuthEmail() email: string, @Query('month') month: string) {
     if (!email) throw new BadRequestException('이메일이 필요합니다.');
@@ -46,6 +74,24 @@ export class TeacherController {
   @Post('board-student')
   async boardStudent(@AuthEmail() email: string, @Body() body: { studentId: number; reason?: string }) {
     return this.teacherService.boardStudent(email, body.studentId, body.reason);
+  }
+
+  @Post('unboard-student')
+  async unboardStudent(@AuthEmail() email: string, @Body() body: { studentId: number }) {
+    if (!email || !body?.studentId) throw new BadRequestException('필수 정보 누락');
+    return this.teacherService.unboardStudent(email, body.studentId);
+  }
+
+  @Post('escort/check-in')
+  async checkInEscort(@AuthEmail() email: string) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.checkInEscort(email);
+  }
+
+  @Get('escort/status')
+  async getEscortStatus(@AuthEmail() email: string, @Query('vehicleId') vehicleId?: string) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.getEscortStatus(email, vehicleId ? parseInt(vehicleId, 10) : undefined);
   }
 
   @Post('skip-student')
@@ -157,9 +203,33 @@ export class TeacherController {
     return this.teacherService.readMessage(email, messageId);
   }
 
-  @Post('emergency')
-  async triggerEmergency(@AuthEmail() email: string) {
+  @Get('homeroom/shuttle-status')
+  async getHomeroomShuttleStatus(@AuthEmail() email: string) {
     if (!email) throw new BadRequestException('이메일이 필요합니다.');
-    return this.teacherService.triggerEmergency(email);
+    return this.teacherService.getHomeroomShuttleStatus(email);
+  }
+
+  @Get('homeroom/attendance')
+  async getHomeroomAttendance(
+    @AuthEmail() email: string,
+    @Query('date') date?: string,
+  ) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.getHomeroomAttendance(email, date);
+  }
+
+  @Post('homeroom/attendance')
+  async submitHomeroomAttendance(
+    @AuthEmail() email: string,
+    @Body() body: { date: string; attendances: Array<{ studentId: number; status: any; memo?: string }> },
+  ) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.submitHomeroomAttendance(email, body);
+  }
+
+  @Post('emergency')
+  async triggerEmergency(@AuthEmail() email: string, @Body() body?: { lat?: number; lng?: number }) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.triggerEmergency(email, body?.lat, body?.lng);
   }
 }

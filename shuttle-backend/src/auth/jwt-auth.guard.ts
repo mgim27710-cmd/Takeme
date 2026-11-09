@@ -31,7 +31,10 @@ export class JwtAuthGuard implements CanActivate {
     let payload: JwtPayload;
     try {
       payload = await this.jwtService.verifyAsync<JwtPayload>(header.slice(7));
-    } catch {
+    } catch (err: any) {
+      if (err?.name === 'TokenExpiredError') {
+        throw new UnauthorizedException('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.');
+      }
       throw new UnauthorizedException('로그인이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.');
     }
 
@@ -43,14 +46,14 @@ export class JwtAuthGuard implements CanActivate {
 
     // 2. Account lock check
     if (user.isLocked) {
-      throw new ForbiddenException('로그인 또는 인증번호 5회 실패로 계정이 잠겼습니다. 원장님에게 잠금 해제를 요청해 주세요.');
+      throw new ForbiddenException('로그인 또는 인증번호 5회 실패로 계정이 잠겼습니다. 기관 관리자에게 잠금 해제를 요청해 주세요.');
     }
 
-    // 3. Single session (Concurrent login prevention) check
-    // Concurrent session temporarily relaxed per user request
-    // if (payload.sessionId && user.currentSessionToken && payload.sessionId !== user.currentSessionToken) {
-    //   throw new UnauthorizedException(...);
-    // }
+    // 3. Single session (Concurrent login prevention) check (ALLOW_MULTIPLE_SESSIONS 기본 허용으로 동시 접속 유지)
+    const allowMultipleSessions = process.env.ALLOW_MULTIPLE_SESSIONS !== 'false';
+    if (!allowMultipleSessions && payload.sessionId && user.currentSessionToken && payload.sessionId !== user.currentSessionToken) {
+      throw new UnauthorizedException('다른 기기 또는 브라우저에서 로그인되어 현재 접속이 종료되었습니다. 다시 로그인해 주세요.');
+    }
 
     req.user = payload;
     req.dbUser = user;

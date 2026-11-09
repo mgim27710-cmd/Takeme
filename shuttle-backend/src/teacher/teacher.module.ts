@@ -13,6 +13,8 @@ import { StudentSchedule } from '../entities/student-schedule.entity';
 import { ScheduleOverride } from '../entities/schedule-override.entity';
 import { AcademyHoliday } from '../entities/academy-holiday.entity';
 import { PickupPoint } from '../entities/pickup-point.entity';
+import { Attendance } from '../entities/attendance.entity';
+import { AttendanceSubmission } from '../entities/attendance-submission.entity';
 import { RoutingModule } from '../routing/routing.module';
 
 @Module({
@@ -28,11 +30,13 @@ import { RoutingModule } from '../routing/routing.module';
       ScheduleOverride,
       AcademyHoliday,
       PickupPoint,
+      Attendance,
+      AttendanceSubmission,
     ]),
     RoutingModule,
   ],
   controllers: [TeacherController],
   providers: [TeacherService, LocationGateway],
-  exports: [LocationGateway],
+  exports: [TeacherService, LocationGateway],
 })
 export class TeacherModule {}

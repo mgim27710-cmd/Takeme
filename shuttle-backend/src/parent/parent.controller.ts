@@ -42,9 +42,59 @@ export class ParentController {
   }
 
   @Get('notifications')
-  async getNotifications(@AuthEmail() email: string) {
+  async getNotifications(
+    @AuthEmail() authEmail: string,
+    @Query('email') queryEmail?: string,
+  ) {
+    const email = authEmail || queryEmail;
     if (!email) throw new BadRequestException('이메일이 필요합니다.');
     return this.parentService.getNotifications(email);
+  }
+
+  @Get('notifications/unread-count')
+  async getUnreadCount(
+    @AuthEmail() authEmail: string,
+    @Query('email') queryEmail?: string,
+  ) {
+    const email = authEmail || queryEmail;
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.getUnreadNotificationCount(email);
+  }
+
+  @Get('class-board')
+  async getClassBoard(
+    @AuthEmail() authEmail: string,
+    @Query('email') queryEmail?: string,
+  ) {
+    const email = authEmail || queryEmail;
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.getClassBoard(email);
+  }
+
+  @Post('notifications/read-all')
+  async readAllNotifications(
+    @AuthEmail() authEmail: string,
+    @Body('email') bodyEmail?: string,
+    @Query('email') queryEmail?: string,
+  ) {
+    const email = authEmail || bodyEmail || queryEmail;
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.readAllNotifications(email);
+  }
+
+  @Get('notification-settings')
+  async getNotificationSettings(@AuthEmail() email: string) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.getNotificationSettings(email);
+  }
+
+  @Post('notification-settings')
+  async updateNotificationSettings(
+    @AuthEmail() email: string,
+    @Body() body: { notifyShuttleOperation?: boolean; notifyBoardPost?: boolean }
+  ) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.updateNotificationSettings(email, body);
   }
 
   @Get('route')
@@ -65,11 +115,15 @@ export class ParentController {
 
   @Post('read-message')
   async readMessage(
-    @AuthEmail() email: string,
-    @Body('messageId') messageId: number
+    @AuthEmail() authEmail: string,
+    @Body('messageId') messageId?: number,
+    @Body('notificationKey') notificationKey?: string,
+    @Body('email') bodyEmail?: string,
+    @Query('email') queryEmail?: string,
   ) {
-    if (!email || !messageId) throw new BadRequestException('Email and messageId required');
-    return this.parentService.readMessage(messageId, email);
+    const email = authEmail || bodyEmail || queryEmail;
+    if (!email) throw new BadRequestException('Email is required');
+    return this.parentService.readMessage({ messageId, notificationKey }, email);
   }
 
   @Get('today-schedule')
@@ -88,6 +142,16 @@ export class ParentController {
     return this.parentService.getMyChild(email);
   }
 
+  @Get('my-children')
+  async getMyChildren(
+    @AuthEmail() authEmail: string,
+    @Query('email') queryEmail?: string
+  ) {
+    const email = authEmail || queryEmail;
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.getMyChildren(email);
+  }
+
   @Post('my-child/allergies')
   async updateChildAllergies(
     @AuthEmail() authEmail: string,
@@ -97,5 +161,38 @@ export class ParentController {
     const email = authEmail || bodyEmail;
     if (!email) throw new BadRequestException('이메일이 필요합니다.');
     return this.parentService.updateChildAllergies(email, allergies);
+  }
+
+  @Get('profile')
+  async getProfile(
+    @AuthEmail() authEmail: string,
+    @Query('email') queryEmail?: string
+  ) {
+    const email = authEmail || queryEmail;
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.getProfile(email);
+  }
+
+  @Post('update-phone')
+  async updatePhone(
+    @AuthEmail() authEmail: string,
+    @Body('email') bodyEmail: string,
+    @Body('phone') phone: string
+  ) {
+    const email = authEmail || bodyEmail;
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.updatePhone(email, phone);
+  }
+
+  @Post('change-password')
+  async changePassword(
+    @AuthEmail() authEmail: string,
+    @Body('email') bodyEmail: string,
+    @Body('currentPassword') currentPassword: string,
+    @Body('newPassword') newPassword: string
+  ) {
+    const email = authEmail || bodyEmail;
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.changePassword(email, currentPassword, newPassword);
   }
 }

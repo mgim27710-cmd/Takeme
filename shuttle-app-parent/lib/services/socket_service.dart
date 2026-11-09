@@ -74,6 +74,24 @@ class SocketService {
     });
   }
 
+  void onChangeRequestDecided(Function(Map<String, dynamic> data) callback) {
+    _socket?.on('changeRequestDecided', (data) {
+      if (data is Map) {
+        callback(Map<String, dynamic>.from(data));
+      }
+    });
+  }
+
+  void onNotificationReceived(Function(Map<String, dynamic> data) callback) {
+    _socket?.on('notificationReceived', (data) {
+      if (data is Map) {
+        callback(Map<String, dynamic>.from(data));
+      } else {
+        callback({});
+      }
+    });
+  }
+
   void disconnect() {
     _socket?.disconnect();
     _socket = null;
