@@ -775,23 +775,42 @@ class ApiService {
   }
 
   // ==================== REALTIME CHAT APIs ====================
-  Future<Map<String, List<Map<String, dynamic>>>> getChatUsers() async {
+  Future<Map<String, dynamic>> getChatUsers() async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/chat/users');
       final res = await getWithAuth(url);
       if (res.statusCode == 200) {
         final data = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
         return {
+          'success': true,
           'drivers': (data['drivers'] as List? ?? []).cast<Map<String, dynamic>>(),
           'teachers': (data['teachers'] as List? ?? []).cast<Map<String, dynamic>>(),
           'parents': (data['parents'] as List? ?? []).cast<Map<String, dynamic>>(),
           'admins': (data['admins'] as List? ?? []).cast<Map<String, dynamic>>(),
         };
+      } else {
+        return {
+          'success': false,
+          'statusCode': res.statusCode,
+          'errorMessage': '서버 오류가 발생했습니다 (${res.statusCode}).',
+          'drivers': <Map<String, dynamic>>[],
+          'teachers': <Map<String, dynamic>>[],
+          'parents': <Map<String, dynamic>>[],
+          'admins': <Map<String, dynamic>>[],
+        };
       }
     } catch (e) {
       debugPrint('[ApiService] getChatUsers error: $e');
+      return {
+        'success': false,
+        'statusCode': 0,
+        'errorMessage': '네트워크 연결 오류가 발생했습니다.',
+        'drivers': <Map<String, dynamic>>[],
+        'teachers': <Map<String, dynamic>>[],
+        'parents': <Map<String, dynamic>>[],
+        'admins': <Map<String, dynamic>>[],
+      };
     }
-    return {'drivers': [], 'teachers': [], 'parents': [], 'admins': []};
   }
 
   Future<List<Map<String, dynamic>>> getChatRooms() async {

@@ -52,10 +52,26 @@ export class ChatService {
     });
     if (!currentUser) throw new BadRequestException('사용자를 찾을 수 없습니다.');
 
-    const academyId = currentUser.academy?.id || targetAcademyId || currentUser.academyId;
+    let academyId = currentUser.academy?.id || targetAcademyId || currentUser.academyId;
     if (!academyId) {
+      const student = await this.studentRepo.findOne({
+        where: [
+          { parentUser: { id: currentUser.id } },
+          { studentUser: { id: currentUser.id } },
+        ],
+        relations: { academy: true },
+      });
+      if (student?.academy) {
+        academyId = student.academy.id;
+      }
+    }
+
+    if (!academyId) {
+      console.log(`[ChatService.getAcademyUsers] userId=${currentUser.id}, role=${currentUser.role}: 소속 기관(academyId)을 찾을 수 없음`);
       return { drivers: [], teachers: [], parents: [], admins: [] };
     }
+
+    const isApproved = (u: any) => !!u && (u.approvalStatus === 'APPROVED' || !u.approvalStatus);
 
     // 1. 차량 정보 (기사 및 지도교사)
     const vehicles = await this.vehicleRepo.find({
@@ -66,10 +82,10 @@ export class ChatService {
     const driverVehicleMap = new Map<number, string>();
     const teacherVehicleMap = new Map<number, string>();
     for (const v of vehicles) {
-      if (v.driverUser) {
+      if (v.driverUser && isApproved(v.driverUser)) {
         driverVehicleMap.set(v.driverUser.id, v.busNumber ? `${v.busNumber} 기사` : '셔틀 기사');
       }
-      if (v.teacherUser) {
+      if (v.teacherUser && isApproved(v.teacherUser)) {
         teacherVehicleMap.set(v.teacherUser.id, v.busNumber ? `${v.busNumber} 지도교사` : '지도교사');
       }
     }
@@ -80,15 +96,15 @@ export class ChatService {
       relations: { parentUser: true, assignedVehicle: true },
     });
 
-    // 3. 같은 기관 교직원 및 관리자 목록
+    // 3. 같은 기관 교직원 및 관리자 목록 (승인 완료 계정만)
     const allUsers = await this.userRepo.find({
       where: { academy: { id: academyId } },
     });
 
-    const homeroomTeachers = allUsers.filter(u => u.role === UserRole.HOMEROOM_TEACHER);
-    const escortTeachers = allUsers.filter(u => u.role === UserRole.TEACHER || u.role === UserRole.SHUTTLE_TEACHER);
-    const drivers = allUsers.filter(u => u.role === UserRole.DRIVER);
-    const admins = allUsers.filter(u => u.role === UserRole.ACADEMY_ADMIN || u.role === UserRole.SUPER_ADMIN);
+    const homeroomTeachers = allUsers.filter(u => u.role === UserRole.HOMEROOM_TEACHER && isApproved(u));
+    const escortTeachers = allUsers.filter(u => (u.role === UserRole.TEACHER || u.role === UserRole.SHUTTLE_TEACHER) && isApproved(u));
+    const drivers = allUsers.filter(u => u.role === UserRole.DRIVER && isApproved(u));
+    const admins = allUsers.filter(u => (u.role === UserRole.ACADEMY_ADMIN || u.role === UserRole.SUPER_ADMIN) && isApproved(u));
 
     const resultTeachers: any[] = [];
     const resultParents: any[] = [];
@@ -138,14 +154,16 @@ export class ChatService {
         }
       }
 
-      // 3) 기관 관리자
+      // 3) 기관 관리자 (항상 포함)
       for (const adm of admins) {
-        resultAdmins.push({
-          id: adm.id,
-          name: adm.name || '기관 관리자',
-          role: adm.role,
-          subText: '기관 관리자',
-        });
+        if (adm.id !== currentUser.id && !resultAdmins.some(a => a.id === adm.id)) {
+          resultAdmins.push({
+            id: adm.id,
+            name: adm.name || '기관 관리자',
+            role: adm.role,
+            subText: '기관 관리자',
+          });
+        }
       }
 
       // 학부모끼리는 대화 불가 -> resultParents 는 빈 배열
@@ -156,7 +174,7 @@ export class ChatService {
       const myClassStudents = students.filter(s => isSameClass(getStudentClassName(s), myClass));
 
       for (const st of myClassStudents) {
-        if (st.parentUser && st.parentUser.id !== currentUser.id && !resultParents.some(p => p.id === st.parentUser.id)) {
+        if (st.parentUser && isApproved(st.parentUser) && st.parentUser.id !== currentUser.id && !resultParents.some(p => p.id === st.parentUser.id)) {
           resultParents.push({
             id: st.parentUser.id,
             name: st.parentUser.name || `${st.name} 학부모`,
@@ -186,12 +204,14 @@ export class ChatService {
       }
 
       for (const adm of admins) {
-        resultAdmins.push({
-          id: adm.id,
-          name: adm.name || '기관 관리자',
-          role: adm.role,
-          subText: '기관 관리자',
-        });
+        if (adm.id !== currentUser.id && !resultAdmins.some(a => a.id === adm.id)) {
+          resultAdmins.push({
+            id: adm.id,
+            name: adm.name || '기관 관리자',
+            role: adm.role,
+            subText: '기관 관리자',
+          });
+        }
       }
 
     } else if (currentUser.role === UserRole.TEACHER || currentUser.role === UserRole.SHUTTLE_TEACHER) {
@@ -200,7 +220,7 @@ export class ChatService {
       const myVehicleStudents = students.filter(s => myVehicles.some(v => v.id === s.assignedVehicle?.id));
 
       for (const st of myVehicleStudents) {
-        if (st.parentUser && !resultParents.some(p => p.id === st.parentUser.id)) {
+        if (st.parentUser && isApproved(st.parentUser) && !resultParents.some(p => p.id === st.parentUser.id)) {
           const vName = st.assignedVehicle?.busNumber || '셔틀';
           resultParents.push({
             id: st.parentUser.id,
@@ -231,12 +251,14 @@ export class ChatService {
       }
 
       for (const adm of admins) {
-        resultAdmins.push({
-          id: adm.id,
-          name: adm.name || '기관 관리자',
-          role: adm.role,
-          subText: '기관 관리자',
-        });
+        if (adm.id !== currentUser.id && !resultAdmins.some(a => a.id === adm.id)) {
+          resultAdmins.push({
+            id: adm.id,
+            name: adm.name || '기관 관리자',
+            role: adm.role,
+            subText: '기관 관리자',
+          });
+        }
       }
 
     } else if (currentUser.role === UserRole.DRIVER) {
@@ -245,7 +267,7 @@ export class ChatService {
       const myVehicleStudents = students.filter(s => myVehicles.some(v => v.id === s.assignedVehicle?.id));
 
       for (const st of myVehicleStudents) {
-        if (st.parentUser && !resultParents.some(p => p.id === st.parentUser.id)) {
+        if (st.parentUser && isApproved(st.parentUser) && !resultParents.some(p => p.id === st.parentUser.id)) {
           resultParents.push({
             id: st.parentUser.id,
             name: st.parentUser.name || `${st.name} 학부모`,
@@ -275,18 +297,20 @@ export class ChatService {
       }
 
       for (const adm of admins) {
-        resultAdmins.push({
-          id: adm.id,
-          name: adm.name || '기관 관리자',
-          role: adm.role,
-          subText: '기관 관리자',
-        });
+        if (adm.id !== currentUser.id && !resultAdmins.some(a => a.id === adm.id)) {
+          resultAdmins.push({
+            id: adm.id,
+            name: adm.name || '기관 관리자',
+            role: adm.role,
+            subText: '기관 관리자',
+          });
+        }
       }
 
     } else {
       // 기관 관리자(ADMIN, ACADEMY_ADMIN, SUPER_ADMIN) ↔ 전체 교직원 및 학부모
       for (const st of students) {
-        if (st.parentUser && !resultParents.some(p => p.id === st.parentUser.id)) {
+        if (st.parentUser && isApproved(st.parentUser) && !resultParents.some(p => p.id === st.parentUser.id)) {
           const cName = getStudentClassName(st);
           resultParents.push({
             id: st.parentUser.id,
@@ -318,12 +342,14 @@ export class ChatService {
 
       for (const adm of admins) {
         if (adm.id === currentUser.id) continue;
-        resultAdmins.push({
-          id: adm.id,
-          name: adm.name || '기관 관리자',
-          role: adm.role,
-          subText: '기관 관리자',
-        });
+        if (!resultAdmins.some(a => a.id === adm.id)) {
+          resultAdmins.push({
+            id: adm.id,
+            name: adm.name || '기관 관리자',
+            role: adm.role,
+            subText: '기관 관리자',
+          });
+        }
       }
     }
 
@@ -332,6 +358,10 @@ export class ChatService {
     resultParents.sort(sortFn);
     resultDrivers.sort(sortFn);
     resultAdmins.sort(sortFn);
+
+    console.log(
+      `[ChatService.getAcademyUsers] userId=${currentUser.id}, role=${currentUser.role}, academyId=${academyId}, criteria={assignedClass: "${currentUser.assignedClass || ''}"}, found: teachers=${resultTeachers.length}, parents=${resultParents.length}, drivers=${resultDrivers.length}, admins=${resultAdmins.length}`
+    );
 
     return {
       teachers: resultTeachers,

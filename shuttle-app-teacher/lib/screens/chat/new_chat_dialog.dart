@@ -18,6 +18,7 @@ class _NewChatDialogState extends State<NewChatDialog> {
   };
   bool _isLoading = true;
   bool _isCreating = false;
+  String? _errorMessage;
   String _searchQuery = '';
 
   @override
@@ -33,13 +34,57 @@ class _NewChatDialogState extends State<NewChatDialog> {
   }
 
   Future<void> _loadUsers() async {
-    final users = await ApiService().getChatUsers();
-    if (mounted) {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    final res = await ApiService().getChatUsers();
+    if (!mounted) return;
+
+    if (res['success'] == true) {
       setState(() {
-        _categoryUsers = users;
+        _categoryUsers = {
+          'admins': (res['admins'] as List? ?? []).cast<Map<String, dynamic>>(),
+          'teachers': (res['teachers'] as List? ?? []).cast<Map<String, dynamic>>(),
+          'drivers': (res['drivers'] as List? ?? []).cast<Map<String, dynamic>>(),
+          'parents': (res['parents'] as List? ?? []).cast<Map<String, dynamic>>(),
+        };
         _isLoading = false;
+        _errorMessage = null;
+      });
+    } else {
+      setState(() {
+        _categoryUsers = {'admins': [], 'teachers': [], 'drivers': [], 'parents': []};
+        _isLoading = false;
+        _errorMessage = res['errorMessage']?.toString() ?? '대화 상대를 불러올 수 없습니다.';
       });
     }
+  }
+
+  String _getEmptyMessage() {
+    final user = ApiService().currentUser;
+    if (user == null) return '대화 가능한 상대가 없습니다.';
+
+    if (user.role == 'HOMEROOM_TEACHER') {
+      if (user.assignedClass == null || user.assignedClass!.trim().isEmpty || user.assignedClass == '미배정') {
+        return '배정된 담당 반이 없어 대화 상대를 찾을 수 없습니다.\n관리자에게 반 배정을 요청해 주세요.';
+      }
+      return '담당 반(${user.assignedClass})에 배정된 원아나 승인된 학부모님이 아직 없습니다.';
+    }
+
+    if (user.role == 'TEACHER' || user.role == 'SHUTTLE_TEACHER') {
+      return '담당 차량에 배정된 원아가 없거나 아직 승인된 학부모 계정이 없습니다.';
+    }
+
+    if (user.role == 'DRIVER') {
+      return '운행 담당 차량에 배정된 원아가 없거나 아직 승인된 학부모 계정이 없습니다.';
+    }
+
+    if (user.role == 'PARENT' || user.role == 'STUDENT') {
+      return '등록된 원아 정보가 없거나 소속 학급·차량이 아직 지정되지 않았습니다.';
+    }
+
+    return '아직 승인된 계정이 없거나 대화 가능한 상대가 없습니다.';
   }
 
   Future<void> _handleSelectUser(Map<String, dynamic> user) async {
@@ -183,15 +228,57 @@ class _NewChatDialogState extends State<NewChatDialog> {
                     ),
                   ),
                 ),
-                Expanded(
-                  child: totalCount == 0
-                      ? const Center(
-                          child: Text(
-                            '대화 가능한 상대가 없습니다.',
-                            style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
-                          ),
-                        )
-                      : SingleChildScrollView(
+                if (_errorMessage != null)
+                  Expanded(
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.error_outline, size: 48, color: Color(0xFFEF4444)),
+                            const SizedBox(height: 12),
+                            Text(
+                              _errorMessage!,
+                              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF1E293B)),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 16),
+                            ElevatedButton.icon(
+                              onPressed: _loadUsers,
+                              icon: const Icon(Icons.refresh, size: 16),
+                              label: const Text('다시 시도'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF2563EB),
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: totalCount == 0
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.people_outline, size: 48, color: Color(0xFF94A3B8)),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    _getEmptyMessage(),
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(color: Color(0xFF64748B), fontSize: 13, height: 1.5),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : SingleChildScrollView(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
