@@ -98,7 +98,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
       case 0:
         return '우리 반 원아 명단';
       case 1:
-        return '클라우드 게시판';
+        return '학급 알림장';
       case 2:
         return '학급 메시지 소통';
       default:
@@ -275,8 +275,6 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
         children: const [
           HomeroomStudentsView(),
           TeacherBoardView(),
-          HomeroomAttendanceView(),
-          HomeroomChangeRequestsView(),
           TeacherMessageView(),
         ],
       ),
@@ -299,16 +297,6 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
             icon: Icon(Icons.photo_library_outlined),
             activeIcon: Icon(Icons.photo_library),
             label: '학급 알림장',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.fact_check_outlined),
-            activeIcon: Icon(Icons.fact_check),
-            label: '출석부',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.edit_calendar_outlined),
-            activeIcon: Icon(Icons.edit_calendar),
-            label: '통학 변동',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.mail_outline),
