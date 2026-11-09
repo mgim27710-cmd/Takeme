@@ -19,7 +19,7 @@ import { BoardPost } from '../entities/board-post.entity';
 import { BoardComment } from '../entities/board-comment.entity';
 import { AuditLog } from '../entities/audit-log.entity';
 import { YearlyZoneMapping } from '../entities/yearly-zone-mapping.entity';
-import { Between } from 'typeorm';
+import { Between, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 import {
   S3_REF_PREFIX,
@@ -264,16 +264,14 @@ export class RoutingService {
   }
 
   private colorPalette = [
-    '#3b82f6', // blue
-    '#ef4444', // red
-    '#10b981', // green
-    '#f59e0b', // amber
-    '#8b5cf6', // purple
-    '#ec4899', // pink
-    '#14b8a6', // teal
-    '#f97316', // orange
-    '#6366f1', // indigo
-    '#84cc16'  // lime
+    '#1d4ed8', // 1: royal blue (파랑)
+    '#059669', // 2: emerald green (초록)
+    '#f97316', // 3: vivid orange (주황)
+    '#7c3aed', // 4: deep purple (보라)
+    '#eab308', // 5: bright gold (골드/노랑)
+    '#0891b2', // 6: deep teal (청록)
+    '#dc2626', // 7: crimson red (빨강)
+    '#78350f', // 8: warm chocolate (브라운)
   ];
   private colorIndex = 0;
   private routeUpdateNotifier?: (academyId?: number, message?: string) => void;
@@ -1216,6 +1214,19 @@ export class RoutingService {
       await this.studentRepository.save(expiredStudents).catch(err => console.error('Failed to rollback expired temporary rides:', err));
     }
 
+    // Query active overrides for today (일회성 탑승 및 당일 탑승지 변경 조회)
+    const todayOverrides = await this.scheduleOverrideRepository.find({
+      where: {
+        startDate: LessThanOrEqual(todayStr),
+        endDate: MoreThanOrEqual(todayStr),
+      },
+      relations: { student: true },
+    }).catch(() => []);
+    const overrideMap = new Map<number, ScheduleOverride>();
+    for (const ov of todayOverrides) {
+      if (ov.student?.id) overrideMap.set(ov.student.id, ov);
+    }
+
     let formattedStudents = dbStudents.map(st => {
       let parsedRaw: any = {};
       try {
@@ -1225,6 +1236,15 @@ export class RoutingService {
       const isNotRiding = Boolean(st.isNotRiding || parsedRaw['미탑승'] || parsedRaw['차량미탑승']);
       const needsAddress = !isNotRiding && (!st.address || st.latitude === null || st.latitude === undefined || isNaN(st.latitude) || !st.longitude || isNaN(st.longitude) || !!parsedRaw['주소입력필요']);
 
+      const override = overrideMap.get(st.id);
+      const isOneTimeRide = Boolean(
+        (override && (override.overrideType === OverrideType.ONE_TIME_BOARDING || override.overrideType === OverrideType.CHANGE_LOCATION)) ||
+        parsedRaw.isTemporaryRide ||
+        parsedRaw.rideType === 'TODAY_ONLY' ||
+        parsedRaw.isTemporaryLocation ||
+        (isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))
+      );
+
       return {
         id: st.id,
         name: st.adminDisplayName || st.name,
@@ -1233,11 +1253,13 @@ export class RoutingService {
         birthDate: st.birthDate || parsedRaw['생년월일'] || parsedRaw['생일'] || '',
         className: st.className || getStudentClassName(st),
         address: st.address || '',
-        boardingLocation: st.boardingLocation || '',
+        boardingLocation: (override && override.newAddress) ? override.newAddress : (st.boardingLocation || ''),
         dropoffLocation: st.dropoffLocation || parsedRaw['하차지'] || parsedRaw['하원지'] || '',
-        lat: st.latitude,
-        lng: st.longitude,
+        lat: (override && override.latitude) ? Number(override.latitude) : st.latitude,
+        lng: (override && override.longitude) ? Number(override.longitude) : st.longitude,
         isNotRiding,
+        isOneTimeRide,
+        oneTimeType: override?.overrideType || (parsedRaw.isTemporaryLocation ? 'CHANGE_LOCATION' : 'ONE_TIME_BOARDING'),
         addressNeedsInput: needsAddress,
         assignedBusId: st.assignedVehicle ? st.assignedVehicle.id : null,
         assignedDepartureBusId: st.assignedDepartureVehicle ? st.assignedDepartureVehicle.id : null,

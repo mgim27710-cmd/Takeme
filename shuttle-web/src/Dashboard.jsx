@@ -212,7 +212,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     teacherName: '',
     teacherPhone: '',
     capacity: 25,
-    color: '#2563eb',
+    color: '#1d4ed8',
   });
   const [isProcessing, setIsProcessing] = useState(false);
   const [teachers, setTeachers] = useState([]);
@@ -3468,7 +3468,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               <button
                 type="button"
                 onClick={() => {
-                  const presetColors = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#ea580c'];
+                  const presetColors = ['#1d4ed8', '#059669', '#f97316', '#7c3aed', '#eab308', '#0891b2', '#dc2626', '#78350f'];
                   setNewBusForm({
                     name: `${buses.length + 1}호차`,
                     busNumber: `${buses.length + 1}호차`,
@@ -5390,28 +5390,77 @@ const parseKindergartenExcelSheet = (sheet) => {
             
             if (!showStudent || !displayLat || !displayLng) return null;
 
-            const stColor = displayBusId ? (buses.find(b=>b.id===displayBusId)?.color || '#64748b') : '#64748b';
+            // 당일 1회 탑승 희망 또는 당일 임시 탑승지 변경 원아 감지
+            const isOneTimeStudent = Boolean(
+              st.isOneTimeRide ||
+              st.oneTimeType ||
+              st.raw?.isTemporaryRide ||
+              st.raw?.rideType === 'TODAY_ONLY' ||
+              st.raw?.isTemporaryLocation ||
+              (st.isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))
+            );
+
+            // 일회성 탑승 원아는 차량 색상과 겹치지 않는 선명한 핫핑크(#f43f5e) 적용
+            const ONE_TIME_COLOR = '#f43f5e';
+            const stColor = isOneTimeStudent 
+              ? ONE_TIME_COLOR 
+              : displayBusId 
+              ? (buses.find(b=>b.id===displayBusId)?.color || '#64748b') 
+              : '#64748b';
 
             const studentIcon = L.divIcon({
-              className: 'custom-student-marker',
-              html: `<div style="background-color: ${stColor}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>`,
-              iconSize: [14, 14],
-              iconAnchor: [7, 7]
+              className: isOneTimeStudent ? 'custom-student-marker-onetime' : 'custom-student-marker',
+              html: isOneTimeStudent ? `
+                <div style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">
+                  <span style="position: absolute; inset: -2px; border-radius: 50%; background: #f43f5e; opacity: 0.45; animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
+                  <div style="position: relative; background: #f43f5e; width: 20px; height: 20px; border-radius: 50%; border: 2.5px solid white; box-shadow: 0 3px 8px rgba(244,63,94,0.7); display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: 900; line-height: 1;">
+                    1
+                  </div>
+                </div>
+              ` : `
+                <div style="background-color: ${stColor}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>
+              `,
+              iconSize: isOneTimeStudent ? [24, 24] : [14, 14],
+              iconAnchor: isOneTimeStudent ? [12, 12] : [7, 7]
             });
             return (
               <Marker key={st.id} position={[displayLat, displayLng]} icon={studentIcon}>
                 <Popup className="student-popup">
-                <div className="font-bold text-lg mb-1">{st.name} <span className="text-sm font-normal text-slate-500">{st.raw?.['성별']} / {st.raw?.['연령'] || st.raw?.['학년'] || ''}</span></div>
+                <div className="font-bold text-lg mb-1 flex items-center justify-between">
+                  <span>{st.name} <span className="text-sm font-normal text-slate-500">{st.raw?.['성별']} / {st.raw?.['연령'] || st.raw?.['학년'] || ''}</span></span>
+                  {isOneTimeStudent && (
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-300">
+                      당일 1회 탑승
+                    </span>
+                  )}
+                </div>
                 <div className="text-sm text-slate-700 mb-2">{st.raw?.['유치원명'] || st.raw?.['학교명']} {st.raw?.['반명'] ? `(${st.raw?.['반명']})` : ''} {st.raw?.['하원구분'] ? `[${st.raw?.['하원구분']}]` : ''}</div>
                 
+                {isOneTimeStudent && (
+                  <div className="bg-rose-50 text-rose-700 border border-rose-200 text-xs font-black p-2 rounded-lg mb-2 flex items-center justify-center gap-1.5 shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
+                    <span>[당일 1회 탑승] 미탑승 원아 셔틀 신청 / 당일 임시 위치</span>
+                  </div>
+                )}
+
                 <div className="bg-slate-50 p-2 rounded border border-slate-100 text-xs mb-2">
                   <div className="mb-1"><b>주소:</b> {st.address}</div>
+                  {st.boardingLocation && st.boardingLocation !== st.address && (
+                    <div className="mb-1 text-rose-600 font-bold"><b>탑승지:</b> {st.boardingLocation}</div>
+                  )}
                   <div className="mb-1"><b>학부모:</b> {st.raw?.['보호자 성함']} ({maskPhoneNumber(st.raw?.['보호자연락처'])})</div>
                   <div><b>담임:</b> {st.raw?.['담임명']}</div>
                 </div>
                 
-                <div className="text-sm font-bold text-center p-2 rounded" style={{ backgroundColor: stColor + '20', color: stColor }}>
-                  {displayBusId ? `배차: ${buses.find(b=>b.id===displayBusId)?.name}` : '배차 없음 (구역 밖)'}
+                <div className="text-sm font-bold text-center p-2 rounded border" style={{ 
+                  backgroundColor: isOneTimeStudent ? '#fff1f2' : (stColor + '20'), 
+                  color: isOneTimeStudent ? '#e11d48' : stColor,
+                  borderColor: isOneTimeStudent ? '#fecdd3' : 'transparent'
+                }}>
+                  {isOneTimeStudent 
+                    ? `당일 임시 탑승: ${displayBusId ? buses.find(b=>b.id===displayBusId)?.name : '임시 셔틀'} (1일)`
+                    : (displayBusId ? `배차: ${buses.find(b=>b.id===displayBusId)?.name}` : '배차 없음 (구역 밖)')
+                  }
                 </div>
               </Popup>
             </Marker>
@@ -5472,6 +5521,43 @@ const parseKindergartenExcelSheet = (sheet) => {
             );
           })}
         </MapContainer>
+
+        {/* Floating Map Legend (지도 고대비 범례 안내) */}
+        <div className="absolute bottom-6 left-6 z-[1000] bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200 p-3.5 max-w-xs transition-all pointer-events-auto">
+          <div className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-2 flex items-center justify-between">
+            <span>지도 표시 범례</span>
+            <span className="text-[10px] text-slate-400 font-normal">고대비 색상</span>
+          </div>
+          <div className="space-y-1.5 text-xs font-bold text-slate-700">
+            {/* One-time rider indicator */}
+            <div className="flex items-center gap-2 p-1.5 rounded-lg bg-rose-50/80 border border-rose-200 text-rose-900">
+              <div className="relative w-5 h-5 flex items-center justify-center shrink-0">
+                <span className="absolute inset-0 rounded-full bg-rose-400 opacity-60 animate-ping"></span>
+                <span className="relative w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] font-black flex items-center justify-center border border-white">1</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] font-black leading-tight">당일 1회 탑승 / 임시 위치</div>
+                <div className="text-[10px] text-rose-600 font-normal">미탑승 셔틀 희망 원아</div>
+              </div>
+            </div>
+            {/* Unassigned regular indicator */}
+            <div className="flex items-center gap-2 px-1.5 py-1 text-slate-600">
+              <span className="w-3.5 h-3.5 rounded-full bg-slate-500 border border-white shadow-xs shrink-0"></span>
+              <span className="text-[11px]">정규 미배정 (구역 밖)</span>
+            </div>
+            {/* Bus list with colors */}
+            {buses.length > 0 && (
+              <div className="pt-1.5 border-t border-slate-100 flex flex-wrap gap-1.5">
+                {buses.map(b => (
+                  <span key={b.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold text-white shadow-2xs" style={{ backgroundColor: b.color || '#1d4ed8' }}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                    {b.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
             {/* Student Addition Modal */}
       {showAddStudentModal && (
@@ -5853,7 +5939,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">지도 표시 고유 색상</label>
                 <div className="flex items-center gap-2">
-                  {['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#ea580c', '#475569'].map(c => (
+                  {['#1d4ed8', '#059669', '#f97316', '#7c3aed', '#eab308', '#0891b2', '#dc2626', '#78350f'].map(c => (
                     <button
                       key={c}
                       type="button"
