@@ -17,6 +17,7 @@ import { API_BASE_URL } from './config';
 import TeacherDashboard from './TeacherDashboard';
 import ClassManager from './classes/ClassManager';
 import AuthViewer from './auth/AuthViewer';
+import { formatTeacherName, cleanTeacherBaseName } from './utils/teacherUtil';
 
 
 // Fix Leaflet default icon issue
@@ -43,11 +44,6 @@ const formatBusinessNumber = (value) => {
   return `${nums.slice(0, 3)}-${nums.slice(3, 5)}-${nums.slice(5, 10)}`;
 };
 
-const formatTeacherName = (name) => {
-  if (!name) return '';
-  const clean = String(name).replace(/\s*선생님\s*/g, '').trim();
-  return clean ? `${clean} 선생님` : '';
-};
 
 function MapBoundsFit({ buses, academy }) {
   const map = useMap();
@@ -1409,7 +1405,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
           const parentName = raw['보호자 성함'] || raw['보호자성함'] || raw['보호자명'] || raw['학부모성함'] || raw['학부모 성함'] || '';
           const parentPhone = raw['부모연락처'] || raw['보호자연락처'] || raw['보호자 연락처'] || raw['학부모연락처'] || raw['연락처'] || raw['전화번호'] || '';
           const address = st.address || raw['주소'] || st.boardingLocation || raw['등원지'] || raw['탑승지'] || '';
-          const teacherName = raw['담임명'] || raw['담임'] || '';
+          const teacherName = formatTeacherName(raw['담임명'] || raw['담임'] || raw['담임교사'] || raw['선생님'] || raw['교사'] || '');
 
           // 하원정보 구분 매핑
           const depType = raw['하원구분'] || raw['하원정보'] || '';
@@ -1470,7 +1466,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
             registeredTeacherNames.add(t.name);
             teachersData.push({
               'No': idx + 1,
-              '교사 성명': t.name || '',
+              '교사 성명': formatTeacherName(t.name) || '',
               '담당 반': t.assignedClass || '미배정',
               '이메일(아이디)': t.email || '',
               '동승 차량': assignedBus ? (assignedBus.busNumber || assignedBus.name) : '미배정',
@@ -1485,7 +1481,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
             registeredTeacherNames.add(b.teacherName);
             teachersData.push({
               'No': teachersData.length + 1,
-              '교사 성명': b.teacherName,
+              '교사 성명': formatTeacherName(b.teacherName),
               '담당 반': '차량 동승 지도',
               '이메일(아이디)': '미가입 (차량 동승 교사)',
               '동승 차량': b.busNumber || b.name,
@@ -1519,7 +1515,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
             '담당 기사 성명': b.driverName || '미지정',
             '기사 연락처': b.driverPhone || '미등록',
             '기사 앱 승인상태': driverStatus,
-            '동승 교사 성명': b.teacherName || '미지정',
+            '동승 교사 성명': b.teacherName ? formatTeacherName(b.teacherName) : '미지정',
             '동승 교사 연락처': b.teacherPhone || '미등록',
             '동승 교사 앱 승인상태': teacherStatus,
             '배정 원생 수': `${assignedStudentCount}명`
@@ -1684,7 +1680,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
           plateNumber: newBusForm.plateNumber || '',
           driverName: newBusForm.driverName || '',
           driverPhone: newBusForm.driverPhone || '',
-          teacherName: newBusForm.teacherName || '',
+          teacherName: formatTeacherName(newBusForm.teacherName) || '',
           teacherPhone: newBusForm.teacherPhone || '',
           capacity: parseInt(newBusForm.capacity) || 25,
           color: newBusForm.color || '#2563eb',
@@ -1703,7 +1699,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
           plateNumber: newBusForm.plateNumber || '',
           driverName: newBusForm.driverName || '',
           driverPhone: newBusForm.driverPhone || '',
-          teacherName: newBusForm.teacherName || '',
+          teacherName: formatTeacherName(newBusForm.teacherName) || '',
           teacherPhone: newBusForm.teacherPhone || '',
           capacity: parseInt(newBusForm.capacity) || 25,
           color: newBusForm.color || '#2563eb',
@@ -1795,7 +1791,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
           plateNumber: editingBus.plateNumber,
           driverName: editingBus.driverName,
           driverPhone: editingBus.driverPhone,
-          teacherName: editingBus.teacherName,
+          teacherName: formatTeacherName(editingBus.teacherName),
           teacherPhone: editingBus.teacherPhone,
           capacity: parseInt(editingBus.capacity) || 25,
         })
@@ -2154,12 +2150,18 @@ const parseKindergartenExcelSheet = (sheet) => {
     obj['유치원명'] = kindergartenName;
     obj['학교명'] = kindergartenName;
 
+    // Normalize teacher name from Excel
+    const rawTeacherFromExcel = obj['담임명'] || obj['담임'] || obj['담임교사'] || obj['선생님'] || obj['교사'] || obj['교사성명'] || obj['교사명'] || '';
+    if (rawTeacherFromExcel) {
+      obj['담임명'] = formatTeacherName(rawTeacherFromExcel);
+    }
+
     // Preserve existing class teacher if already registered in system
     const studentClass = (obj['반명'] || obj['반'] || '').toString().trim();
     if (studentClass && Array.isArray(teachers)) {
       const existingT = teachers.find(t => t.assignedClass && t.assignedClass.trim() === studentClass);
       if (existingT && existingT.name) {
-        obj['담임명'] = existingT.name;
+        obj['담임명'] = formatTeacherName(existingT.name);
       }
     }
     obj['연령'] = age;
@@ -2922,7 +2924,7 @@ const parseKindergartenExcelSheet = (sheet) => {
         gender: studentForm.gender,
         parentName: studentForm.parentName.trim(),
         parentPhone: studentForm.parentPhone.trim(),
-        teacherName: studentForm.teacherName.trim(),
+        teacherName: formatTeacherName(studentForm.teacherName.trim()),
         departureType: studentForm.departureType || '정규하원',
         inLocation: inLoc,
         outLocation: outLoc,
@@ -3047,7 +3049,7 @@ const parseKindergartenExcelSheet = (sheet) => {
       gender: raw['성별'] || '남',
       parentName: raw['보호자 성함'] || raw['학부모 성함'] || raw['학부모명'] || student.parentName || '',
       parentPhone: raw['부모연락처'] || raw['보호자연락처'] || raw['보호자 연락처'] || student.parentPhone || '',
-      teacherName: raw['담임명'] || '',
+      teacherName: formatTeacherName(raw['담임명'] || raw['담임'] || raw['담임교사'] || raw['선생님'] || raw['교사'] || ''),
       departureType: raw['하원구분'] || raw['하원정보'] || '정규하원',
       assignedBusId: student.assignedBusId ? String(student.assignedBusId) : '',
       assignedDepartureBusId: student.assignedDepartureBusId ? String(student.assignedDepartureBusId) : '',
@@ -4198,7 +4200,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                               {st.raw?.['담임명'] && (
                                 <div className="flex justify-between">
                                   <span className="text-slate-400">담임 교사:</span>
-                                  <span className="font-semibold text-slate-700">{st.raw['담임명']}</span>
+                                  <span className="font-semibold text-slate-700">{formatTeacherName(st.raw['담임명'])}</span>
                                 </div>
                               )}
                               {(st.allergies || st.raw?.['알레르기']) && (
@@ -4387,7 +4389,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                                           {st.raw?.['담임명'] && (
                                             <div className="flex justify-between">
                                               <span className="text-slate-400">담임 교사:</span>
-                                              <span className="font-semibold text-slate-700">{st.raw['담임명']}</span>
+                                              <span className="font-semibold text-slate-700">{formatTeacherName(st.raw['담임명'])}</span>
                                             </div>
                                           )}
                                           {(st.allergies || st.raw?.['알레르기']) && (
@@ -5491,7 +5493,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                     <div className="mb-1 text-rose-600 font-bold"><b>탑승지:</b> {st.boardingLocation}</div>
                   )}
                   <div className="mb-1"><b>학부모:</b> {st.raw?.['보호자 성함']} ({maskPhoneNumber(st.raw?.['보호자연락처'])})</div>
-                  <div><b>담임:</b> {st.raw?.['담임명']}</div>
+                  <div><b>담임:</b> {formatTeacherName(st.raw?.['담임명'])}</div>
                 </div>
                 
                 <div className="text-sm font-bold text-center p-2 rounded border" style={{ 

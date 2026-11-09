@@ -5,6 +5,7 @@ import BoardViewer from './board/BoardViewer';
 import MessagePanel from './MessagePanel';
 import LogViewer from './LogViewer';
 import { API_BASE_URL } from './config';
+import { formatTeacherName } from './utils/teacherUtil';
 
 // Haversine Distance Helper
 function getDistanceKm(lat1, lon1, lat2, lon2) {
@@ -1878,7 +1879,7 @@ export default function TeacherDashboard({
                       관리자에게 반 배정을 요청하세요
                     </div>
                     <p className="text-xs text-slate-500 leading-relaxed">
-                      <strong>{localTeacherUser?.name || '선생님'}</strong>님, 환영합니다.<br />
+                      <strong>{formatTeacherName(localTeacherUser?.name)}</strong>, 환영합니다.<br />
                       현재 <strong>{academy?.name || '소속 유치원'}</strong>에 정상 등록되었으며,
                       <strong>관리자님께서 담당 반을 배정</strong>하시면 교실 수업 일정 및 우리 반 원아 명단이 자동으로 활성화됩니다.
                     </p>
@@ -1918,7 +1919,7 @@ export default function TeacherDashboard({
                         {academy?.name || '우리 유치원'} · {teacherClass} 교실
                       </h2>
                       <p className="text-blue-100 text-xs sm:text-sm">
-                        {todayStr} · <strong>{localTeacherUser?.name || '선생님'}</strong>님, 오늘 하루도 안전하고 행복한 보육 되세요!
+                        {todayStr} · <strong>{formatTeacherName(localTeacherUser?.name)}</strong>, 오늘 하루도 안전하고 행복한 보육 되세요!
                       </p>
                     </div>
 

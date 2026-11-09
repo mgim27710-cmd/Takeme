@@ -17,6 +17,7 @@ import { LocationGateway } from './location.gateway';
 import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE, kstDateString, isValidDateString } from '../utils/school.util';
 import { Attendance, AttendanceStatus } from '../entities/attendance.entity';
 import { AttendanceSubmission } from '../entities/attendance-submission.entity';
+import { formatTeacherName } from '../utils/teacher.util';
 
 @Injectable()
 export class TeacherService {
@@ -1376,13 +1377,13 @@ export class TeacherService {
           date,
           status: item.status || AttendanceStatus.PRESENT,
           recordedBy: user,
-          recordedByName: user.name || '담임선생님',
+          recordedByName: user.name ? formatTeacherName(user.name) : '담임선생님',
           memo: item.memo || '',
         });
       } else {
         att.status = item.status || AttendanceStatus.PRESENT;
         att.recordedBy = user;
-        att.recordedByName = user.name || '담임선생님';
+        att.recordedByName = user.name ? formatTeacherName(user.name) : '담임선생님';
         if (item.memo !== undefined) att.memo = item.memo;
       }
 
@@ -1410,7 +1411,7 @@ export class TeacherService {
         className: assignedClass,
         date,
         teacher: user,
-        teacherName: user.name || '담임선생님',
+        teacherName: user.name ? formatTeacherName(user.name) : '담임선생님',
         totalCount,
         presentCount,
         absentCount,
@@ -1420,7 +1421,7 @@ export class TeacherService {
       });
     } else {
       submission.teacher = user;
-      submission.teacherName = user.name || '담임선생님';
+      submission.teacherName = user.name ? formatTeacherName(user.name) : '담임선생님';
       submission.totalCount = totalCount;
       submission.presentCount = presentCount;
       submission.absentCount = absentCount;
@@ -1435,7 +1436,7 @@ export class TeacherService {
       academyId,
       className: assignedClass,
       date,
-      teacherName: user.name || '담임선생님',
+      teacherName: user.name ? formatTeacherName(user.name) : '담임선생님',
       teacherEmail: user.email,
       submittedAt: savedSubmission.submittedAt,
       totalCount,

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { API_BASE_URL } from './config';
+import { formatTeacherName } from './utils/teacherUtil';
 
 // Leaflet default icon fix
 delete L.Icon.Default.prototype._getIconUrl;
@@ -1577,7 +1578,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                   <span className="text-[10px] text-blue-600 block truncate">
                                     {isContest && payload.status === 'PENDING'
                                       ? '전체 지도교사 대상'
-                                      : `교사: ${payload.teacherName || '담당 교사'}`}
+                                      : `교사: ${formatTeacherName(payload.teacherName) || '담당 교사'}`}
                                   </span>
                                 </div>
                               </div>
@@ -1722,7 +1723,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     <span>상대방 결재 대기 중</span>
                                   </div>
                                   <p className="text-[11px] text-amber-700 font-medium">
-                                    신청자는 직접 결재할 수 없으며, 상대방({isContest ? '지도교사 공모 수락자' : `${payload.teacherName || '담당 지도교사'} / 원장님`})만 결재 가능합니다.
+                                    신청자는 직접 결재할 수 없으며, 상대방({isContest ? '지도교사 공모 수락자' : `${formatTeacherName(payload.teacherName) || '담당 지도교사'} / 원장님`})만 결재 가능합니다.
                                   </p>
                                 </div>
                               ) : isParent ? (
@@ -1828,7 +1829,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     1:1 지정 결재 건
                                   </div>
                                   <p className="text-[10px] text-slate-500">
-                                    해당 1:1 결재는 지정된 담당 지도교사({payload.teacherName || payload.busNumber}) 또는 원장님만 결재할 수 있습니다.
+                                    해당 1:1 결재는 지정된 담당 지도교사({formatTeacherName(payload.teacherName) || payload.busNumber}) 또는 원장님만 결재할 수 있습니다.
                                   </p>
                                 </div>
                               )}
@@ -2499,7 +2500,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                           <option value="">-- 차량(호차)을 선택하세요 --</option>
                           {(paymentContext.vehicles || []).map((v) => (
                             <option key={v.id} value={v.id}>
-                              {v.busNumber} (담당 지도교사: {v.teacherName} / 기사: {v.driverName})
+                              {v.busNumber} (담당 지도교사: {formatTeacherName(v.teacherName)} / 기사: {v.driverName})
                             </option>
                           ))}
                         </select>

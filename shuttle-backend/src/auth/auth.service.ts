@@ -1,4 +1,5 @@
 import { normalizePhone, maskPhone, sendSmsNotification } from '../utils/sms.util';
+import { formatTeacherName, cleanTeacherBaseName } from '../utils/teacher.util';
 import { Injectable, BadRequestException, UnauthorizedException, HttpException, HttpStatus, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -597,7 +598,7 @@ export class AuthService {
     const user = this.usersRepository.create({
       email,
       passwordHash: hashedPassword,
-      name,
+      name: (userRole === UserRole.TEACHER || userRole === UserRole.HOMEROOM_TEACHER || userRole === UserRole.SHUTTLE_TEACHER) && name ? formatTeacherName(name) : name,
       role: userRole,
       isOtpEnabled: false,
     });

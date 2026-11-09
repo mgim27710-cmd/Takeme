@@ -14,6 +14,7 @@ import { Notification } from '../entities/notification.entity';
 import { ChatGateway } from './chat.gateway';
 import { RoutingService } from '../routing/routing.service';
 import { ApprovalService } from '../approval/approval.service';
+import { formatTeacherName } from '../utils/teacher.util';
 
 @Injectable()
 export class ChatService {
@@ -968,14 +969,14 @@ export class ChatService {
       payload.decidedAt = new Date().toISOString();
       payload.vehicleId = vehicle.id;
       payload.busNumber = vehicle.busNumber;
-      payload.teacherName = decider.name || vehicle.teacherUser?.name || '지도교사';
+      payload.teacherName = formatTeacherName(decider.name || vehicle.teacherUser?.name) || '지도교사';
       payload.teacherEmail = decider.email;
       payload.driverName = vehicle.driverUser?.name || vehicle.driverName || '기사님';
 
       if (isContest) {
         payload.contestWinner = {
           teacherId: decider.id,
-          teacherName: decider.name || decider.email,
+          teacherName: formatTeacherName(decider.name) || decider.email,
           vehicleId: vehicle.id,
           busNumber: vehicle.busNumber,
           acceptedAt: new Date().toISOString(),
@@ -988,7 +989,7 @@ export class ChatService {
       // 5. Send automated confirmation chat message in the room
       let confText = '';
       if (isContest) {
-        confText = `✓ [공모 결재 완료] ${decider.name || '선생님'} 지도교사님이 먼저 수락하여 ${vehicle.busNumber}에 배정이 완료되었습니다. (추가 결재 마감)`;
+        confText = `✓ [공모 결재 완료] ${formatTeacherName(decider.name) || '선생님'} 지도교사님이 먼저 수락하여 ${vehicle.busNumber}에 배정이 완료되었습니다. (추가 결재 마감)`;
       } else {
         const isCounterApproved = Boolean(payload.counterProposal);
         if (isCounterApproved) {

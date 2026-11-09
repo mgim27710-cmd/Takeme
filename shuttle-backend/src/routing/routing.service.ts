@@ -34,6 +34,7 @@ import {
 import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE, kstDateString, isValidDateString } from '../utils/school.util';
 import { Attendance, AttendanceStatus } from '../entities/attendance.entity';
 import { AttendanceSubmission } from '../entities/attendance-submission.entity';
+import { formatTeacherName, cleanTeacherBaseName } from '../utils/teacher.util';
 
 @Injectable()
 export class RoutingService {
@@ -659,7 +660,9 @@ export class RoutingService {
         }
         const hasExistingTeacher = existing.teacherName && existing.teacherName !== '미정';
         if (!hasExistingTeacher && v.teacherName && v.teacherName !== '미정') {
-          existing.teacherName = v.teacherName;
+          existing.teacherName = formatTeacherName(v.teacherName);
+        } else if (hasExistingTeacher) {
+          existing.teacherName = formatTeacherName(existing.teacherName);
         }
         const hasExistingTeacherPhone = existing.teacherPhone && existing.teacherPhone !== '000-0000-0000';
         if (!hasExistingTeacherPhone && v.teacherPhone && v.teacherPhone !== '000-0000-0000') {
@@ -675,7 +678,7 @@ export class RoutingService {
           plateNumber: v.plateNumber || '',
           driverName: v.driverName || '미정',
           driverPhone: v.driverPhone || '000-0000-0000',
-          teacherName: v.teacherName || '미정',
+          teacherName: v.teacherName ? formatTeacherName(v.teacherName) : '미정',
           teacherPhone: v.teacherPhone || '000-0000-0000',
           capacity: Number(v.capacity) || 25,
           academy: academy,
@@ -1171,7 +1174,7 @@ export class RoutingService {
         plateNumber: v.plateNumber,
         driverName: v.driverName,
         driverPhone: v.driverPhone,
-        teacherName: v.teacherName,
+        teacherName: v.teacherName ? formatTeacherName(v.teacherName) : '미정',
         teacherPhone: v.teacherPhone,
         capacity: v.capacity,
         driverApprovalStatus: v.driverApprovalStatus,
@@ -1197,6 +1200,9 @@ export class RoutingService {
       try {
         parsedRaw = typeof st.raw === 'string' ? JSON.parse(st.raw) : (st.raw || {});
       } catch(e) {}
+      if (parsedRaw && parsedRaw['담임명']) {
+        parsedRaw['담임명'] = formatTeacherName(parsedRaw['담임명']);
+      }
       if (parsedRaw.isTemporaryRide && parsedRaw.temporaryRideDate && parsedRaw.temporaryRideDate < todayStr) {
         st.assignedVehicle = null;
         st.boardingLocation = parsedRaw.originalBoardingLocation || null;
@@ -1232,6 +1238,9 @@ export class RoutingService {
       try {
         parsedRaw = typeof st.raw === 'string' ? JSON.parse(st.raw) : (st.raw || {});
       } catch(e) {}
+      if (parsedRaw && parsedRaw['담임명']) {
+        parsedRaw['담임명'] = formatTeacherName(parsedRaw['담임명']);
+      }
 
       const isNotRiding = Boolean(st.isNotRiding || parsedRaw['미탑승'] || parsedRaw['차량미탑승']);
       const needsAddress = !isNotRiding && (!st.address || st.latitude === null || st.latitude === undefined || isNaN(st.latitude) || !st.longitude || isNaN(st.longitude) || !!parsedRaw['주소입력필요']);
@@ -1946,7 +1955,7 @@ export class RoutingService {
     const classTeacherMap = new Map<string, string>();
     existingTeachers.forEach(t => {
       if (t.assignedClass && t.name && t.assignedClass !== '미배정') {
-        classTeacherMap.set(t.assignedClass.trim(), t.name.trim());
+        classTeacherMap.set(t.assignedClass.trim(), formatTeacherName(t.name.trim()));
       }
     });
 
@@ -1992,9 +2001,10 @@ export class RoutingService {
         const studentClass = (rawObj['반명'] || rawObj['반'] || '').toString().trim();
         const classTeacher = studentClass ? classTeacherMap.get(studentClass) : null;
         if (classTeacher) {
-          rawObj['담임명'] = classTeacher;
+          rawObj['담임명'] = formatTeacherName(classTeacher);
         } else {
-          rawObj['담임명'] = rawObj['담임명'] || rawObj['담임'] || '';
+          const rawTeacher = rawObj['담임명'] || rawObj['담임'] || rawObj['담임교사'] || rawObj['선생님'] || rawObj['교사'] || '';
+          rawObj['담임명'] = rawTeacher ? formatTeacherName(rawTeacher) : '';
         }
       }
 
@@ -2281,13 +2291,14 @@ export class RoutingService {
     const className = studentData.className || studentData.raw?.['반명'] || '';
 
     // Check if class already has an existing assigned teacher in the system
-    let teacherName = studentData.teacherName || studentData.raw?.['담임명'] || '';
+    const rawTeacherFromInput = studentData.teacherName || studentData.raw?.['담임명'] || studentData.raw?.['담임'] || studentData.raw?.['담임교사'] || studentData.raw?.['선생님'] || studentData.raw?.['교사'] || '';
+    let teacherName = rawTeacherFromInput ? formatTeacherName(rawTeacherFromInput) : '';
     if (className) {
       const classTeacher = await this.userRepository.findOne({
         where: { academy: { id: academy.id }, assignedClass: className }
       });
       if (classTeacher && classTeacher.name) {
-        teacherName = classTeacher.name; // Preserve existing teacher!
+        teacherName = formatTeacherName(classTeacher.name); // Preserve existing teacher!
       }
     }
 
@@ -3420,7 +3431,7 @@ export class RoutingService {
     return teachers.map(t => ({
       id: t.id,
       email: t.email && t.email.includes('@pending.takeme') ? '' : (t.email || ''),
-      name: t.name || '미등록 교사',
+      name: t.name ? formatTeacherName(t.name) : '미등록 교사',
       phone: t.phone || '',
       assignedClass: t.assignedClass || '',
       approvalStatus: t.approvalStatus || 'APPROVED',
@@ -3436,24 +3447,28 @@ export class RoutingService {
 
     const results = [];
     for (const item of teachersList) {
-      const name = item.name ? String(item.name).trim() : '';
-      if (!name) continue;
+      const rawName = item.name ? String(item.name).trim() : '';
+      if (!rawName) continue;
+      const name = formatTeacherName(rawName);
+      const baseName = cleanTeacherBaseName(rawName);
       const assignedClass = item.assignedClass ? String(item.assignedClass).trim() : '';
       const phone = item.phone ? String(item.phone).trim() : null;
 
       // 동명이인 교사 지원: 성함 및 담당 반명(또는 전화번호)으로 개별 교사 식별
       let teacher = await this.userRepository.findOne({
-        where: {
-          name,
-          assignedClass: assignedClass || undefined,
-          academy: { id: academy.id }
-        }
+        where: [
+          { name, assignedClass: assignedClass || undefined, academy: { id: academy.id } },
+          { name: baseName, assignedClass: assignedClass || undefined, academy: { id: academy.id } }
+        ]
       });
 
       if (teacher) {
+        teacher.name = name;
         if (assignedClass && (!teacher.assignedClass || teacher.assignedClass === '미배정')) {
           teacher.assignedClass = assignedClass;
           if (phone && !teacher.phone) teacher.phone = phone;
+          await this.userRepository.save(teacher);
+        } else {
           await this.userRepository.save(teacher);
         }
       } else {
@@ -3473,7 +3488,7 @@ export class RoutingService {
       }
       results.push({
         id: teacher.id,
-        name: teacher.name,
+        name: formatTeacherName(teacher.name),
         assignedClass: teacher.assignedClass,
         phone: teacher.phone,
         approvalStatus: teacher.approvalStatus
@@ -3679,7 +3694,7 @@ export class RoutingService {
         className,
         isSubmitted: !!sub,
         submittedAt: sub?.submittedAt || null,
-        teacherName: sub?.teacherName || null,
+        teacherName: sub?.teacherName ? formatTeacherName(sub.teacherName) : null,
         total: stList.length,
         present,
         absent,

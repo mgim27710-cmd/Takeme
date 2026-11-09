@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 
+import { formatTeacherName } from '../utils/teacherUtil';
 import { API_BASE_URL } from '../config';
 
 export default function ClassManager({
@@ -710,7 +711,7 @@ export default function ClassManager({
                         <option value="">-- 담임교사 선택 --</option>
                         {teachers.map(t => (
                           <option key={t.id} value={t.id}>
-                            {t.name} 선생님 {t.assignedClass ? `(${t.assignedClass} 담임)` : '(미배정)'}
+                            {formatTeacherName(t.name)} {t.assignedClass ? `(${t.assignedClass} 담임)` : '(미배정)'}
                           </option>
                         ))}
                       </select>
