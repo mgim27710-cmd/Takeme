@@ -434,9 +434,13 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
 
   void _showBroadcastModal() {
     _broadcastMessageController.clear();
-    bool sendToParents = true;
-    bool sendToStudents = false;
     bool isSending = false;
+
+    final runStudents = _students.where((s) => s.runNumber == _currentRunNumber).toList();
+    final targetStudents = _selectedStudentIds.isNotEmpty
+        ? runStudents.where((s) => _selectedStudentIds.contains(s.id)).toList()
+        : runStudents;
+    final targetStudentIds = targetStudents.map((s) => s.id).toList();
 
     showModalBottomSheet(
       context: context,
@@ -444,101 +448,126 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => StatefulBuilder(
-        builder: (context, setModalState) => Padding(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 24,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-          ),
-          child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              '단체 메시지 전송',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
+        builder: (context, setModalState) => SafeArea(
+          top: false,
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 24,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 20,
             ),
-            const SizedBox(height: 4),
-            Text(
-              '선택된 원아 ${_selectedStudentIds.length}명에게 메시지를 전송합니다.',
-              style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-            ),
-            const SizedBox(height: 16),
-            Row(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                FilterChip(
-                  label: const Text('학부모'),
-                  selected: sendToParents,
-                  onSelected: (v) => setModalState(() => sendToParents = v),
-                  selectedColor: const Color(0xFFEFF6FF),
-                  checkmarkColor: const Color(0xFF2563EB),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      '단체 메시지 전송',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Color(0xFF64748B), size: 20),
+                      onPressed: () => Navigator.pop(ctx),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                FilterChip(
-                  label: const Text('학생'),
-                  selected: sendToStudents,
-                  onSelected: (v) => setModalState(() => sendToStudents = v),
-                  selectedColor: const Color(0xFFEFF6FF),
-                  checkmarkColor: const Color(0xFF2563EB),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.people_outline, size: 18, color: Color(0xFF2563EB)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          targetStudents.isEmpty
+                              ? '현재 회차($_currentRunNumber차)에 원아가 없습니다.'
+                              : '수신 대상: $_currentRunNumber차 원아 학부모 총 ${targetStudents.length}명',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF1E293B)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: _broadcastMessageController,
+                  maxLines: 4,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    hintText: '전송할 메시지 내용을 입력하세요.\n(예: 현재 버스가 탑승지에 곧 도착할 예정입니다)',
+                    hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.5)),
+                    contentPadding: const EdgeInsets.all(14),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: isSending || targetStudentIds.isEmpty
+                      ? null
+                      : () async {
+                          final msg = _broadcastMessageController.text.trim();
+                          if (msg.isEmpty) return;
+
+                          setModalState(() => isSending = true);
+                          final user = ApiService().currentUser;
+                          if (user != null) {
+                            final res = await ApiService().broadcastMessage(
+                              user.email,
+                              studentIds: targetStudentIds,
+                              targetRoles: ['PARENT'],
+                              message: msg,
+                            );
+                            if (!ctx.mounted) return;
+                            Navigator.pop(ctx);
+                            if (!mounted) return;
+                            if (res['success'] == true) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('학부모 ${targetStudents.length}명에게 메시지를 전송했습니다.'),
+                                  backgroundColor: const Color(0xFF10B981),
+                                ),
+                              );
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(res['message'] ?? '메시지 전송에 실패했습니다.'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    elevation: 0,
+                  ),
+                  child: isSending
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : Text(
+                          targetStudents.isEmpty
+                              ? '수신 대상 없음'
+                              : '학부모 ${targetStudents.length}명에게 전송하기',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _broadcastMessageController,
-              maxLines: 3,
-              decoration: InputDecoration(
-                hintText: '전송할 메시지 내용을 입력하세요 (예: 5분 후 탑승지에 도착 예정입니다)',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                contentPadding: const EdgeInsets.all(12),
-              ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: isSending
-                  ? null
-                  : () async {
-                      final msg = _broadcastMessageController.text.trim();
-                      if (msg.isEmpty) return;
-
-                      final roles = <String>[];
-                      if (sendToParents) roles.add('PARENT');
-                      if (sendToStudents) roles.add('STUDENT');
-                      if (roles.isEmpty) return;
-
-                      setModalState(() => isSending = true);
-                      final user = ApiService().currentUser;
-                      if (user != null) {
-                        final res = await ApiService().broadcastMessage(
-                          user.email,
-                          studentIds: _selectedStudentIds.toList(),
-                          targetRoles: roles,
-                          message: msg,
-                        );
-                        if (!ctx.mounted) return;
-                        Navigator.pop(ctx);
-                        if (!mounted) return;
-                        if (res['success'] == true) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('메시지가 성공적으로 전송되었습니다.'), backgroundColor: Color(0xFF10B981)),
-                          );
-                        }
-                      }
-                    },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2563EB),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              child: isSending
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text('메시지 전송하기', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          ],
+          ),
         ),
       ),
-    ),
     );
   }
 
@@ -1014,14 +1043,14 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                   ),
                 ),
 
-                // Bottom Panel Main Row (Always visible): 동승 시작 / 확인됨 + 요약
+                // Bottom Panel Main Row (Always visible): 동승 시작 / 확인됨 + 단체 메시지
                 Row(
                   children: [
                     // Escort Button / Badge
                     Expanded(
                       child: _escortConfirmedAt != null
                           ? Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                               decoration: BoxDecoration(
                                 color: const Color(0xFFDCFCE7),
                                 borderRadius: BorderRadius.circular(12),
@@ -1030,16 +1059,20 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  const Icon(Icons.verified, size: 20, color: Color(0xFF15803D)),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    _escortName != null && _escortName!.isNotEmpty
-                                        ? '동승: $_escortName (${_formatTime(_escortConfirmedAt)})'
-                                        : '동승 확인됨 · ${_formatTime(_escortConfirmedAt)}',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      fontSize: 14,
-                                      color: Color(0xFF15803D),
+                                  const Icon(Icons.verified, size: 18, color: Color(0xFF15803D)),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      _escortName != null && _escortName!.isNotEmpty
+                                          ? '동승: $_escortName (${_formatTime(_escortConfirmedAt)})'
+                                          : '동승 완료 (${_formatTime(_escortConfirmedAt)})',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 13,
+                                        color: Color(0xFF15803D),
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
                                 ],
@@ -1053,10 +1086,10 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                                       height: 16,
                                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                                     )
-                                  : const Icon(Icons.airline_seat_recline_normal, color: Colors.white, size: 20),
+                                  : const Icon(Icons.airline_seat_recline_normal, color: Colors.white, size: 18),
                               label: const Text(
                                 '동승 시작',
-                                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Colors.white),
+                                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: Colors.white),
                               ),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: _isDriverOperating ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
@@ -1069,15 +1102,35 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
 
                     const SizedBox(width: 8),
 
+                    // 단체 메시지 (동승 시작 버튼 바로 옆, 한 줄에 두 버튼)
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _showBroadcastModal,
+                        icon: const Icon(Icons.campaign, color: Colors.white, size: 18),
+                        label: const Text(
+                          '단체 메시지',
+                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: Colors.white),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1E293B),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          elevation: 0,
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(width: 4),
+
                     // Expand / Collapse Toggle Button
                     IconButton(
                       onPressed: () => setState(() => _isBottomPanelExpanded = !_isBottomPanelExpanded),
                       icon: Icon(
                         _isBottomPanelExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
                         color: const Color(0xFF64748B),
-                        size: 28,
+                        size: 26,
                       ),
-                      tooltip: _isBottomPanelExpanded ? '패널 접기' : '더보기 펼치기',
+                      tooltip: _isBottomPanelExpanded ? '패널 접기' : '회차 선택 펼치기',
                     ),
                   ],
                 ),
@@ -1109,22 +1162,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                         }).toList(),
                       ),
                     ),
-
-                  const SizedBox(height: 10),
-
-                  // Quick Action: 단체 메시지
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _showBroadcastModal,
-                      icon: const Icon(Icons.campaign_outlined, size: 18),
-                      label: const Text('단체 메시지 전송'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-                  ),
                 ],
               ],
             ),
