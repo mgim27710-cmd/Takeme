@@ -12,6 +12,7 @@ import 'my_requests_screen.dart';
 import 'notification_list_screen.dart';
 import 'class_board_screen.dart';
 import '../settings_screen.dart';
+import '../chat/chat_room_list_screen.dart';
 
 class ParentHomeScreen extends StatefulWidget {
   const ParentHomeScreen({super.key});
@@ -25,6 +26,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   StudentModel? _childInfo;
   RouteDataModel? _routeData;
   int _unreadNotificationCount = 0;
+  int _unreadChatCount = 0;
   Timer? _notificationPollTimer;
   Map<String, dynamic>? _todaySchedule;
 
@@ -62,10 +64,16 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   Future<void> _loadUnreadCount() async {
     final user = ApiService().currentUser;
     if (user == null) return;
-    final count = await ApiService().getUnreadNotificationCount(user.email);
-    if (mounted) {
-      setState(() => _unreadNotificationCount = count);
-    }
+    try {
+      final notiCount = await ApiService().getUnreadNotificationCount(user.email);
+      final chatCount = await ApiService().getChatTotalUnreadCount();
+      if (mounted) {
+        setState(() {
+          _unreadNotificationCount = notiCount;
+          _unreadChatCount = chatCount;
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadAllData() async {
@@ -118,6 +126,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
       });
 
       SocketService().onNotificationReceived((_) {
+        if (mounted) _loadUnreadCount();
+      });
+
+      SocketService().onRoomUpdated((_) {
         if (mounted) _loadUnreadCount();
       });
 
@@ -387,6 +399,52 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                       alignment: Alignment.center,
                       child: Text(
                         _unreadNotificationCount > 9 ? '9+' : '$_unreadNotificationCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          height: 1,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.forum_outlined, color: Color(0xFF0F172A), size: 24),
+                tooltip: '메신저 대화',
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const ChatRoomListScreen()),
+                  ).then((_) {
+                    _loadUnreadCount();
+                    _loadAllData();
+                  });
+                },
+              ),
+              if (_unreadChatCount > 0)
+                Positioned(
+                  right: 4,
+                  bottom: 4,
+                  child: IgnorePointer(
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEF4444),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                      ),
+                      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                      alignment: Alignment.center,
+                      child: Text(
+                        _unreadChatCount > 9 ? '9+' : '$_unreadChatCount',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 10,

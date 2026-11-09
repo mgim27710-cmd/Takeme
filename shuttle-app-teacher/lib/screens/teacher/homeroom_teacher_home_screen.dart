@@ -20,6 +20,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
   int _selectedTabIndex = 0;
   bool _isRefreshing = false;
   int _unreadNotificationCount = 0;
+  int _unreadChatCount = 0;
   Timer? _notificationPollTimer;
 
   @override
@@ -29,6 +30,9 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
     _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) => _loadUnreadCount());
     SocketService().connect(ApiService().token);
     SocketService().onNotificationReceived((_) {
+      if (mounted) _loadUnreadCount();
+    });
+    SocketService().onRoomUpdated((_) {
       if (mounted) _loadUnreadCount();
     });
   }
@@ -42,7 +46,13 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
   Future<void> _loadUnreadCount() async {
     try {
       final count = await ApiService().getTeacherUnreadCount();
-      if (mounted) setState(() => _unreadNotificationCount = count);
+      final chatCount = await ApiService().getChatTotalUnreadCount();
+      if (mounted) {
+        setState(() {
+          _unreadNotificationCount = count;
+          _unreadChatCount = chatCount;
+        });
+      }
     } catch (_) {}
   }
 
@@ -280,25 +290,81 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
         type: BottomNavigationBarType.fixed,
         selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
         unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
-        items: const [
-          BottomNavigationBarItem(
+        items: [
+          const BottomNavigationBarItem(
             icon: Icon(Icons.photo_library_outlined),
             activeIcon: Icon(Icons.photo_library),
             label: '학급 알림장',
           ),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
             icon: Icon(Icons.fact_check_outlined),
             activeIcon: Icon(Icons.fact_check),
             label: '출석부',
           ),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
             icon: Icon(Icons.edit_calendar_outlined),
             activeIcon: Icon(Icons.edit_calendar),
             label: '통학 변동',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.mail_outline),
-            activeIcon: Icon(Icons.mail),
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.forum_outlined),
+                if (_unreadChatCount > 0)
+                  Positioned(
+                    right: -6,
+                    top: -3,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFEF4444),
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                      alignment: Alignment.center,
+                      child: Text(
+                        _unreadChatCount > 9 ? '9+' : '$_unreadChatCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          height: 1,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            activeIcon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.forum),
+                if (_unreadChatCount > 0)
+                  Positioned(
+                    right: -6,
+                    top: -3,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFEF4444),
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                      alignment: Alignment.center,
+                      child: Text(
+                        _unreadChatCount > 9 ? '9+' : '$_unreadChatCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          height: 1,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
             label: '메시지',
           ),
         ],
