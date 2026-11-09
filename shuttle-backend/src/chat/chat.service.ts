@@ -340,18 +340,34 @@ export class ChatService {
       (room as any).unreadCount = unread;
     }
 
-    // 최신 메시지 또는 갱신 시간 기준 정렬 (단, 결제 시스템 방은 항상 최상단)
-    rooms.sort((a: any, b: any) => {
-      if (a.type === ChatRoomType.PAYMENT_SYSTEM) return -1;
-      if (b.type === ChatRoomType.PAYMENT_SYSTEM) return 1;
-      if (a.type === ChatRoomType.NOTIFICATION_SYSTEM) return -1;
-      if (b.type === ChatRoomType.NOTIFICATION_SYSTEM) return 1;
+    // 결재 방 및 알림 채널 중복 제거 (단 1개씩만 유지)
+    const seenSpecialTypes = new Set<string>();
+    const deduplicatedRooms: ChatRoom[] = [];
+    for (const room of rooms) {
+      if (room.type === ChatRoomType.PAYMENT_SYSTEM) {
+        if (seenSpecialTypes.has(ChatRoomType.PAYMENT_SYSTEM)) continue;
+        seenSpecialTypes.add(ChatRoomType.PAYMENT_SYSTEM);
+        room.name = '결재 전용 채널';
+      } else if (room.type === ChatRoomType.NOTIFICATION_SYSTEM) {
+        if (seenSpecialTypes.has(ChatRoomType.NOTIFICATION_SYSTEM)) continue;
+        seenSpecialTypes.add(ChatRoomType.NOTIFICATION_SYSTEM);
+        room.name = '실시간 알림 채널';
+      }
+      deduplicatedRooms.push(room);
+    }
+
+    // 최신 메시지 또는 갱신 시간 기준 정렬 (결재 전용 채널 최상단, 그다음 실시간 알림 채널)
+    deduplicatedRooms.sort((a: any, b: any) => {
+      if (a.type === ChatRoomType.PAYMENT_SYSTEM && b.type !== ChatRoomType.PAYMENT_SYSTEM) return -1;
+      if (b.type === ChatRoomType.PAYMENT_SYSTEM && a.type !== ChatRoomType.PAYMENT_SYSTEM) return 1;
+      if (a.type === ChatRoomType.NOTIFICATION_SYSTEM && b.type !== ChatRoomType.NOTIFICATION_SYSTEM) return -1;
+      if (b.type === ChatRoomType.NOTIFICATION_SYSTEM && a.type !== ChatRoomType.NOTIFICATION_SYSTEM) return 1;
       const timeA = a.latestMessage ? new Date(a.latestMessage.createdAt).getTime() : new Date(a.updatedAt || a.createdAt).getTime();
       const timeB = b.latestMessage ? new Date(b.latestMessage.createdAt).getTime() : new Date(b.updatedAt || b.createdAt).getTime();
       return timeB - timeA;
     });
 
-    return rooms;
+    return deduplicatedRooms;
   }
 
   async getMessages(roomId: number, currentUserId?: number) {
@@ -534,7 +550,7 @@ export class ChatService {
 
     const students = await this.studentRepo.find({
       where: { academy: { id: aId } },
-      relations: { assignedVehicle: true },
+      relations: { assignedVehicle: true, parentUser: true },
     });
 
     const pickupPoints = await this.pickupPointRepo.find({
@@ -551,16 +567,33 @@ export class ChatService {
         teacherPhone: v.teacherPhone,
         colorHex: v.colorHex || '#3b82f6',
       })),
-      students: students.map(s => ({
-        id: s.id,
-        name: s.adminDisplayName || s.name,
-        address: s.address,
-        boardingLocation: s.boardingLocation || s.address,
-        lat: s.latitude,
-        lng: s.longitude,
-        assignedBusId: s.assignedVehicle?.id || null,
-        assignedBusNumber: s.assignedVehicle?.busNumber || '미배정',
-      })),
+      students: students.map(s => {
+        let raw: any = {};
+        if (typeof s.raw === 'string') {
+          try { raw = JSON.parse(s.raw); } catch (e) {}
+        } else if (typeof s.raw === 'object' && s.raw) {
+          raw = s.raw;
+        }
+        return {
+          id: s.id,
+          name: s.adminDisplayName || s.name,
+          address: s.address,
+          boardingLocation: s.boardingLocation || s.address,
+          lat: s.latitude,
+          lng: s.longitude,
+          assignedBusId: s.assignedVehicle?.id || null,
+          assignedBusNumber: s.assignedVehicle?.busNumber || '미배정',
+          className: raw.반 || raw['반명'] || raw.className || '',
+          birthDate: raw.생년월일 || raw.birthDate || '',
+          gender: raw.성별 || '',
+          parentName: s.parentUser?.name || raw['보호자 성함'] || raw.보호자명 || raw.parentName || '',
+          parentPhone: s.parentUser?.phone || raw['보호자연락처'] || raw.보호자연락처 || raw.parentPhone || '',
+          allergies: s.allergies || raw.알레르기 || raw.allergies || '없음',
+          dropoffLocation: raw.하차지 || raw.dropoffLocation || s.address || '',
+          isNotRiding: s.isNotRiding,
+          boardStatus: s.boardStatus,
+        };
+      }),
       pickupPoints: pickupPoints.map(p => ({
         id: p.id,
         name: p.name,
@@ -643,10 +676,19 @@ export class ChatService {
 
     let studentName = data.studentName;
     let studentObj: Student | null = null;
+    let studentRaw: any = {};
     if (data.studentId) {
-      studentObj = await this.studentRepo.findOne({ where: { id: Number(data.studentId) } });
+      studentObj = await this.studentRepo.findOne({
+        where: { id: Number(data.studentId) },
+        relations: { parentUser: true, assignedVehicle: true },
+      });
       if (studentObj) {
         studentName = studentObj.adminDisplayName || studentObj.name;
+        if (typeof studentObj.raw === 'string') {
+          try { studentRaw = JSON.parse(studentObj.raw); } catch (e) {}
+        } else if (typeof studentObj.raw === 'object' && studentObj.raw) {
+          studentRaw = studentObj.raw;
+        }
       }
 
       // Check if an active payment request already exists for this student (중복 신청 방지 원아 락)
@@ -692,6 +734,10 @@ export class ChatService {
     const payload = {
       studentId: data.studentId ? Number(data.studentId) : (studentObj?.id || null),
       studentName,
+      className: studentRaw['반명'] || studentRaw.반 || studentRaw.className || '',
+      parentName: studentObj?.parentUser?.name || studentRaw['보호자 성함'] || studentRaw.보호자명 || '',
+      parentPhone: studentObj?.parentUser?.phone || studentRaw['보호자연락처'] || '',
+      allergies: studentObj?.allergies || studentRaw.알레르기 || '',
       vehicleId: vehicle ? vehicle.id : null,
       busNumber: vehicle ? vehicle.busNumber : '오픈 공모 (선착순 배정)',
       teacherName: vehicle ? (vehicle.teacherUser?.name || vehicle.teacherName || '담당 지도교사') : '전체 지도교사 대상',
@@ -741,6 +787,32 @@ export class ChatService {
 
     const saved = await this.messageRepo.save(message);
     await this.roomRepo.update(sysRoom.id, { updatedAt: new Date() });
+
+    // 학생 학부모에게 결재 신청 안내 발송
+    if (studentObj?.parentUser) {
+      const parentMsg = this.parentMessageRepo.create({
+        student: studentObj,
+        receiverUser: studentObj.parentUser,
+        targetRoles: ['PARENT'],
+        message: `[통학 셔틀 결재 신청 접수] ${studentName} 원아의 [${payload.busNumber}] ${rideType === 'TODAY_ONLY' ? '당일 탑승' : '정규 탑승'} 결재 신청이 접수되어 지도교사 승인 대기 중입니다. (탑승 희망지: ${payload.boardingLocation})`,
+      });
+      await this.parentMessageRepo.save(parentMsg).catch(() => {});
+    }
+
+    // 실시간 알림 채널에 결재 신청 알림 전송
+    await this.sendSystemNotification(
+      targetAcademyId || null,
+      'PAYMENT_REQUEST',
+      '신규 결재 신청',
+      `[신규 결재 신청] ${requester.name || requester.email}님이 ${studentName} 원아의 [${payload.busNumber}] 탑승 결재를 신청하였습니다. (탑승지: ${payload.boardingLocation})`,
+      {
+        messageId: saved.id,
+        studentName,
+        busNumber: payload.busNumber,
+        requesterName: requester.name || requester.email,
+        boardingLocation: payload.boardingLocation,
+      }
+    );
 
     const fullMessage = await this.messageRepo.findOne({
       where: { id: saved.id },
@@ -1013,10 +1085,10 @@ export class ChatService {
       this.chatGateway.broadcastMessageToRoom(message.room.id, message);
       this.chatGateway.broadcastMessageToRoom(message.room.id, savedConf);
 
-      const notifyTitle = isContest ? '공모 결재 완료 알림' : '결재 승인 알림';
+      const notifyTitle = isContest ? '공모 결재 완료 알림' : '결재 승인 완료 알림';
       const notifyText = isContest
-        ? `[공모 결재 완료] ${payload.studentName} 학생의 오픈 공모를 ${decider.name || decider.email} 지도교사님이 먼저 수락하여 [${vehicle.busNumber}]에 배정되었습니다. (추가 결재 마감)`
-        : `${payload.studentName} 학생의 [${payload.busNumber || '셔틀'}] 차량 탑승 결재가 최종 승인되었습니다. (결재자: ${decider.name || decider.email})`;
+        ? `[공모 결재 완료] ${payload.studentName} 원아의 오픈 공모가 ${formatTeacherName(decider.name)} 지도교사에 의해 수락 완료되었습니다. [${vehicle.busNumber}] 배정 (탑승지: ${finalBoardingLocation})`
+        : `[결재 승인 완료] ${payload.studentName} 원아의 [${vehicle.busNumber}] ${isTodayOnly ? '당일 임시' : '정규'} 탑승 결재가 ${formatTeacherName(decider.name)} 지도교사에 의해 최종 승인 완료되었습니다. (탑승지: ${finalBoardingLocation})`;
 
       await this.sendSystemNotification(
         targetAcadId || null,
@@ -1027,8 +1099,9 @@ export class ChatService {
           messageId: message.id,
           studentName: payload.studentName,
           decision,
-          decidedBy: decider.name || decider.email,
+          decidedBy: formatTeacherName(decider.name),
           busNumber: vehicle.busNumber,
+          boardingLocation: finalBoardingLocation,
           isPublicContest: isContest,
         }
       );
@@ -1051,8 +1124,8 @@ export class ChatService {
         room: message.room,
         sender: decider,
         text: isContest
-          ? `✕ [공모 결재 반려] ${payload.studentName} 원아의 오픈 공모가 반려되었습니다. (처리: ${decider.name || '선생님'})`
-          : `✕ [결재 반려] ${payload.studentName} 원아의 탑승 요청이 반려되었습니다. (처리: ${decider.name || '선생님'})`,
+          ? `✕ [공모 결재 반려] ${payload.studentName} 원아의 오픈 공모가 반려되었습니다. (처리: ${formatTeacherName(decider.name)})`
+          : `✕ [결재 반려] ${payload.studentName} 원아의 탑승 요청이 반려되었습니다. (처리: ${formatTeacherName(decider.name)})`,
         type: 'TEXT',
         readBy: [decider.id],
       });
@@ -1066,12 +1139,12 @@ export class ChatService {
         targetAcadId || null,
         'PAYMENT_DECISION',
         '결재 반려 알림',
-        `${payload.studentName} 학생의 차량 탑승 결재가 반려되었습니다. (반려자: ${decider.name || decider.email})`,
+        `[결재 반려] ${payload.studentName} 원아의 [${payload.busNumber || '셔틀'}] 차량 탑승 신청이 반려되었습니다. (반려자: ${formatTeacherName(decider.name)})`,
         {
           messageId: message.id,
           studentName: payload.studentName,
           decision: 'REJECTED',
-          decidedBy: decider.name || decider.email,
+          decidedBy: formatTeacherName(decider.name),
         }
       );
     }

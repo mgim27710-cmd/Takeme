@@ -66,6 +66,18 @@ function MapBoundsFit({ buses, academy }) {
   return null;
 }
 
+function MapCenterOnStudent({ selectedStudentLocation }) {
+  const map = useMap();
+  useEffect(() => {
+    if (selectedStudentLocation && selectedStudentLocation.lat && selectedStudentLocation.lng) {
+      map.flyTo([selectedStudentLocation.lat, selectedStudentLocation.lng], 17, {
+        duration: 1.2,
+      });
+    }
+  }, [selectedStudentLocation, map]);
+  return null;
+}
+
 function ZoneEditEvents({ isAddingPoint, onAddPoint }) {
   useMapEvents({
     click(e) {
@@ -540,8 +552,26 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const [studentSearchKeyword, setStudentSearchKeyword] = useState('');
   const [studentClassFilter, setStudentClassFilter] = useState('ALL');
   const [selectedPaymentStudent, setSelectedPaymentStudent] = useState(null);
+  const [highlightedStudentId, setHighlightedStudentId] = useState(null);
+  const [highlightedStudentLocation, setHighlightedStudentLocation] = useState(null);
   const [collapsedGroups, setCollapsedGroups] = useState({});
   const [expandedStudentDetailIds, setExpandedStudentDetailIds] = useState(new Set());
+
+  const handleStudentMapClick = (st) => {
+    if (!st) return;
+    const sLat = Number(st.lat || st.latitude);
+    const sLng = Number(st.lng || st.longitude);
+    if (sLat && sLng && !isNaN(sLat) && !isNaN(sLng)) {
+      setHighlightedStudentId(st.id);
+      setHighlightedStudentLocation({ lat: sLat, lng: sLng, student: st, timestamp: Date.now() });
+      if (activeTab !== 'map') {
+        setActiveTab('map');
+      }
+    } else {
+      alert(`${st.name} 원아의 등록된 탑승지/주소 좌표가 없습니다. 주소를 등록해주세요.`);
+      handleOpenEditStudentModal(st);
+    }
+  };
 
   const toggleStudentDetail = (id) => {
     setExpandedStudentDetailIds(prev => {
@@ -4045,7 +4075,18 @@ const parseKindergartenExcelSheet = (sheet) => {
                       const needsAddress = !isNotRiding && (!st.address || !st.lat || !st.lng || st.addressNeedsInput || st.raw?.['주소입력필요']);
                       const depBus = st.assignedDepartureBusId ? buses.find(b => b.id === st.assignedDepartureBusId) : null;
                       return (
-                        <div key={st.id} className={`p-2.5 rounded-xl shadow-xs hover:shadow-md transition-all group ${needsAddress ? 'bg-red-50/30 border-2 border-red-500 ring-2 ring-red-100' : 'bg-white border border-slate-200'}`}>
+                        <div
+                          key={st.id}
+                          onClick={() => handleStudentMapClick(st)}
+                          title="클릭 시 지도에서 탑승지 위치를 눈에 띄게 확인합니다"
+                          className={`p-2.5 rounded-xl shadow-xs hover:shadow-md transition-all group cursor-pointer ${
+                            highlightedStudentId === st.id
+                              ? 'ring-2 ring-indigo-500 border-indigo-400 bg-indigo-50/30'
+                              : needsAddress
+                              ? 'bg-red-50/30 border-2 border-red-500 ring-2 ring-red-100'
+                              : 'bg-white border border-slate-200 hover:border-indigo-300'
+                          }`}
+                        >
                           <div className="flex items-center justify-between mb-1">
                             <div className="flex items-center gap-1.5 flex-1 min-w-0">
                               <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b') }}></div>
@@ -4261,7 +4302,18 @@ const parseKindergartenExcelSheet = (sheet) => {
                                   const needsAddress = !isNotRiding && (!st.address || !st.lat || !st.lng || st.addressNeedsInput || st.raw?.['주소입력필요']);
                                   const depBus = st.assignedDepartureBusId ? buses.find(b => b.id === st.assignedDepartureBusId) : null;
                                   return (
-                                    <div key={st.id} className={`p-2.5 rounded-xl shadow-xs hover:shadow-md transition-all group ${needsAddress ? 'bg-red-50/30 border-2 border-red-500 ring-2 ring-red-100' : 'bg-white border border-slate-200'}`}>
+                                    <div
+                                      key={st.id}
+                                      onClick={() => handleStudentMapClick(st)}
+                                      title="클릭 시 지도에서 탑승지 위치를 눈에 띄게 확인합니다"
+                                      className={`p-2.5 rounded-xl shadow-xs hover:shadow-md transition-all group cursor-pointer ${
+                                        highlightedStudentId === st.id
+                                          ? 'ring-2 ring-indigo-500 border-indigo-400 bg-indigo-50/30'
+                                          : needsAddress
+                                          ? 'bg-red-50/30 border-2 border-red-500 ring-2 ring-red-100'
+                                          : 'bg-white border border-slate-200 hover:border-indigo-300'
+                                      }`}
+                                    >
                                       <div className="flex items-center justify-between mb-1">
                                         <div className="flex items-center gap-1.5 flex-1 min-w-0">
                                           <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b') }}></div>
@@ -5220,6 +5272,7 @@ const parseKindergartenExcelSheet = (sheet) => {
           />
 
           <MapBoundsFit buses={buses} academy={academy} />
+          <MapCenterOnStudent selectedStudentLocation={highlightedStudentLocation} />
 
           {/* Draw Academy Marker */}
           {academy && !isNaN(academy.lat) && !isNaN(academy.lng) && (
@@ -5452,9 +5505,20 @@ const parseKindergartenExcelSheet = (sheet) => {
               ? (buses.find(b=>b.id===displayBusId)?.color || '#64748b') 
               : '#64748b';
 
+            const isHighlighted = highlightedStudentId === st.id;
             const studentIcon = L.divIcon({
-              className: isOneTimeStudent ? 'custom-student-marker-onetime' : 'custom-student-marker',
-              html: isOneTimeStudent ? `
+              className: isHighlighted ? 'custom-student-marker-highlighted' : isOneTimeStudent ? 'custom-student-marker-onetime' : 'custom-student-marker',
+              html: isHighlighted ? `
+                <div style="position: relative; display: flex; flex-direction: column; align-items: center; z-index: 1000;">
+                  <div style="position: absolute; top: -30px; background: #312e81; color: white; padding: 2.5px 8px; border-radius: 9999px; font-size: 11px; font-weight: 900; white-space: nowrap; box-shadow: 0 4px 12px rgba(49,46,129,0.5); border: 2px solid #818cf8; animation: bounce 1s infinite;">
+                    ★ ${st.name} 탑승지
+                  </div>
+                  <div style="position: absolute; width: 42px; height: 42px; border-radius: 50%; background: #4f46e5; opacity: 0.35; animation: ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+                  <div style="position: relative; background: #4f46e5; width: 26px; height: 26px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 14px rgba(79,70,229,0.8); display: flex; align-items: center; justify-content: center; color: white; font-size: 13px; font-weight: 900;">
+                    📍
+                  </div>
+                </div>
+              ` : isOneTimeStudent ? `
                 <div style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">
                   <span style="position: absolute; inset: -2px; border-radius: 50%; background: #f43f5e; opacity: 0.45; animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
                   <div style="position: relative; background: #f43f5e; width: 20px; height: 20px; border-radius: 50%; border: 2.5px solid white; box-shadow: 0 3px 8px rgba(244,63,94,0.7); display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: 900; line-height: 1;">
@@ -5464,8 +5528,8 @@ const parseKindergartenExcelSheet = (sheet) => {
               ` : `
                 <div style="background-color: ${stColor}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>
               `,
-              iconSize: isOneTimeStudent ? [24, 24] : [14, 14],
-              iconAnchor: isOneTimeStudent ? [12, 12] : [7, 7]
+              iconSize: isHighlighted ? [44, 44] : isOneTimeStudent ? [24, 24] : [14, 14],
+              iconAnchor: isHighlighted ? [22, 22] : isOneTimeStudent ? [12, 12] : [7, 7]
             });
             return (
               <Marker key={st.id} position={[displayLat, displayLng]} icon={studentIcon}>
@@ -5496,7 +5560,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                   <div><b>담임:</b> {formatTeacherName(st.raw?.['담임명'])}</div>
                 </div>
                 
-                <div className="text-sm font-bold text-center p-2 rounded border" style={{ 
+                <div className="text-sm font-bold text-center p-2 rounded border mb-2" style={{ 
                   backgroundColor: isOneTimeStudent ? '#fff1f2' : (stColor + '20'), 
                   color: isOneTimeStudent ? '#e11d48' : stColor,
                   borderColor: isOneTimeStudent ? '#fecdd3' : 'transparent'
@@ -5506,6 +5570,20 @@ const parseKindergartenExcelSheet = (sheet) => {
                     : (displayBusId ? `배차: ${buses.find(b=>b.id===displayBusId)?.name}` : '배차 없음 (구역 밖)')
                   }
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedPaymentStudent(st);
+                    handleTabChange('messages');
+                  }}
+                  className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-xs transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  </svg>
+                  <span>이 원아 결재 신청 바로가기</span>
+                </button>
               </Popup>
             </Marker>
             );
