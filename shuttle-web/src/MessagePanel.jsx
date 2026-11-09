@@ -208,6 +208,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       const msgRoomId = newMsg.room?.id || newMsg.roomId;
 
       if (currentActive && Number(currentActive.id) === Number(msgRoomId)) {
+        markRoomAsRead(msgRoomId);
         setMessages((prev) => {
           if (prev.some((m) => m.id === newMsg.id)) {
             // Update existing message if payload status changed
@@ -244,12 +245,23 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       fetchRooms();
     };
 
+    const handleMessagesRead = (data) => {
+      const currentActive = activeRoomRef.current;
+      if (currentActive && Number(currentActive.id) === Number(data?.roomId)) {
+        setMessages((prev) =>
+          prev.map((m) => ({ ...m, unreadCount: 0 }))
+        );
+      }
+    };
+
     socket.on('receiveMessage', handleReceiveMessage);
     socket.on('roomUpdated', handleRoomUpdated);
+    socket.on('messagesRead', handleMessagesRead);
 
     return () => {
       socket.off('receiveMessage', handleReceiveMessage);
       socket.off('roomUpdated', handleRoomUpdated);
+      socket.off('messagesRead', handleMessagesRead);
     };
   }, [socket]);
 
@@ -261,6 +273,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       socket.emit('joinChatRoom', { roomId: activeRoom.id });
     }
 
+    markRoomAsRead(activeRoom.id);
     fetchMessages(activeRoom.id);
 
     return () => {
@@ -304,6 +317,18 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       }
     } catch (e) {
       console.error('Failed to load chat rooms', e);
+    }
+  };
+
+  const markRoomAsRead = async (roomId) => {
+    if (!roomId) return;
+    try {
+      await fetch(`${API_BASE_URL}/chat/rooms/${roomId}/read`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+    } catch (e) {
+      console.error('Failed to mark room as read', e);
     }
   };
 
@@ -1499,9 +1524,16 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         /* Standard Chat Bubble */
                         isMine ? (
                           <div className="flex justify-end items-end gap-1.5 animate-fade-in">
-                            <span className="text-[10px] text-slate-600 select-none pb-1 font-medium">
-                              {formatMessageTime(msg.createdAt)}
-                            </span>
+                            <div className="flex flex-col items-end pb-0.5 select-none">
+                              {Number(msg.unreadCount) > 0 && (
+                                <span className="text-[10px] text-amber-500 font-black leading-none pb-0.5">
+                                  {msg.unreadCount}
+                                </span>
+                              )}
+                              <span className="text-[10px] text-slate-600 font-medium">
+                                {formatMessageTime(msg.createdAt)}
+                              </span>
+                            </div>
                             <div className="bg-blue-600 text-white px-3.5 py-2.5 rounded-2xl rounded-tr-xs text-xs font-medium max-w-[70%] break-words shadow-xs">
                               <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
                             </div>
@@ -1522,9 +1554,16 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                 <div className="bg-white text-slate-800 px-3.5 py-2.5 rounded-2xl rounded-tl-xs text-xs font-medium break-words shadow-xs border border-white/80">
                                   <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
                                 </div>
-                                <span className="text-[10px] text-slate-600 select-none pb-1 font-medium">
-                                  {formatMessageTime(msg.createdAt)}
-                                </span>
+                                <div className="flex flex-col items-start pb-0.5 select-none">
+                                  {Number(msg.unreadCount) > 0 && (
+                                    <span className="text-[10px] text-amber-500 font-black leading-none pb-0.5">
+                                      {msg.unreadCount}
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] text-slate-600 font-medium">
+                                    {formatMessageTime(msg.createdAt)}
+                                  </span>
+                                </div>
                               </div>
                             </div>
                           </div>
