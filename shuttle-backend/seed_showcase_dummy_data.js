@@ -57,32 +57,32 @@ function generatePhone(idx) {
 }
 
 // Generate realistic students data for an academy
+// Distribution plan:
+// 1호차: 정규 23명 + 당일 1회 탑승 2명 = 총 25명 필수 배치 (25/25 만석 구역, 대각선 빗금 표시)
+// 2호차: 정규 13명 + 당일 1회 탑승 1명 = 총 14명 (여유 11석)
+// 3호차: 정규 10명 + 결석 1명, 위치변경 1명
+// 4호차: 정규 7명 + 당일 1회 탑승 1명 = 총 8명 (여유 17석)
+// 5호차: 정규 6명
+// 6호차: 정규 6명
+// 7호차: 정규 6명
+// 8호차: 정규 6명
+// 미배정: 5명
+// 자차/미탑승: 6명 (이 중 4명이 1회 탑승 오버라이드로 전환되어 1호차 2명, 2호차 1명, 4호차 1명 배정, 2명은 순수 미탑승 유지)
 function buildStudentsForAcademy(academyId, vehicleMap, baseLat, baseLng, locationType) {
   const students = [];
   let studentIdx = 1;
 
-  // Distribution plan:
-  // 1호차: 25명 (만석 빗금 시연용! 23명 중심부, 2명 외곽)
-  // 2호차: 14명 (여유 11석)
-  // 3호차: 10명
-  // 4호차: 8명
-  // 5호차: 6명
-  // 6호차: 6명
-  // 7호차: 6명
-  // 8호차: 6명
-  // 미배정: 6명
-  // 자차/미탑승: 3명
   const vehicleDistribution = [
-    { busNum: '1호차', count: 25 },
-    { busNum: '2호차', count: 14 },
+    { busNum: '1호차', count: 23 },
+    { busNum: '2호차', count: 13 },
     { busNum: '3호차', count: 10 },
-    { busNum: '4호차', count: 8 },
+    { busNum: '4호차', count: 7 },
     { busNum: '5호차', count: 6 },
     { busNum: '6호차', count: 6 },
     { busNum: '7호차', count: 6 },
     { busNum: '8호차', count: 6 },
-    { busNum: '미배정', count: 6 },
-    { busNum: '자차', count: 3 }
+    { busNum: '미배정', count: 5 },
+    { busNum: '자차', count: 6 }
   ];
 
   // Age distributions: 3세 (2023), 4세 (2022), 5세 (2021), 6세 (2020), 7세 (2019)
@@ -110,10 +110,10 @@ function buildStudentsForAcademy(academyId, vehicleMap, baseLat, baseLng, locati
       const day = String(1 + (studentIdx * 7 % 28)).padStart(2, '0');
       const birthDate = `${ageInfo.birthYear}-${month}-${day}`;
 
-      // Leave about 10 students unassigned from class for testing Class Manager
+      // Leave unassigned for class testing
       let className = null;
       let teacherName = '';
-      if (studentIdx > 10) {
+      if (studentIdx > 8) {
         if (studentIdx % 7 === 0) {
           className = '무지개반';
           teacherName = '송예원 선생님';
@@ -125,16 +125,17 @@ function buildStudentsForAcademy(academyId, vehicleMap, baseLat, baseLng, locati
       }
 
       // Coordinates generation based on bus zone
-      // 1호차 gets coordinates tightly clustered, but item 23 & 24 are furthest outwards
+      // 1호차: 23명의 정규 원아 좌표 클러스터
+      // 21번째, 22번째 원아는 1호차 중심에서 상대적으로 먼 최외곽에 위치 (26명 재배차 테스트용)
       let latOffset = 0;
       let lngOffset = 0;
       if (dist.busNum === '1호차') {
-        if (i === 23) {
-          latOffset = 0.022; // Outlier 1
-          lngOffset = 0.028;
-        } else if (i === 24) {
-          latOffset = 0.025; // Outlier 2
-          lngOffset = 0.031;
+        if (i === 21) {
+          latOffset = 0.021; // 최외곽 원아 1
+          lngOffset = 0.027;
+        } else if (i === 22) {
+          latOffset = 0.024; // 최외곽 원아 2 (가장 먼 원아)
+          lngOffset = 0.030;
         } else {
           latOffset = 0.003 + (i * 0.0006);
           lngOffset = 0.004 + (i * 0.0007);
@@ -160,8 +161,26 @@ function buildStudentsForAcademy(academyId, vehicleMap, baseLat, baseLng, locati
       } else if (dist.busNum === '8호차') {
         latOffset = 0.002 + (i * 0.0006);
         lngOffset = 0.001 + (i * 0.0006);
+      } else if (dist.busNum === '자차') {
+        // 자차 원아 중 i=0, i=1은 1호차 구역 내에 거주하여 당일 1호차 탑승에 적합
+        if (i === 0) {
+          latOffset = 0.007;
+          lngOffset = 0.008;
+        } else if (i === 1) {
+          latOffset = 0.009;
+          lngOffset = 0.011;
+        } else if (i === 2) {
+          latOffset = -0.006;
+          lngOffset = 0.007; // 2호차 구역
+        } else if (i === 3) {
+          latOffset = -0.004;
+          lngOffset = -0.015; // 4호차 구역
+        } else {
+          latOffset = 0.001;
+          lngOffset = -0.002;
+        }
       } else {
-        // Unassigned / Self-pickup
+        // 미배정
         latOffset = (Math.random() - 0.5) * 0.02;
         lngOffset = (Math.random() - 0.5) * 0.02;
       }
@@ -252,11 +271,6 @@ async function main() {
   await client.connect();
   console.log('Connected to RDS PostgreSQL. Seeding showcase dummy data...');
 
-  // 1. Fetch Academy 12 and Academy 1
-  const acad12 = await client.query('SELECT * FROM academies WHERE id = 12');
-  const acad1 = await client.query('SELECT * FROM academies WHERE id = 1');
-  const acad11 = await client.query('SELECT * FROM academies WHERE id = 11');
-
   const academiesToSeed = [
     { id: 12, lat: 37.828, lng: 127.065, type: 'yangju' },
     { id: 1, lat: 37.558, lng: 126.832, type: 'magok' },
@@ -310,7 +324,7 @@ async function main() {
     }
     console.log(`Inserted ${insertedStudentRows.length} students into DB.`);
 
-    // Insert Schedules (MON-FRI) for riding students
+    // Insert Schedules (MON-FRI) for regular riding students
     console.log(`Inserting schedules for riding students...`);
     const days = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
     let schedCount = 0;
@@ -328,55 +342,100 @@ async function main() {
     console.log(`Inserted ${schedCount} schedule records.`);
 
     // Insert Overrides (당일 1회 탑승, 탑승지 변경, 결석)
-    console.log(`Inserting schedule overrides for today (2026-11-10)...`);
-    const today = '2026-11-10';
+    console.log(`Inserting schedule overrides...`);
+    const startDate = '2026-11-01';
+    const endDate = '2026-11-30';
     const bus1Id = vMap['1호차'];
     const bus2Id = vMap['2호차'];
+    const bus4Id = vMap['4호차'];
 
-    // Override 1: 당일 1회 탑승 (Self pickup -> Boarding 1호차)
-    const selfPickupStudent = insertedStudentRows.find(s => s.isNotRiding);
-    if (selfPickupStudent && bus1Id) {
+    const selfPickupStudents = insertedStudentRows.filter(s => s.isNotRiding);
+
+    // Override 1 & 2: 1호차 당일 1회 탑승 2명 -> 1호차 총 23 + 2 = 25명 (만석 구역 완성)
+    if (selfPickupStudents[0] && bus1Id) {
       await client.query(`
         INSERT INTO schedule_overrides (
           "studentId", "startDate", "endDate", "overrideType", direction,
           reason, "newVehicleId", "createdAt", "updatedAt"
         ) VALUES (
-          $1, $2, $2, 'ONE_TIME_BOARDING', 'ALL',
-          '학부모 출장으로 인한 당일 1회 셔틀 신청 (1호차)', $3, NOW(), NOW()
+          $1, $2, $3, 'ONE_TIME_BOARDING', 'ALL',
+          '학부모 출장으로 인한 당일 1회 셔틀 탑승 신청 (1호차)', $4, NOW(), NOW()
         )
-      `, [selfPickupStudent.id, today, bus1Id]);
-      console.log(`Created ONE_TIME_BOARDING override for student ${selfPickupStudent.name}`);
+      `, [selfPickupStudents[0].id, startDate, endDate, bus1Id]);
+      console.log(`Created ONE_TIME_BOARDING override for student ${selfPickupStudents[0].name} (1호차)`);
     }
 
-    // Override 2: 당일 하차지 변경
-    const busStudent = insertedStudentRows.find(s => s.assignedVehicleId && !s.isNotRiding);
+    if (selfPickupStudents[1] && bus1Id) {
+      await client.query(`
+        INSERT INTO schedule_overrides (
+          "studentId", "startDate", "endDate", "overrideType", direction,
+          reason, "newVehicleId", "createdAt", "updatedAt"
+        ) VALUES (
+          $1, $2, $3, 'ONE_TIME_BOARDING', 'ALL',
+          '보호자 병원 진료로 인한 당일 1회 셔틀 탑승 신청 (1호차)', $4, NOW(), NOW()
+        )
+      `, [selfPickupStudents[1].id, startDate, endDate, bus1Id]);
+      console.log(`Created ONE_TIME_BOARDING override for student ${selfPickupStudents[1].name} (1호차)`);
+    }
+
+    // Override 3: 2호차 당일 1회 탑승 1명 -> 2호차 총 13 + 1 = 14명
+    if (selfPickupStudents[2] && bus2Id) {
+      await client.query(`
+        INSERT INTO schedule_overrides (
+          "studentId", "startDate", "endDate", "overrideType", direction,
+          reason, "newVehicleId", "createdAt", "updatedAt"
+        ) VALUES (
+          $1, $2, $3, 'ONE_TIME_BOARDING', 'ALL',
+          '조부모 댁 방문 후 셔틀 등원 신청 (2호차)', $4, NOW(), NOW()
+        )
+      `, [selfPickupStudents[2].id, startDate, endDate, bus2Id]);
+      console.log(`Created ONE_TIME_BOARDING override for student ${selfPickupStudents[2].name} (2호차)`);
+    }
+
+    // Override 4: 4호차 당일 1회 탑승 1명 -> 4호차 총 7 + 1 = 8명
+    if (selfPickupStudents[3] && bus4Id) {
+      await client.query(`
+        INSERT INTO schedule_overrides (
+          "studentId", "startDate", "endDate", "overrideType", direction,
+          reason, "newVehicleId", "createdAt", "updatedAt"
+        ) VALUES (
+          $1, $2, $3, 'ONE_TIME_BOARDING', 'ALL',
+          '방과후 체험학습 이동용 셔틀 신청 (4호차)', $4, NOW(), NOW()
+        )
+      `, [selfPickupStudents[3].id, startDate, endDate, bus4Id]);
+      console.log(`Created ONE_TIME_BOARDING override for student ${selfPickupStudents[3].name} (4호차)`);
+    }
+
+    // Override 5: 당일 하차지 변경 (3호차 원아 중 1명)
+    const bus3Students = insertedStudentRows.filter(s => s.assignedVehicleId === vMap['3호차'] && !s.isNotRiding);
+    const busStudent = bus3Students[0] || insertedStudentRows.find(s => s.assignedVehicleId && !s.isNotRiding);
     if (busStudent) {
-      const newLat = acadInfo.lat + 0.005;
-      const newLng = acadInfo.lng + 0.006;
+      const newLat = acadInfo.lat - 0.012;
+      const newLng = acadInfo.lng - 0.004;
       await client.query(`
         INSERT INTO schedule_overrides (
           "studentId", "startDate", "endDate", "overrideType", direction,
           "newAddress", latitude, longitude, reason, "createdAt", "updatedAt"
         ) VALUES (
-          $1, $2, $2, 'CHANGE_LOCATION', 'AFTERNOON',
-          '학원 인근 NC백화점 앞 정류장', $3, $4, '문화센터 방문으로 인한 하차지 변경', NOW(), NOW()
+          $1, $2, $3, 'CHANGE_LOCATION', 'AFTERNOON',
+          '학원 인근 NC백화점 앞 정류장', $4, $5, '문화센터 수업 참여로 인한 하차지 변경', NOW(), NOW()
         )
-      `, [busStudent.id, today, newLat, newLng]);
+      `, [busStudent.id, startDate, endDate, newLat, newLng]);
       console.log(`Created CHANGE_LOCATION override for student ${busStudent.name}`);
     }
 
-    // Override 3: 당일 결석
-    const absentStudent = insertedStudentRows.filter(s => s.assignedVehicleId && !s.isNotRiding)[2];
+    // Override 6: 당일 결석 (3호차 원아 중 1명)
+    const absentStudent = bus3Students[1] || insertedStudentRows.filter(s => s.assignedVehicleId && !s.isNotRiding)[2];
     if (absentStudent) {
       await client.query(`
         INSERT INTO schedule_overrides (
           "studentId", "startDate", "endDate", "overrideType", direction,
           reason, "createdAt", "updatedAt"
         ) VALUES (
-          $1, $2, $2, 'ABSENCE', 'ALL',
-          '소아과 병원 진료로 인한 결석', NOW(), NOW()
+          $1, $2, $3, 'ABSENCE', 'ALL',
+          '감기 및 소아과 진료로 인한 결석', NOW(), NOW()
         )
-      `, [absentStudent.id, today]);
+      `, [absentStudent.id, startDate, endDate]);
       console.log(`Created ABSENCE override for student ${absentStudent.name}`);
     }
 
@@ -415,9 +474,9 @@ async function main() {
       INSERT INTO approval_requests (
         type, "requesterRole", "studentId", "targetDate", direction, reason, status, "targetVehicleId", "academyId", "createdAt", "updatedAt"
       ) VALUES (
-        'ONE_TIME_BOARDING', 'PARENT', $1, '2026-11-10', 'ALL', '학부모 출장으로 인한 당일 1회 셔틀 신청 (1호차)', 'PENDING', $2, $3, NOW(), NOW()
+        'ONE_TIME_BOARDING', 'PARENT', $1, '2026-11-10', 'ALL', '학부모 출장으로 인한 당일 1회 셔틀 신청 (1호차)', 'APPROVED', $2, $3, NOW(), NOW()
       ) RETURNING id
-    `, [selfPickupStudent ? selfPickupStudent.id : insertedStudentRows[1].id, bus1Id, aId]);
+    `, [selfPickupStudents[0] ? selfPickupStudents[0].id : insertedStudentRows[1].id, bus1Id, aId]);
 
     const req3 = await client.query(`
       INSERT INTO approval_requests (
@@ -439,7 +498,7 @@ async function main() {
     console.log(`Inserting notifications...`);
     const notificationsData = [
       { type: 'ABSENCE', msg: `[결석 신청] ${absentStudent ? absentStudent.name : '원아'} 병원 진료로 인한 결석 신청 (승인 완료)`, reqId: req1.rows[0].id },
-      { type: 'SHUTTLE_REQUEST', msg: `[셔틀 신청] ${selfPickupStudent ? selfPickupStudent.name : '원아'} 11월 10일 1호차 1회 탑승 신청 (원장 결재 대기)`, reqId: req2.rows[0].id },
+      { type: 'SHUTTLE_REQUEST', msg: `[셔틀 신청] ${selfPickupStudents[0] ? selfPickupStudents[0].name : '원아'} 1호차 당일 1회 탑승 신청 (승인 완료)`, reqId: req2.rows[0].id },
       { type: 'CHANGE_LOCATION', msg: `[위치 변경] ${busStudent ? busStudent.name : '원아'} 하원 위치 변경 요청 (NC백화점 앞 승인 완료)`, reqId: req3.rows[0].id },
       { type: 'PAYMENT_DECISION', msg: `[결제 완료] ${insertedStudentRows[0].name} 학부모 11월 통학 셔틀 이용료 결제 승인 완료 (150,000원)`, reqId: null },
       { type: 'PICKUP', msg: `[직접 픽업] ${insertedStudentRows[3].name} 원아 오늘 하원 보호자 직접 픽업 접수 (결재 대기)`, reqId: req4.rows[0].id }

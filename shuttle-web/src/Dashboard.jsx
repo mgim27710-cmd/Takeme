@@ -44,6 +44,50 @@ const formatBusinessNumber = (value) => {
   return `${nums.slice(0, 3)}-${nums.slice(3, 5)}-${nums.slice(5, 10)}`;
 };
 
+// 차량별 정규 탑승자와 당일 1회 탑승자 분류 및 총 탑승 인원 산출 헬퍼
+export const getBusRiderDetails = (bus, studentList = []) => {
+  if (!bus || !Array.isArray(studentList)) {
+    return { totalRiders: [], regularStudents: [], oneTimeStudents: [], isFull: false, totalCount: 0, capacity: 25 };
+  }
+  const capacity = Number(bus.capacity) || 25;
+
+  const totalRiders = studentList.filter(st => {
+    if (st.assignedBusId !== bus.id) return false;
+    const isOneTime = Boolean(
+      st.isOneTimeRide ||
+      st.oneTimeType ||
+      st.raw?.isTemporaryRide ||
+      st.raw?.rideType === 'TODAY_ONLY' ||
+      st.raw?.isTemporaryLocation ||
+      (st.isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))
+    );
+    return isOneTime || !st.isNotRiding;
+  });
+
+  const oneTimeStudents = totalRiders.filter(st => {
+    return Boolean(
+      st.isOneTimeRide ||
+      st.oneTimeType ||
+      st.raw?.isTemporaryRide ||
+      st.raw?.rideType === 'TODAY_ONLY' ||
+      st.raw?.isTemporaryLocation ||
+      (st.isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))
+    );
+  });
+
+  const regularStudents = totalRiders.filter(st => !oneTimeStudents.includes(st));
+  const isFull = totalRiders.length >= capacity;
+
+  return {
+    totalRiders,
+    regularStudents,
+    oneTimeStudents,
+    isFull,
+    totalCount: totalRiders.length,
+    capacity
+  };
+};
+
 
 function MapBoundsFit({ buses, academy }) {
   const map = useMap();
@@ -1100,10 +1144,9 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     if (!fullBus) return null;
     const capacity = Number(fullBus.capacity) || 25;
 
-    // 1. 현재 해당 호차에 배정된 탑승 원아 목록 (미탑승 제외)
-    const assignedStudents = currentStudentsList.filter(
-      st => st.assignedBusId === fullBus.id && !st.isNotRiding
-    );
+    // 1. 현재 해당 호차에 탑승하는 원아 목록 (정규 탑승자 + 당일 1회 탑승자)
+    const busDetails = getBusRiderDetails(fullBus, currentStudentsList);
+    const assignedStudents = busDetails.totalRiders;
 
     // 2. 신규 원아 포함 총 후보군 풀(Pool) 형성 (25명 + 1명 = 최대 26명)
     const pool = [...assignedStudents];
@@ -1143,12 +1186,11 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       }
     });
 
-    // 5. 정원 미달인 인접 여유 호차 탐색
+    // 5. 정원 미달인 인접 여유 호차 탐색 (정규 + 1회 탑승자 합산 기준)
     const candidateBuses = currentBusesList.filter(b => {
       if (b.id === fullBus.id) return false;
-      const bCap = Number(b.capacity) || 25;
-      const bCount = currentStudentsList.filter(st => st.assignedBusId === b.id && !st.isNotRiding).length;
-      return bCount < bCap;
+      const details = getBusRiderDetails(b, currentStudentsList);
+      return details.totalCount < details.capacity;
     });
 
     if (candidateBuses.length === 0) {
@@ -1204,10 +1246,9 @@ export default function Dashboard({ initialEducationLevel } = {}) {
 
   // Auto-rebalance suggestion when bus is at or over capacity (26명 클러스터 기준 외곽 원아 분산 배차)
   const handleAutoRebalance = async (fullBus) => {
-    const capacity = Number(fullBus.capacity) || 25;
-    const busStudents = students.filter(st => st.assignedBusId === fullBus.id && !st.isNotRiding);
+    const { totalRiders, regularStudents, oneTimeStudents, capacity, totalCount } = getBusRiderDetails(fullBus, students);
 
-    if (busStudents.length === 0) {
+    if (totalCount === 0) {
       alert(`[${fullBus.name}]에 배정된 탑승 원아가 없습니다.`);
       return;
     }
@@ -1221,7 +1262,9 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     const { furthestStudent, targetAltBus, maxDistance } = result;
 
     const confirmMsg = 
-      `[${fullBus.name}] 만석 현황 (${busStudents.length}명 / 정원 ${capacity}명)\n\n` +
+      `[${fullBus.name}] 탑승 현황 (총 ${totalCount}명 / 정원 ${capacity}명)\n` +
+      `• 정규 탑승자: ${regularStudents.length}명\n` +
+      `• 당일 1회 탑승자: ${oneTimeStudents.length}명\n\n` +
       `26명(전체 탑승 원아) 좌표 클러스터 기준 중심점에서 가장 먼 최외곽 원아:\n` +
       `• 대상 원아: [${furthestStudent.name}] (중심 거리: ${maxDistance.toFixed(2)}km)\n` +
       `• 이동 추천 차량: [${targetAltBus.name}] (잔여 좌석 여유)\n\n` +
@@ -4014,9 +4057,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               ) : (
                 sortedBuses.map(bus => {
                   const isSelected = selectedBusId === bus.id;
-                  const busStudents = students.filter(st => st.assignedBusId === bus.id && !st.isNotRiding);
-                  const busCapacity = Number(bus.capacity) || 25;
-                  const isFull = busStudents.length >= busCapacity;
+                  const { totalRiders, regularStudents, oneTimeStudents, isFull, totalCount, capacity: busCapacity } = getBusRiderDetails(bus, students);
 
                   return (
                     <div 
@@ -4042,7 +4083,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                               {isFull && (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-700 border border-rose-300 shadow-2xs" title="25인승 정원 만석 (지도 구역 대각선 빗금 표시)">
                                   <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
-                                  만석 ({busStudents.length}/${busCapacity}명) 빗금
+                                  만석 (총 {totalCount}/{busCapacity}명) 빗금
                                 </span>
                               )}
                               {bus.plateNumber && (
@@ -4101,13 +4142,13 @@ const parseKindergartenExcelSheet = (sheet) => {
 
                       {/* Zone & Students Status Bar */}
                       <div 
-                        className="flex items-center justify-between text-xs cursor-pointer p-2 rounded-xl bg-slate-50/70 hover:bg-slate-100/70 transition-colors"
+                        className="flex items-center justify-between text-xs cursor-pointer p-2.5 rounded-xl bg-slate-50/80 hover:bg-slate-100 transition-colors"
                         onClick={() => setSelectedBusId(isSelected ? null : bus.id)}
                       >
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-700">배정 원아</span>
-                          <span className={`font-bold px-1.5 py-0.2 rounded text-xs ${isFull ? 'bg-rose-100 text-rose-700 border border-rose-200' : 'bg-blue-100 text-blue-700'}`}>
-                            {busStudents.length} / {busCapacity}명 {isFull ? '(만석)' : ''}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-slate-800 text-xs">탑승 인원</span>
+                          <span className={`font-black px-2 py-0.5 rounded-md text-xs ${isFull ? 'bg-rose-100 text-rose-800 border border-rose-300' : 'bg-blue-100 text-blue-700'}`}>
+                            총 {totalCount} / {busCapacity}명 {isFull ? '(만석)' : ''}
                           </span>
                         </div>
                         <div className="flex items-center gap-1 text-slate-400">
@@ -4115,6 +4156,24 @@ const parseKindergartenExcelSheet = (sheet) => {
                           <svg className={`w-3.5 h-3.5 transition-transform ${isSelected ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                           </svg>
+                        </div>
+                      </div>
+
+                      {/* 정규 vs 1회 탑승자 분리 안내 바 */}
+                      <div className="grid grid-cols-2 gap-1.5 text-[11px] mt-1.5 px-0.5">
+                        <div className="flex items-center justify-between bg-blue-50/70 border border-blue-100 px-2.5 py-1 rounded-lg">
+                          <span className="text-slate-600 font-semibold flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                            정규 탑승
+                          </span>
+                          <span className="font-black text-blue-800">{regularStudents.length}명</span>
+                        </div>
+                        <div className="flex items-center justify-between bg-rose-50/70 border border-rose-100 px-2.5 py-1 rounded-lg">
+                          <span className="text-rose-700 font-semibold flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                            1회 탑승
+                          </span>
+                          <span className="font-black text-rose-700">{oneTimeStudents.length}명</span>
                         </div>
                       </div>
 
@@ -4138,27 +4197,58 @@ const parseKindergartenExcelSheet = (sheet) => {
 
                       {/* Expandable Students List */}
                       {isSelected && (
-                        <div className="mt-3 border-t border-slate-100 pt-3 space-y-1.5">
-                          <div className="text-xs font-bold text-slate-500 flex justify-between px-1 mb-1">
-                            <span>배정 학생 명단</span>
-                            <span>{busStudents.length}명</span>
+                        <div className="mt-3 border-t border-slate-100 pt-3 space-y-2">
+                          <div className="text-xs font-bold text-slate-600 flex justify-between items-center px-1">
+                            <span>탑승 원아 명단 (총 {totalCount}명)</span>
+                            <div className="flex items-center gap-1 text-[10px]">
+                              <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-bold">정규 {regularStudents.length}</span>
+                              <span className="px-1.5 py-0.5 bg-rose-50 text-rose-700 rounded font-bold">1회 {oneTimeStudents.length}</span>
+                            </div>
                           </div>
-                          {busStudents.length > 0 ? (
-                            <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
-                              {busStudents.map(st => (
-                                <div key={st.id} className="text-xs flex justify-between items-center bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                  <span className="font-bold text-slate-700 truncate">{st.name}</span>
-                                  <span className="text-slate-400 truncate max-w-[150px] text-right" title={st.address || st.boardingLocation}>
+
+                          {/* 1회 탑승자 목록 (상단 강조) */}
+                          {oneTimeStudents.length > 0 && (
+                            <div className="space-y-1">
+                              <div className="text-[10px] font-black text-rose-700 flex items-center gap-1 px-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
+                                <span>당일 1회 탑승자 ({oneTimeStudents.length}명)</span>
+                              </div>
+                              {oneTimeStudents.map(st => (
+                                <div key={st.id} className="text-xs flex justify-between items-center bg-rose-50/70 border border-rose-200 p-2 rounded-xl shadow-2xs">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="px-1.5 py-0.2 bg-rose-500 text-white rounded text-[10px] font-black">1회</span>
+                                    <span className="font-bold text-rose-950 truncate">{st.name}</span>
+                                  </div>
+                                  <span className="text-rose-600 text-[11px] truncate max-w-[130px]" title={st.address || st.boardingLocation}>
                                     {st.boardingLocation || st.address || '위치 미등록'}
                                   </span>
                                 </div>
                               ))}
                             </div>
-                          ) : (
-                            <div className="text-center text-xs text-slate-400 py-3 bg-slate-50 rounded-xl">
-                              배정된 원아가 없습니다.
-                            </div>
                           )}
+
+                          {/* 정규 탑승자 목록 */}
+                          <div className="space-y-1">
+                            {oneTimeStudents.length > 0 && (
+                              <div className="text-[10px] font-black text-slate-500 flex items-center gap-1 px-1 pt-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                                <span>정규 탑승자 ({regularStudents.length}명)</span>
+                              </div>
+                            )}
+                            <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                              {regularStudents.map(st => (
+                                <div key={st.id} className="text-xs flex justify-between items-center bg-slate-50 p-2 rounded-xl border border-slate-100">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded text-[10px] font-bold">정규</span>
+                                    <span className="font-bold text-slate-800 truncate">{st.name}</span>
+                                  </div>
+                                  <span className="text-slate-400 text-[11px] truncate max-w-[140px]" title={st.address || st.boardingLocation}>
+                                    {st.boardingLocation || st.address || '위치 미등록'}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -5759,9 +5849,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             const isEditingThis = isZoneEditingMode && editingZoneBusId === bus.id;
             const polygonPoints = isEditingThis ? editingPolygon : bus.polygon;
             
-            const busStudents = students.filter(st => st.assignedBusId === bus.id && !st.isNotRiding);
-            const busCapacity = Number(bus.capacity) || 25;
-            const isFull = busStudents.length >= busCapacity;
+            const { totalRiders, regularStudents, oneTimeStudents, isFull, totalCount, capacity: busCapacity } = getBusRiderDetails(bus, students);
 
             return (
             <Fragment key={bus.id}>
@@ -5778,11 +5866,24 @@ const parseKindergartenExcelSheet = (sheet) => {
                     }} 
                   >
                     <Popup>
-                      <div className="p-2 text-center min-w-[190px]">
+                      <div className="p-2.5 text-center min-w-[210px]">
                         <div className="font-extrabold text-sm" style={{ color: bus.color }}>{bus.name}</div>
-                        <div className="text-xs text-slate-600 mt-1 font-medium">
-                          탑승 인원: <span className="font-bold text-slate-900">{busStudents.length}명</span> / 정원 {busCapacity}명
+                        <div className="text-xs text-slate-700 mt-1.5 font-bold">
+                          총 탑승 인원: <span className="text-slate-900 font-black">{totalCount}명</span> / 정원 {busCapacity}명
                         </div>
+
+                        {/* 정규 vs 1회 탑승자 분리 안내 */}
+                        <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px]">
+                          <div className="bg-blue-50/80 border border-blue-200 rounded-lg p-1.5 text-blue-900 font-bold">
+                            <span className="block text-[10px] text-blue-600 font-medium">정규 탑승자</span>
+                            <span className="text-xs font-black">{regularStudents.length}명</span>
+                          </div>
+                          <div className="bg-rose-50/80 border border-rose-200 rounded-lg p-1.5 text-rose-900 font-bold">
+                            <span className="block text-[10px] text-rose-600 font-medium">당일 1회 탑승자</span>
+                            <span className="text-xs font-black text-rose-600">{oneTimeStudents.length}명</span>
+                          </div>
+                        </div>
+
                         {isFull ? (
                           <div className="mt-2 p-2 bg-rose-50 border border-rose-300 rounded-xl text-rose-800 text-xs font-bold flex flex-col items-center justify-center gap-1 shadow-2xs">
                             <div className="flex items-center gap-1.5 text-[11px] font-black">
@@ -5790,12 +5891,12 @@ const parseKindergartenExcelSheet = (sheet) => {
                               <span>만석 구역 (대각선 빗금 표시)</span>
                             </div>
                             <p className="text-[10px] text-rose-700 font-normal leading-tight">
-                              25인승 만석 구역입니다. 신규 원아 진입 시 26명 중 중심점에서 가장 먼 최외곽 원아가 인접 호차로 자동 분산 배정됩니다.
+                              25명 필수 배치 완료(정규 {regularStudents.length}명 + 1회 {oneTimeStudents.length}명). 신규 원아 진입 시 26명 중 최외곽 원아가 인접 호차로 자동 분산 배정됩니다.
                             </p>
                           </div>
                         ) : (
-                          <div className="mt-1 text-[11px] text-emerald-600 font-bold">
-                            잔여 좌석: {busCapacity - busStudents.length}석 여유
+                          <div className="mt-1.5 text-[11px] text-emerald-600 font-bold">
+                            잔여 좌석: {busCapacity - totalCount}석 여유
                           </div>
                         )}
                       </div>

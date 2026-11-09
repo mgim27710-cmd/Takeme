@@ -1242,17 +1242,26 @@ export class RoutingService {
         parsedRaw['담임명'] = formatTeacherName(parsedRaw['담임명']);
       }
 
-      const isNotRiding = Boolean(st.isNotRiding || parsedRaw['미탑승'] || parsedRaw['차량미탑승']);
+      const override = overrideMap.get(st.id);
+      const isOneTimeBoarding = Boolean(override && override.overrideType === OverrideType.ONE_TIME_BOARDING);
+      const isNotRiding = isOneTimeBoarding ? false : Boolean(st.isNotRiding || parsedRaw['미탑승'] || parsedRaw['차량미탑승']);
       const needsAddress = !isNotRiding && (!st.address || st.latitude === null || st.latitude === undefined || isNaN(st.latitude) || !st.longitude || isNaN(st.longitude) || !!parsedRaw['주소입력필요']);
 
-      const override = overrideMap.get(st.id);
       const isOneTimeRide = Boolean(
-        (override && (override.overrideType === OverrideType.ONE_TIME_BOARDING || override.overrideType === OverrideType.CHANGE_LOCATION)) ||
+        isOneTimeBoarding ||
+        (override && (override.overrideType === OverrideType.CHANGE_LOCATION || override.overrideType === OverrideType.PARENT_PICKUP)) ||
         parsedRaw.isTemporaryRide ||
         parsedRaw.rideType === 'TODAY_ONLY' ||
         parsedRaw.isTemporaryLocation ||
-        (isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))
+        (st.isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))
       );
+
+      const effectiveBusId = (isOneTimeBoarding && override?.newVehicleId)
+        ? override.newVehicleId
+        : (st.assignedVehicle ? st.assignedVehicle.id : null);
+      const effectiveVehicle = effectiveBusId
+        ? vehicles.find(v => v.id === effectiveBusId)
+        : st.assignedVehicle;
 
       return {
         id: st.id,
@@ -1268,12 +1277,12 @@ export class RoutingService {
         lng: (override && override.longitude) ? Number(override.longitude) : st.longitude,
         isNotRiding,
         isOneTimeRide,
-        oneTimeType: override?.overrideType || (parsedRaw.isTemporaryLocation ? 'CHANGE_LOCATION' : 'ONE_TIME_BOARDING'),
+        oneTimeType: override?.overrideType || (parsedRaw.isTemporaryLocation ? 'CHANGE_LOCATION' : (isOneTimeBoarding ? 'ONE_TIME_BOARDING' : null)),
         addressNeedsInput: needsAddress,
-        assignedBusId: st.assignedVehicle ? st.assignedVehicle.id : null,
-        assignedDepartureBusId: st.assignedDepartureVehicle ? st.assignedDepartureVehicle.id : null,
-        assignedDepartureBusName: st.assignedDepartureVehicle ? st.assignedDepartureVehicle.busNumber : (parsedRaw['하원차량'] || ''),
-        color: st.assignedVehicle ? (st.assignedVehicle.colorHex || '#64748b') : '#64748b',
+        assignedBusId: effectiveBusId,
+        assignedDepartureBusId: st.assignedDepartureVehicle ? st.assignedDepartureVehicle.id : (isOneTimeBoarding ? effectiveBusId : null),
+        assignedDepartureBusName: effectiveVehicle ? effectiveVehicle.busNumber : (parsedRaw['하원차량'] || ''),
+        color: effectiveVehicle ? (effectiveVehicle.colorHex || '#64748b') : '#64748b',
         allergies: st.allergies || parsedRaw['알레르기'] || parsedRaw['알러지'] || '',
         raw: parsedRaw,
         parentPhone: st.phone || st.parentUser?.phone || parsedRaw['부모연락처'] || parsedRaw['연락처'] || parsedRaw['보호자연락처'] || parsedRaw['보호자 연락처'] || parsedRaw['전화번호'] || parsedRaw['학부모전화번호'] || '',
