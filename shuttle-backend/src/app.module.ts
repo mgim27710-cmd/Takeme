@@ -42,10 +42,10 @@ import { DirectionsModule } from './directions/directions.module';
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
         host: config.get<string>('DB_HOST', 'localhost'),
-        port: config.get<number>('DB_PORT', 5432),
-        username: config.get<string>('DB_USER', 'takeme'),
+        port: Number(config.get('DB_PORT', 5432)),
+        username: config.get<string>('DB_USERNAME') || config.get<string>('DB_USER', 'postgres'),
         password: config.get<string>('DB_PASSWORD', 'takeme123'),
-        database: config.get<string>('DB_NAME', 'takeme_db'),
+        database: config.get<string>('DB_NAME', 'postgres'),
         entities: [
           User,
           Academy,
