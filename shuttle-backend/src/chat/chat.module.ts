@@ -10,6 +10,7 @@ import { User } from '../entities/user.entity';
 import { Student } from '../entities/student.entity';
 import { Vehicle } from '../entities/vehicle.entity';
 import { Academy } from '../entities/academy.entity';
+import { Notification } from '../entities/notification.entity';
 import { ApprovalModule } from '../approval/approval.module';
 
 @Module({
@@ -22,6 +23,7 @@ import { ApprovalModule } from '../approval/approval.module';
       Student,
       Vehicle,
       Academy,
+      Notification,
     ]),
     ApprovalModule,
   ],
