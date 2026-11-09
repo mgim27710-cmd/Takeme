@@ -99,6 +99,34 @@ export class ApprovalService {
     private readonly locationGateway: LocationGateway,
   ) {}
 
+  private static systemNotificationHandler: ((
+    academyId: number | null,
+    category: 'ABSENT' | 'SHUTTLE_REQUEST' | 'PICKUP' | 'PAYMENT_REQUEST' | 'PAYMENT_DECISION' | 'GENERAL',
+    title: string,
+    content: string,
+    extra?: any,
+  ) => Promise<any>) | null = null;
+
+  public static registerSystemNotificationHandler(handler: any) {
+    ApprovalService.systemNotificationHandler = handler;
+  }
+
+  private async notifySystemNotification(
+    academyId: number | null,
+    category: 'ABSENT' | 'SHUTTLE_REQUEST' | 'PICKUP' | 'PAYMENT_REQUEST' | 'PAYMENT_DECISION' | 'GENERAL',
+    title: string,
+    content: string,
+    extra?: any,
+  ) {
+    if (ApprovalService.systemNotificationHandler) {
+      try {
+        await ApprovalService.systemNotificationHandler(academyId, category, title, content, extra);
+      } catch (err) {
+        console.error('[ApprovalService] System notification error:', err);
+      }
+    }
+  }
+
   /**
    * 차량의 특정 날짜 승차 예정 인원 계산
    */
@@ -279,6 +307,15 @@ export class ApprovalService {
       message: `[신규 신청] ${student.adminDisplayName || student.name} 원아의 ${typeKr} 신청이 접수되었습니다. (적용일: ${targetDate})`,
     });
     await this.notificationRepo.save(noti);
+
+    const notiCategory = type === ChangeRequestType.ABSENCE ? 'ABSENT' : type === ChangeRequestType.ONE_TIME_BOARDING ? 'SHUTTLE_REQUEST' : type === ChangeRequestType.PICKUP || type === ChangeRequestType.INDIVIDUAL_DISMISSAL ? 'PICKUP' : 'GENERAL';
+    this.notifySystemNotification(
+      academyId,
+      notiCategory as any,
+      `[신청 접수] ${student.adminDisplayName || student.name} ${typeKr} 신청`,
+      `${student.adminDisplayName || student.name} 원아의 ${typeKr} 신청이 접수되었습니다. (적용일: ${targetDate})`,
+      { approvalRequestId: saved.id, studentId: student.id, type, targetDate }
+    );
 
     // 소켓 브로드캐스트 (해당 유치원 관리자 방)
     if (this.locationGateway) {
@@ -553,6 +590,14 @@ export class ApprovalService {
       });
       await this.notificationRepo.save(vNoti);
     }
+
+    this.notifySystemNotification(
+      academyId,
+      'PAYMENT_DECISION',
+      `[결재 ${decisionKr}] ${student.adminDisplayName || student.name} ${typeKr} ${decisionKr}`,
+      `${student.adminDisplayName || student.name} 원아의 ${typeKr} 신청이 최종 ${decisionKr}되었습니다.${decision === ApprovalStatus.REJECTED ? ` (사유: ${rejectionReason})` : ''}`,
+      { approvalRequestId: req.id, studentId: student.id, decision, type: req.type }
+    );
 
     // 소켓 브로드캐스트
     if (this.locationGateway && academyId) {

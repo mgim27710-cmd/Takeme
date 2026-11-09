@@ -282,6 +282,18 @@ export class RoutingService {
     this.routeUpdateNotifier = fn;
   }
 
+  private systemNotificationHandler?: (academyId: number | null, category: string, title: string, content: string, extra?: any) => Promise<any>;
+
+  public registerSystemNotificationHandler(fn: (academyId: number | null, category: string, title: string, content: string, extra?: any) => Promise<any>) {
+    this.systemNotificationHandler = fn;
+  }
+
+  public notifySystemNotification(academyId: number | null, category: string, title: string, content: string, extra?: any) {
+    try {
+      this.systemNotificationHandler?.(academyId, category, title, content, extra);
+    } catch {}
+  }
+
   public notifyRouteUpdated(academyId?: number, message?: string) {
     try {
       this.routeUpdateNotifier?.(academyId, message);
@@ -3091,10 +3103,39 @@ export class RoutingService {
   }
 
   async updateStudentBoardStatus(studentId: number, boardStatus: string) {
-    const student = await this.studentRepository.findOne({ where: { id: studentId } });
+    const student = await this.studentRepository.findOne({ where: { id: studentId }, relations: { academy: true } });
     if (!student) throw new BadRequestException('원아를 찾을 수 없습니다.');
+    const prevStatus = student.boardStatus;
     student.boardStatus = boardStatus;
     await this.studentRepository.save(student);
+
+    const acadId = student.academy?.id || null;
+    if (boardStatus === 'ABSENT') {
+      this.notifySystemNotification(
+        acadId,
+        'ABSENT',
+        '원생 결석 알림',
+        `${student.name} 학생(원아)이(가) 오늘 결석 처리되었습니다.`,
+        { studentId: student.id, studentName: student.name }
+      );
+    } else if (boardStatus === 'SELF_PICKUP') {
+      this.notifySystemNotification(
+        acadId,
+        'PICKUP',
+        '개별 픽업 알림',
+        `${student.name} 학생(원아)의 하원 방법이 보호자 직접 픽업으로 변경되었습니다.`,
+        { studentId: student.id, studentName: student.name }
+      );
+    } else if (boardStatus === 'WAITING' && prevStatus && prevStatus !== 'WAITING') {
+      this.notifySystemNotification(
+        acadId,
+        'SHUTTLE_REQUEST',
+        '셔틀 탑승 희망 알림',
+        `${student.name} 학생(원아)이(가) 셔틀 탑승을 희망하여 탑승 대기로 변경되었습니다.`,
+        { studentId: student.id, studentName: student.name }
+      );
+    }
+
     return { success: true, studentId: student.id, boardStatus: student.boardStatus };
   }
 

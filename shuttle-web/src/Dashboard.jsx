@@ -377,6 +377,60 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     return () => window.removeEventListener('takeme_expiry_changed', updateExpiryStatus);
   }, [buses]);
 
+  // Real-time Director Alert State
+  const [directorAlertToast, setDirectorAlertToast] = useState(null);
+  const [unreadAlertCount, setUnreadAlertCount] = useState(0);
+  const [messageInitialRoomType, setMessageInitialRoomType] = useState(null);
+
+  const playAlertChime = () => {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.35);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.35);
+    } catch (e) {
+      // Audio context may require user gesture
+    }
+  };
+
+  const handleIncomingDirectorAlert = (alertData) => {
+    if (!alertData) return;
+    const toastObj = {
+      id: alertData.id || Date.now(),
+      category: alertData.category || 'GENERAL',
+      title: alertData.title || '원내 실시간 변동 알림',
+      message: alertData.message || alertData.content || '',
+      timestamp: alertData.timestamp || new Date().toISOString(),
+      data: alertData.data,
+    };
+    setDirectorAlertToast(toastObj);
+    setUnreadAlertCount(prev => prev + 1);
+    playAlertChime();
+  };
+
+  const handleOpenNotificationRoom = () => {
+    setMessageInitialRoomType('NOTIFICATION_SYSTEM');
+    setDirectorAlertToast(null);
+    setUnreadAlertCount(0);
+    handleTabChange('messages');
+  };
+
+  useEffect(() => {
+    if (!directorAlertToast) return;
+    const timer = setTimeout(() => {
+      setDirectorAlertToast(null);
+    }, 8000);
+    return () => clearTimeout(timer);
+  }, [directorAlertToast]);
+
 
   const handleTabChange = (newTab) => {
     const targetTab = newTab === 'buses' ? 'status' : newTab;
@@ -685,6 +739,9 @@ export default function Dashboard({ initialEducationLevel } = {}) {
           socket.emit('joinVehicleRoom', { vehicleId: Number(b.id) });
         });
       }
+      if (selectedAcademyId) {
+        socket.emit('joinAcademyRoom', { academyId: Number(selectedAcademyId) });
+      }
     });
 
     socket.on('allVehicleOperatingStatus', (statusMap) => {
@@ -753,7 +810,36 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       console.warn('Manager socket auth error:', err);
     });
 
+    socket.on('directorAlert', handleIncomingDirectorAlert);
+    socket.on('globalDirectorAlert', handleIncomingDirectorAlert);
+    socket.on('changeRequestCreated', (data) => {
+      handleIncomingDirectorAlert({
+        id: data.id,
+        category: data.type === 'ABSENCE' ? 'ABSENT' : data.type === 'ONE_TIME_BOARDING' ? 'SHUTTLE_REQUEST' : (data.type === 'PICKUP' || data.type === 'INDIVIDUAL_DISMISSAL') ? 'PICKUP' : 'GENERAL',
+        title: `[신청 접수] ${data.studentName} ${data.typeKr || '통학 변동'} 신청`,
+        message: `${data.studentName} 원아의 ${data.typeKr || '통학 변동'} 신청이 접수되었습니다. (적용일: ${data.targetDate})`,
+        timestamp: new Date().toISOString(),
+        data,
+      });
+    });
+    socket.on('changeRequestDecided', (req) => {
+      const studentName = req?.student?.adminDisplayName || req?.student?.name || '원아';
+      const decisionKr = req?.decision === 'APPROVED' ? '승인' : '반려';
+      handleIncomingDirectorAlert({
+        id: req?.id,
+        category: 'PAYMENT_DECISION',
+        title: `[결재 ${decisionKr}] ${studentName} 통학 신청 ${decisionKr}`,
+        message: `${studentName} 원아의 통학 신청이 최종 ${decisionKr}되었습니다.`,
+        timestamp: new Date().toISOString(),
+        data: req,
+      });
+    });
+
     return () => {
+      socket.off('directorAlert', handleIncomingDirectorAlert);
+      socket.off('globalDirectorAlert', handleIncomingDirectorAlert);
+      socket.off('changeRequestCreated');
+      socket.off('changeRequestDecided');
       socket.disconnect();
       socketRef.current = null;
     };
@@ -3324,11 +3410,16 @@ const parseKindergartenExcelSheet = (sheet) => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 2v4M8 2v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01" />
           </svg>
         </button>
-        <button onClick={() => handleTabChange('messages')} className={`p-4 rounded-2xl transition-all ${activeTab === 'messages' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="메세지함">
+        <button onClick={() => { setUnreadAlertCount(0); handleTabChange('messages'); }} className={`relative p-4 rounded-2xl transition-all ${activeTab === 'messages' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="메세지함">
           {/* 대화 및 메시지함 아이콘 */}
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
+          {unreadAlertCount > 0 && (
+            <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-blue-700 animate-bounce shadow-sm">
+              {unreadAlertCount > 99 ? '99+' : unreadAlertCount}
+            </span>
+          )}
         </button>
         <button onClick={() => handleTabChange('documents')} className={`relative p-4 rounded-2xl transition-all ${activeTab === 'documents' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="행정 및 안전 서류 관리">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4817,6 +4908,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             initialStudent={selectedPaymentStudent}
             onClearInitialStudent={() => setSelectedPaymentStudent(null)}
             isClosing={isMessageClosing}
+            initialRoomType={messageInitialRoomType}
           />
         )}
 
@@ -6068,6 +6160,58 @@ const parseKindergartenExcelSheet = (sheet) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Real-time Director Alert Floating Toast */}
+      {directorAlertToast && (
+        <div className="fixed top-5 right-6 z-[9999] max-w-sm w-full bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border-2 border-amber-300 p-4 animate-bounce-short transition-all">
+          <div className="flex items-start gap-3">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-xs ${
+              directorAlertToast.category === 'ABSENT' ? 'bg-rose-100 text-rose-600' :
+              directorAlertToast.category === 'PICKUP' ? 'bg-blue-100 text-blue-600' :
+              directorAlertToast.category === 'SHUTTLE_REQUEST' ? 'bg-amber-100 text-amber-600' :
+              directorAlertToast.category === 'PAYMENT_DECISION' ? 'bg-emerald-100 text-emerald-600' :
+              'bg-indigo-100 text-indigo-600'
+            }`}>
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-1 mb-0.5">
+                <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+                  {directorAlertToast.category === 'ABSENT' ? '결석 알림' :
+                   directorAlertToast.category === 'PICKUP' ? '개별 픽업' :
+                   directorAlertToast.category === 'SHUTTLE_REQUEST' ? '셔틀 신청' :
+                   directorAlertToast.category === 'PAYMENT_DECISION' ? '결재 완료' :
+                   directorAlertToast.category === 'PAYMENT_REQUEST' ? '결재 상신' : '실시간 알림'}
+                </span>
+                <span className="text-[10px] text-slate-400">방금 전</span>
+              </div>
+              <h4 className="text-xs font-black text-slate-800 truncate">{directorAlertToast.title}</h4>
+              <p className="text-[11px] text-slate-600 mt-0.5 line-clamp-2 leading-tight">{directorAlertToast.message}</p>
+              
+              <div className="flex items-center gap-2 mt-2.5 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={handleOpenNotificationRoom}
+                  className="flex-1 py-1 px-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold transition shadow-xs flex items-center justify-center gap-1"
+                >
+                  <span>알림방 바로가기</span>
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDirectorAlertToast(null)}
+                  className="py-1 px-2 text-slate-400 hover:text-slate-600 text-[11px] font-medium"
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

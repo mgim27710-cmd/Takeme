@@ -8,6 +8,7 @@ export enum ChatRoomType {
   DIRECT = 'DIRECT',
   GROUP = 'GROUP',
   PAYMENT_SYSTEM = 'PAYMENT_SYSTEM',
+  NOTIFICATION_SYSTEM = 'NOTIFICATION_SYSTEM',
 }
 
 @Entity('chat_rooms')

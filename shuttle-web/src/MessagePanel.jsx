@@ -129,7 +129,7 @@ function ComparisonLocationMap({ original, suggested }) {
   );
 }
 
-export default function MessagePanel({ currentUser, selectedAcademyId, socket, isClosing, initialStudent, onClearInitialStudent }) {
+export default function MessagePanel({ currentUser, selectedAcademyId, socket, isClosing, initialStudent, onClearInitialStudent, initialRoomType }) {
   const [rooms, setRooms] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -348,6 +348,13 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       if (res.ok) {
         const data = await res.json();
         setRooms(data);
+        if (initialRoomType) {
+          const match = data.find((r) => r.type === initialRoomType);
+          if (match) {
+            setActiveRoom(match);
+            return;
+          }
+        }
         if (activeRoomRef.current) {
           const updated = data.find((r) => r.id === activeRoomRef.current.id);
           if (updated) setActiveRoom(updated);
@@ -572,6 +579,15 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       if (onClearInitialStudent) onClearInitialStudent();
     }
   }, [initialStudent]);
+
+  useEffect(() => {
+    if (initialRoomType && rooms.length > 0) {
+      const match = rooms.find((r) => r.type === initialRoomType);
+      if (match) {
+        setActiveRoom(match);
+      }
+    }
+  }, [initialRoomType, rooms]);
 
   const handleOpenPaymentModalWithStudent = async (student) => {
     await handleOpenPaymentModal();
@@ -1124,6 +1140,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   });
 
   const isCurrentRoomPaymentSystem = activeRoom?.type === 'PAYMENT_SYSTEM' || activeRoom?.name === '결재 전용 채널';
+  const isCurrentRoomNotificationSystem = activeRoom?.type === 'NOTIFICATION_SYSTEM' || activeRoom?.name === '실시간 알림 채널';
 
   return (
     <div

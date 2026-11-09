@@ -13,6 +13,7 @@ import { ParentMessage } from '../entities/parent-message.entity';
 import { Notification } from '../entities/notification.entity';
 import { ChatGateway } from './chat.gateway';
 import { RoutingService } from '../routing/routing.service';
+import { ApprovalService } from '../approval/approval.service';
 
 @Injectable()
 export class ChatService {
@@ -31,7 +32,13 @@ export class ChatService {
     private readonly chatGateway: ChatGateway,
     @Inject(forwardRef(() => RoutingService))
     private readonly routingService: RoutingService,
-  ) {}
+  ) {
+    this.routingService.registerSystemNotificationHandler(
+      (academyId: number | null, category: string, title: string, content: string, extra?: any) => {
+        return this.sendSystemNotification(academyId, category as any, title, content, extra);
+      }
+    );
+  }
 
   async getAcademyUsers(academyId?: number, currentUserEmail?: string) {
     let currentUser: User | null = null;
@@ -150,6 +157,89 @@ export class ChatService {
     return { drivers, teachers, parents, admins };
   }
 
+  async sendSystemNotification(
+    academyId: number | null,
+    category: 'ABSENT' | 'SHUTTLE_REQUEST' | 'PICKUP' | 'PAYMENT_REQUEST' | 'PAYMENT_DECISION' | 'GENERAL',
+    title: string,
+    content: string,
+    extraData?: any,
+  ) {
+    try {
+      let notiRoom = await this.roomRepo.findOne({
+        where: {
+          type: ChatRoomType.NOTIFICATION_SYSTEM,
+          ...(academyId ? { academyId } : {}),
+        },
+        relations: { members: { user: true } },
+      });
+
+      if (!notiRoom) {
+        notiRoom = this.roomRepo.create({
+          name: '실시간 알림 채널',
+          type: ChatRoomType.NOTIFICATION_SYSTEM,
+          academyId: academyId || null,
+        });
+        notiRoom = await this.roomRepo.save(notiRoom);
+      }
+
+      let senderUser: User | null = null;
+      if (academyId) {
+        senderUser = await this.userRepo.findOne({
+          where: { academyId, role: In([UserRole.ACADEMY_ADMIN, UserRole.SUPER_ADMIN]) },
+        });
+      }
+      if (!senderUser) {
+        senderUser = await this.userRepo.findOne({
+          where: { role: UserRole.SUPER_ADMIN },
+        });
+      }
+
+      const message = this.messageRepo.create({
+        room: notiRoom,
+        sender: senderUser || undefined,
+        text: `[${title}] ${content}`,
+        type: 'TEXT',
+        payload: {
+          isSystemAlert: true,
+          category,
+          title,
+          content,
+          extraData,
+          createdAt: new Date().toISOString(),
+        },
+        readBy: senderUser ? [senderUser.id] : [],
+      });
+
+      const saved = await this.messageRepo.save(message);
+      await this.roomRepo.update(notiRoom.id, { updatedAt: new Date() });
+
+      this.chatGateway.broadcastMessageToRoom(notiRoom.id, saved);
+      this.chatGateway.server?.emit('roomUpdated', { roomId: notiRoom.id });
+
+      const alertPayload = {
+        id: saved.id,
+        category,
+        title,
+        message: content,
+        timestamp: new Date().toISOString(),
+        data: extraData,
+      };
+
+      if (academyId && this.chatGateway?.server) {
+        this.chatGateway.server.to(`academy_${academyId}`).emit('directorAlert', alertPayload);
+        this.chatGateway.server.to(`academy_${academyId}`).emit('notificationReceived', {
+          type: 'DIRECTOR_ALERT',
+          data: alertPayload,
+        });
+      }
+      this.chatGateway?.server?.emit('globalDirectorAlert', alertPayload);
+
+      return saved;
+    } catch (err) {
+      console.error('Failed to send system notification:', err);
+    }
+  }
+
   async getRoomsByEmail(email: string) {
     if (!email) return [];
     const user = await this.userRepo.findOne({ where: { email } });
@@ -183,6 +273,33 @@ export class ChatService {
         user: { id: userId },
       });
       await this.memberRepo.save(member);
+    }
+
+    // 2. Ensure '실시간 알림 채널' exists and user is member
+    let notiSystemRoom = await this.roomRepo.findOne({
+      where: {
+        type: ChatRoomType.NOTIFICATION_SYSTEM,
+        ...(targetAcademyId ? { academyId: targetAcademyId } : {}),
+      },
+      relations: { members: { user: true } },
+    });
+
+    if (!notiSystemRoom) {
+      notiSystemRoom = this.roomRepo.create({
+        name: '실시간 알림 채널',
+        type: ChatRoomType.NOTIFICATION_SYSTEM,
+        academyId: targetAcademyId,
+      });
+      notiSystemRoom = await this.roomRepo.save(notiSystemRoom);
+    }
+
+    const isNotiMember = (notiSystemRoom.members || []).some(m => m.user?.id === userId);
+    if (!isNotiMember) {
+      const notiMember = this.memberRepo.create({
+        room: notiSystemRoom,
+        user: { id: userId },
+      });
+      await this.memberRepo.save(notiMember);
     }
 
     // 2. Fetch all rooms the user is a member of
@@ -226,6 +343,8 @@ export class ChatService {
     rooms.sort((a: any, b: any) => {
       if (a.type === ChatRoomType.PAYMENT_SYSTEM) return -1;
       if (b.type === ChatRoomType.PAYMENT_SYSTEM) return 1;
+      if (a.type === ChatRoomType.NOTIFICATION_SYSTEM) return -1;
+      if (b.type === ChatRoomType.NOTIFICATION_SYSTEM) return 1;
       const timeA = a.latestMessage ? new Date(a.latestMessage.createdAt).getTime() : new Date(a.updatedAt || a.createdAt).getTime();
       const timeB = b.latestMessage ? new Date(b.latestMessage.createdAt).getTime() : new Date(b.updatedAt || b.createdAt).getTime();
       return timeB - timeA;
@@ -755,6 +874,20 @@ export class ChatService {
 
       this.chatGateway.broadcastMessageToRoom(message.room.id, message);
       this.chatGateway.broadcastMessageToRoom(message.room.id, savedConf);
+
+      const decisionText = decision === 'APPROVED' ? '최종 승인' : '반려';
+      await this.sendSystemNotification(
+        targetAcadId || null,
+        'PAYMENT_DECISION',
+        `결재 ${decisionText} 알림`,
+        `${payload.studentName} 학생의 [${payload.busNumber || '셔틀'}] 차량 탑승 결재가 ${decisionText}되었습니다. (결재자: ${decider.name || decider.email})`,
+        {
+          messageId: message.id,
+          studentName: payload.studentName,
+          decision,
+          decidedBy: decider.name || decider.email,
+        }
+      );
 
       // 6. Automatically push notification to parent (Requirement 4)
       try {
