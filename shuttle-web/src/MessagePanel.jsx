@@ -485,6 +485,64 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           return [...prev, savedMsg];
         });
         scrollToBottom();
+
+        // [교사/기사 앱 수신함 브릿지 동기화: 1:1 개인 메세지 및 공지 자동 판별]
+        try {
+          const otherMembers = (activeRoom.members || [])
+            .map((m) => m.user)
+            .filter((u) => u && u.email !== myUser.email);
+
+          const isGroupRoom = (activeRoom.members || []).length > 2 || activeRoom.type === 'GROUP';
+          const isPersonal = !isGroupRoom && otherMembers.length === 1;
+          const targetUser = otherMembers[0] || null;
+
+          const hasTeacher = otherMembers.some(
+            (u) => u.role && (u.role.includes('TEACHER') || u.role === 'SHUTTLE_TEACHER' || u.role === 'HOMEROOM_TEACHER')
+          );
+          const hasDriver = otherMembers.some((u) => u.role && u.role.includes('DRIVER'));
+
+          const targetRoles = [];
+          if (hasTeacher) targetRoles.push('TEACHER', 'HOMEROOM_TEACHER', 'SHUTTLE_TEACHER');
+          if (hasDriver) targetRoles.push('DRIVER');
+          if (targetRoles.length === 0) targetRoles.push('TEACHER');
+
+          const prefix = isPersonal
+            ? `[원장님 1:1 개인 메세지]`
+            : `[원장님 공지]`;
+
+          // 1. 백엔드 admin-messages 엔드포인트 브릿지
+          fetch(`${API_BASE_URL}/routing/admin-messages/send`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+              targetRoles,
+              vehicleId: null,
+              studentIds: [],
+              message: `${prefix} ${text}`,
+            }),
+          }).catch((err) => console.warn('교사 앱 수신함 백엔드 전송:', err));
+
+          // 2. 모바일 앱 프록시 실시간 수신함 큐 동기화 (1:1 개인 메세지 플래그 및 수신자 명시)
+          fetch(`http://localhost:8083/api/bridge-admin-message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              isPersonal,
+              type: isPersonal ? 'PERSONAL' : 'NOTICE',
+              targetEmail: targetUser ? targetUser.email : null,
+              targetName: targetUser ? (targetUser.name || '선생님') : '선생님',
+              targetUserId: targetUser ? targetUser.id : null,
+              senderName: myUser.name || '원장님(관리자)',
+              senderEmail: myUser.email,
+              targetRoles,
+              message: text,
+              prefix,
+              createdAt: new Date().toISOString(),
+            }),
+          }).catch(() => {});
+        } catch (bridgeErr) {
+          console.warn('교사 앱 메시지 브릿지 처리 중 오류(무시):', bridgeErr);
+        }
       } else {
         alert('메시지 전송에 실패했습니다.');
       }

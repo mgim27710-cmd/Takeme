@@ -105,6 +105,26 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     return initialEducationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
   }, [location.pathname, initialEducationLevel]);
 
+  // 부문별 맞춤형 용어 및 UI 테마
+  const terms = useMemo(() => {
+    const isKinder = activeEducationLevel === '유치원';
+    const isElem = activeEducationLevel === '초등부';
+    return {
+      student: isKinder ? '원아' : '학생',
+      students: isKinder ? '원생' : '학생',
+      academy: isKinder ? '유치원' : (isElem ? '초등학교/학원' : '중·고등학교/학원'),
+      institution: isKinder ? '유치원' : (isElem ? '초등부 기관' : '중·고등부 기관'),
+      class: isKinder ? '반' : '학급',
+      board: isKinder ? '원아 앨범 & 게시판' : (isElem ? '알림장 & 게시판' : '공지 & 커뮤니티'),
+      authCode: isKinder ? '원 인증코드' : '기관 인증코드',
+      themeBg: isKinder ? 'bg-blue-700' : (isElem ? 'bg-emerald-700' : 'bg-indigo-800'),
+      themeHover: isKinder ? 'hover:bg-blue-600' : (isElem ? 'hover:bg-emerald-600' : 'hover:bg-indigo-700'),
+      themeText: isKinder ? 'text-blue-700' : (isElem ? 'text-emerald-700' : 'text-indigo-700'),
+      themeBadge: isKinder ? 'bg-blue-100 text-blue-800 border-blue-200' : (isElem ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-indigo-100 text-indigo-800 border-indigo-300'),
+      icon: isKinder ? '🏫' : (isElem ? '🎒' : '🎓')
+    };
+  }, [activeEducationLevel]);
+
   // Multi-tenant User Context
   const currentUser = (() => {
     try {
@@ -781,6 +801,22 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     }
   };
 
+  // 교육 부문별 기관 분류 헬퍼
+  const getAcademyLevel = (acad) => {
+    if (acad?.educationLevel) return acad.educationLevel;
+    const name = acad?.name || '';
+    if (name.includes('초등') || name.includes('초교') || name.includes('Elementary')) return '초등부';
+    if (name.includes('중등') || name.includes('고등') || name.includes('중학교') || name.includes('고등학교') || name.includes('Middle') || name.includes('High')) return '중,고등부';
+    if (name.includes('유치원') || name.includes('어린이집') || name.includes('Kinder')) return '유치원';
+    return '유치원';
+  };
+
+  // 현재 활성화된 교육 부문에 해당하는 기관만 엄격 필터링
+  const visibleAcademies = useMemo(() => {
+    return allAcademies.filter(ac => getAcademyLevel(ac) === activeEducationLevel);
+  }, [allAcademies, activeEducationLevel]);
+
+  // 슈퍼 관리자: 전체 기관 목록 최초 로드
   useEffect(() => {
     if (isSuperAdmin) {
       fetch(`${API_BASE_URL}/routing/academies`)
@@ -788,15 +824,82 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         .then(data => {
           if (Array.isArray(data) && data.length > 0) {
             setAllAcademies(data);
-            if (!selectedAcademyId) {
-              setSelectedAcademyId(data[0].id);
-              localStorage.setItem('takeme_selected_academy_id', String(data[0].id));
-            }
           }
         })
         .catch(err => console.error('Failed to load academies', err));
     }
   }, [isSuperAdmin]);
+
+  // 교육 부문(activeEducationLevel) 변경 시 해당 부문의 기관으로 자동 스위칭 및 데이터 완전 격리
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    if (allAcademies.length === 0) return;
+
+    const matched = allAcademies.filter(ac => getAcademyLevel(ac) === activeEducationLevel);
+    if (matched.length > 0) {
+      // 현재 선택된 기관이 해당 부문에 속해있지 않다면 해당 부문의 첫 번째 기관으로 교체
+      const isCurrentSelectedValid = matched.some(m => m.id === selectedAcademyId);
+      if (!isCurrentSelectedValid) {
+        const nextId = matched[0].id;
+        setSelectedAcademyId(nextId);
+        localStorage.setItem('takeme_selected_academy_id', String(nextId));
+        loadInitialState(nextId);
+      }
+    } else {
+      // 해당 부문(예: 초등부, 중·고등부)에 등록된 기관이 없으면 다른 부문(유치원)의 데이터가 화면에 남지 않도록 완전 초기화
+      setSelectedAcademyId(null);
+      setAcademy(null);
+      setBuses([]);
+      setStudents([]);
+    }
+  }, [activeEducationLevel, allAcademies, isSuperAdmin]);
+
+  // 부문 전용 샘플/신규 기관 원클릭 생성 핸들러
+  const handleCreateSampleAcademy = async () => {
+    const isElem = activeEducationLevel === '초등부';
+    const isMidHigh = activeEducationLevel === '중,고등부';
+    const defaultName = isElem 
+      ? '마곡 안심 초등학교' 
+      : (isMidHigh ? '마곡 안심 중·고등학교' : '마곡 꿈나무 유치원');
+    const defaultAddress = '서울특별시 강서구 마곡서로 101';
+
+    const inputName = prompt(`새로운 [${activeEducationLevel}] 기관명을 입력해 주세요:`, defaultName);
+    if (!inputName || !inputName.trim()) return;
+
+    try {
+      setIsProcessing(true);
+      const res = await fetch(`${API_BASE_URL}/routing/setup-academy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: inputName.trim(),
+          address: defaultAddress,
+          lat: 37.55805,
+          lng: 126.82408,
+          businessNumber: '123-88-00001',
+          educationLevel: activeEducationLevel
+        })
+      });
+      const data = await res.json();
+      alert(`[${inputName.trim()}] ${terms.institution}이(가) 성공적으로 등록되었습니다.`);
+      
+      const acadRes = await fetch(`${API_BASE_URL}/routing/academies`);
+      const allData = await acadRes.json();
+      if (Array.isArray(allData)) {
+        setAllAcademies(allData);
+        if (data.id) {
+          setSelectedAcademyId(data.id);
+          localStorage.setItem('takeme_selected_academy_id', String(data.id));
+          loadInitialState(data.id);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      alert('기관 생성 중 오류가 발생했습니다.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
 
   // Auto-rebalance suggestion when bus is over capacity
@@ -1703,7 +1806,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         setShowAcademyModal(false);
       } else {
         setBuses([]);
-        if (!isTeacherRole && (!data.academy || !data.academy.id)) {
+        if (!isTeacherRole && !isSuperAdmin && (!data.academy || !data.academy.id)) {
           setShowAcademyModal(true);
           setSetupStep(1);
         } else {
@@ -3170,14 +3273,14 @@ const parseKindergartenExcelSheet = (sheet) => {
       )}
 
       {/* Bookmark Rail (Left Navigation) */}
-      <div className="w-20 bg-blue-700 flex flex-col items-center py-8 gap-6 z-20 shadow-xl">
+      <div className={`w-20 ${terms.themeBg} flex flex-col items-center py-8 gap-6 z-20 shadow-xl transition-colors duration-300`}>
         <div className="text-white font-bold text-xs mb-1">Takeme</div>
-        <div className="text-xs text-blue-200 text-center truncate max-w-[70px] mb-4 font-medium" title={currentUser.name}>
+        <div className="text-xs text-white/80 text-center truncate max-w-[70px] mb-4 font-medium" title={currentUser.name}>
           {isSuperAdmin ? '플랫폼관리' : (currentUser.name ? `${currentUser.name} 관리자님` : '관리자님')}
         </div>
         <button 
           onClick={() => handleTabChange('status')} 
-          className={`p-4 rounded-2xl transition-all ${activeTab === 'status' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} 
+          className={`p-4 rounded-2xl transition-all ${activeTab === 'status' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} 
           title="차량 및 구역 관리"
         >
           {/* 차량 및 통학버스 아이콘 */}
@@ -3185,8 +3288,8 @@ const parseKindergartenExcelSheet = (sheet) => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 17a2 2 0 100 4 2 2 0 000-4zm10 0a2 2 0 100 4 2 2 0 000-4zM4 6a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm0 5h16M9 6v5m6-5v5" />
           </svg>
         </button>
-        <button onClick={() => handleTabChange('students')} className={`p-4 rounded-2xl transition-all ${activeTab === 'students' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="원생 정보">
-          {/* 유치원생 돔형 통학모 아이콘 (사이드바 통일 라인 스타일) */}
+        <button onClick={() => handleTabChange('students')} className={`p-4 rounded-2xl transition-all ${activeTab === 'students' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title={`${terms.students} 정보`}>
+          {/* 학생 아이콘 */}
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             {/* 상단 꼭지 단추 */}
             <ellipse cx="12" cy="4.9" rx="1.3" ry="0.7" />
@@ -3194,40 +3297,40 @@ const parseKindergartenExcelSheet = (sheet) => {
             <path d="M5.2 14 C4.6 9.2 7.8 5.6 10.7 5.2 M13.3 5.2 C16.2 5.6 19.4 9.2 18.8 14" />
             {/* 돔 하단 이마 곡선 */}
             <path d="M5.2 14 C8 16.2 16 16.2 18.8 14" />
-            {/* 유치원 모자 챙 (Brim) */}
+            {/* 모자 챙 (Brim) */}
             <path d="M5.2 14 C3.2 14.8 1.8 15.8 1.2 16.8 C4.5 20.6 19.5 20.6 22.8 16.8 C22.2 15.8 20.8 14.8 18.8 14" />
             {/* 패널 절개선 */}
             <path d="M11.2 5.5 C9.8 8.8 8.8 12.2 8.5 15.8" />
             <path d="M12.8 5.5 C14.2 8.8 15.2 12.2 15.5 15.8" />
           </svg>
         </button>
-        <button onClick={() => handleTabChange('classes')} className={`p-4 rounded-2xl transition-all ${activeTab === 'classes' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="반 관리">
+        <button onClick={() => handleTabChange('classes')} className={`p-4 rounded-2xl transition-all ${activeTab === 'classes' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title={`${terms.class} 관리`}>
           {/* 교실 학급 칠판 아이콘 */}
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <rect x="3" y="4" width="18" height="12" rx="2" strokeWidth={2} />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h5m-3 4v4m6-4v4m-8 0h10" />
           </svg>
         </button>
-        <button onClick={() => handleTabChange('auth')} className={`p-4 rounded-2xl transition-all ${activeTab === 'auth' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="인증 관리">
+        <button onClick={() => handleTabChange('auth')} className={`p-4 rounded-2xl transition-all ${activeTab === 'auth' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="인증 관리">
           {/* 가입 승인 및 인증 방패 아이콘 */}
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
           </svg>
         </button>
-        <button onClick={() => handleTabChange('log')} className={`p-4 rounded-2xl transition-all ${activeTab === 'log' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="캘린더 및 로그보기">
+        <button onClick={() => handleTabChange('log')} className={`p-4 rounded-2xl transition-all ${activeTab === 'log' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="캘린더 및 로그보기">
           {/* 캘린더 달력 아이콘 */}
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <rect x="3" y="4" width="18" height="18" rx="2" strokeWidth={2} />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 2v4M8 2v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01" />
           </svg>
         </button>
-        <button onClick={() => handleTabChange('messages')} className={`p-4 rounded-2xl transition-all ${activeTab === 'messages' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="메세지함">
+        <button onClick={() => handleTabChange('messages')} className={`p-4 rounded-2xl transition-all ${activeTab === 'messages' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="메세지함">
           {/* 대화 및 메시지함 아이콘 */}
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
         </button>
-        <button onClick={() => handleTabChange('documents')} className={`relative p-4 rounded-2xl transition-all ${activeTab === 'documents' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="행정 및 안전 서류 관리">
+        <button onClick={() => handleTabChange('documents')} className={`relative p-4 rounded-2xl transition-all ${activeTab === 'documents' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="행정 및 안전 서류 관리">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
@@ -3239,15 +3342,15 @@ const parseKindergartenExcelSheet = (sheet) => {
         </button>
         <button 
           onClick={() => handleTabChange('board')} 
-          className={`relative p-4 rounded-2xl transition-all ${activeTab === 'board' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} 
-          title="원아 앨범 & 게시판"
+          className={`relative p-4 rounded-2xl transition-all ${activeTab === 'board' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} 
+          title={terms.board}
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
         </button>
 
-        <button onClick={() => handleTabChange('settings')} className={`p-4 rounded-2xl transition-all mt-auto ${activeTab === 'settings' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`} title="환경설정">
+        <button onClick={() => handleTabChange('settings')} className={`p-4 rounded-2xl transition-all mt-auto ${activeTab === 'settings' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="환경설정">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
         </button>
       </div>
@@ -3261,11 +3364,12 @@ const parseKindergartenExcelSheet = (sheet) => {
             <div className="mb-4">
               <div className="flex items-center gap-2">
                 <h2 className="text-xl font-bold text-slate-800">차량 및 구역 관리</h2>
-                <span className="text-xs px-2.5 py-1 rounded-lg font-black bg-blue-100 text-blue-700 border border-blue-200 shadow-xs">
-                  {activeEducationLevel}
+                <span className={`text-xs px-2.5 py-1 rounded-lg font-black shadow-xs flex items-center gap-1 border ${terms.themeBadge}`}>
+                  <span>{terms.icon}</span>
+                  <span>{activeEducationLevel}</span>
                 </span>
               </div>
-              <p className="text-[13px] text-slate-500 mt-1">호차별 운행 구역, 차량 정보 및 탑승 원생을 통합 관리합니다.</p>
+              <p className="text-[13px] text-slate-500 mt-1">호차별 운행 구역, 차량 정보 및 탑승 {terms.students}을 통합 관리합니다.</p>
             </div>
 
             {/* Action Buttons: Integrated Zone Mapping & Pickup Points */}
@@ -3628,9 +3732,9 @@ const parseKindergartenExcelSheet = (sheet) => {
 
         {activeTab === 'students' && (
           <div className="p-4 h-full flex flex-col">
-            <h2 className="text-lg font-bold text-slate-800 mb-1 text-center">원아 정보</h2>
+            <h2 className="text-lg font-bold text-slate-800 mb-1 text-center">{terms.student} 정보</h2>
             <p className="text-[13px] text-slate-500 mb-3 text-center">
-              원아를 직접 추가하거나 엑셀 파일로 일괄 등록할 수 있습니다.
+              {terms.student}을 직접 추가하거나 엑셀 파일로 일괄 등록할 수 있습니다.
             </p>
 
             <input 
@@ -3641,7 +3745,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               onChange={handleStudentUpload} 
             />
 
-            {/* Primary Action Button: 원생 추가 */}
+            {/* Primary Action Button: 원생/학생 추가 */}
             <button
               onClick={handleOpenAddStudentModal}
               className="w-full py-2.5 px-3 mb-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 text-sm active:scale-[0.99]"
@@ -3649,7 +3753,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
               </svg>
-              원아 추가
+              {terms.student} 추가
             </button>
 
             <button 
@@ -4425,14 +4529,14 @@ const parseKindergartenExcelSheet = (sheet) => {
             <div className="space-y-4">
               <div className="p-4 bg-orange-50 rounded-xl border border-orange-100 transition-all">
                 <div className="flex items-center justify-between mb-1">
-                  <h3 className="font-bold text-orange-700">유치원 정보 관리</h3>
+                  <h3 className="font-bold text-orange-700">{terms.institution} 정보 관리</h3>
                   {academy?.businessNumber && (
                     <span className="text-[11px] bg-orange-200/70 text-orange-800 font-semibold px-2 py-0.5 rounded-full">
                       사업자번호: {academy.businessNumber}
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-orange-600 mb-3 opacity-80 leading-relaxed">유치원명, 주소 및 사업자 등록번호를 확인하고 변경할 수 있습니다.</p>
+                <p className="text-xs text-orange-600 mb-3 opacity-80 leading-relaxed">{terms.institution}명, 주소 및 사업자 등록번호를 확인하고 변경할 수 있습니다.</p>
                 
                 {!isChangingAcademy ? (
                   <div className="space-y-2">
@@ -4850,20 +4954,67 @@ const parseKindergartenExcelSheet = (sheet) => {
             <span>{isSavingAll ? '저장 중...' : '변경사항 저장'}</span>
           </button>
 
+          {/* 슈퍼 관리자 전용 교육 부문 스위처 */}
+          {isSuperAdmin && (
+            <div className="flex items-center bg-slate-900/90 backdrop-blur-md p-1 rounded-xl shadow-lg border border-slate-700 text-xs font-bold gap-1">
+              {[
+                { id: 'kindergarten', label: '유치원', icon: '🏫', path: '/dashboard/kindergarten' },
+                { id: 'elementary', label: '초등부', icon: '🎒', path: '/dashboard/elementary' },
+                { id: 'middle_high', label: '중,고등부', icon: '🎓', path: '/dashboard/middle-high' },
+              ].map(lvl => (
+                <button
+                  key={lvl.id}
+                  type="button"
+                  onClick={() => {
+                    localStorage.setItem('takeme_selected_education_level', lvl.label);
+                    navigate(lvl.path);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
+                    activeEducationLevel === lvl.label
+                      ? 'bg-blue-600 text-white shadow-md font-black'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                  }`}
+                  title={`${lvl.label} 대시보드로 즉시 전환`}
+                >
+                  <span>{lvl.icon}</span>
+                  <span>{lvl.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
           {isSuperAdmin && (
             <div className="flex items-center gap-2 bg-indigo-700 text-white px-3 py-1.5 rounded-lg shadow-lg text-xs font-bold border border-indigo-500">
-              <span className="whitespace-nowrap">유치원 선택:</span>
+              <span className="whitespace-nowrap">{terms.institution} 선택:</span>
               <select
                 value={selectedAcademyId || ''}
-                onChange={(e) => handleSwitchAcademy(Number(e.target.value))}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  if (val) handleSwitchAcademy(val);
+                }}
                 className="bg-white text-slate-800 px-2 py-1 rounded font-bold text-xs outline-none cursor-pointer"
               >
-                {allAcademies.map(ac => (
-                  <option key={ac.id} value={ac.id}>
-                    {ac.name} ({ac.vehicleCount}대 / {ac.studentCount}명)
-                  </option>
-                ))}
+                {visibleAcademies.length > 0 ? (
+                  visibleAcademies.map(ac => (
+                    <option key={ac.id} value={ac.id}>
+                      {ac.name} ({ac.vehicleCount}대 / {ac.studentCount}명)
+                    </option>
+                  ))
+                ) : (
+                  <option value="">등록된 {terms.institution} 없음</option>
+                )}
               </select>
+              {visibleAcademies.length === 0 && (
+                <button
+                  type="button"
+                  onClick={handleCreateSampleAcademy}
+                  className="bg-amber-500 hover:bg-amber-600 text-white px-2 py-0.5 rounded font-black text-[11px] shadow-sm transition-all whitespace-nowrap flex items-center gap-1 cursor-pointer"
+                  title={`테스트용 ${activeEducationLevel} 기관 즉시 개설`}
+                >
+                  <span>➕</span>
+                  <span>{activeEducationLevel} 기관 개설</span>
+                </button>
+              )}
             </div>
           )}
 
@@ -4888,7 +5039,38 @@ const parseKindergartenExcelSheet = (sheet) => {
             ))}
           </div>
 
-</div>
+        </div>
+
+        {/* 해당 부문에 등록된 기관이 없을 때의 데이터 격리 안내 오버레이 */}
+        {isSuperAdmin && visibleAcademies.length === 0 && (
+          <div className="absolute inset-0 z-[999] bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 pointer-events-auto">
+            <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-slate-200 max-w-md p-6 text-center space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-3xl mx-auto shadow-inner">
+                {terms.icon}
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-800">
+                  등록된 {activeEducationLevel} 기관이 없습니다
+                </h3>
+                <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+                  현재 DB의 유치원 정보가 <b>{activeEducationLevel} 화면에 섞여 나오지 않도록 안전하게 분리 격리</b>되었습니다.
+                  <br />
+                  새로운 {terms.institution}을 개설하여 {activeEducationLevel} 전용 통학차량과 학생 명단을 등록해 보세요!
+                </p>
+              </div>
+              <div className="pt-2 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={handleCreateSampleAcademy}
+                  className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-black text-sm shadow-md transition-all active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <span>✨</span>
+                  <span>{activeEducationLevel} 신규 기관 개설하기</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <MapContainer 
           center={academy && !isNaN(academy.lat) && !isNaN(academy.lng) ? [academy.lat, academy.lng] : [37.5650, 126.9750]} 

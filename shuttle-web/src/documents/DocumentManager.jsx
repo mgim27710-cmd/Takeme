@@ -10,15 +10,21 @@ import {
   saveExpiryRecord,
   calculateDday,
   getOverallExpirySummary,
+  getExpiryNotificationSchedule,
+  syncStaffExpiryNotifications,
+  getStaffNotifications,
 } from './documentStorage';
 import { openPrintDocument } from './pdfDocumentGenerator';
 
 const CATEGORIES = [
   { id: 'all', label: '전체 서류' },
-  { id: 'safety', label: '안전·점검' },
-  { id: 'vehicle', label: '차량·보험' },
-  { id: 'companion', label: '동승보호자' },
-  { id: 'consent', label: '원생·동의서' },
+  { id: 'registry', label: '학원·설립등록' },
+  { id: 'shuttle_consent', label: '차량이용동의서' },
+  { id: 'privacy', label: '개인정보동의서' },
+  { id: 'driver_location', label: '기사 위치정보' },
+  { id: 'accounting', label: '회계·지출문서' },
+  { id: 'report', label: '신고·보험필증' },
+  { id: 'safety', label: '안전점검·운행일지' },
   { id: 'etc', label: '기타 서류' },
 ];
 
@@ -52,6 +58,9 @@ export default function DocumentManager({
     companionEduExpiry: '',
   });
   const [expiryFilterTab, setExpiryFilterTab] = useState('all'); // 'all' | 'urgent' | 'warning' | 'safe'
+  const [staffNotiSummary, setStaffNotiSummary] = useState({ driverNotifications: [], teacherNotifications: [], allCount: 0 });
+  const [showStaffNotiModal, setShowStaffNotiModal] = useState(false);
+  const [staffNotiRoleFilter, setStaffNotiRoleFilter] = useState('all'); // 'all' | 'driver' | 'teacher'
 
   // Sub Navigation Tabs: 'templates' (법정 서식 자동 발급) | 'expiry' (만료일 신호등 현황) | 'documents' (등록 서류 보관함)
   const [activeSubTab, setActiveSubTab] = useState('templates');
@@ -59,7 +68,7 @@ export default function DocumentManager({
   // Form states for upload modal
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadTitle, setUploadTitle] = useState('');
-  const [uploadCategory, setUploadCategory] = useState('safety');
+  const [uploadCategory, setUploadCategory] = useState('registry');
   const [uploadNote, setUploadNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -72,12 +81,14 @@ export default function DocumentManager({
 
   const fileInputRef = useRef(null);
 
-  // Load expiry records & calculate summary
+  // Load expiry records & calculate summary & sync staff app notifications
   const loadExpiry = () => {
     const recs = getExpiryRecords();
     setExpiryRecords(recs);
     const sum = getOverallExpirySummary(buses);
     setExpirySummary(sum);
+    const staffSync = syncStaffExpiryNotifications(buses);
+    setStaffNotiSummary(staffSync);
   };
 
   // Load documents
@@ -166,7 +177,7 @@ export default function DocumentManager({
       // Reset modal form
       setUploadFile(null);
       setUploadTitle('');
-      setUploadCategory('safety');
+      setUploadCategory('registry');
       setUploadNote('');
       setShowUploadModal(false);
       await loadDocs();
@@ -336,13 +347,17 @@ export default function DocumentManager({
 
   // Filtered documents
   const filteredDocs = documents.filter((doc) => {
+    const cat = doc.category || '';
     const matchCategory =
       selectedCategory === 'all' ||
-      (selectedCategory === 'safety' && doc.category.includes('안전')) ||
-      (selectedCategory === 'vehicle' && doc.category.includes('차량')) ||
-      (selectedCategory === 'companion' && doc.category.includes('동승')) ||
-      (selectedCategory === 'consent' && doc.category.includes('동의')) ||
-      (selectedCategory === 'etc' && !doc.category.includes('안전') && !doc.category.includes('차량') && !doc.category.includes('동승') && !doc.category.includes('동의'));
+      (selectedCategory === 'registry' && (cat.includes('학원') || cat.includes('설립') || cat.includes('등록') || cat.includes('인가'))) ||
+      (selectedCategory === 'shuttle_consent' && (cat.includes('차량이용') || cat.includes('탑승신청') || (cat.includes('동의') && !cat.includes('개인정보') && !cat.includes('위치')))) ||
+      (selectedCategory === 'privacy' && cat.includes('개인정보')) ||
+      (selectedCategory === 'driver_location' && (cat.includes('위치정보') || cat.includes('기사') && cat.includes('위치'))) ||
+      (selectedCategory === 'accounting' && (cat.includes('회계') || cat.includes('지출') || cat.includes('정산') || cat.includes('유류비') || cat.includes('영수증'))) ||
+      (selectedCategory === 'report' && (cat.includes('신고') || cat.includes('보험') || cat.includes('필증') || cat.includes('검사') || cat.includes('차량'))) ||
+      (selectedCategory === 'safety' && (cat.includes('안전') || cat.includes('점검') || cat.includes('일지') || cat.includes('동승'))) ||
+      (selectedCategory === 'etc' && (cat.includes('기타') || (!cat.includes('학원') && !cat.includes('설립') && !cat.includes('등록') && !cat.includes('차량이용') && !cat.includes('개인정보') && !cat.includes('위치') && !cat.includes('회계') && !cat.includes('신고') && !cat.includes('보험') && !cat.includes('안전') && !cat.includes('동승') && !cat.includes('동의'))));
 
     const query = searchQuery.trim().toLowerCase();
     const matchQuery =
@@ -443,7 +458,7 @@ export default function DocumentManager({
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            법정 서식 자동 발급 (6종)
+            법정 서식 자동 발급 (10종)
           </button>
           <button
             onClick={() => setActiveSubTab('expiry')}
@@ -525,18 +540,29 @@ export default function DocumentManager({
               <div>
                 <h2 className="text-base font-black text-slate-800 flex items-center gap-2">
                   법정 의무 서류 및 안전교육 만료일 현황
-                  <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">
-                    신호등 알림 시스템
+                  <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-md">
+                    2달 전 주의 · 1달 전 만료임박 · 2주 전 매일알림
                   </span>
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  어린이통학버스 종합보험, 정기검사/신고필증, 운전자 및 동승보호자 안전교육(2년 주기)의 만료일을 관리합니다.
+                  어린이통학버스 종합보험, 정기검사, 운전자 및 동승보호자 안전교육 기한을 관리하며 기사·교사 앱으로 주기를 계산하여 자동 알림을 전송합니다.
                 </p>
               </div>
             </div>
 
-            {/* Status Filter Badges */}
-            <div className="flex items-center gap-2">
+            {/* Status Filter Badges & Staff Notifications Trigger */}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setShowStaffNotiModal(true)}
+                className="text-xs font-bold px-3 py-1.5 rounded-xl border border-indigo-300 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition-all flex items-center gap-1.5 shadow-xs mr-2"
+                title="기사 및 교사 앱으로 발송되는 알림 현황 조회"
+              >
+                <svg className="w-3.5 h-3.5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                </svg>
+                기사·교사 앱 알림 현황 ({staffNotiSummary.allCount}건)
+              </button>
+
               <button
                 onClick={() => setExpiryFilterTab('all')}
                 className={`text-xs font-bold px-3 py-1.5 rounded-xl border transition-all ${
@@ -555,7 +581,7 @@ export default function DocumentManager({
                     : 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
                 }`}
               >
-                만료/임박 ({expirySummary.urgentCount}건)
+                만료/1달이내 ({expirySummary.urgentCount}건)
               </button>
               <button
                 onClick={() => setExpiryFilterTab('warning')}
@@ -565,7 +591,7 @@ export default function DocumentManager({
                     : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
                 }`}
               >
-                주의 ({expirySummary.warningCount}건)
+                주의/2달이내 ({expirySummary.warningCount}건)
               </button>
               <button
                 onClick={() => setExpiryFilterTab('safe')}
@@ -577,6 +603,23 @@ export default function DocumentManager({
               >
                 정상 ({expirySummary.safeCount}건)
               </button>
+            </div>
+          </div>
+
+          {/* Notification Rule Summary Banner */}
+          <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-slate-50 border border-blue-200/70 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-3">
+              <span className="font-extrabold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-md flex items-center gap-1">
+                🔔 만료 알림 규칙
+              </span>
+              <span className="text-slate-700">
+                <strong>2달 전(D-60)</strong>부터 <span className="text-amber-700 font-bold">주의 (주 1회 알림)</span> &nbsp;|&nbsp; 
+                <strong>1달 전(D-30)</strong>부터 <span className="text-red-600 font-bold">만료 임박</span> &nbsp;|&nbsp; 
+                <strong>2주 전(D-14)</strong>부터 만료일까지 <span className="text-rose-700 font-black underline">매일 알림 발송</span>
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-500 font-medium">
+              * 기사 앱(운전자교육·차량) & 동승교사 앱(동승자교육·차량)에 지정 주기별 자동 알림 연동
             </div>
           </div>
 
@@ -748,13 +791,13 @@ export default function DocumentManager({
               <div className="flex items-center gap-3">
                 <div>
                   <h2 className="text-base font-black text-slate-800 flex items-center gap-2">
-                    데이터베이스 연동 법정 서식 자동 발급 (6종)
+                    데이터베이스 연동 법정 서식 자동 발급 (10종)
                     <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-md">
                       A4 법적 규격 & DB 자동 기입
                     </span>
                   </h2>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    호차를 선택하면 차량번호, 기사님, 동승보호자, 정류장 노선, 그리고 <strong>해당 호차 배정 실제 원생 명부·알레르기 정보</strong>가 법정 양식에 자동으로 채워집니다.
+                    호차 및 원아를 선택하면 기사명, 차량번호, 동승교사, 원아 인적사항 및 배정 정보가 법정 양식에 자동으로 채워집니다.
                   </p>
                 </div>
               </div>
@@ -802,10 +845,177 @@ export default function DocumentManager({
               </div>
             )}
 
-            {/* Template Action Cards (6 Legal & Operational Forms) */}
-            <div className="space-y-4">
-              <div className="text-xs font-extrabold text-slate-600 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+            {/* SECTION 1: 필수 동의서 및 회계 서식 */}
+            <div className="space-y-3">
+              <div className="text-xs font-extrabold text-slate-700 flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-violet-600"></span>
+                <span>법정 의무 동의서 및 회계 증빙 서식 (4종)</span>
+                <span className="text-[10px] font-bold text-violet-700 bg-violet-50 px-2 py-0.5 rounded-md border border-violet-200">
+                  위치정보보호법·개인정보보호법 준수
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 1. 기사 위치정보 동의서 */}
+                <button
+                  onClick={() => handleDownloadTemplate('consent-driver-location')}
+                  className="flex items-center justify-between p-5 bg-violet-50/40 hover:bg-violet-50/80 border border-violet-200/80 hover:border-violet-400 rounded-2xl transition-all text-left shadow-xs group"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-extrabold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-md">법정필수</span>
+                      <span className="text-xs font-bold text-slate-800 group-hover:text-violet-700">
+                        운전자 위치정보 수집·이용 동의서
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      {activeBus ? `[${activeBus.name}] 기사 (${activeBus.driverName || '기사명'}) 및 차량번호 자동 연동` : '위치정보보호법 제15조 준수 기사용 실시간 관제 동의서'}
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-violet-700 bg-white group-hover:bg-violet-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-violet-200 transition-colors shrink-0 shadow-2xs">
+                    인쇄 / PDF
+                  </span>
+                </button>
+
+                {/* 2. 개인정보 동의서 (원생·학부모용) */}
+                <button
+                  onClick={() => handleDownloadTemplate('consent-privacy-student')}
+                  className="flex items-center justify-between p-5 bg-violet-50/40 hover:bg-violet-50/80 border border-violet-200/80 hover:border-violet-400 rounded-2xl transition-all text-left shadow-xs group"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-extrabold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-md">개인정보보호법</span>
+                      <span className="text-xs font-bold text-slate-800 group-hover:text-violet-700">
+                        개인정보 수집·이용 동의서 (원생·학부모용)
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      {activeStudent ? `[${activeStudent.name}] 학생 및 보호자 인적사항 자동 반영` : '등·하원 알림 및 승하차 관제를 위한 학부모 동의서'}
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-violet-700 bg-white group-hover:bg-violet-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-violet-200 transition-colors shrink-0 shadow-2xs">
+                    인쇄 / PDF
+                  </span>
+                </button>
+
+                {/* 3. 종사자 개인정보 동의서 */}
+                <button
+                  onClick={() => handleDownloadTemplate('consent-privacy-staff')}
+                  className="flex items-center justify-between p-5 bg-violet-50/40 hover:bg-violet-50/80 border border-violet-200/80 hover:border-violet-400 rounded-2xl transition-all text-left shadow-xs group"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-extrabold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-md">종사자필수</span>
+                      <span className="text-xs font-bold text-slate-800 group-hover:text-violet-700">
+                        통학차량 종사자 개인정보 동의서 (기사·교사용)
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      {activeBus ? `[${activeBus.name}] 기사(${activeBus.driverName || '미지정'}) 및 동승교사 정보 반영` : '운전자·동승교사 자격검증 및 범죄경력조회 동의 양식'}
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-violet-700 bg-white group-hover:bg-violet-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-violet-200 transition-colors shrink-0 shadow-2xs">
+                    인쇄 / PDF
+                  </span>
+                </button>
+
+                {/* 4. 회계문서 (통학차량 정산서) */}
+                <button
+                  onClick={() => handleDownloadTemplate('accounting-expense-report')}
+                  className="flex items-center justify-between p-5 bg-emerald-50/40 hover:bg-emerald-50/80 border border-emerald-200/80 hover:border-emerald-400 rounded-2xl transition-all text-left shadow-xs group"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-extrabold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-md">회계·지출</span>
+                      <span className="text-xs font-bold text-slate-800 group-hover:text-emerald-700">
+                        통학차량 운영비 및 유류비 정산서
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      {activeBus ? `[${activeBus.name}] ${activeBus.plateNumber || ''} 유류대·정비비·용역 결재서식` : '통학버스 유류비/정비비/통행료 지출 증빙 결재 서식'}
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-emerald-700 bg-white group-hover:bg-emerald-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-emerald-200 transition-colors shrink-0 shadow-2xs">
+                    인쇄 / PDF
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* SECTION 2: 원아별 학부모 제출 법정 동의서 서식 */}
+            <div className="space-y-3 pt-4 border-t border-slate-100">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-xs font-extrabold text-slate-700 flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-600"></span>
+                  <span>원아별 통학차량 이용 및 귀가 동의서 (2종)</span>
+                </div>
+
+                {availableStudents.length > 0 && (
+                  <div className="flex items-center gap-2 bg-indigo-50/70 px-3 py-1.5 rounded-xl border border-indigo-200 text-xs">
+                    <span className="text-indigo-900 font-bold">
+                      동의서 대상 원생 선택:
+                    </span>
+                    <select
+                      value={selectedStudentId}
+                      onChange={(e) => setSelectedStudentId(e.target.value)}
+                      className="bg-white border border-indigo-200 rounded-lg px-2.5 py-1 font-bold text-slate-800 text-xs outline-none cursor-pointer"
+                    >
+                      {availableStudents.map((st) => (
+                        <option key={st.id} value={st.id}>
+                          {st.name} ({st.className || st.raw?.['반명'] || st.raw?.['연령'] || '원생'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <button
+                  onClick={() => handleDownloadTemplate('consent')}
+                  className="flex items-center justify-between p-5 bg-slate-50/60 hover:bg-indigo-50/70 border border-slate-200 hover:border-indigo-400 rounded-2xl transition-all text-left shadow-xs group"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-extrabold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md">입소필수</span>
+                      <span className="text-xs font-bold text-slate-800 group-hover:text-indigo-600">
+                        어린이 통학차량 이용 신청 및 안전동의서
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      {activeStudent ? `[${activeStudent.name}] 원아 인적사항·탑승지 자동 연동` : '통학차량 탑승 안전수칙 보호자 서약서'}
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-indigo-600 bg-white group-hover:bg-indigo-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-indigo-200 transition-colors shrink-0 shadow-2xs">
+                    인쇄 / PDF
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => handleDownloadTemplate('handover')}
+                  className="flex items-center justify-between p-5 bg-slate-50/60 hover:bg-indigo-50/70 border border-slate-200 hover:border-indigo-400 rounded-2xl transition-all text-left shadow-xs group"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-extrabold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md">감사필수</span>
+                      <span className="text-xs font-bold text-slate-800 group-hover:text-indigo-600">
+                        영유아 귀가 동의서 및 응급처치 동의서
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1">
+                      {activeStudent ? `[${activeStudent.name}] 지정 인계 보호자(대리인) 및 응급이송 동의서` : '하원 시 대리인 인계 확인 및 119 응급처치 위임 동의서'}
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-indigo-600 bg-white group-hover:bg-indigo-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-indigo-200 transition-colors shrink-0 shadow-2xs">
+                    인쇄 / PDF
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* SECTION 3: 통학차량 비치 및 일일 점검 법정 일지 */}
+            <div className="space-y-3 pt-4 border-t border-slate-100">
+              <div className="text-xs font-extrabold text-slate-700 flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
                 <span>통학차량 비치 및 일일 점검 법정 서식 (4종)</span>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -885,77 +1095,6 @@ export default function DocumentManager({
                     </div>
                   </div>
                   <span className="text-xs font-bold text-emerald-700 bg-white group-hover:bg-emerald-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-emerald-200 transition-colors shrink-0 shadow-2xs">
-                    인쇄 / PDF
-                  </span>
-                </button>
-              </div>
-            </div>
-
-            {/* Individual Student Consent & Handover Forms (2 Legal Forms) */}
-            <div className="space-y-3 pt-4 border-t border-slate-100">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="text-xs font-extrabold text-slate-600 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
-                  <span>원아별 학부모 제출 법정 동의서 서식 (2종)</span>
-                </div>
-
-                {availableStudents.length > 0 && (
-                  <div className="flex items-center gap-2 bg-indigo-50/70 px-3 py-1.5 rounded-xl border border-indigo-200 text-xs">
-                    <span className="text-indigo-900 font-bold">
-                      동의서 대상 원생 선택:
-                    </span>
-                    <select
-                      value={selectedStudentId}
-                      onChange={(e) => setSelectedStudentId(e.target.value)}
-                      className="bg-white border border-indigo-200 rounded-lg px-2.5 py-1 font-bold text-slate-800 text-xs outline-none cursor-pointer"
-                    >
-                      {availableStudents.map((st) => (
-                        <option key={st.id} value={st.id}>
-                          {st.name} ({st.className || st.raw?.['반명'] || st.raw?.['연령'] || '원생'})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <button
-                  onClick={() => handleDownloadTemplate('consent')}
-                  className="flex items-center justify-between p-5 bg-slate-50/60 hover:bg-indigo-50/70 border border-slate-200 hover:border-indigo-400 rounded-2xl transition-all text-left shadow-xs group"
-                >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-extrabold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md">입소필수</span>
-                      <span className="text-xs font-bold text-slate-800 group-hover:text-indigo-600">
-                        어린이 통학차량 이용 신청 및 안전동의서
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 mt-1">
-                      {activeStudent ? `[${activeStudent.name}] 원아 인적사항·탑승지 자동 연동` : '통학차량 탑승 안전수칙 보호자 서약서'}
-                    </div>
-                  </div>
-                  <span className="text-xs font-bold text-indigo-600 bg-white group-hover:bg-indigo-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-indigo-200 transition-colors shrink-0 shadow-2xs">
-                    인쇄 / PDF
-                  </span>
-                </button>
-
-                <button
-                  onClick={() => handleDownloadTemplate('handover')}
-                  className="flex items-center justify-between p-5 bg-slate-50/60 hover:bg-indigo-50/70 border border-slate-200 hover:border-indigo-400 rounded-2xl transition-all text-left shadow-xs group"
-                >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-extrabold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md">감사필수</span>
-                      <span className="text-xs font-bold text-slate-800 group-hover:text-indigo-600">
-                        영유아 귀가 동의서 및 응급처치 동의서
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 mt-1">
-                      {activeStudent ? `[${activeStudent.name}] 지정 인계 보호자(대리인) 및 응급이송 동의서` : '하원 시 대리인 인계 확인 및 119 응급처치 위임 동의서'}
-                    </div>
-                  </div>
-                  <span className="text-xs font-bold text-indigo-600 bg-white group-hover:bg-indigo-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-indigo-200 transition-colors shrink-0 shadow-2xs">
                     인쇄 / PDF
                   </span>
                 </button>
@@ -1214,11 +1353,14 @@ export default function DocumentManager({
                   onChange={(e) => setUploadCategory(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                 >
-                  <option value="safety">안전·점검 (체크리스트, 안전점검표 등)</option>
-                  <option value="vehicle">차량·보험 (차량등록증, 자동차종합보험 등)</option>
-                  <option value="companion">동승보호자 (탑승일지, 보호자명부 등)</option>
-                  <option value="consent">원생·동의서 (차량이용신청서, 응급처치동의서 등)</option>
-                  <option value="etc">기타 서류 (공문, 증명서 등)</option>
+                  <option value="registry">학원·설립등록 (학원설립운영등록증, 사업자등록증, 강사명부 등)</option>
+                  <option value="shuttle_consent">차량이용동의서 (통학차량 이용 신청 및 안전수칙 동의서 스캔본)</option>
+                  <option value="privacy">개인정보동의서 (원생·학부모 및 교직원 개인정보 수집·이용 동의서)</option>
+                  <option value="driver_location">기사 위치정보 (기사 위치정보 수집·이용 동의서 서명 스캔본)</option>
+                  <option value="accounting">회계·지출문서 (운영비/유류비 정산서, 영수증, 지출결의서)</option>
+                  <option value="report">신고·보험필증 (어린이통학버스 신고필증, 자동차종합보험, 정기검사표)</option>
+                  <option value="safety">안전점검·운행일지 (일일 안전점검표, 동승일지, 노선표)</option>
+                  <option value="etc">기타 서류 (공문, 위촉장, 일반 증명서 등)</option>
                 </select>
               </div>
 
@@ -1453,6 +1595,186 @@ export default function DocumentManager({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Staff Notifications Modal (기사 및 교사 앱 알림 발송 현황 모달) */}
+      {showStaffNotiModal && (
+        <div
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-[2250] p-4"
+          onClick={() => setShowStaffNotiModal(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[85vh] flex flex-col border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="px-6 py-4.5 border-b border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                  🔔
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-800">
+                    기사 및 동승교사 모바일 앱 만료 알림 발송 현황
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    2달 전 주의(주 1회) · 1달 전 만료임박 · 2주 전 매일 알림 규칙에 따라 앱으로 자동 전송되는 큐입니다.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowStaffNotiModal(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Filter Tabs */}
+            <div className="px-6 py-3 border-b border-slate-100 flex items-center justify-between gap-3 bg-white">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setStaffNotiRoleFilter('all')}
+                  className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all ${
+                    staffNotiRoleFilter === 'all'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  전체 알림 ({staffNotiSummary.allCount}건)
+                </button>
+                <button
+                  onClick={() => setStaffNotiRoleFilter('driver')}
+                  className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 ${
+                    staffNotiRoleFilter === 'driver'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                  }`}
+                >
+                  기사 앱 대상 ({staffNotiSummary.driverNotifications.length}건)
+                </button>
+                <button
+                  onClick={() => setStaffNotiRoleFilter('teacher')}
+                  className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 ${
+                    staffNotiRoleFilter === 'teacher'
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
+                  }`}
+                >
+                  교사 앱 대상 ({staffNotiSummary.teacherNotifications.length}건)
+                </button>
+              </div>
+
+              <div className="text-[11px] text-slate-400 font-medium hidden sm:block">
+                실시간 기사·교사 앱 소켓/스토리지 연동 중
+              </div>
+            </div>
+
+            {/* Notifications List Body */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-3 bg-slate-50/50">
+              {(() => {
+                const list =
+                  staffNotiRoleFilter === 'driver'
+                    ? staffNotiSummary.driverNotifications
+                    : staffNotiRoleFilter === 'teacher'
+                    ? staffNotiSummary.teacherNotifications
+                    : [...staffNotiSummary.driverNotifications, ...staffNotiSummary.teacherNotifications];
+
+                if (list.length === 0) {
+                  return (
+                    <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 p-8">
+                      <div className="w-12 h-12 mx-auto rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-xl mb-2">
+                        ✓
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-700">현재 발송 대기 중인 만료 알림이 없습니다</h4>
+                      <p className="text-xs text-slate-400 mt-1">
+                        모든 법정 서류 및 안전교육이 정상(2달 초과 잔여) 상태이거나 서류 만료일이 아직 미도래 상태입니다.
+                      </p>
+                    </div>
+                  );
+                }
+
+                return list.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-4 rounded-xl border bg-white shadow-2xs space-y-2 border-slate-200 hover:border-indigo-300 transition-all"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`text-[10px] font-black px-2 py-0.5 rounded-md ${
+                            item.targetRole === 'driver'
+                              ? 'bg-blue-100 text-blue-700'
+                              : 'bg-purple-100 text-purple-700'
+                          }`}
+                        >
+                          {item.targetRole === 'driver' ? '기사용' : '교사용'}: {item.targetName}
+                        </span>
+                        <span className="text-xs font-extrabold text-slate-800">
+                          {item.busName} ({item.plateNumber})
+                        </span>
+                        <span className="text-xs font-bold text-slate-500">
+                          · {item.itemLabel}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border ${
+                            item.frequency === 'daily'
+                              ? 'bg-rose-50 text-rose-700 border-rose-200'
+                              : 'bg-amber-50 text-amber-700 border-amber-200'
+                          }`}
+                        >
+                          {item.frequency === 'daily' ? '매일 발송 (2주 이내)' : '주 1회 발송 (2달~2주)'}
+                        </span>
+                        <span
+                          className={`text-[10px] font-black px-2 py-0.5 rounded-md ${
+                            item.daysRemaining < 0
+                              ? 'bg-red-600 text-white'
+                              : item.daysRemaining <= 14
+                              ? 'bg-rose-600 text-white'
+                              : item.daysRemaining <= 30
+                              ? 'bg-amber-500 text-white'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {item.daysRemaining < 0
+                            ? `만료 (+${Math.abs(item.daysRemaining)}일)`
+                            : item.daysRemaining === 0
+                            ? 'D-Day 오늘 만료'
+                            : `D-${item.daysRemaining}`}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-slate-700 bg-slate-50 p-2.5 rounded-lg border border-slate-100 font-medium leading-relaxed">
+                      💬 <span className="font-semibold">{item.message}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1">
+                      <span>만료 예정일: <strong>{item.expiryDate}</strong></span>
+                      <span>알림 상태: {item.urgencyLabel}</span>
+                    </div>
+                  </div>
+                ));
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs">
+              <span className="text-slate-500 font-medium">
+                * 만료일이 갱신(수정)되면 기사 및 교사 앱 알림도 실시간으로 즉시 동기화됩니다.
+              </span>
+              <button
+                onClick={() => setShowStaffNotiModal(false)}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-xs transition-colors"
+              >
+                확인 완료
+              </button>
+            </div>
           </div>
         </div>
       )}

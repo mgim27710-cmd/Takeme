@@ -204,6 +204,10 @@ class _TeacherMessageViewState extends State<TeacherMessageView> with SingleTick
               : '';
           final student = msg['student'] as Map<String, dynamic>?;
           final isUrgent = text.contains('긴급') || text.contains('사고') || text.contains('결석');
+          final isPersonal = msg['isPersonal'] == true ||
+              msg['type'] == 'PERSONAL' ||
+              text.contains('개인') ||
+              text.contains('1:1');
 
           return Container(
             padding: const EdgeInsets.all(14),
@@ -211,7 +215,12 @@ class _TeacherMessageViewState extends State<TeacherMessageView> with SingleTick
               color: Colors.white,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: isUrgent ? const Color(0xFFFECACA) : const Color(0xFFE2E8F0),
+                color: isUrgent
+                    ? const Color(0xFFFECACA)
+                    : isPersonal
+                        ? const Color(0xFFDDD6FE)
+                        : const Color(0xFFE2E8F0),
+                width: isPersonal ? 1.5 : 1.0,
               ),
               boxShadow: [
                 BoxShadow(
@@ -232,15 +241,35 @@ class _TeacherMessageViewState extends State<TeacherMessageView> with SingleTick
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: isUrgent ? const Color(0xFFFEE2E2) : const Color(0xFFEFF6FF),
+                            color: isUrgent
+                                ? const Color(0xFFFEE2E2)
+                                : isPersonal
+                                    ? const Color(0xFFEDE9FE)
+                                    : const Color(0xFFEFF6FF),
                             borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: isUrgent
+                                  ? const Color(0xFFFCA5A5)
+                                  : isPersonal
+                                      ? const Color(0xFFC4B5FD)
+                                      : const Color(0xFFBFDBFE),
+                              width: 0.5,
+                            ),
                           ),
                           child: Text(
-                            isUrgent ? '긴급 알림' : (student != null ? '학부모 전달' : '관리자 공지'),
+                            isUrgent
+                                ? '긴급 알림'
+                                : isPersonal
+                                    ? '1:1 개인 메세지'
+                                    : (student != null ? '학부모 전달' : '관리자 공지'),
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
-                              color: isUrgent ? const Color(0xFFDC2626) : const Color(0xFF2563EB),
+                              color: isUrgent
+                                  ? const Color(0xFFDC2626)
+                                  : isPersonal
+                                      ? const Color(0xFF6D28D9)
+                                      : const Color(0xFF2563EB),
                             ),
                           ),
                         ),
@@ -249,6 +278,12 @@ class _TeacherMessageViewState extends State<TeacherMessageView> with SingleTick
                           Text(
                             '원아: ${student['name']}',
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF334155)),
+                          ),
+                        ] else if (isPersonal && msg['receiverUser'] != null) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            '수신: ${msg['receiverUser']?['name'] ?? '선생님'}',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF6D28D9)),
                           ),
                         ],
                       ],

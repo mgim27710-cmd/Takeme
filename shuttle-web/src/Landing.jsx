@@ -11,7 +11,9 @@ export default function Landing() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [name, setName] = useState('');
   const [role, setRole] = useState('ACADEMY_ADMIN'); // 'ACADEMY_ADMIN' | 'TEACHER'
-  const [educationLevel, setEducationLevel] = useState('유치원'); // '유치원' | '초등부' | '중,고등부'
+  const [educationLevel, setEducationLevel] = useState(() => {
+    return localStorage.getItem('takeme_selected_education_level') || '유치원';
+  }); // '유치원' | '초등부' | '중,고등부'
   const [otpToken, setOtpToken] = useState('');
   const [qrCodeUrl, setQrCodeUrl] = useState('');
   const [userId, setUserId] = useState(null);
@@ -366,7 +368,13 @@ export default function Landing() {
           ...data.user,
           accessToken: data.accessToken || null
         }));
-        const targetLevel = data.user?.educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
+        const isSuperAdmin = data.user?.role === 'SUPER_ADMIN';
+        const targetLevel = isSuperAdmin
+          ? (educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원')
+          : (data.user?.educationLevel || educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원');
+        
+        localStorage.setItem('takeme_selected_education_level', targetLevel);
+
         if (targetLevel === '초등부') {
           navigate('/dashboard/elementary');
         } else if (targetLevel === '중,고등부') {
@@ -388,6 +396,35 @@ export default function Landing() {
 
         {mode === 'login' && (
           <form onSubmit={handleLogin} className="space-y-4">
+            {/* Education Level Selector: 유치원 / 초등부 / 중,고등부 */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1.5">교육 부문 선택</label>
+              <div className="grid grid-cols-3 gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                {[
+                  { id: 'kindergarten', label: '유치원', icon: '🏫' },
+                  { id: 'elementary', label: '초등부', icon: '🎒' },
+                  { id: 'middle_high', label: '중,고등부', icon: '🎓' },
+                ].map(level => (
+                  <button
+                    key={level.id}
+                    type="button"
+                    onClick={() => {
+                      setEducationLevel(level.label);
+                      localStorage.setItem('takeme_selected_education_level', level.label);
+                    }}
+                    className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                      educationLevel === level.label
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                    }`}
+                  >
+                    <span>{level.icon}</span>
+                    <span>{level.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">이메일</label>
               <input type="email" placeholder="user@example.com" value={email} onChange={e=>setEmail(e.target.value)} className="form-input" required />
