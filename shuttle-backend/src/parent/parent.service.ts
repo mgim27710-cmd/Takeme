@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { ScheduleOverride, OverrideType } from '../entities/schedule-override.entity';
 import { ApprovalService } from '../approval/approval.service';
@@ -863,9 +863,19 @@ export class ParentService {
 
     const posts = await qb.getMany();
 
+    const authorUserIds = posts.map(p => p.authorUserId).filter(Boolean);
+    const roleMap = new Map<number, string>();
+    if (authorUserIds.length > 0) {
+      const authorUsers = await this.userRepository.find({ where: { id: In(authorUserIds) } });
+      for (const u of authorUsers) {
+        roleMap.set(u.id, u.role);
+      }
+    }
+
     return Promise.all(posts.map(async p => {
       const resolvedImageUrl = await resolveMediaRef(p.imageUrl);
       const resolvedImages = await resolveMediaRefs(p.images);
+      const effectiveRole = (p.authorUserId && roleMap.get(p.authorUserId)) || p.authorRole;
       return {
         id: p.id,
         title: p.title,
@@ -875,7 +885,7 @@ export class ParentService {
         createdAt: p.createdAt,
         updatedAt: p.updatedAt,
         authorName: p.authorName,
-        authorRole: p.authorRole,
+        authorRole: effectiveRole,
         targetClass: p.targetClass,
         className: p.className || p.targetClass,
         likeCount: p.likeCount || 0,

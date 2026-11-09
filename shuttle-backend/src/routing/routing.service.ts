@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Between, In } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
@@ -18,7 +18,6 @@ import { PickupPoint } from '../entities/pickup-point.entity';
 import { BoardPost } from '../entities/board-post.entity';
 import { BoardComment } from '../entities/board-comment.entity';
 import { AuditLog } from '../entities/audit-log.entity';
-import { Between } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 import {
   S3_REF_PREFIX,
@@ -2152,6 +2151,19 @@ export class RoutingService {
     }
 
     const posts = await qb.getMany();
+
+    // 작성자 계정(authorUserId)의 현재 역할로 authorRole 표출
+    const authorUserIds = posts.map(p => p.authorUserId).filter(Boolean);
+    if (authorUserIds.length > 0) {
+      const authorUsers = await this.userRepository.find({ where: { id: In(authorUserIds) } });
+      const roleMap = new Map<number, string>(authorUsers.map(u => [u.id, u.role]));
+      for (const p of posts) {
+        if (p.authorUserId && roleMap.has(p.authorUserId)) {
+          p.authorRole = roleMap.get(p.authorUserId)!;
+        }
+      }
+    }
+
     return Promise.all(posts.map(p => this.hydratePostMedia(p)));
   }
 
@@ -2172,6 +2184,12 @@ export class RoutingService {
       relations: { comments: true }
     });
     if (!post) throw new BadRequestException('게시글을 찾을 수 없습니다.');
+    if (post.authorUserId) {
+      const author = await this.userRepository.findOne({ where: { id: post.authorUserId } });
+      if (author?.role) {
+        post.authorRole = author.role;
+      }
+    }
     return this.hydratePostMedia(post);
   }
 
