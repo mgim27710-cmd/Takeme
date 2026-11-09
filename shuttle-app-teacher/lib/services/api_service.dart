@@ -890,4 +890,15 @@ class ApiService {
       return 0;
     }
   }
+
+  Future<Map<String, dynamic>?> getRoutePath() async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/teacher/route-path');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
 }

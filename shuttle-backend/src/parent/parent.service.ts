@@ -17,6 +17,7 @@ import { PickupPoint } from '../entities/pickup-point.entity';
 import { BoardPost } from '../entities/board-post.entity';
 import { getStudentClassName } from '../utils/school.util';
 import { resolveMediaRef, resolveMediaRefs } from '../utils/s3.util';
+import { TeacherService } from '../teacher/teacher.service';
 
 @Injectable()
 export class ParentService {
@@ -422,6 +423,8 @@ export class ParentService {
     }
 
     const myChildStop = stops.find(s => s.isMyChild) || null;
+    // 개인정보 보호: 학부모에게는 내 아이 정류장만 전달 (다른 아이의 정류장 위치/이름 노출 차단)
+    const parentVisibleStops = stops.filter(s => s.isMyChild);
 
     return {
       vehicleId: student.assignedVehicle.id,
@@ -430,11 +433,33 @@ export class ParentService {
         longitude: parseFloat(academy.longitude as any),
         name: academy.name
       } : null,
-      stops,
+      stops: parentVisibleStops,
       routePoints,
       academyPickupPoints,
       myChildStop
     };
+  }
+
+  async getRoutePath(email: string) {
+    let student = await this.studentRepository.createQueryBuilder('student')
+      .leftJoinAndSelect('student.parentUser', 'parentUser')
+      .leftJoinAndSelect('student.studentUser', 'studentUser')
+      .leftJoinAndSelect('student.assignedVehicle', 'vehicle')
+      .where('parentUser.email = :email OR studentUser.email = :email', { email })
+      .getOne();
+
+    if (!student) {
+      student = await this.studentRepository.findOne({
+        where: { raw: { email } },
+        relations: { assignedVehicle: true }
+      });
+    }
+
+    if (!student?.assignedVehicle) {
+      return { path: [], progressIndex: 0 };
+    }
+
+    return TeacherService.getRoutePathForVehicle(student.assignedVehicle.id);
   }
 
   async createMessage(email: string, targetRoles: string[], message: string) {

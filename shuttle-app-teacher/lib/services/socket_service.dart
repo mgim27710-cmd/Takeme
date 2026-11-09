@@ -87,6 +87,17 @@ class SocketService {
     });
   }
 
+  void onRoutePathUpdated(Function(Map<String, dynamic> data) callback) {
+    _socket?.off('routePathUpdated');
+    _socket?.on('routePathUpdated', (data) {
+      if (data is Map<String, dynamic>) {
+        callback(data);
+      } else if (data is Map) {
+        callback(Map<String, dynamic>.from(data));
+      }
+    });
+  }
+
   void joinChatRoom(int roomId) {
     _socket?.emit('joinChatRoom', {'roomId': roomId});
   }

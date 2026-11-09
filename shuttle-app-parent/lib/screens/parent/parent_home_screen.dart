@@ -32,6 +32,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
 
   double? _busLat;
   double? _busLng;
+  List<dynamic>? _actualRoadPath;
+  int _progressIndex = 0;
   bool _isLoading = true;
   bool _isScanning = false;
 
@@ -87,12 +89,17 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     final child = await ApiService().getMyChild(user.email);
     final route = await ApiService().getParentRoute(user.email);
     final schedule = await ApiService().getTodaySchedule(user.email);
+    final routePathData = await ApiService().getRoutePath();
 
     if (mounted) {
       setState(() {
         _childInfo = child;
         _routeData = route;
         _todaySchedule = schedule;
+        if (routePathData != null) {
+          _actualRoadPath = routePathData['path'];
+          _progressIndex = routePathData['progressIndex'] ?? 0;
+        }
         _isLoading = false;
         if (child != null) {
           _allergyController.text = child.allergies;
@@ -106,6 +113,14 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
             setState(() {
               _busLat = double.tryParse(data['lat'].toString());
               _busLng = double.tryParse(data['lng'].toString());
+            });
+          }
+        });
+        SocketService().onRoutePathUpdated((data) {
+          if (mounted) {
+            setState(() {
+              _actualRoadPath = data['path'];
+              _progressIndex = data['progressIndex'] ?? 0;
             });
           }
         });
@@ -726,6 +741,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                           child: KakaoMapView(
                             stops: _routeData?.stops ?? [],
                             routePoints: _routeData?.routePoints ?? [],
+                            actualRoadPath: _actualRoadPath,
+                            progressIndex: _progressIndex,
                             busLat: _busLat,
                             busLng: _busLng,
                             academyLat: _routeData?.academyLat,

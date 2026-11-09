@@ -40,6 +40,8 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
 
   double? _busLat;
   double? _busLng;
+  List<dynamic>? _actualRoadPath;
+  int _progressIndex = 0;
 
   final ScrollController _scrollController = ScrollController();
   final FlutterTts _flutterTts = FlutterTts();
@@ -101,6 +103,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     final vehicle = await ApiService().getTeacherVehicle(user.email);
     final students = await ApiService().getTeacherStudents(user.email);
     final route = await ApiService().getTeacherRoute(user.email);
+    final routePathData = await ApiService().getRoutePath();
 
     // Fetch parentPhone and escort status
     try {
@@ -135,6 +138,10 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
       setState(() {
         _students = students;
         _routeData = route;
+        if (routePathData != null) {
+          _actualRoadPath = routePathData['path'];
+          _progressIndex = routePathData['progressIndex'] ?? 0;
+        }
         _isLoading = false;
 
         final runs = _students.map((s) => s.runNumber).toSet().toList()..sort();
@@ -159,6 +166,14 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
               _isDriverOperating = true;
             });
           }
+        });
+
+        SocketService().onRoutePathUpdated((data) {
+          if (!mounted) return;
+          setState(() {
+            _actualRoadPath = data['path'];
+            _progressIndex = data['progressIndex'] ?? 0;
+          });
         });
       }
     }
@@ -757,6 +772,8 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                       child: KakaoMapView(
                         stops: _routeData?.stops ?? [],
                         routePoints: _routeData?.routePoints ?? [],
+                        actualRoadPath: _actualRoadPath,
+                        progressIndex: _progressIndex,
                         busLat: _busLat,
                         busLng: _busLng,
                         academyLat: _routeData?.academyLat,

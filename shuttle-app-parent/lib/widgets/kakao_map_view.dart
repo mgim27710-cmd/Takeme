@@ -14,6 +14,8 @@ class KakaoMapView extends StatefulWidget {
   final String? academyName;
   final String? myChildName;
   final String? myChildAddress;
+  final List<dynamic>? actualRoadPath;
+  final int progressIndex;
   final bool isFullScreen;
   final VoidCallback? onToggleFullscreen;
 
@@ -28,6 +30,8 @@ class KakaoMapView extends StatefulWidget {
     this.academyName,
     this.myChildName,
     this.myChildAddress,
+    this.actualRoadPath,
+    this.progressIndex = 0,
     this.isFullScreen = false,
     this.onToggleFullscreen,
   });
@@ -72,12 +76,28 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           oldWidget.academyLng != widget.academyLng) {
         _updateMapData();
       }
+      if (oldWidget.actualRoadPath != widget.actualRoadPath ||
+          oldWidget.progressIndex != widget.progressIndex) {
+        _updateRoutePath();
+      }
     }
   }
 
   void _updateBusLocation() {
     if (widget.busLat != null && widget.busLng != null) {
       final js = 'if (window.updateBus) { window.updateBus(${widget.busLat}, ${widget.busLng}); }';
+      _controller?.runJavaScript(js);
+    }
+  }
+
+  void _updateRoutePath() {
+    final roadPath = widget.actualRoadPath;
+    if (roadPath != null && roadPath.isNotEmpty) {
+      final roadJson = jsonEncode(roadPath.map((p) => [
+        p['lat'] ?? p['latitude'],
+        p['lng'] ?? p['longitude'],
+      ]).where((p) => p[0] != null && p[1] != null).toList());
+      final js = 'if (window.updateRoutePath) { window.updateRoutePath($roadJson, ${widget.progressIndex}); }';
       _controller?.runJavaScript(js);
     }
   }
@@ -96,6 +116,11 @@ class _KakaoMapViewState extends State<KakaoMapView> {
       p['longitude'] ?? p['lng'],
     ]).where((p) => p[0] != null && p[1] != null).toList());
 
+    final roadPathJson = jsonEncode((widget.actualRoadPath ?? []).map((p) => [
+      p['lat'] ?? p['latitude'],
+      p['lng'] ?? p['longitude'],
+    ]).where((p) => p[0] != null && p[1] != null).toList());
+
     final js = '''
       if (window.initData) {
         window.initData(
@@ -105,7 +130,9 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           ${widget.academyLng ?? 'null'}, 
           "${widget.academyName ?? ''}", 
           ${widget.busLat ?? 'null'}, 
-          ${widget.busLng ?? 'null'}
+          ${widget.busLng ?? 'null'},
+          $roadPathJson,
+          ${widget.progressIndex}
         );
       }
     ''';
@@ -139,6 +166,8 @@ class _KakaoMapViewState extends State<KakaoMapView> {
         builder: (_) => KakaoMapFullscreenPage(
           stops: widget.stops,
           routePoints: widget.routePoints,
+          actualRoadPath: widget.actualRoadPath,
+          progressIndex: widget.progressIndex,
           busLat: widget.busLat,
           busLng: widget.busLng,
           academyLat: widget.academyLat,
@@ -295,7 +324,20 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           }
         };
 
-        window.initData = function(stops, points, acLat, acLng, acName, bLat, bLng) {
+        window.updateRoutePath = function(roadPath, progIdx) {
+          if (polyline) {
+            map.removeLayer(polyline);
+            polyline = null;
+          }
+          if (roadPath && roadPath.length) {
+            var active = roadPath.slice(progIdx || 0);
+            if (active.length) {
+              polyline = L.polyline(active, { color: '#2563eb', weight: 5, opacity: 0.85 }).addTo(map);
+            }
+          }
+        };
+
+        window.initData = function(stops, points, acLat, acLng, acName, bLat, bLng, roadPath, progIdx) {
           var pts = [];
           if (acLat && acLng) {
             var acIcon = L.divIcon({
@@ -311,8 +353,9 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           if (stops && stops.length) {
             stops.forEach(function(s, idx) {
               if (s.lat && s.lng) {
-                pts.push([s.lat, s.lng]);
+                // 개인정보 보호: 학부모 지도에는 우리 아이 정류장만 표시
                 if (s.isMyChild) {
+                  pts.push([s.lat, s.lng]);
                   myChildLatLng = [s.lat, s.lng];
                   var myIcon = L.divIcon({
                     className: '',
@@ -324,25 +367,16 @@ class _KakaoMapViewState extends State<KakaoMapView> {
                     .bindPopup('<b>⭐ 우리 아이 탑승지</b><br/>' + (s.address || s.name))
                     .addTo(map);
                   marker.openPopup();
-                } else {
-                  var icon = L.divIcon({
-                    className: '',
-                    html: '<div class="stop-marker">' + (idx + 1) + '</div>',
-                    iconSize: [26, 26],
-                    iconAnchor: [13, 13]
-                  });
-                  L.marker([s.lat, s.lng], { icon: icon })
-                    .bindPopup('<b>' + (idx + 1) + '번 경유지</b><br/>' + (s.address || s.name))
-                    .addTo(map);
                 }
               }
             });
           }
 
-          if (points && points.length) {
+          var activeRoute = (roadPath && roadPath.length) ? roadPath.slice(progIdx || 0) : (points || []);
+          if (activeRoute && activeRoute.length) {
             if (polyline) map.removeLayer(polyline);
-            polyline = L.polyline(points, { color: '#2563eb', weight: 5, opacity: 0.85 }).addTo(map);
-            points.forEach(function(p) { pts.push(p); });
+            polyline = L.polyline(activeRoute, { color: '#2563eb', weight: 5, opacity: 0.85 }).addTo(map);
+            activeRoute.forEach(function(p) { pts.push(p); });
           }
 
           if (bLat && bLng) {
@@ -526,6 +560,8 @@ class _KakaoMapViewState extends State<KakaoMapView> {
 class KakaoMapFullscreenPage extends StatelessWidget {
   final List<RouteStop> stops;
   final List<Map<String, dynamic>> routePoints;
+  final List<dynamic>? actualRoadPath;
+  final int progressIndex;
   final double? busLat;
   final double? busLng;
   final double? academyLat;
@@ -538,6 +574,8 @@ class KakaoMapFullscreenPage extends StatelessWidget {
     super.key,
     required this.stops,
     required this.routePoints,
+    this.actualRoadPath,
+    this.progressIndex = 0,
     this.busLat,
     this.busLng,
     this.academyLat,
@@ -589,6 +627,8 @@ class KakaoMapFullscreenPage extends StatelessWidget {
             child: KakaoMapView(
               stops: stops,
               routePoints: routePoints,
+              actualRoadPath: actualRoadPath,
+              progressIndex: progressIndex,
               busLat: busLat,
               busLng: busLng,
               academyLat: academyLat,

@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Student } from '../entities/student.entity';
@@ -316,6 +316,64 @@ export class TeacherService {
       stops,
       routePoints
     };
+  }
+
+  // Vehicle route path storage (in-memory per vehicle)
+  public static vehicleRoutePaths = new Map<number, { path: { lat: number; lng: number }[]; progressIndex: number; updatedAt: Date }>();
+
+  static getRoutePathForVehicle(vehicleId: number) {
+    const data = TeacherService.vehicleRoutePaths.get(vehicleId);
+    return data ? { path: data.path, progressIndex: data.progressIndex } : { path: [], progressIndex: 0 };
+  }
+
+  async saveRoutePath(email: string, vehicleId?: number, path?: { lat: number; lng: number }[], progressIndex?: number) {
+    const user = await this.userRepository.findOne({ where: { email }, relations: { academy: true } });
+    if (!user) throw new BadRequestException('사용자를 찾을 수 없습니다.');
+
+    let vehicle: Vehicle | null = null;
+    if (vehicleId) {
+      vehicle = await this.vehicleRepository.findOne({ where: { id: vehicleId }, relations: { academy: true } });
+    } else {
+      vehicle = await this.findAssignedVehicle(user.id, { academy: true });
+    }
+    if (!vehicle) throw new BadRequestException('배정된 차량을 찾을 수 없습니다.');
+
+    if (user.academy?.id && vehicle.academy?.id && user.academy.id !== vehicle.academy.id) {
+      throw new ForbiddenException('소속 기관의 차량 경로만 등록할 수 있습니다.');
+    }
+
+    const rawPath = Array.isArray(path) ? path : [];
+    const validPath = rawPath
+      .filter(p => p && typeof p.lat === 'number' && typeof p.lng === 'number')
+      .map(p => ({ lat: Number(p.lat), lng: Number(p.lng) }));
+
+    const pIdx = typeof progressIndex === 'number' && progressIndex >= 0 ? progressIndex : 0;
+
+    TeacherService.vehicleRoutePaths.set(vehicle.id, {
+      path: validPath,
+      progressIndex: pIdx,
+      updatedAt: new Date(),
+    });
+
+    if (this.locationGateway?.server) {
+      this.locationGateway.server.to(`vehicle_${vehicle.id}`).emit('routePathUpdated', {
+        vehicleId: vehicle.id,
+        path: validPath,
+        progressIndex: pIdx,
+      });
+    }
+
+    return { success: true, vehicleId: vehicle.id, count: validPath.length, progressIndex: pIdx };
+  }
+
+  async getTeacherRoutePath(email: string) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('사용자를 찾을 수 없습니다.');
+
+    const vehicle = await this.findAssignedVehicle(user.id);
+    if (!vehicle) return { path: [], progressIndex: 0 };
+
+    return TeacherService.getRoutePathForVehicle(vehicle.id);
   }
 
   async getInbox(email: string) {

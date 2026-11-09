@@ -103,6 +103,12 @@ export class ParentController {
     return this.parentService.getRoute(email);
   }
 
+  @Get('route-path')
+  async getRoutePath(@AuthEmail() email: string) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.parentService.getRoutePath(email);
+  }
+
   @Post('message')
   async createMessage(
     @AuthEmail() email: string,

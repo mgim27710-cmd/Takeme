@@ -176,6 +176,9 @@ class DriverNavigator extends ChangeNotifier {
   DateTime _lastReroute = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastAutoRouteSync = DateTime.fromMillisecondsSinceEpoch(0);
 
+  int _lastSyncedProgress = -1;
+  DateTime _lastRoutePathSync = DateTime.fromMillisecondsSinceEpoch(0);
+
   // ── 안전 운전 보조 & 지도교사 출발 신호 ──
   int speedKmh = 0;
   int _prevSpeedKmh = 0;
@@ -408,6 +411,44 @@ class DriverNavigator extends ChangeNotifier {
       await _post('/teacher/driving-event', {'type': type, 'detail': detail});
     } catch (e) {
       debugPrint('[nav] logDrivingEvent failed: $e');
+    }
+  }
+
+  /// 실제 도로 경로와 진행률을 서버로 전송 (학부모·지도교사 지도 실시간 공유)
+  Future<void> _syncRoutePathToServer({bool force = false}) async {
+    final mayLeaveDevice = serverLive && !testMode;
+    if (!mayLeaveDevice || vehicleId == null) return;
+    final a = active;
+    if (a == null || a.path.isEmpty) return;
+
+    final now = DateTime.now();
+    if (!force && (_progress - _lastSyncedProgress).abs() < 5 && now.difference(_lastRoutePathSync).inSeconds < 10) {
+      return;
+    }
+
+    _lastSyncedProgress = _progress;
+    _lastRoutePathSync = now;
+
+    try {
+      final rawPath = a.path;
+      final step = math.max(1, (rawPath.length / 300).ceil());
+      final simplified = <Map<String, double>>[];
+      for (var i = 0; i < rawPath.length; i += step) {
+        simplified.add({'lat': rawPath[i].lat, 'lng': rawPath[i].lng});
+      }
+      if (rawPath.isNotEmpty && (simplified.isEmpty || simplified.last['lat'] != rawPath.last.lat)) {
+        simplified.add({'lat': rawPath.last.lat, 'lng': rawPath.last.lng});
+      }
+
+      final scaledProgress = (_progress / step).floor().clamp(0, simplified.length - 1);
+
+      await _post('/teacher/route-path', {
+        'vehicleId': vehicleId,
+        'path': simplified,
+        'progressIndex': scaledProgress,
+      });
+    } catch (e) {
+      debugPrint('[nav] syncRoutePathToServer error: $e');
     }
   }
 
@@ -950,6 +991,7 @@ class DriverNavigator extends ChangeNotifier {
     );
     map.updateRouteProgress(segmentIndex: 0, fraction: 0.0);
     _updateProgress();
+    _syncRoutePathToServer(force: true);
     if (driving && position != null) {
       map.moveMe(position!, heading: heading, follow: follow, navigating: true, speedKmh: speedKmh.toDouble());
     }
@@ -1000,6 +1042,7 @@ class DriverNavigator extends ChangeNotifier {
       }
       _onPosition(position!, acc: accuracy);
       _syncOverlay();
+    _syncRoutePathToServer();
       _speak('운행을 시작합니다. ${mode.title}로 안내합니다. 오늘도 안전 운행 부탁드립니다.');
     } catch (e) {
       actionError = e.toString();
@@ -1021,6 +1064,7 @@ class DriverNavigator extends ChangeNotifier {
     }
     _resetDriving();
     _syncOverlay();
+    _syncRoutePathToServer();
     busy = false;
     notifyListeners();
     _speak(testMode ? '테스트를 종료합니다.' : '차량 내부 확인이 완료되어 운행을 종료합니다. 수고하셨습니다.');
@@ -1333,6 +1377,7 @@ class DriverNavigator extends ChangeNotifier {
     }
 
     _syncOverlay();
+    _syncRoutePathToServer();
 
     final turn = nextTurn;
     if (turn == null) return;
@@ -1399,12 +1444,14 @@ class DriverNavigator extends ChangeNotifier {
     notifyListeners();
     if (active != null) {
       _syncOverlay();
+    _syncRoutePathToServer();
       _speak('테스트 경로를 시작합니다. 실제 운행이 아닙니다.');
       startSimulation();
     } else {
       testMode = false;
       _resetDriving();
       _syncOverlay();
+    _syncRoutePathToServer();
       _testStops.clear();
       _drawPreview();
       notifyListeners();
