@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import BoardViewer from './board/BoardViewer';
 import MessagePanel from './MessagePanel';
+import LogViewer from './LogViewer';
 import { API_BASE_URL } from './config';
 
 // Haversine Distance Helper
@@ -1241,6 +1242,20 @@ export default function TeacherDashboard({
           </svg>
         </button>
 
+        {/* Tab: 캘린더 & 일정 관리 */}
+        <button
+          onClick={() => setActiveNavTab('calendar')}
+          className={`p-4 rounded-2xl transition-all ${activeNavTab === 'calendar'
+              ? 'bg-white text-blue-700 shadow-lg scale-110'
+              : 'text-blue-200 hover:bg-blue-600'
+            }`}
+          title="반 및 학원 캘린더 & 일정"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+        </button>
+
         {/* Tab: 출석부 관리 */}
         <button
           onClick={() => setActiveNavTab('attendance')}
@@ -1310,8 +1325,19 @@ export default function TeacherDashboard({
       {/* 2. Main Area (To the right of the Left Rail) */}
       {/* ======================================================== */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* VIEW: Homeroom Shuttle Status Mode */}
-        {activeNavTab === 'shuttle' ? (
+        {/* VIEW: Integrated Calendar Mode */}
+        {activeNavTab === 'calendar' ? (
+          <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-slate-50">
+            <LogViewer
+              buses={buses}
+              students={students}
+              currentTab="ALL"
+              currentUser={localTeacherUser}
+              availableClasses={teacherClass ? [teacherClass, ...availableClasses] : availableClasses}
+              academyId={selectedAcademyId || academy?.id}
+            />
+          </div>
+        ) : activeNavTab === 'shuttle' ? (
           <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
             {/* Header */}
             <div className="bg-white border-b border-slate-200 px-8 py-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">

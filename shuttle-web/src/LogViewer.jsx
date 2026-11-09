@@ -1,15 +1,9 @@
 import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import { API_BASE_URL } from './config';
 
-const getDaysInMonth = (year, month) => {
-  return new Date(year, month + 1, 0).getDate();
-};
-
-const getFirstDayOfMonth = (year, month) => {
-  return new Date(year, month, 1).getDay();
-};
-
-const monthNames = ["1월", "2월", "3월", "4월", "5월", "6월", "7월", "8월", "9월", "10월", "11월", "12월"];
+const getDaysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
+const getFirstDayOfMonth = (year, month) => new Date(year, month, 1).getDay();
+const monthNames = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
 
 const formatYMD = (year, month, day) => {
   return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -24,59 +18,140 @@ const toDateStr = (val) => {
   return String(val);
 };
 
-export default function LogViewer({ buses, students, currentTab = 'LOG', isClosing }) {
-  const [selectedDate, setSelectedDate] = useState(() => new Date());
-  const [selectedBusId, setSelectedBusId] = useState(buses?.length > 0 ? buses[0].id : null);
+export default function LogViewer({
+  buses = [],
+  students = [],
+  currentTab = 'ALL', // 'ALL', 'EVENT_HOLIDAY', 'ABSENCE_VARIABLE', 'LOG'
+  onTabChange,
+  isClosing = false,
+  currentUser = null,
+  availableClasses = [],
+  academyId = null,
+}) {
+  // Resolved user info & role
+  const resolvedUser = useMemo(() => {
+    if (currentUser && currentUser.role) return currentUser;
+    try {
+      return JSON.parse(localStorage.getItem('takeme_user') || '{}');
+    } catch (e) {
+      return {};
+    }
+  }, [currentUser]);
 
+  const userRole = resolvedUser.role || 'ACADEMY_ADMIN';
+  const isAdmin = userRole === 'ACADEMY_ADMIN' || userRole === 'SUPER_ADMIN' || userRole === 'DESK_STAFF';
+  const isHomeroom = userRole === 'HOMEROOM_TEACHER';
+  const isTeacher = userRole === 'TEACHER' || userRole === 'SHUTTLE_TEACHER';
+  const isParent = userRole === 'PARENT';
+  const myAssignedClass = resolvedUser.assignedClass || '';
+
+  const activeAcadId = useMemo(() => {
+    return academyId ||
+      localStorage.getItem('takeme_selected_academy_id') ||
+      resolvedUser.academyId ||
+      '';
+  }, [academyId, resolvedUser]);
+
+  // Auth headers helper
+  const getAuthHeaders = useCallback(() => {
+    const token = localStorage.getItem('takeme_token') || localStorage.getItem('token') || '';
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': token ? `Bearer ${token}` : '',
+      'x-academy-id': String(activeAcadId || ''),
+    };
+  }, [activeAcadId]);
+
+  // Mode state: 'ALL' | 'EVENT_HOLIDAY' | 'ABSENCE_VARIABLE' | 'LOG'
+  const [activeMode, setActiveMode] = useState(() => currentTab || 'ALL');
+
+  useEffect(() => {
+    if (currentTab && currentTab !== activeMode) {
+      setActiveMode(currentTab);
+    }
+  }, [currentTab]);
+
+  const handleModeChange = (mode) => {
+    setActiveMode(mode);
+    if (onTabChange) onTabChange(mode);
+  };
+
+  // Selected date state
+  const [selectedDate, setSelectedDate] = useState(() => new Date());
+  const selectedDateStr = useMemo(() => toDateStr(selectedDate), [selectedDate]);
+
+  // Class Selection: Replace vehicle tabs with Class tabs ("지금 호차별로 되어 있는거 빼고 반별로 바꿔주고")
+  // "원장은 모든 일정 반별 말고 볼 수 있게 해줘" -> Director defaults to 'ALL' (전체 반)
+  const classList = useMemo(() => {
+    const set = new Set();
+    if (Array.isArray(availableClasses) && availableClasses.length > 0) {
+      availableClasses.forEach(c => { if (c) set.add(String(c).trim()); });
+    }
+    students.forEach(s => {
+      let raw = s?.raw;
+      if (typeof raw === 'string') {
+        try { raw = JSON.parse(raw); } catch (e) {}
+      }
+      const c1 = raw?.['반명'] || raw?.['반'] || s.assignedClass || s.className;
+      if (c1 && String(c1).trim() && String(c1).trim() !== '미배정') {
+        set.add(String(c1).trim());
+      }
+    });
+    return Array.from(set);
+  }, [availableClasses, students]);
+
+  const [selectedClass, setSelectedClass] = useState(() => {
+    if (isHomeroom && myAssignedClass) return myAssignedClass;
+    return 'ALL'; // Director defaults to all classes
+  });
+
+  // Bus selection for LOG mode
+  const [selectedBusId, setSelectedBusId] = useState(buses?.length > 0 ? buses[0].id : null);
   useEffect(() => {
     if ((!selectedBusId || !buses?.some(b => b.id === selectedBusId)) && buses?.length > 0) {
       setSelectedBusId(buses[0].id);
     }
   }, [buses, selectedBusId]);
 
-  // LOG state & in-memory cache for instant date switching
+  // Integrated Calendar Data (Events, Holidays, Schedule Overrides/Absences)
+  const [calendarHolidays, setCalendarHolidays] = useState([]);
+  const [calendarOverrides, setCalendarOverrides] = useState([]);
+  const [approvedRides, setApprovedRides] = useState([]);
+  const [isLoadingCalendar, setIsLoadingCalendar] = useState(false);
+
+  // Search keyword for student absences/variables ("원장의 경우에는 결석 학생 검색할 수 있게")
+  const [searchKeyword, setSearchKeyword] = useState('');
+
+  // Add Event/Holiday Modal state
+  const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+  const [newEvent, setNewEvent] = useState({
+    type: 'EVENT', // 'EVENT', 'ACADEMY_HOLIDAY', 'VACATION', 'CLASS_HOLIDAY'
+    title: '',
+    startDate: selectedDateStr,
+    endDate: selectedDateStr,
+    targetClass: isHomeroom && myAssignedClass ? myAssignedClass : '',
+    reason: '',
+  });
+  const [isSubmittingEvent, setIsSubmittingEvent] = useState(false);
+
+  // Add Absence Modal state
+  const [isAbsenceModalOpen, setIsAbsenceModalOpen] = useState(false);
+  const [newAbsence, setNewAbsence] = useState({
+    studentId: '',
+    startDate: selectedDateStr,
+    endDate: selectedDateStr,
+    reason: '질병 또는 개인 사유',
+  });
+  const [isSubmittingAbsence, setIsSubmittingAbsence] = useState(false);
+
+  // Delete Holiday / Event state
+  const [itemToDelete, setItemToDelete] = useState(null);
+  const [isDeletingItem, setIsDeletingItem] = useState(false);
+
+  // LOG state & cache for LOG mode
   const [logs, setLogs] = useState([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const logsCacheRef = useRef(new Map());
-
-  // ABSENCE state
-  const [absences, setAbsences] = useState([]);
-  const [selectedStudentForAbsence, setSelectedStudentForAbsence] = useState(null);
-  const [absenceRange, setAbsenceRange] = useState({ start: null, end: null });
-
-  // HOLIDAY state
-  const [holidays, setHolidays] = useState([]);
-  const [holidayRange, setHolidayRange] = useState({ start: null, end: null });
-  const [showHolidayConfirm, setShowHolidayConfirm] = useState(false);
-  const [holidayReason, setHolidayReason] = useState('유치원 정기 휴업');
-  const [holidayToDelete, setHolidayToDelete] = useState(null);
-  const [isSavingHoliday, setIsSavingHoliday] = useState(false);
-  const [isDeletingHoliday, setIsDeletingHoliday] = useState(false);
-  // Filter by Class and Student Search
-  const [selectedClassFilter, setSelectedClassFilter] = useState('ALL');
-  const [absenceSearchKeyword, setAbsenceSearchKeyword] = useState('');
-  const [approvedRides, setApprovedRides] = useState([]);
-
-  // Fetch approved rides for calendar display
-  const fetchApprovedRides = useCallback(async () => {
-    try {
-      const activeAcadId = localStorage.getItem('takeme_selected_academy_id') || (() => {
-        try { return JSON.parse(localStorage.getItem('takeme_user') || '{}').academyId; } catch (e) { return ''; }
-      })();
-      const res = await fetch(`${API_BASE_URL}/chat/payment/requests${activeAcadId ? `?academyId=${activeAcadId}` : ''}`);
-      if (res.ok) {
-        const data = await res.json();
-        setApprovedRides(data.filter(d => d.status === 'APPROVED') || []);
-      }
-    } catch (e) {
-      // ignore
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchApprovedRides();
-  }, [fetchApprovedRides]);
-
 
   const calendarRef = useRef(null);
   const hasScrolledRef = useRef(false);
@@ -115,9 +190,7 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
     return { currentYear: cYear, currentMonth: cMonth, todayStr: tStr, monthsData: list };
   }, []);
 
-  const selectedDateStr = useMemo(() => toDateStr(selectedDate), [selectedDate]);
-
-  // Instant scroll to current month on open (without smooth-scroll lag)
+  // Instant scroll to current month on open
   useLayoutEffect(() => {
     if (calendarRef.current && !hasScrolledRef.current) {
       const currentMonthElement = calendarRef.current.querySelector('[data-is-current="true"]');
@@ -128,361 +201,461 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
     }
   }, []);
 
-  const fetchAbsences = useCallback(async () => {
+  // Fetch Calendar Data (Holidays + Overrides) with class & search filters
+  const fetchCalendarData = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/routing/absences${selectedBusId ? `?vehicleId=${selectedBusId}` : ''}`);
-      const data = await res.json();
-      setAbsences(data || []);
-    } catch (e) {
-      console.error(e);
-    }
-  }, [selectedBusId]);
+      setIsLoadingCalendar(true);
+      const queryParams = new URLSearchParams();
+      if (selectedClass && selectedClass !== 'ALL') {
+        queryParams.append('className', selectedClass);
+      }
+      if (searchKeyword.trim()) {
+        queryParams.append('search', searchKeyword.trim());
+      }
 
-  const fetchHolidays = useCallback(async () => {
+      const res = await fetch(`${API_BASE_URL}/approval/calendar?${queryParams.toString()}`, {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCalendarHolidays(data.holidays || []);
+        setCalendarOverrides(data.scheduleChanges || []);
+      }
+    } catch (e) {
+      console.error('Failed to load calendar data', e);
+    } finally {
+      setIsLoadingCalendar(false);
+    }
+  }, [selectedClass, searchKeyword, getAuthHeaders]);
+
+  // Fetch Approved Rides (일회성 셔틀 탑승 승인 내역)
+  const fetchApprovedRides = useCallback(async () => {
     try {
-      const activeAcademyId = localStorage.getItem('takeme_selected_academy_id') || (() => {
-        try { return JSON.parse(localStorage.getItem('takeme_user') || '{}').academyId; } catch (e) { return ''; }
-      })();
-      const res = await fetch(`${API_BASE_URL}/routing/holidays${activeAcademyId ? `?academyId=${activeAcademyId}` : ''}`);
-      const data = await res.json();
-      setHolidays(data || []);
+      const res = await fetch(
+        `${API_BASE_URL}/chat/payment/requests${activeAcadId ? `?academyId=${activeAcadId}` : ''}`,
+        { headers: getAuthHeaders() }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setApprovedRides(data.filter(d => d.status === 'APPROVED') || []);
+      }
     } catch (e) {
-      console.error(e);
+      // ignore
     }
-  }, []);
+  }, [activeAcadId, getAuthHeaders]);
 
-  // Load holidays once on mount so calendar dots are always ready
   useEffect(() => {
-    fetchHolidays();
-  }, [fetchHolidays]);
+    fetchCalendarData();
+    fetchApprovedRides();
+  }, [fetchCalendarData, fetchApprovedRides]);
 
-  // Fetch logs with cache + AbortController for fast, non-blocking date selection
+  // Fetch Operation Logs when in LOG mode
   useEffect(() => {
-    if (currentTab === 'LOG' && selectedBusId) {
-      const cacheKey = `${selectedDateStr}_${selectedBusId}`;
-      const cached = logsCacheRef.current.get(cacheKey);
+    if (activeMode !== 'LOG' || !selectedBusId) return;
 
-      if (cached) {
-        setLogs(cached);
-        setIsLoadingLogs(false);
-      } else {
-        setIsLoadingLogs(true);
-      }
+    const cacheKey = `${selectedDateStr}_${selectedBusId}`;
+    const cached = logsCacheRef.current.get(cacheKey);
 
-      const controller = new AbortController();
-      const fetchLogs = async () => {
-        try {
-          const res = await fetch(
-            `${API_BASE_URL}/routing/daily-logs?date=${selectedDateStr}&vehicleId=${selectedBusId}`,
-            { signal: controller.signal }
-          );
-          const data = await res.json();
-          const safeData = Array.isArray(data) ? data : [];
-          logsCacheRef.current.set(cacheKey, safeData);
-          setLogs(safeData);
-        } catch (e) {
-          if (e.name !== 'AbortError') {
-            console.error(e);
-          }
-        } finally {
-          if (!controller.signal.aborted) {
-            setIsLoadingLogs(false);
-          }
-        }
-      };
-      fetchLogs();
-
-      return () => controller.abort();
-    } else if (currentTab === 'ABSENCE') {
-      fetchAbsences();
-    } else if (currentTab === 'HOLIDAY') {
-      fetchHolidays();
-    }
-  }, [currentTab, selectedDateStr, selectedBusId, fetchAbsences, fetchHolidays]);
-
-  // Background prefetch recent 5 days for the selected bus to make clicking recent dates instant
-  useEffect(() => {
-    if (currentTab !== 'LOG' || !selectedBusId) return;
-    const timer = setTimeout(() => {
-      const base = new Date();
-      for (let i = 0; i < 5; i++) {
-        const d = new Date(base);
-        d.setDate(base.getDate() - i);
-        const dStr = toDateStr(d);
-        const key = `${dStr}_${selectedBusId}`;
-        if (!logsCacheRef.current.has(key)) {
-          fetch(`${API_BASE_URL}/routing/daily-logs?date=${dStr}&vehicleId=${selectedBusId}`)
-            .then(r => r.json())
-            .then(data => {
-              if (Array.isArray(data)) {
-                logsCacheRef.current.set(key, data);
-              }
-            })
-            .catch(() => {});
-        }
-      }
-    }, 150);
-    return () => clearTimeout(timer);
-  }, [currentTab, selectedBusId]);
-
-  // Precompute O(1) lookup structures for holidays and absences
-  const holidayRanges = useMemo(() => {
-    return holidays.map(h => ({
-      start: toDateStr(h.startDate),
-      end: toDateStr(h.endDate),
-    }));
-  }, [holidays]);
-
-  const isDateHoliday = useCallback((dateStr) => {
-    for (let i = 0; i < holidayRanges.length; i++) {
-      if (dateStr >= holidayRanges[i].start && dateStr <= holidayRanges[i].end) {
-        return true;
-      }
-    }
-    return false;
-  }, [holidayRanges]);
-
-  const absenceRanges = useMemo(() => {
-    return absences.map(a => ({
-      start: toDateStr(a.startDate),
-      end: toDateStr(a.endDate),
-    }));
-  }, [absences]);
-
-  const getAbsenceCountForDate = useCallback((dateStr) => {
-    let count = 0;
-    for (let i = 0; i < absenceRanges.length; i++) {
-      if (dateStr >= absenceRanges[i].start && dateStr <= absenceRanges[i].end) {
-        count++;
-      }
-    }
-    return count;
-  }, [absenceRanges]);
-
-  const handleDateClick = (year, month, day) => {
-    const clickedDate = new Date(year, month, day);
-
-    if (currentTab === 'LOG') {
-      setSelectedDate(clickedDate);
-    } else if (currentTab === 'ABSENCE' && selectedStudentForAbsence) {
-      handleRangeSelection(clickedDate, absenceRange, setAbsenceRange);
-    } else if (currentTab === 'HOLIDAY') {
-      handleRangeSelection(clickedDate, holidayRange, setHolidayRange);
-    }
-  };
-
-  const handleRangeSelection = (clickedDate, currentRange, setRange) => {
-    if (!currentRange.start || (currentRange.start && currentRange.end)) {
-      setRange({ start: clickedDate, end: null });
+    if (cached) {
+      setLogs(cached);
+      setIsLoadingLogs(false);
     } else {
-      if (clickedDate < currentRange.start) {
-        setRange({ start: clickedDate, end: currentRange.start });
-      } else {
-        setRange({ start: currentRange.start, end: clickedDate });
+      setIsLoadingLogs(true);
+    }
+
+    const controller = new AbortController();
+    fetch(`${API_BASE_URL}/routing/daily-logs?date=${selectedDateStr}&vehicleId=${selectedBusId}`, {
+      signal: controller.signal,
+      headers: getAuthHeaders(),
+    })
+      .then(r => r.json())
+      .then(data => {
+        const safe = Array.isArray(data) ? data : [];
+        logsCacheRef.current.set(cacheKey, safe);
+        setLogs(safe);
+      })
+      .catch(e => {
+        if (e.name !== 'AbortError') console.error(e);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsLoadingLogs(false);
+      });
+
+    return () => controller.abort();
+  }, [activeMode, selectedDateStr, selectedBusId, getAuthHeaders]);
+
+  // Filtered Daily Variables for Selected Date
+  const selectedDateEvents = useMemo(() => {
+    return calendarHolidays.filter(h => {
+      const s = toDateStr(h.startDate);
+      const e = toDateStr(h.endDate);
+      const matchDate = selectedDateStr >= s && selectedDateStr <= e;
+      if (!matchDate) return false;
+      if (selectedClass !== 'ALL' && h.targetClass && h.targetClass !== selectedClass) return false;
+      return true;
+    });
+  }, [calendarHolidays, selectedDateStr, selectedClass]);
+
+  const selectedDateOverrides = useMemo(() => {
+    return calendarOverrides.filter(o => {
+      const s = toDateStr(o.startDate);
+      const e = toDateStr(o.endDate);
+      const matchDate = selectedDateStr >= s && selectedDateStr <= e;
+      if (!matchDate) return false;
+      if (selectedClass !== 'ALL') {
+        const studentClass = o.student?.className;
+        if (studentClass && studentClass !== selectedClass) return false;
       }
+      if (searchKeyword.trim()) {
+        const kw = searchKeyword.toLowerCase();
+        const n = (o.student?.name || '').toLowerCase();
+        const p = (o.student?.phone || '').toLowerCase();
+        const r = (o.reason || '').toLowerCase();
+        if (!n.includes(kw) && !p.includes(kw) && !r.includes(kw)) return false;
+      }
+      return true;
+    });
+  }, [calendarOverrides, selectedDateStr, selectedClass, searchKeyword]);
+
+  // Partition overrides into categories
+  const absencesOnDate = useMemo(() => {
+    return selectedDateOverrides.filter(o => o.overrideType === 'ABSENCE');
+  }, [selectedDateOverrides]);
+
+  const locationChangesOnDate = useMemo(() => {
+    return selectedDateOverrides.filter(o => o.overrideType === 'CHANGE_LOCATION');
+  }, [selectedDateOverrides]);
+
+  const otherChangesOnDate = useMemo(() => {
+    return selectedDateOverrides.filter(o => o.overrideType !== 'ABSENCE' && o.overrideType !== 'CHANGE_LOCATION');
+  }, [selectedDateOverrides]);
+
+  const approvedRidesOnDate = useMemo(() => {
+    return approvedRides.filter(r => {
+      const matchDate = (r.createdAt && r.createdAt.startsWith(selectedDateStr)) || (r.rideDate === selectedDateStr);
+      if (!matchDate) return false;
+      if (selectedClass !== 'ALL') {
+        const studentObj = students.find(s => s.id === (r.studentId || r.student?.id));
+        const c = studentObj?.raw?.['반명'] || studentObj?.raw?.['반'] || studentObj?.assignedClass;
+        if (c && c !== selectedClass) return false;
+      }
+      return true;
+    });
+  }, [approvedRides, selectedDateStr, selectedClass, students]);
+
+  // Calendar dot flags precomputation
+  const dateIndicatorMap = useMemo(() => {
+    const map = new Map();
+    // Holidays & events
+    calendarHolidays.forEach(h => {
+      const s = toDateStr(h.startDate);
+      const e = toDateStr(h.endDate);
+      const isHoliday = h.type === 'ACADEMY_HOLIDAY' || h.type === 'CLASS_HOLIDAY' || h.type === 'HOLIDAY';
+      const isVacation = h.type === 'VACATION';
+      const isEvent = h.type === 'EVENT';
+
+      const cur = new Date(s);
+      const endD = new Date(e);
+      while (cur <= endD) {
+        const dStr = toDateStr(cur);
+        const existing = map.get(dStr) || { hasHoliday: false, hasVacation: false, hasEvent: false, absences: 0, changes: 0 };
+        if (isHoliday) existing.hasHoliday = true;
+        if (isVacation) existing.hasVacation = true;
+        if (isEvent) existing.hasEvent = true;
+        map.set(dStr, existing);
+        cur.setDate(cur.getDate() + 1);
+      }
+    });
+
+    // Overrides & Absences
+    calendarOverrides.forEach(o => {
+      const s = toDateStr(o.startDate);
+      const e = toDateStr(o.endDate);
+      const isAbs = o.overrideType === 'ABSENCE';
+
+      const cur = new Date(s);
+      const endD = new Date(e);
+      while (cur <= endD) {
+        const dStr = toDateStr(cur);
+        const existing = map.get(dStr) || { hasHoliday: false, hasVacation: false, hasEvent: false, absences: 0, changes: 0 };
+        if (isAbs) {
+          existing.absences += 1;
+        } else {
+          existing.changes += 1;
+        }
+        map.set(dStr, existing);
+        cur.setDate(cur.getDate() + 1);
+      }
+    });
+
+    return map;
+  }, [calendarHolidays, calendarOverrides]);
+
+  // Handle Event / Holiday Submission
+  const handleSaveEvent = async (e) => {
+    e.preventDefault();
+    if (!newEvent.title.trim()) {
+      alert('일정/행사 제목을 입력해 주세요.');
+      return;
     }
-  };
-
-  const isDateStrInRange = (dateStr, start, end) => {
-    if (!start) return false;
-    const sStr = toDateStr(start);
-    if (!end) return dateStr === sStr;
-    const eStr = toDateStr(end);
-    return dateStr >= sStr && dateStr <= eStr;
-  };
-
-  const saveAbsence = async () => {
-    if (!selectedStudentForAbsence || !absenceRange.start) return;
-
-    const startStr = toDateStr(absenceRange.start);
-    const endStr = absenceRange.end ? toDateStr(absenceRange.end) : startStr;
 
     try {
-      await fetch(`${API_BASE_URL}/routing/absence`, {
+      setIsSubmittingEvent(true);
+      const res = await fetch(`${API_BASE_URL}/approval/calendar/event`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          studentId: selectedStudentForAbsence.id,
-          startDate: startStr,
-          endDate: endStr
-        })
+        headers: getAuthHeaders(),
+        body: JSON.stringify(newEvent),
       });
-      setAbsenceRange({ start: null, end: null });
-      fetchAbsences();
-    } catch (e) {
-      console.error(e);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIsEventModalOpen(false);
+        setNewEvent({
+          type: 'EVENT',
+          title: '',
+          startDate: selectedDateStr,
+          endDate: selectedDateStr,
+          targetClass: isHomeroom && myAssignedClass ? myAssignedClass : '',
+          reason: '',
+        });
+        await fetchCalendarData();
+      } else {
+        alert(data.message || '일정 등록에 실패했습니다.');
+      }
+    } catch (err) {
+      alert('일정 등록 중 오류가 발생했습니다.');
+    } finally {
+      setIsSubmittingEvent(false);
     }
   };
 
-  const deleteAbsence = async (id) => {
-    try {
-      await fetch(`${API_BASE_URL}/routing/absence/${id}`, { method: 'DELETE' });
-      fetchAbsences();
-    } catch (e) {
-      console.error(e);
+  // Handle Absence Submission
+  const handleSaveAbsence = async (e) => {
+    e.preventDefault();
+    if (!newAbsence.studentId) {
+      alert('결석 원아를 선택해 주세요.');
+      return;
     }
-  };
 
-  const saveHoliday = async () => {
-    if (!holidayRange.start) return;
-
-    const startStr = toDateStr(holidayRange.start);
-    const endStr = holidayRange.end ? toDateStr(holidayRange.end) : startStr;
-
-    setIsSavingHoliday(true);
     try {
-      const activeAcademyId = localStorage.getItem('takeme_selected_academy_id') || (() => {
-        try { return JSON.parse(localStorage.getItem('takeme_user') || '{}').academyId; } catch (e) { return undefined; }
-      })();
-      await fetch(`${API_BASE_URL}/routing/holiday`, {
+      setIsSubmittingAbsence(true);
+      const res = await fetch(`${API_BASE_URL}/approval/calendar/absence`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
-          startDate: startStr,
-          endDate: endStr,
-          reason: holidayReason || '유치원 정기 휴업',
-          academyId: activeAcademyId ? Number(activeAcademyId) : undefined
-        })
+          studentId: Number(newAbsence.studentId),
+          startDate: newAbsence.startDate,
+          endDate: newAbsence.endDate,
+          reason: newAbsence.reason,
+        }),
       });
-      setShowHolidayConfirm(false);
-      setHolidayRange({ start: null, end: null });
-      setHolidayReason('유치원 정기 휴업');
-      fetchHolidays();
-    } catch (e) {
-      console.error(e);
-      alert('휴업일 저장 중 오류가 발생했습니다.');
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIsAbsenceModalOpen(false);
+        setNewAbsence({
+          studentId: '',
+          startDate: selectedDateStr,
+          endDate: selectedDateStr,
+          reason: '질병 또는 개인 사유',
+        });
+        await fetchCalendarData();
+      } else {
+        alert(data.message || '결석 등록에 실패했습니다.');
+      }
+    } catch (err) {
+      alert('결석 등록 중 오류가 발생했습니다.');
     } finally {
-      setIsSavingHoliday(false);
+      setIsSubmittingAbsence(false);
     }
   };
 
-  const deleteHoliday = async (id) => {
-    setIsDeletingHoliday(true);
+  // Handle Delete Event / Holiday
+  const handleDeleteItem = async () => {
+    if (!itemToDelete) return;
     try {
-      await fetch(`${API_BASE_URL}/routing/holiday/${id}`, { method: 'DELETE' });
-      await fetchHolidays();
-      setHolidayToDelete(null);
-    } catch (e) {
-      console.error(e);
-      alert('휴업일 취소 중 오류가 발생했습니다.');
+      setIsDeletingItem(true);
+      if (itemToDelete.isOverride) {
+        // Delete Absence / Override
+        const res = await fetch(`${API_BASE_URL}/approval/calendar/absence/${itemToDelete.id}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders(),
+        });
+        if (res.ok) {
+          setItemToDelete(null);
+          await fetchCalendarData();
+        } else {
+          alert('삭제 처리에 실패했습니다.');
+        }
+      } else {
+        // Delete Holiday / Event
+        const res = await fetch(`${API_BASE_URL}/approval/calendar/event/${itemToDelete.id}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders(),
+        });
+        if (res.ok) {
+          setItemToDelete(null);
+          await fetchCalendarData();
+        } else {
+          alert('일정 삭제 처리에 실패했습니다.');
+        }
+      }
+    } catch (err) {
+      alert('삭제 중 오류가 발생했습니다.');
     } finally {
-      setIsDeletingHoliday(false);
+      setIsDeletingItem(false);
     }
   };
 
+  // Render Calendar Date Cells
   const getDayClasses = (dateStr) => {
-    let classes = 'w-10 h-10 mx-auto rounded-full flex items-center justify-center text-sm font-bold transition-colors relative ';
+    let classes = 'w-10 h-10 mx-auto rounded-full flex items-center justify-center text-sm font-bold transition-all relative ';
     const isSelected = dateStr === selectedDateStr;
     const isToday = dateStr === todayStr;
+    const info = dateIndicatorMap.get(dateStr);
 
-    if (currentTab === 'ABSENCE' && selectedStudentForAbsence) {
-      if (isDateStrInRange(dateStr, absenceRange.start, absenceRange.end)) {
-        return classes + 'bg-red-500 text-white shadow-md scale-110 ring-2 ring-red-300 ring-offset-2';
-      }
-    } else if (currentTab === 'HOLIDAY') {
-      if (isDateStrInRange(dateStr, holidayRange.start, holidayRange.end)) {
-        return classes + 'bg-orange-500 text-white shadow-md scale-110 ring-2 ring-orange-300 ring-offset-2';
-      }
-      if (isDateHoliday(dateStr)) {
-        return classes + 'bg-orange-100 text-orange-700 font-black border border-orange-300 hover:bg-orange-200';
-      }
-    } else if (currentTab === 'LOG') {
-      if (isSelected) return classes + 'bg-blue-600 text-white shadow-md scale-110';
+    if (isSelected) {
+      return classes + 'bg-blue-600 text-white shadow-md scale-110 ring-2 ring-blue-300';
     }
 
-    if (isToday) return classes + 'bg-blue-50 text-blue-700 border border-blue-200';
+    if (info?.hasHoliday) {
+      return classes + 'bg-orange-100 text-orange-700 font-black border border-orange-300 hover:bg-orange-200';
+    }
+
+    if (info?.hasVacation) {
+      return classes + 'bg-purple-100 text-purple-700 font-bold border border-purple-200 hover:bg-purple-200';
+    }
+
+    if (isToday) {
+      return classes + 'bg-blue-50 text-blue-700 border border-blue-300 font-black';
+    }
+
     return classes + 'hover:bg-slate-100 text-slate-700';
   };
 
-  const busStudents = useMemo(() => {
-    if (!students || !selectedBusId) return [];
-    return students.filter(s => {
-      const isAssigned = s.assignedBusId === selectedBusId ||
-        s.assignedVehicle?.id === selectedBusId ||
-        s.assignedVehicleId === selectedBusId ||
-        s.schedules?.some(sch => sch.assignedVehicle?.id === selectedBusId || sch.assignedVehicleId === selectedBusId);
-      if (!isAssigned) return false;
-
-      if (selectedClassFilter !== 'ALL') {
-        const c = s.raw?.['반명'] || s.raw?.['반'] || s.assignedClass;
-        if (c !== selectedClassFilter) return false;
-      }
-
-      if (absenceSearchKeyword.trim()) {
-        const kw = absenceSearchKeyword.toLowerCase();
-        const n = (s.name || '').toLowerCase();
-        const p = s.phone || s.raw?.['학부모전화번호'] || s.raw?.['연락처'] || '';
-        if (!n.includes(kw) && !p.includes(kw)) return false;
-      }
-
-      return true;
-    });
-  }, [students, selectedBusId, selectedClassFilter, absenceSearchKeyword]);
-
   const renderDots = (dateStr) => {
-    if (isDateHoliday(dateStr)) {
-      return <div className="absolute bottom-1 flex justify-center w-full pointer-events-none"><span className="w-1.5 h-1.5 rounded-full bg-orange-500" title="휴업일"></span></div>;
-    }
+    const info = dateIndicatorMap.get(dateStr);
+    if (!info) return null;
 
-    if (currentTab === 'ABSENCE') {
-      const count = getAbsenceCountForDate(dateStr);
-      if (count > 0) {
-        return <div className="absolute bottom-1 flex justify-center w-full pointer-events-none"><span className="w-1.5 h-1.5 rounded-full bg-red-500" title={`결석 ${count}명`}></span></div>;
-      }
-    }
-
-    const rideMatches = approvedRides.filter(r => (r.createdAt && r.createdAt.startsWith(dateStr)) || (r.rideDate === dateStr));
-    if (rideMatches.length > 0) {
-      return (
-        <div className="absolute bottom-1 flex justify-center gap-0.5 w-full pointer-events-none">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title={`결재 승인 셔틀 탑승 ${rideMatches.length}건`}></span>
-        </div>
-      );
-    }
-
-    return null;
+    return (
+      <div className="absolute bottom-1 flex justify-center items-center gap-0.5 w-full pointer-events-none">
+        {info.hasHoliday && (
+          <span className="w-1.5 h-1.5 rounded-full bg-orange-500" title="휴업일" />
+        )}
+        {info.hasEvent && (
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-500" title="학원/반 행사" />
+        )}
+        {info.absences > 0 && (
+          <span className="w-1.5 h-1.5 rounded-full bg-rose-500" title={`결석 ${info.absences}명`} />
+        )}
+        {info.changes > 0 && (
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" title={`통학 변동 ${info.changes}건`} />
+        )}
+      </div>
+    );
   };
+
+  // Helper for available students in current class selection
+  const eligibleStudentsForAbsence = useMemo(() => {
+    if (isParent) {
+      return students.filter(s => {
+        return (
+          s.parentUserId === resolvedUser.id ||
+          s.studentUserId === resolvedUser.id ||
+          (s.phone && resolvedUser.phone && s.phone === resolvedUser.phone)
+        );
+      });
+    }
+    if (selectedClass !== 'ALL') {
+      return students.filter(s => {
+        const c = s.raw?.['반명'] || s.raw?.['반'] || s.assignedClass || s.className;
+        return c === selectedClass;
+      });
+    }
+    return students;
+  }, [students, isParent, resolvedUser, selectedClass]);
 
   return (
     <div className={`absolute inset-0 z-[2000] flex bg-slate-50 h-full overflow-hidden transition-all duration-300 ${isClosing ? 'animate-slide-out-right' : 'animate-slide-in-right'}`}>
       
-      {/* Calendar Area (50% width) */}
+      {/* Left Area: 13-Month Calendar Grid (50%) */}
       <div className="w-1/2 h-full border-r border-slate-200 flex flex-col bg-white">
         
-        {/* Calendar Header */}
-        <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-100/50 backdrop-blur z-20">
-          <h2 className="text-lg font-black text-slate-800">📅 날짜 선택</h2>
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedDate(new Date());
-              if (calendarRef.current) {
-                const el = calendarRef.current.querySelector('[data-is-current="true"]');
-                if (el) calendarRef.current.scrollTop = el.offsetTop - calendarRef.current.offsetTop - 20;
-              }
-            }}
-            className="px-3 py-1 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 transition-colors"
-          >
-            오늘로 이동
-          </button>
+        {/* Calendar Header with Legend & Quick Today Button */}
+        <div className="p-4 border-b border-slate-200 flex flex-col gap-2.5 bg-slate-50/70 backdrop-blur z-20">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-xl">📅</span>
+              <h2 className="text-base font-black text-slate-800">통합 캘린더</h2>
+              <span className="text-xs px-2 py-0.5 rounded-md bg-blue-100 text-blue-700 font-bold">
+                {selectedDateStr}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedDate(new Date());
+                if (calendarRef.current) {
+                  const el = calendarRef.current.querySelector('[data-is-current="true"]');
+                  if (el) calendarRef.current.scrollTop = el.offsetTop - calendarRef.current.offsetTop - 20;
+                }
+              }}
+              className="px-3 py-1.5 text-xs font-bold text-blue-600 bg-white hover:bg-blue-50 rounded-xl border border-blue-200 transition-colors shadow-2xs"
+            >
+              오늘 날짜로 이동
+            </button>
+          </div>
+
+          {/* Color Legend for Calendar Dots */}
+          <div className="flex items-center gap-3.5 text-[11px] font-bold text-slate-500 pt-1 border-t border-slate-200/60 overflow-x-auto scrollbar-hide">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="w-2 h-2 rounded-full bg-orange-500" />
+              <span>휴업일</span>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="w-2 h-2 rounded-full bg-blue-500" />
+              <span>행사</span>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="w-2 h-2 rounded-full bg-rose-500" />
+              <span>결석</span>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="w-2 h-2 rounded-full bg-amber-500" />
+              <span>통학 변동</span>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="w-2 h-2 rounded-full bg-blue-600" />
+              <span>선택일</span>
+            </div>
+          </div>
         </div>
 
+        {/* 13 Months Scrollable List */}
         <div className="flex-1 overflow-y-auto p-6 space-y-12" ref={calendarRef}>
           {monthsData.map((mData, index) => (
             <div key={index} data-is-current={mData.isCurrentMonth} className="max-w-md mx-auto">
-              <h3 className="text-xl font-black text-slate-800 mb-4">{mData.year}년 {monthNames[mData.month]}</h3>
-              <div className="grid grid-cols-7 gap-1 text-center mb-2">
+              <h3 className="text-lg font-black text-slate-800 mb-3 flex items-center justify-between">
+                <span>{mData.year}년 {monthNames[mData.month]}</span>
+                {mData.isCurrentMonth && (
+                  <span className="text-[11px] font-bold bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded-full">
+                    이번 달
+                  </span>
+                )}
+              </h3>
+              <div className="grid grid-cols-7 gap-1 text-center mb-1.5">
                 {['일', '월', '화', '수', '목', '금', '토'].map(d => (
-                  <div key={d} className={`text-xs font-bold ${d === '일' ? 'text-red-500' : d === '토' ? 'text-blue-500' : 'text-slate-400'}`}>{d}</div>
+                  <div key={d} className={`text-xs font-bold py-1 ${d === '일' ? 'text-red-500' : d === '토' ? 'text-blue-500' : 'text-slate-400'}`}>
+                    {d}
+                  </div>
                 ))}
               </div>
               <div className="grid grid-cols-7 gap-1">
-                {mData.blanks.map(b => <div key={`blank-${b}`} className="h-10"></div>)}
+                {mData.blanks.map(b => <div key={`blank-${b}`} className="h-10" />)}
                 {mData.daysArray.map(({ day, dateStr }) => (
                   <div key={day} className="relative">
                     <button
                       type="button"
-                      onClick={() => handleDateClick(mData.year, mData.month, day)}
+                      onClick={() => setSelectedDate(new Date(mData.year, mData.month, day))}
                       className={getDayClasses(dateStr)}
                     >
                       {day}
@@ -494,399 +667,843 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
             </div>
           ))}
         </div>
-
-        {/* Action Buttons below calendar depending on state */}
-        {currentTab === 'ABSENCE' && absenceRange.start && (
-          <div className="p-4 border-t bg-white shadow-lg flex justify-between items-center animate-slide-up">
-            <div>
-              <div className="text-xs text-slate-500 font-bold">선택된 기간</div>
-              <div className="font-black text-red-600">
-                {absenceRange.start.toLocaleDateString()} {absenceRange.end && `~ ${absenceRange.end.toLocaleDateString()}`}
-              </div>
-            </div>
-            <button onClick={saveAbsence} className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-xl font-bold shadow-md transition-all">
-              결석 저장하기
-            </button>
-          </div>
-        )}
-
-        {currentTab === 'HOLIDAY' && holidayRange.start && (
-          <div className="p-4 border-t bg-white shadow-lg flex justify-between items-center animate-slide-up">
-            <div>
-              <div className="text-xs text-slate-500 font-bold">휴업 예정 기간</div>
-              <div className="font-black text-orange-600">
-                {holidayRange.start.toLocaleDateString()} {holidayRange.end && `~ ${holidayRange.end.toLocaleDateString()}`}
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setHolidayRange({ start: null, end: null })}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
-              >
-                선택 취소
-              </button>
-              <button onClick={() => setShowHolidayConfirm(true)} className="bg-orange-500 hover:bg-orange-600 text-white px-5 py-2 rounded-xl font-bold shadow-md transition-all text-sm">
-                휴업일 저장하기
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Right Side Area (50%) */}
-      <div className="w-1/2 h-full flex flex-col bg-slate-50">
-        {currentTab === 'HOLIDAY' ? (
-          <div className="h-full flex flex-col">
-            <div className="p-4 border-b border-slate-200 bg-white shadow-sm z-10 flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
-                  <span>🎉</span> 유치원 휴업일(휴원) 관리
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  달력에서 날짜를 지정하거나 등록된 휴업일을 취소(삭제)할 수 있습니다.
-                </p>
-              </div>
-              <span className="text-xs font-bold px-3 py-1 bg-orange-50 text-orange-600 rounded-full border border-orange-200">
-                등록 휴업일: {holidays.length}건
-              </span>
+      {/* Right Area: Daily Variables & Event Management (50%) */}
+      <div className="w-1/2 h-full flex flex-col bg-slate-50 overflow-hidden">
+        
+        {/* Top Control Bar 1: View Mode Switcher (결석용이랑 행사용 분리) */}
+        <div className="p-3.5 bg-white border-b border-slate-200 shrink-0">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+              <button
+                type="button"
+                onClick={() => handleModeChange('ALL')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  activeMode === 'ALL'
+                    ? 'bg-white text-blue-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                전체 일정
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeChange('EVENT_HOLIDAY')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  activeMode === 'EVENT_HOLIDAY'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                행사 및 휴업일
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeChange('ABSENCE_VARIABLE')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  activeMode === 'ABSENCE_VARIABLE'
+                    ? 'bg-white text-rose-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                원아 결석 & 변동
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeChange('LOG')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  activeMode === 'LOG'
+                    ? 'bg-white text-slate-800 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                차량 운행 일지
+              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              {holidayRange.start && (
-                <div className="bg-orange-50 border-2 border-orange-200 rounded-2xl p-4 animate-fade-in shadow-sm">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-orange-600 uppercase tracking-wider">신규 휴업일 선택 중</span>
-                    <button
-                      onClick={() => setHolidayRange({ start: null, end: null })}
-                      className="text-xs text-slate-500 hover:text-slate-700 underline font-semibold"
-                    >
-                      선택 취소
-                    </button>
-                  </div>
-                  <div className="text-base font-black text-orange-800 mb-3">
-                    📅 {holidayRange.start.toLocaleDateString()} {holidayRange.end && `~ ${holidayRange.end.toLocaleDateString()}`}
-                    {holidayRange.end && (
-                      <span className="text-xs font-semibold text-orange-600 ml-2">
-                        ({Math.round((holidayRange.end - holidayRange.start) / (1000 * 60 * 60 * 24)) + 1}일간)
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => setShowHolidayConfirm(true)}
-                    className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-bold shadow-md transition-all flex items-center justify-center gap-2"
-                  >
-                    <span>🚨</span> 이 기간을 휴업일로 저장하기
-                  </button>
-                </div>
+            {/* Quick Action Buttons (역할별 일정 추가) */}
+            <div className="flex items-center gap-2">
+              {(isAdmin || isHomeroom || isTeacher) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewEvent(prev => ({
+                      ...prev,
+                      startDate: selectedDateStr,
+                      endDate: selectedDateStr,
+                    }));
+                    setIsEventModalOpen(true);
+                  }}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1 shrink-0"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span>일정/휴업 등록</span>
+                </button>
               )}
 
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-black text-slate-700">지정된 휴업일 목록</h3>
-                  <span className="text-xs text-slate-400">최신순</span>
-                </div>
-
-                {holidays.length === 0 ? (
-                  <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-8 text-center">
-                    <div className="text-4xl mb-3">🏖️</div>
-                    <p className="font-bold text-slate-600 text-sm mb-1">등록된 휴업일이 없습니다</p>
-                    <p className="text-xs text-slate-400">
-                      왼쪽 달력에서 시작일과 종료일을 클릭하여 휴업일을 지정해 보세요.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {holidays.map(h => {
-                      const sDate = toDateStr(h.startDate);
-                      const eDate = toDateStr(h.endDate);
-                      const isSingleDay = sDate === eDate;
-                      return (
-                        <div
-                          key={h.id}
-                          className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs hover:shadow-md transition-all flex items-center justify-between"
-                        >
-                          <div className="flex items-start gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center font-bold text-lg shrink-0">
-                              🎉
-                            </div>
-                            <div>
-                              <div className="font-black text-slate-800 text-base flex items-center gap-2">
-                                <span>{sDate} {isSingleDay ? '' : `~ ${eDate}`}</span>
-                                {isSingleDay && <span className="text-[11px] bg-slate-100 text-slate-500 font-bold px-2 py-0.5 rounded-full">당일</span>}
-                              </div>
-                              <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
-                                <span>{h.reason ? `사유: ${h.reason}` : '사유: 유치원 정기 휴업'}</span>
-                                <span className="text-slate-300">|</span>
-                                <span className="text-orange-600 font-semibold">전 차량 운행 정지</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() => setHolidayToDelete(h)}
-                            className="px-3.5 py-2 bg-red-50 hover:bg-red-500 text-red-600 hover:text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1 shrink-0 border border-red-100 hover:border-transparent shadow-xs"
-                            title="휴업일 지정 취소"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                            <span>휴업 취소</span>
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              {(isAdmin || isHomeroom || isTeacher || isParent) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewAbsence(prev => ({
+                      ...prev,
+                      startDate: selectedDateStr,
+                      endDate: selectedDateStr,
+                    }));
+                    setIsAbsenceModalOpen(true);
+                  }}
+                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 shrink-0"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                  <span>결석 등록</span>
+                </button>
+              )}
             </div>
           </div>
-        ) : (
-          <>
-          <div className="p-4 border-b border-slate-200 bg-white shadow-sm z-10">
-            {currentTab === 'LOG' && (
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-black text-slate-800">
-                  {selectedDate.getFullYear()}년 {selectedDate.getMonth() + 1}월 {selectedDate.getDate()}일 운행 일지
-                </h2>
-              </div>
-            )}
-            {currentTab === 'ABSENCE' && (
-              <>
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-black text-slate-800">
-                  원생 결석관리
-                </h2>
-                <div className="flex items-center gap-2">
-                  <select
-                    value={selectedClassFilter}
-                    onChange={(e) => setSelectedClassFilter(e.target.value)}
-                    className="bg-white text-xs font-bold py-1 px-2 rounded-lg border border-slate-200 text-slate-700 outline-none cursor-pointer"
-                  >
-                    <option value="ALL">전체 반</option>
-                    {Array.from(new Set(students.map(s => s.raw?.['반명'] || s.raw?.['반'] || s.assignedClass).filter(Boolean))).map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                  <span className="text-xs font-bold text-slate-400">
-                    {busStudents.length}명
-                  </span>
-                </div>
-              </div>
-              <div className="relative mb-3">
-                <input
-                  type="text"
-                  value={absenceSearchKeyword}
-                  onChange={(e) => setAbsenceSearchKeyword(e.target.value)}
-                  placeholder="원아 이름 또는 연락처 검색..."
-                  className="w-full text-xs py-2 pl-8 pr-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-blue-500 outline-none transition"
-                />
-                <svg className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              </div>
-              </>
-            )}
-            
-            {/* Bus Selection Tabs */}
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+
+          {/* Top Control Bar 2: Class Selection Tabs ("지금 호차별로 되어 있는거 빼고 반별로 바꿔주고") */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+            <span className="text-[11px] font-bold text-slate-400 shrink-0 mr-1">반 선택:</span>
+            <button
+              type="button"
+              onClick={() => setSelectedClass('ALL')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                selectedClass === 'ALL'
+                  ? 'bg-slate-800 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              전체 반 (기관 전체)
+            </button>
+
+            {classList.map(cName => (
+              <button
+                key={cName}
+                type="button"
+                onClick={() => setSelectedClass(cName)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                  selectedClass === cName
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {cName}
+              </button>
+            ))}
+          </div>
+
+          {/* Student Search Bar ("원장의 경우에는 결석 학생 검색할 수 있게") */}
+          {(activeMode === 'ALL' || activeMode === 'ABSENCE_VARIABLE') && (
+            <div className="relative mt-2.5">
+              <input
+                type="text"
+                value={searchKeyword}
+                onChange={e => setSearchKeyword(e.target.value)}
+                placeholder="결석/변동 원아 이름, 연락처 또는 사유 검색..."
+                className="w-full text-xs py-2 pl-8 pr-8 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-blue-500 outline-none transition"
+              />
+              <svg className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              {searchKeyword && (
+                <button
+                  type="button"
+                  onClick={() => setSearchKeyword('')}
+                  className="absolute right-2.5 top-2.5 text-xs text-slate-400 hover:text-slate-600"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Vehicle Tabs when activeMode is LOG */}
+          {activeMode === 'LOG' && (
+            <div className="flex items-center gap-1.5 overflow-x-auto pt-2.5 border-t border-slate-100 mt-2.5 scrollbar-hide">
+              <span className="text-[11px] font-bold text-slate-400 shrink-0 mr-1">호차 선택:</span>
               {buses.map(bus => (
                 <button
                   key={bus.id}
-                  onClick={() => { setSelectedBusId(bus.id); setSelectedStudentForAbsence(null); }}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${
-                    selectedBusId === bus.id 
-                      ? 'bg-slate-800 text-white shadow-md transform scale-105' 
+                  type="button"
+                  onClick={() => setSelectedBusId(bus.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                    selectedBusId === bus.id
+                      ? 'bg-slate-800 text-white shadow-xs'
                       : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
                   }`}
                 >
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: bus.color }}></span>
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: bus.color || '#3b82f6' }} />
                   {bus.name}
                 </button>
               ))}
             </div>
+          )}
+        </div>
+
+        {/* Selected Date Summary Header */}
+        <div className="px-5 py-3 bg-white border-b border-slate-200/80 flex items-center justify-between shadow-2xs shrink-0">
+          <div>
+            <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
+              <span>{selectedDate.getFullYear()}년 {selectedDate.getMonth() + 1}월 {selectedDate.getDate()}일</span>
+              <span className="text-xs font-bold text-slate-400">
+                ({['일', '월', '화', '수', '목', '금', '토'][selectedDate.getDay()]}요일)
+              </span>
+              <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                {selectedClass === 'ALL' ? '전체 반' : selectedClass}
+              </span>
+            </h3>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6">
-            {currentTab === 'LOG' && (
-              <div className="h-full">
-                {isLoadingLogs ? (
-                  <div className="flex flex-col items-center justify-center h-full opacity-50">
-                    <div className="text-4xl animate-bounce mb-4">📝</div>
-                    <p className="text-sm font-bold text-slate-500">로그 데이터를 불러오는 중...</p>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg">
+              결석 {absencesOnDate.length}명
+            </span>
+            <span className="text-xs font-bold px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg">
+              변동 {locationChangesOnDate.length + otherChangesOnDate.length + approvedRidesOnDate.length}건
+            </span>
+            <span className="text-xs font-bold px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg">
+              행사/휴업 {selectedDateEvents.length}건
+            </span>
+          </div>
+        </div>
+
+        {/* Content Area */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-6">
+          
+          {/* LOG Mode Content */}
+          {activeMode === 'LOG' && (
+            <div className="h-full">
+              {isLoadingLogs ? (
+                <div className="flex flex-col items-center justify-center h-64 text-slate-400">
+                  <div className="text-3xl animate-bounce mb-2">📝</div>
+                  <p className="text-xs font-bold">운행 로그를 불러오는 중입니다...</p>
+                </div>
+              ) : logs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 text-slate-400 bg-white rounded-2xl border border-dashed border-slate-200 p-8">
+                  <div className="text-3xl mb-2 grayscale">📭</div>
+                  <p className="text-sm font-bold text-slate-600">기록된 운행 로그가 없습니다.</p>
+                  <p className="text-xs text-slate-400 mt-1">선택한 날짜 및 차량에 기록된 주행/탑승 일지가 없습니다.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {logs.map((log, index) => (
+                    <div key={index} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-base shrink-0">
+                        {log.icon || '🚍'}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold text-sm text-slate-800">{log.title || log.type}</span>
+                          <time className="text-xs font-medium text-slate-400">
+                            {log.time ? new Date(log.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                          </time>
+                        </div>
+                        <p className="text-xs text-slate-600 leading-relaxed">{log.message}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Section 1: Events & Holidays on this date */}
+          {(activeMode === 'ALL' || activeMode === 'EVENT_HOLIDAY') && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">🎪</span>
+                  <h4 className="text-sm font-black text-slate-800">학원/유치원 행사 및 휴업일</h4>
+                  <span className="text-xs font-bold text-slate-400">({selectedDateEvents.length}건)</span>
+                </div>
+              </div>
+
+              {selectedDateEvents.length === 0 ? (
+                <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-6 text-center">
+                  <p className="text-xs font-bold text-slate-400">선택한 날짜에 등록된 행사나 휴업일이 없습니다.</p>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {selectedDateEvents.map(event => {
+                    const isHoliday = event.type === 'ACADEMY_HOLIDAY' || event.type === 'CLASS_HOLIDAY' || event.type === 'HOLIDAY';
+                    const isVacation = event.type === 'VACATION';
+                    return (
+                      <div
+                        key={event.id}
+                        className={`bg-white rounded-2xl border p-4 shadow-2xs flex items-center justify-between transition-all ${
+                          isHoliday
+                            ? 'border-orange-200 hover:border-orange-300'
+                            : isVacation
+                            ? 'border-purple-200 hover:border-purple-300'
+                            : 'border-blue-200 hover:border-blue-300'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base shrink-0 ${
+                            isHoliday
+                              ? 'bg-orange-100 text-orange-700'
+                              : isVacation
+                              ? 'bg-purple-100 text-purple-700'
+                              : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            {isHoliday ? '🚨' : isVacation ? '🏖️' : '🎪'}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-slate-800 text-sm">{event.title}</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                isHoliday
+                                  ? 'bg-orange-50 text-orange-700 border border-orange-200'
+                                  : isVacation
+                                  ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                                  : 'bg-blue-50 text-blue-700 border border-blue-200'
+                              }`}>
+                                {isHoliday ? '휴업일' : isVacation ? '방학' : '학원 행사'}
+                              </span>
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                                {event.targetClass ? `대상: ${event.targetClass}` : '전체 반 대상'}
+                              </span>
+                            </div>
+                            <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
+                              <span>기간: {event.startDate} {event.startDate !== event.endDate ? `~ ${event.endDate}` : ''}</span>
+                              {event.reason && (
+                                <>
+                                  <span className="text-slate-300">|</span>
+                                  <span>{event.reason}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {(isAdmin || isHomeroom) && (
+                          <button
+                            type="button"
+                            onClick={() => setItemToDelete({ id: event.id, title: event.title, isOverride: false })}
+                            className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                            title="일정 삭제"
+                          >
+                            삭제
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Section 2: Student Absences & Daily Variables on this date */}
+          {(activeMode === 'ALL' || activeMode === 'ABSENCE_VARIABLE') && (
+            <div className="space-y-5">
+              
+              {/* 2-1: 결석 원아 목록 */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                    <h4 className="text-sm font-black text-slate-800">결석 원아</h4>
+                    <span className="text-xs font-bold text-rose-600">({absencesOnDate.length}명)</span>
                   </div>
-                ) : logs.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full opacity-50">
-                    <div className="text-4xl mb-4 grayscale">📭</div>
-                    <p className="text-sm font-bold text-slate-500">선택한 날짜에 기록된 로그가 없습니다.</p>
+                </div>
+
+                {absencesOnDate.length === 0 ? (
+                  <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-5 text-center">
+                    <p className="text-xs font-bold text-slate-400">선택한 날짜에 결석 처리된 원아가 없습니다.</p>
                   </div>
                 ) : (
-                  <div className="space-y-6 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-200 before:to-transparent">
-                    {logs.map((log, index) => {
-                      const getTypeStyle = (type) => {
-                        switch (type) {
-                          case 'OPERATION_START': return 'text-blue-600 bg-blue-50 border-blue-100';
-                          case 'OPERATION_END': return 'text-red-600 bg-red-50 border-red-100';
-                          case 'BOARDING': return 'text-green-600 bg-green-50 border-green-100';
-                          case 'PARENT_MESSAGE': return 'text-purple-600 bg-purple-50 border-purple-100';
-                          default: return 'text-slate-600 bg-slate-50 border-slate-100';
-                        }
-                      };
-                      const getTypeLabel = (type) => {
-                        switch (type) {
-                          case 'OPERATION_START': return '운행 시작';
-                          case 'OPERATION_END': return '운행 종료';
-                          case 'BOARDING': return '탑승';
-                          case 'PARENT_MESSAGE': return '메시지';
-                          default: return type;
-                        }
-                      };
-                      const style = getTypeStyle(log.type);
-                      return (
-                        <div key={index} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
-                          <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-slate-50 bg-white shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 text-lg z-10">
-                            {log.icon}
+                  <div className="space-y-2.5">
+                    {absencesOnDate.map(abs => (
+                      <div
+                        key={abs.id}
+                        className="bg-white rounded-2xl border border-rose-100 p-4 shadow-2xs flex items-center justify-between hover:border-rose-300 transition-all"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold text-sm shrink-0 border border-rose-100">
+                            결석
                           </div>
-                          <div className={`w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] p-4 rounded-2xl border shadow-sm transition-all hover:shadow-md ${style}`}>
-                            <div className="flex items-center justify-between space-x-2 mb-1">
-                              <div className="font-black text-sm">{getTypeLabel(log.type)}</div>
-                              <time className="text-xs font-bold opacity-70">
-                                {new Date(log.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </time>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-slate-800 text-sm">{abs.student?.name}</span>
+                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                                {abs.student?.className || '반 미배정'}
+                              </span>
+                              {abs.student?.phone && (
+                                <span className="text-xs text-slate-400 font-medium">
+                                  {abs.student.phone}
+                                </span>
+                              )}
                             </div>
-                            <div className="text-sm font-medium opacity-90">{log.message}</div>
+                            <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
+                              <span className="font-bold text-rose-600">사유: {abs.reason || '사유 미기재'}</span>
+                              <span className="text-slate-300">|</span>
+                              <span>기간: {abs.startDate} {abs.startDate !== abs.endDate ? `~ ${abs.endDate}` : ''}</span>
+                            </div>
                           </div>
                         </div>
-                      );
-                    })}
+
+                        {(isAdmin || isHomeroom || isParent) && (
+                          <button
+                            type="button"
+                            onClick={() => setItemToDelete({ id: abs.id, title: `${abs.student?.name} 원아 결석`, isOverride: true })}
+                            className="px-3 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-100 transition-colors"
+                            title="결석 취소"
+                          >
+                            결석 취소
+                          </button>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
-            )}
 
-            {currentTab === 'ABSENCE' && (
-              <div className="grid grid-cols-1 gap-4">
-                {busStudents.map(student => {
-                  const studentAbsences = absences.filter(a => (a.student?.id || a.studentId) === student.id);
-                  const isSelected = selectedStudentForAbsence?.id === student.id;
-                  
-                  return (
-                    <div key={student.id} className={`bg-white rounded-2xl border p-4 transition-all shadow-sm ${isSelected ? 'ring-2 ring-red-500 border-transparent' : 'hover:border-slate-300'}`}>
-                      <div className="flex justify-between items-center">
-                        <div className="font-black text-slate-800 text-lg">{student.name} <span className="text-xs text-slate-400 font-normal ml-2">{student.raw?.['유치원명'] || student.raw?.['학교명']}</span></div>
-                        <button 
-                          onClick={() => {
-                            setSelectedStudentForAbsence(isSelected ? null : student);
-                            setAbsenceRange({ start: null, end: null });
-                          }}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isSelected ? 'bg-red-500 text-white' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
-                        >
-                          {isSelected ? '선택 취소' : '결석 등록'}
-                        </button>
-                      </div>
-                      
-                      {studentAbsences.length > 0 && (
-                        <div className="mt-4 space-y-2 border-t pt-3">
-                          <div className="text-xs text-slate-400 font-bold mb-2">등록된 결석 이력</div>
-                          {studentAbsences.map(a => (
-                            <div key={a.id} className="flex justify-between items-center bg-slate-50 px-3 py-2 rounded-lg text-sm border">
-                              <span className="font-medium text-slate-700">{a.startDate} {a.startDate !== a.endDate ? `~ ${a.endDate}` : ''}</span>
-                              <button onClick={() => deleteAbsence(a.id)} className="text-slate-400 hover:text-red-500 transition-colors">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                              </button>
+              {/* 2-2: 승하차 위치/정류장 변경 원아 목록 */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                    <h4 className="text-sm font-black text-slate-800">승하차 위치/정류장 변경</h4>
+                    <span className="text-xs font-bold text-amber-600">({locationChangesOnDate.length}건)</span>
+                  </div>
+                </div>
+
+                {locationChangesOnDate.length === 0 ? (
+                  <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-5 text-center">
+                    <p className="text-xs font-bold text-slate-400">선택한 날짜에 위치/정류장 변경 신청이 없습니다.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {locationChangesOnDate.map(change => (
+                      <div
+                        key={change.id}
+                        className="bg-white rounded-2xl border border-amber-100 p-4 shadow-2xs flex items-center justify-between hover:border-amber-300 transition-all"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center font-bold text-sm shrink-0 border border-amber-200">
+                            🚏
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-slate-800 text-sm">{change.student?.name}</span>
+                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                                {change.student?.className || '반 미배정'}
+                              </span>
+                              <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-800">
+                                {change.direction === 'MORNING' ? '등원 변경' : change.direction === 'AFTERNOON' ? '하원 변경' : '등·하원 전체 변경'}
+                              </span>
                             </div>
-                          ))}
+                            <div className="text-xs text-slate-600 mt-1 flex flex-col gap-0.5">
+                              <div className="font-bold text-amber-900">
+                                변경 정류장/주소: {change.newAddress || '임시 지정 위치'}
+                              </div>
+                              <div className="text-slate-400 flex items-center gap-2">
+                                <span>사유: {change.reason || '개인 사정'}</span>
+                                {change.targetTime && (
+                                  <>
+                                    <span>|</span>
+                                    <span>예정 시각: {change.targetTime}</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {busStudents.length === 0 && (
-                  <div className="text-center p-8 text-slate-500 font-bold">이 차량에 배정된 원생이 없습니다.</div>
+
+                        {(isAdmin || isHomeroom) && (
+                          <button
+                            type="button"
+                            onClick={() => setItemToDelete({ id: change.id, title: `${change.student?.name} 원아 위치 변경`, isOverride: true })}
+                            className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                          >
+                            취소
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
-            )}
-          </div>
-          </>
-        )}
+
+              {/* 2-3: 결재 승인 일회성 셔틀 탑승 및 픽업 요청 */}
+              {(approvedRidesOnDate.length > 0 || otherChangesOnDate.length > 0) && (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                      <h4 className="text-sm font-black text-slate-800">일회성 탑승 & 픽업 요청</h4>
+                      <span className="text-xs font-bold text-emerald-600">
+                        ({approvedRidesOnDate.length + otherChangesOnDate.length}건)
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {approvedRidesOnDate.map((ride, idx) => (
+                      <div
+                        key={`ride-${idx}`}
+                        className="bg-white rounded-2xl border border-emerald-100 p-4 shadow-2xs flex items-center justify-between hover:border-emerald-300 transition-all"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold text-sm shrink-0 border border-emerald-200">
+                            🎫
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-slate-800 text-sm">{ride.studentName || ride.student?.name}</span>
+                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                                일회성 셔틀 탑승 승인
+                              </span>
+                            </div>
+                            <div className="text-xs text-slate-600 mt-1">
+                              탑승 요청 위치: {ride.boardingLocation || ride.location || '원내 지정 정류장'}
+                            </div>
+                          </div>
+                        </div>
+
+                        <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                          승인 완료
+                        </span>
+                      </div>
+                    ))}
+
+                    {otherChangesOnDate.map(change => (
+                      <div
+                        key={change.id}
+                        className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs flex items-center justify-between hover:border-slate-300 transition-all"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center font-bold text-sm shrink-0 border border-purple-200">
+                            🚗
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-slate-800 text-sm">{change.student?.name}</span>
+                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                                {change.student?.className || '반 미배정'}
+                              </span>
+                              <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-purple-100 text-purple-800">
+                                {change.overrideType === 'TEMP_DROP' ? '학부모 직접 픽업' : '기타 통학 변동'}
+                              </span>
+                            </div>
+                            <div className="text-xs text-slate-500 mt-1">
+                              사유: {change.reason || '사유 미작성'}
+                            </div>
+                          </div>
+                        </div>
+
+                        {(isAdmin || isHomeroom) && (
+                          <button
+                            type="button"
+                            onClick={() => setItemToDelete({ id: change.id, title: `${change.student?.name} 원아 변동`, isOverride: true })}
+                            className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                          >
+                            취소
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Holiday Double Confirmation Modal */}
-      {showHolidayConfirm && (
-        <div className="absolute inset-0 z-[3000] flex flex-col items-center justify-center bg-slate-900/40 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl mx-4 transform animate-scale-up">
-            <div className="text-5xl mb-4 text-center">🚨</div>
-            <h3 className="text-xl font-black text-slate-800 text-center mb-2">휴업일로 지정하시겠습니까?</h3>
-            <div className="text-center mb-4">
-              <span className="font-black text-orange-600 text-base">
-                {holidayRange.start?.toLocaleDateString()} {holidayRange.end && `~ ${holidayRange.end.toLocaleDateString()}`}
-              </span>
-            </div>
-            <div className="mb-4">
-              <label className="block text-xs font-bold text-slate-500 mb-1">휴업 사유</label>
-              <input
-                type="text"
-                value={holidayReason}
-                onChange={(e) => setHolidayReason(e.target.value)}
-                placeholder="예: 정기 휴원, 개원기념일, 재량휴업일 등"
-                className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 font-medium"
-              />
-            </div>
-            <p className="text-slate-500 text-center text-xs mb-6 leading-relaxed">
-              저장을 누르시면 전 인원에게 휴업일 공지가 발송되며,<br/>해당 기간 동안 셔틀 운행이 일시 정지됩니다.
-            </p>
-            <div className="flex gap-3">
-              <button 
+      {/* Modal 1: Add Event / Holiday (학원 행사 및 휴업일 일괄 등록) */}
+      {isEventModalOpen && (
+        <div className="absolute inset-0 z-[3000] flex items-center justify-center bg-slate-900/40 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-3xl p-7 max-w-lg w-full shadow-2xl mx-4 transform animate-scale-up">
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">📝</span>
+                <h3 className="text-lg font-black text-slate-800">일정 및 휴업일 등록</h3>
+              </div>
+              <button
                 type="button"
-                disabled={isSavingHoliday}
-                onClick={() => setShowHolidayConfirm(false)} 
-                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors disabled:opacity-50"
+                onClick={() => setIsEventModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center font-bold"
               >
-                취소
-              </button>
-              <button 
-                type="button"
-                disabled={isSavingHoliday}
-                onClick={saveHoliday} 
-                className="flex-1 py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl shadow-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
-              >
-                {isSavingHoliday ? '저장 중...' : '확인 및 저장'}
+                ✕
               </button>
             </div>
+
+            <form onSubmit={handleSaveEvent} className="space-y-4">
+              {/* Type Selection */}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1.5">일정 유형</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewEvent(p => ({ ...p, type: 'EVENT' }))}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all text-left flex items-center gap-2 ${
+                      newEvent.type === 'EVENT'
+                        ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-xs'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span>🎪</span>
+                    <span>학원/유치원 행사</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setNewEvent(p => ({ ...p, type: 'ACADEMY_HOLIDAY' }))}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all text-left flex items-center gap-2 ${
+                      newEvent.type === 'ACADEMY_HOLIDAY'
+                        ? 'bg-orange-50 border-orange-500 text-orange-700 shadow-xs'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span>🚨</span>
+                    <span>정기/임시 휴업일</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setNewEvent(p => ({ ...p, type: 'VACATION' }))}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all text-left flex items-center gap-2 ${
+                      newEvent.type === 'VACATION'
+                        ? 'bg-purple-50 border-purple-500 text-purple-700 shadow-xs'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span>🏖️</span>
+                    <span>방학 기간</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setNewEvent(p => ({ ...p, type: 'CLASS_HOLIDAY' }))}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all text-left flex items-center gap-2 ${
+                      newEvent.type === 'CLASS_HOLIDAY'
+                        ? 'bg-emerald-50 border-emerald-500 text-emerald-700 shadow-xs'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span>🎨</span>
+                    <span>반별 행사/자체휴업</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Title */}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">일정/행사 제목 *</label>
+                <input
+                  type="text"
+                  required
+                  value={newEvent.title}
+                  onChange={e => setNewEvent(p => ({ ...p, title: e.target.value }))}
+                  placeholder="예: 가을 운동회, 학부모 참여수업, 개원기념일 휴원 등"
+                  className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+
+              {/* Date Range */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">시작일</label>
+                  <input
+                    type="date"
+                    required
+                    value={newEvent.startDate}
+                    onChange={e => setNewEvent(p => ({ ...p, startDate: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">종료일</label>
+                  <input
+                    type="date"
+                    required
+                    value={newEvent.endDate}
+                    onChange={e => setNewEvent(p => ({ ...p, endDate: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Target Class */}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">대상 반 (선택)</label>
+                <select
+                  value={newEvent.targetClass}
+                  onChange={e => setNewEvent(p => ({ ...p, targetClass: e.target.value }))}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none bg-white"
+                >
+                  <option value="">유치원/학원 전체 대상 (전체 반)</option>
+                  {classList.map(c => (
+                    <option key={c} value={c}>{c} 대상</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  특정 반을 선택하시면 해당 반 담임교사와 학부모에게 우선 안내 알림이 전송됩니다.
+                </p>
+              </div>
+
+              {/* Reason / Details */}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">상세 안내 및 사유</label>
+                <textarea
+                  rows={2}
+                  value={newEvent.reason}
+                  onChange={e => setNewEvent(p => ({ ...p, reason: e.target.value }))}
+                  placeholder="추가 안내사항이나 일정 사유를 작성하세요."
+                  className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                />
+              </div>
+
+              <div className="pt-2 flex gap-2.5">
+                <button
+                  type="button"
+                  disabled={isSubmittingEvent}
+                  onClick={() => setIsEventModalOpen(false)}
+                  className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingEvent}
+                  className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition-colors flex items-center justify-center gap-1.5"
+                >
+                  {isSubmittingEvent ? '저장 및 알림 전송 중...' : '일정 등록 및 알림 발송'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* Delete Holiday Confirmation Modal */}
-      {holidayToDelete && (
-        <div className="absolute inset-0 z-[3000] flex flex-col items-center justify-center bg-slate-900/40 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl mx-4 transform animate-scale-up">
-            <div className="text-5xl mb-4 text-center">⚠️</div>
-            <h3 className="text-xl font-black text-slate-800 text-center mb-2">휴업일 지정을 취소하시겠습니까?</h3>
-            <p className="text-slate-600 text-center mb-6 leading-relaxed text-sm">
-              <b className="text-orange-600 font-bold">
-                {toDateStr(holidayToDelete.startDate)} {toDateStr(holidayToDelete.startDate) !== toDateStr(holidayToDelete.endDate) ? `~ ${toDateStr(holidayToDelete.endDate)}` : ''}
-              </b>
-              <br/>
-              해당 기간의 휴업 설정이 취소되며, 셔틀 차량 운행 및 원아 등·하원이 <b>정상 운행</b>으로 복원됩니다.
-            </p>
-            <div className="flex gap-3">
-              <button 
+      {/* Modal 2: Add Student Absence (결석 신청 및 등록) */}
+      {isAbsenceModalOpen && (
+        <div className="absolute inset-0 z-[3000] flex items-center justify-center bg-slate-900/40 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-3xl p-7 max-w-md w-full shadow-2xl mx-4 transform animate-scale-up">
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">📋</span>
+                <h3 className="text-lg font-black text-slate-800">원아 결석 등록</h3>
+              </div>
+              <button
                 type="button"
-                disabled={isDeletingHoliday}
-                onClick={() => setHolidayToDelete(null)} 
-                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors disabled:opacity-50"
+                onClick={() => setIsAbsenceModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAbsence} className="space-y-4">
+              {/* Student Select */}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">결석 원아 선택 *</label>
+                <select
+                  required
+                  value={newAbsence.studentId}
+                  onChange={e => setNewAbsence(p => ({ ...p, studentId: e.target.value }))}
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none bg-white"
+                >
+                  <option value="">원아를 선택하세요</option>
+                  {eligibleStudentsForAbsence.map(s => {
+                    const c = s.raw?.['반명'] || s.raw?.['반'] || s.assignedClass || s.className || '';
+                    return (
+                      <option key={s.id} value={s.id}>
+                        {s.name} {c ? `(${c})` : ''} {s.phone ? `- ${s.phone}` : ''}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {/* Date Range */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">결석 시작일</label>
+                  <input
+                    type="date"
+                    required
+                    value={newAbsence.startDate}
+                    onChange={e => setNewAbsence(p => ({ ...p, startDate: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">결석 종료일</label>
+                  <input
+                    type="date"
+                    required
+                    value={newAbsence.endDate}
+                    onChange={e => setNewAbsence(p => ({ ...p, endDate: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Reason */}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">결석 사유</label>
+                <input
+                  type="text"
+                  value={newAbsence.reason}
+                  onChange={e => setNewAbsence(p => ({ ...p, reason: e.target.value }))}
+                  placeholder="예: 감기 몸살, 가족 여행, 병원 진료 등"
+                  className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-rose-500 outline-none"
+                />
+              </div>
+
+              <div className="pt-2 flex gap-2.5">
+                <button
+                  type="button"
+                  disabled={isSubmittingAbsence}
+                  onClick={() => setIsAbsenceModalOpen(false)}
+                  className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingAbsence}
+                  className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-md transition-colors flex items-center justify-center gap-1.5"
+                >
+                  {isSubmittingAbsence ? '등록 중...' : '결석 확정 및 알림 발송'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 3: Delete Confirmation Modal */}
+      {itemToDelete && (
+        <div className="absolute inset-0 z-[3000] flex items-center justify-center bg-slate-900/40 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-3xl p-7 max-w-sm w-full shadow-2xl mx-4 transform animate-scale-up text-center">
+            <div className="text-4xl mb-3">⚠️</div>
+            <h3 className="text-base font-black text-slate-800 mb-2">삭제하시겠습니까?</h3>
+            <p className="text-xs text-slate-500 mb-5 leading-relaxed">
+              <span className="font-bold text-slate-800">[{itemToDelete.title}]</span> 내역이 삭제되며, 캘린더 및 변동 기록에서 제거됩니다.
+            </p>
+            <div className="flex gap-2.5">
+              <button
+                type="button"
+                disabled={isDeletingItem}
+                onClick={() => setItemToDelete(null)}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors"
               >
                 닫기
               </button>
-              <button 
+              <button
                 type="button"
-                disabled={isDeletingHoliday}
-                onClick={() => deleteHoliday(holidayToDelete.id)} 
-                className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                disabled={isDeletingItem}
+                onClick={handleDeleteItem}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-md transition-colors"
               >
-                {isDeletingHoliday ? '취소 중...' : '휴업 취소 확정'}
+                {isDeletingItem ? '삭제 중...' : '삭제 확정'}
               </button>
             </div>
           </div>
@@ -896,13 +1513,11 @@ export default function LogViewer({ buses, students, currentTab = 'LOG', isClosi
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
         @keyframes slideOutRight { from { transform: translateX(0); } to { transform: translateX(100%); } }
-        @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes scaleUp { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
         
         .animate-slide-in-right { animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         .animate-slide-out-right { animation: slideOutRight 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        .animate-slide-up { animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         .animate-fade-in { animation: fadeIn 0.15s ease forwards; }
         .animate-scale-up { animation: scaleUp 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         

@@ -119,6 +119,8 @@ export class ApprovalController {
     @Query('className') className?: string,
     @Query('vehicleId') vehicleId?: string,
     @Query('studentId') studentId?: string,
+    @Query('search') search?: string,
+    @Query('mode') mode?: string,
   ) {
     const user = req.dbUser;
     return this.approvalService.getCalendar(user, {
@@ -128,7 +130,42 @@ export class ApprovalController {
       className,
       vehicleId,
       studentId,
+      search,
+      mode,
     });
+  }
+
+  /**
+   * 캘린더 원아 결석 신청 (학부모, 담임교사, 관리자)
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('calendar/absence')
+  async createCalendarAbsence(
+    @Req() req: any,
+    @Body() body: {
+      studentId: number;
+      startDate: string;
+      endDate: string;
+      reason?: string;
+    },
+  ) {
+    const user = req.dbUser;
+    return this.approvalService.createCalendarAbsence(user, body);
+  }
+
+  /**
+   * 캘린더 원아 결석 취소/삭제
+   */
+  @UseGuards(JwtAuthGuard)
+  @Delete('calendar/absence/:id')
+  async deleteCalendarAbsence(
+    @Req() req: any,
+    @Param('id') id: string,
+  ) {
+    const user = req.dbUser;
+    const overrideId = parseInt(id, 10);
+    if (isNaN(overrideId)) throw new BadRequestException('유효한 결석 ID가 아닙니다.');
+    return this.approvalService.deleteCalendarAbsence(user, overrideId);
   }
 
   /**

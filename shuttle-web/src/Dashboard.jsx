@@ -504,7 +504,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const [isLoadingYearlyMappings, setIsLoadingYearlyMappings] = useState(false);
   
   // Log Viewer State
-  const [logTab, setLogTab] = useState('LOG'); // 'LOG', 'ABSENCE', 'HOLIDAY'
+  const [logTab, setLogTab] = useState('ALL'); // 'LOG', 'ABSENCE', 'HOLIDAY'
 
   // Day Filter State
   const [selectedDay, setSelectedDay] = useState('ALL'); // 'ALL', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'
@@ -4894,10 +4894,11 @@ const parseKindergartenExcelSheet = (sheet) => {
                 </h2>
                 <p className="text-sm text-slate-500 font-medium">원생의 출결과 로그를 확인하세요.</p>
               </div>
-              <div className="p-4 flex flex-col gap-3">
-                <button onClick={() => setLogTab('LOG')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'LOG' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>로그보기</button>
-                <button onClick={() => setLogTab('ABSENCE')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'ABSENCE' ? 'bg-red-500 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>원생 결석관리</button>
-                <button onClick={() => setLogTab('HOLIDAY')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'HOLIDAY' ? 'bg-orange-500 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>휴업일 설정</button>
+              <div className="p-4 flex flex-col gap-2.5">
+                <button onClick={() => setLogTab('ALL')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'ALL' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>전체 일정 (변수 & 행사)</button>
+                <button onClick={() => setLogTab('EVENT_HOLIDAY')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'EVENT_HOLIDAY' ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>행사 및 휴업일</button>
+                <button onClick={() => setLogTab('ABSENCE_VARIABLE')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'ABSENCE_VARIABLE' ? 'bg-rose-500 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>원아 결석 및 통학 변동</button>
+                <button onClick={() => setLogTab('LOG')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'LOG' ? 'bg-slate-800 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>차량 운행 일지</button>
               </div>
             </div>
           )}
@@ -4933,7 +4934,11 @@ const parseKindergartenExcelSheet = (sheet) => {
             buses={buses} 
             students={students}
             currentTab={logTab} 
+            onTabChange={setLogTab}
             isClosing={isLogClosing}
+            currentUser={currentUser}
+            availableClasses={availableClasses}
+            academyId={selectedAcademyId}
           />
         )}
 

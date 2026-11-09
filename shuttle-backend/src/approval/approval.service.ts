@@ -634,6 +634,8 @@ export class ApprovalService {
       className?: string;
       vehicleId?: string;
       studentId?: string;
+      search?: string;
+      mode?: string;
     },
   ) {
     const academyId = callingUser.academyId;
@@ -655,10 +657,35 @@ export class ApprovalService {
       holidayQb.andWhere('(h.academyId = :academyId OR h.academyId IS NULL)', { academyId });
     }
 
-    // 담임교사: 기관 전체 휴업 + 자기 반 행사만
-    if (callingUser.role === UserRole.HOMEROOM_TEACHER && callingUser.assignedClass) {
+    // 역할별 열람 범위 차등화:
+    // 학부모: 기관 전체 + 자녀 반 행사만
+    // 지도교사: 기관 전체 + 담당 반(있다면) 행사만
+    // 담임교사: 기관 전체 + 자기 반 행사만
+    // 원장/관리자: 모든 일정 반 구분 없이 전체 열람 (특정 반 선택 시 필터링)
+    if (callingUser.role === UserRole.PARENT) {
+      const whereConditions: any[] = [
+        { parentUser: { id: callingUser.id } },
+        { studentUser: { id: callingUser.id } },
+      ];
+      if (callingUser.phone) {
+        whereConditions.push({ phone: callingUser.phone });
+      }
+      const parentStudents = await this.studentRepo.find({ where: whereConditions });
+      const childClasses = Array.from(new Set(parentStudents.map(s => s.className).filter(Boolean)));
+      if (childClasses.length > 0) {
+        holidayQb.andWhere('(h.targetClass IS NULL OR h.targetClass IN (:...childClasses))', { childClasses });
+      } else {
+        holidayQb.andWhere('h.targetClass IS NULL');
+      }
+    } else if (callingUser.role === UserRole.HOMEROOM_TEACHER && callingUser.assignedClass) {
       holidayQb.andWhere('(h.targetClass IS NULL OR h.targetClass = :myClass)', { myClass: callingUser.assignedClass });
-    } else if (query.className) {
+    } else if (callingUser.role === UserRole.TEACHER || callingUser.role === UserRole.SHUTTLE_TEACHER) {
+      if (callingUser.assignedClass) {
+        holidayQb.andWhere('(h.targetClass IS NULL OR h.targetClass = :myClass)', { myClass: callingUser.assignedClass });
+      } else {
+        holidayQb.andWhere('h.targetClass IS NULL');
+      }
+    } else if (query.className && query.className !== 'ALL') {
       holidayQb.andWhere('(h.targetClass IS NULL OR h.targetClass = :cName)', { cName: query.className });
     }
 
@@ -674,17 +701,18 @@ export class ApprovalService {
       overrideQb.andWhere('student.academyId = :academyId', { academyId });
     }
 
-    // 역할별 범위 제한
+    // 역할별 범위 제한:
+    // 학부모: 자녀 관련 결석/변동만
+    // 담임교사: 담당 반 학생들만
+    // 지도교사/기사: 담당 차량 또는 담당 학생들만
+    // 원장/관리자: 전체 학생 (반별 필터 선택 시 해당 반만)
     if (callingUser.role === UserRole.PARENT) {
-      overrideQb.andWhere('(student.parentUserId = :uid OR student.studentUserId = :uid)', { uid: callingUser.id });
+      overrideQb.andWhere('(student.parentUserId = :uid OR student.studentUserId = :uid OR student.phone = :uphone)', {
+        uid: callingUser.id,
+        uphone: callingUser.phone || '',
+      });
     } else if (callingUser.role === UserRole.HOMEROOM_TEACHER && callingUser.assignedClass) {
-      const classStudents = await this.studentRepo.find({ where: { className: callingUser.assignedClass } });
-      const ids = classStudents.map(s => s.id);
-      if (ids.length > 0) {
-        overrideQb.andWhere('student.id IN (:...ids)', { ids });
-      } else {
-        overrideQb.andWhere('1=0');
-      }
+      overrideQb.andWhere('student.className = :myClass', { myClass: callingUser.assignedClass });
     } else if (callingUser.role === UserRole.DRIVER || callingUser.role === UserRole.SHUTTLE_TEACHER) {
       const vehicle = await this.vehicleRepo.findOne({
         where: callingUser.role === UserRole.DRIVER ? { driverUser: { id: callingUser.id } } : { teacherUser: { id: callingUser.id } },
@@ -692,6 +720,17 @@ export class ApprovalService {
       if (vehicle) {
         overrideQb.andWhere('(student.assignedVehicleId = :vid OR o.newVehicleId = :vid)', { vid: vehicle.id });
       }
+    } else if (query.className && query.className !== 'ALL') {
+      overrideQb.andWhere('student.className = :cName', { cName: query.className });
+    }
+
+    // 원장 결석/변동 학생 검색 기능
+    if (query.search && query.search.trim()) {
+      const sTerm = `%${query.search.trim()}%`;
+      overrideQb.andWhere(
+        '(student.name LIKE :sTerm OR student.adminDisplayName LIKE :sTerm OR student.phone LIKE :sTerm OR student.className LIKE :sTerm OR o.reason LIKE :sTerm)',
+        { sTerm }
+      );
     }
 
     if (query.vehicleId) {
@@ -774,7 +813,11 @@ export class ApprovalService {
   }
 
   /**
-   * 캘린더 일정/휴업 추가 (기관 관리자, 데스크)
+   * 캘린더 일정/휴업 추가
+   * 역할별 등록 권한:
+   * - 원장/관리자: 학원/유치원 행사, 휴업일, 방학 등 전체 및 모든 반 일정 등록
+   * - 담임교사: 학원/유치원 행사 일정, 휴업일, 담당 반 행사 일정 등록
+   * - 교사(지도교사): 반 행사 일정 등록
    */
   async createCalendarEvent(callingUser: User, data: {
     type: CalendarEventType;
@@ -784,9 +827,18 @@ export class ApprovalService {
     targetClass?: string;
     reason?: string;
   }) {
-    const allowed = [UserRole.ACADEMY_ADMIN, UserRole.SUPER_ADMIN, UserRole.DESK_STAFF];
-    if (!allowed.includes(callingUser.role as UserRole)) {
-      throw new ForbiddenException('기관 관리자 또는 데스크 직원만 일정을 등록할 수 있습니다.');
+    const isAdmin = [UserRole.ACADEMY_ADMIN, UserRole.SUPER_ADMIN, UserRole.DESK_STAFF].includes(callingUser.role as UserRole);
+    const isHomeroom = callingUser.role === UserRole.HOMEROOM_TEACHER;
+    const isTeacher = callingUser.role === UserRole.TEACHER || callingUser.role === UserRole.SHUTTLE_TEACHER;
+
+    if (!isAdmin && !isHomeroom && !isTeacher) {
+      throw new ForbiddenException('일정을 등록할 권한이 없습니다.');
+    }
+
+    if (isTeacher && !isAdmin && !isHomeroom) {
+      if (data.type !== CalendarEventType.EVENT && data.type !== CalendarEventType.CLASS_HOLIDAY) {
+        throw new BadRequestException('교사는 반 행사 일정만 등록할 수 있습니다.');
+      }
     }
 
     const academyId = callingUser.academyId;
@@ -803,6 +855,38 @@ export class ApprovalService {
     });
 
     const saved = await this.holidayRepo.save(holiday);
+
+    // 행사/휴업일 등록 시 실시간 알림 채널에 알림 메시지 발송 및 소켓 브로드캐스트
+    try {
+      const typeLabel =
+        saved.type === CalendarEventType.ACADEMY_HOLIDAY || saved.type === CalendarEventType.CLASS_HOLIDAY
+          ? '휴업일'
+          : saved.type === CalendarEventType.VACATION
+          ? '방학'
+          : '학원/유치원 행사';
+      const targetLabel = saved.targetClass ? `[${saved.targetClass}] ` : '[전체] ';
+      const dateText = saved.startDate === saved.endDate ? saved.startDate : `${saved.startDate} ~ ${saved.endDate}`;
+      const notiTitle = `${targetLabel}${typeLabel} 일정 등록 안내`;
+      const notiContent = `${saved.title} (${dateText})${saved.reason ? ` - ${saved.reason}` : ''}`;
+
+      await this.notifySystemNotification(
+        academyId,
+        'GENERAL',
+        notiTitle,
+        notiContent,
+        {
+          eventId: saved.id,
+          type: saved.type,
+          title: saved.title,
+          startDate: saved.startDate,
+          endDate: saved.endDate,
+          targetClass: saved.targetClass,
+        },
+      );
+    } catch (notiErr) {
+      console.error('[createCalendarEvent] Notification dispatch error:', notiErr);
+    }
+
     return { success: true, event: saved };
   }
 
@@ -810,16 +894,112 @@ export class ApprovalService {
    * 캘린더 일정/휴업 삭제
    */
   async deleteCalendarEvent(callingUser: User, eventId: number) {
-    const allowed = [UserRole.ACADEMY_ADMIN, UserRole.SUPER_ADMIN, UserRole.DESK_STAFF];
+    const allowed = [
+      UserRole.ACADEMY_ADMIN,
+      UserRole.SUPER_ADMIN,
+      UserRole.DESK_STAFF,
+      UserRole.HOMEROOM_TEACHER,
+      UserRole.TEACHER,
+    ];
     if (!allowed.includes(callingUser.role as UserRole)) {
-      throw new ForbiddenException('기관 관리자 또는 데스크 직원만 일정을 삭제할 수 있습니다.');
+      throw new ForbiddenException('일정을 삭제할 수 있는 권한이 없습니다.');
     }
 
     const event = await this.holidayRepo.findOne({ where: { id: eventId }, relations: { academy: true } });
     if (!event) throw new NotFoundException('일정을 찾을 수 없습니다.');
 
+    if (callingUser.role === UserRole.TEACHER && event.targetClass && event.targetClass !== callingUser.assignedClass) {
+      throw new ForbiddenException('담당 반의 일정만 삭제할 수 있습니다.');
+    }
+
     await this.holidayRepo.remove(event);
     return { success: true, message: '일정이 삭제되었습니다.' };
+  }
+
+  /**
+   * 캘린더 원아 결석 등록 (학부모, 담임교사, 관리자)
+   * 학부모=자녀 결석일 설정
+   */
+  async createCalendarAbsence(callingUser: User, data: {
+    studentId: number;
+    startDate: string;
+    endDate: string;
+    reason?: string;
+  }) {
+    const student = await this.studentRepo.findOne({
+      where: { id: data.studentId },
+      relations: { assignedVehicle: true, parentUser: true, studentUser: true, academy: true },
+    });
+    if (!student) throw new NotFoundException('원아 정보를 찾을 수 없습니다.');
+
+    if (callingUser.role === UserRole.PARENT) {
+      const isMyChild =
+        student.parentUser?.id === callingUser.id ||
+        student.studentUser?.id === callingUser.id ||
+        (student.phone && student.phone === callingUser.phone);
+      if (!isMyChild) {
+        throw new ForbiddenException('본인의 자녀에 대해서만 결석을 신청할 수 있습니다.');
+      }
+    }
+
+    const override = this.overrideRepo.create({
+      student,
+      startDate: data.startDate,
+      endDate: data.endDate,
+      overrideType: OverrideType.ABSENCE,
+      reason: data.reason || '결석 신청',
+    });
+
+    const saved = await this.overrideRepo.save(override);
+
+    try {
+      const dateText = data.startDate === data.endDate ? data.startDate : `${data.startDate} ~ ${data.endDate}`;
+      const notiTitle = '원아 결석 신청 안내';
+      const notiContent = `[결석 신청] ${student.name} (${student.className || '반 미배정'}) - ${dateText}${data.reason ? ` (${data.reason})` : ''}`;
+
+      await this.notifySystemNotification(
+        (student.academy?.id || callingUser.academyId || null),
+        'ABSENT',
+        notiTitle,
+        notiContent,
+        {
+          studentId: student.id,
+          studentName: student.name,
+          className: student.className,
+          startDate: data.startDate,
+          endDate: data.endDate,
+          reason: data.reason,
+        },
+      );
+    } catch (notiErr) {
+      console.error('[createCalendarAbsence] Notification dispatch error:', notiErr);
+    }
+
+    return { success: true, override: saved };
+  }
+
+  /**
+   * 캘린더 원아 결석 취소/삭제
+   */
+  async deleteCalendarAbsence(callingUser: User, overrideId: number) {
+    const override = await this.overrideRepo.findOne({
+      where: { id: overrideId },
+      relations: { student: { parentUser: true, studentUser: true } },
+    });
+    if (!override) throw new NotFoundException('결석 내역을 찾을 수 없습니다.');
+
+    if (callingUser.role === UserRole.PARENT) {
+      const isMyChild =
+        override.student?.parentUser?.id === callingUser.id ||
+        override.student?.studentUser?.id === callingUser.id ||
+        (override.student?.phone && override.student.phone === callingUser.phone);
+      if (!isMyChild) {
+        throw new ForbiddenException('본인의 자녀 결석만 취소할 수 있습니다.');
+      }
+    }
+
+    await this.overrideRepo.remove(override);
+    return { success: true, message: '결석 처리가 취소되었습니다.' };
   }
 
   /**
