@@ -157,6 +157,11 @@ export class RoutingService {
       if (inside && inside.length >= 2) {
         cleanCandidates.push(`${region} ${inside}`);
         cleanCandidates.push(inside);
+        const strippedInside = inside.replace(/[0-9]+\s*차/g, '').replace(/센트럴파크|파크빌리지/g, '').trim();
+        if (strippedInside && strippedInside !== inside) {
+          cleanCandidates.push(`${region} ${strippedInside}`);
+          cleanCandidates.push(strippedInside);
+        }
       }
     }
 
@@ -207,7 +212,13 @@ export class RoutingService {
         const kw = query.replace(/앞|뒤|옆|근처|건너편|인근/g, '').trim();
         const kwResponse = await firstValueFrom(
           this.httpService.get('https://dapi.kakao.com/v2/local/search/keyword.json', {
-            params: { query: kw },
+            params: { 
+              query: kw,
+              x: cCoords.lng,
+              y: cCoords.lat,
+              radius: 20000,
+              sort: 'accuracy'
+            },
             headers: { Authorization: `KakaoAK ${apiKey}` }
           })
         );
@@ -1084,16 +1095,57 @@ export class RoutingService {
       chosenVs.allPoints.push([sLat, sLng]);
     }
 
+    // Capacitated Cluster Balancing:
+    // If a vehicle zone is overcrowded (> 25 students, e.g. 7호차 with 113 students),
+    // prioritize the 25 most clustered students for this vehicle, and distribute surplus to nearby under-capacity vehicles!
+    const CAPACITY = 25;
+    for (const vs of vehicleStates) {
+      if (vs.assignedStudents.length > CAPACITY) {
+        const pts = vs.assignedStudents.map(s => [Number(s.latitude), Number(s.longitude)]);
+        const avgLat = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
+        const avgLng = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+
+        // Sort students by proximity to this vehicle cluster center
+        vs.assignedStudents.sort((a, b) => {
+          const dA = this.getDistanceKm(Number(a.latitude), Number(a.longitude), avgLat, avgLng);
+          const dB = this.getDistanceKm(Number(b.latitude), Number(b.longitude), avgLat, avgLng);
+          return dA - dB;
+        });
+
+        // Retain 25 closest students, spill surplus to nearest available vehicle
+        const surplus = vs.assignedStudents.splice(CAPACITY);
+        for (const st of surplus) {
+          let bestNeighbor: VehicleZoneState | null = null;
+          let minNeighborDist = Infinity;
+          for (const otherVs of vehicleStates) {
+            if (otherVs.assignedStudents.length < CAPACITY) {
+              const oLat = otherVs.centroid[0] !== 0 ? otherVs.centroid[0] : avgLat;
+              const oLng = otherVs.centroid[1] !== 0 ? otherVs.centroid[1] : avgLng;
+              const d = this.getDistanceKm(Number(st.latitude), Number(st.longitude), oLat, oLng);
+              if (d < minNeighborDist) {
+                minNeighborDist = d;
+                bestNeighbor = otherVs;
+              }
+            }
+          }
+          if (bestNeighbor) {
+            bestNeighbor.assignedStudents.push(st);
+          } else {
+            vs.assignedStudents.push(st);
+          }
+        }
+      }
+    }
+
     // Now auto-expand each vehicle's zone to encompass all its assigned students!
-    // ("할당은 되어 있는데 학생 위치까지 구역을 넓혀 줘야지 자동으로")
-    // Buffer = 0.8km ensures full envelope coverage while bisector clipping guarantees 0% overlap
+    // Buffer = 0.35km ensures tight envelope coverage while bisector clipping guarantees 0% overlap
     const studentPointsList = vehicleStates.map(vs => {
       const studentPts = vs.assignedStudents.map(s => [Number(s.latitude), Number(s.longitude)] as [number, number]);
       const basePts = vs.polygon.length > 0 ? vs.polygon : [];
-      return [...basePts, ...studentPts];
+      return studentPts.length > 0 ? studentPts : basePts;
     });
 
-    const expandedPolygons = this.partitionVehicleZones(studentPointsList, 0.8);
+    const expandedPolygons = this.partitionVehicleZones(studentPointsList, 0.35);
 
     // Save expanded polygons to DB
     for (let i = 0; i < vehicleStates.length; i++) {
@@ -1105,10 +1157,32 @@ export class RoutingService {
       }
     }
 
+    // Strict containment enforcement:
+    // Green zone has green students only, Pink zone has pink students only!
+    // Any student falling inside vehicle V's polygon is strictly assigned to vehicle V.
+    for (let i = 0; i < vehicleStates.length; i++) {
+      const vs = vehicleStates[i];
+      const poly = vs.vehicle.polygonCoordinates;
+      if (!poly || !Array.isArray(poly) || poly.length < 3) continue;
+
+      for (let j = 0; j < vehicleStates.length; j++) {
+        if (i === j) continue;
+        const otherVs = vehicleStates[j];
+        for (let k = otherVs.assignedStudents.length - 1; k >= 0; k--) {
+          const st = otherVs.assignedStudents[k];
+          if (this.isPointInPolygon([Number(st.latitude), Number(st.longitude)], poly)) {
+            otherVs.assignedStudents.splice(k, 1);
+            vs.assignedStudents.push(st);
+          }
+        }
+      }
+    }
+
     // Save student assignments and update raw metadata
     for (const vs of vehicleStates) {
       for (const st of vs.assignedStudents) {
         st.assignedVehicle = vs.vehicle;
+        st.assignedDepartureVehicle = vs.vehicle;
         st.color = vs.vehicle.colorHex;
         if (!st.raw || typeof st.raw !== 'object') st.raw = {};
         st.raw['등원차량'] = vs.vehicle.busNumber;
