@@ -132,6 +132,8 @@ function ComparisonLocationMap({ original, suggested }) {
 
 export default function MessagePanel({ currentUser, selectedAcademyId, socket, isClosing, initialStudent, onClearInitialStudent, activeEducationLevel, initialRoomType }) {
   const currentEducationLevel = activeEducationLevel || currentUser?.educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
+  const isKindergarten = currentEducationLevel === '유치원';
+  const isElementary = currentEducationLevel === '초등부';
   const isMiddleHigh = currentEducationLevel === '중,고등부';
   const [rooms, setRooms] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
@@ -254,8 +256,10 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
   // Initial Load: Fetch rooms
   useEffect(() => {
+    setActiveRoom(null);
+    setMessages([]);
     fetchRooms();
-  }, [myUser.email]);
+  }, [myUser.email, currentEducationLevel]);
 
   // Socket.IO event listeners
   useEffect(() => {
@@ -347,25 +351,39 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   const fetchRooms = async () => {
     if (!myUser?.email) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/chat/rooms?email=${encodeURIComponent(myUser.email)}`, {
+      const q = new URLSearchParams({
+        email: myUser.email,
+        educationLevel: currentEducationLevel,
+      });
+      if (targetAcademyId) q.append('academyId', String(targetAcademyId));
+      const res = await fetch(`${API_BASE_URL}/chat/rooms?${q.toString()}`, {
         headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
-        setRooms(data);
+        // 학제 일치 검증 필터 (방에 educationLevel이 명시된 경우 현재 학제와 반드시 일치해야 함)
+        const filtered = (data || []).filter((r) => !r.educationLevel || r.educationLevel === currentEducationLevel);
+        setRooms(filtered);
         if (initialRoomType) {
-          const match = data.find((r) => r.type === initialRoomType);
+          const match = filtered.find((r) => r.type === initialRoomType);
           if (match) {
             setActiveRoom(match);
             return;
           }
         }
         if (activeRoomRef.current) {
-          const updated = data.find((r) => r.id === activeRoomRef.current.id);
-          if (updated) setActiveRoom(updated);
-        } else if (data.length > 0) {
-          // Default to first room (which is PAYMENT_SYSTEM if present)
-          setActiveRoom(data[0]);
+          const updated = filtered.find((r) => r.id === activeRoomRef.current.id);
+          if (updated) {
+            setActiveRoom(updated);
+          } else if (filtered.length > 0) {
+            setActiveRoom(filtered[0]);
+          } else {
+            setActiveRoom(null);
+          }
+        } else if (filtered.length > 0) {
+          setActiveRoom(filtered[0]);
+        } else {
+          setActiveRoom(null);
         }
       }
     } catch (e) {
@@ -409,7 +427,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           drivers: data.drivers || [],
           teachers: data.teachers || [],
           parents: data.parents || [],
-          students: data.students || (isMiddleHigh ? (data.parents || []) : []),
+          students: data.students || [],
           admins: data.admins || [],
         });
       }
@@ -455,7 +473,9 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
   // 관련 인원 전체 선택/해제 토글
   const handleToggleSelectAllUsers = () => {
-    const allUsers = [...filteredDrivers, ...filteredTeachers, ...filteredParents, ...filteredAdmins];
+    const allUsers = isKindergarten
+      ? [...filteredDrivers, ...filteredTeachers, ...filteredParents, ...filteredAdmins]
+      : [...filteredDrivers, ...filteredTeachers, ...filteredStudents, ...filteredParents, ...filteredAdmins];
     const allIds = allUsers.map((u) => u.id);
     setSelectedUserIds((prev) => {
       const allSelected = allIds.length > 0 && allIds.every((id) => prev.includes(id));
@@ -480,6 +500,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         headers: getAuthHeaders(),
         body: JSON.stringify({
           userIds: selectedUserIds,
+          educationLevel: currentEducationLevel,
+          academyId: targetAcademyId,
           name: isGroup && customGroupName.trim() ? customGroupName.trim() : undefined,
           type: isGroup ? 'GROUP' : 'DIRECT',
           creatorEmail: myUser.email,
@@ -571,6 +593,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              educationLevel: currentEducationLevel,
               isPersonal,
               type: isPersonal ? 'PERSONAL' : 'NOTICE',
               targetEmail: targetUser ? targetUser.email : null,
@@ -1157,6 +1180,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   const filteredRooms = useMemo(() => {
     const seenSpecial = new Set();
     return rooms
+      .filter((r) => !r.educationLevel || r.educationLevel === currentEducationLevel)
       .filter((r) => {
         if (r.type === 'PAYMENT_SYSTEM') {
           return false; // Hide payment system channel
@@ -2330,102 +2354,101 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     </div>
                   )}
 
-                  {/* Category 3: 중등부는 학생(Students), 유치원/초등부는 학부모(Parents) */}
-                  {isMiddleHigh ? (
-                    filteredStudents.length > 0 && (
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between text-xs font-black text-indigo-800 bg-indigo-50/80 px-2.5 py-1.5 rounded-lg border border-indigo-100">
-                          <div className="flex items-center gap-1.5">
-                            <svg className="w-3.5 h-3.5 text-indigo-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l9-5-9-5-9 5 9 5z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
-                            </svg>
-                            <span>학생 ({filteredStudents.length}명)</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleSelectRole(filteredStudents)}
-                            className="text-[11px] font-bold text-indigo-800 hover:text-indigo-950 hover:underline cursor-pointer"
-                          >
-                            학생 전체 {filteredStudents.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
-                          </button>
+                  {/* Category 3: 학생 (Students) - 유치원이 아닐 때(초등부, 중·고등부)만 노출 */}
+                  {!isKindergarten && filteredStudents.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs font-black text-indigo-800 bg-indigo-50/80 px-2.5 py-1.5 rounded-lg border border-indigo-100">
+                        <div className="flex items-center gap-1.5">
+                          <svg className="w-3.5 h-3.5 text-indigo-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l9-5-9-5-9 5 9 5z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
+                          </svg>
+                          <span>학생 ({filteredStudents.length}명)</span>
                         </div>
-                        <div className="grid grid-cols-1 gap-1 pl-1">
-                          {filteredStudents.map((u) => {
-                            const isChecked = selectedUserIds.includes(u.id);
-                            return (
-                              <label
-                                key={u.id}
-                                className={`flex items-center gap-3 p-2 rounded-xl border cursor-pointer transition-all ${
-                                  isChecked ? 'bg-indigo-50 border-indigo-300 shadow-xs' : 'border-slate-100 hover:bg-slate-50'
-                                }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() => handleToggleSelectUser(u.id)}
-                                  className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
-                                />
-                                <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center font-bold text-xs">
-                                  {u.name[0] || '생'}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <span className="text-xs font-bold text-slate-800">{u.name}</span>
-                                  <span className="text-[11px] text-indigo-700 ml-2 font-medium">({u.subText})</span>
-                                </div>
-                              </label>
-                            );
-                          })}
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSelectRole(filteredStudents)}
+                          className="text-[11px] font-bold text-indigo-800 hover:text-indigo-950 hover:underline cursor-pointer"
+                        >
+                          학생 전체 {filteredStudents.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
+                        </button>
                       </div>
-                    )
-                  ) : (
-                    filteredParents.length > 0 && (
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between text-xs font-black text-amber-800 bg-amber-50/80 px-2.5 py-1.5 rounded-lg border border-amber-100">
-                          <div className="flex items-center gap-1.5">
-                            <svg className="w-3.5 h-3.5 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                            </svg>
-                            <span>학부모 ({filteredParents.length}명)</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleSelectRole(filteredParents)}
-                            className="text-[11px] font-bold text-amber-800 hover:text-amber-950 hover:underline cursor-pointer"
-                          >
-                            학부모 전체 {filteredParents.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
-                          </button>
-                        </div>
-                        <div className="grid grid-cols-1 gap-1 pl-1">
-                          {filteredParents.map((u) => {
-                            const isChecked = selectedUserIds.includes(u.id);
-                            return (
-                              <label
-                                key={u.id}
-                                className={`flex items-center gap-3 p-2 rounded-xl border cursor-pointer transition-all ${
-                                  isChecked ? 'bg-amber-50 border-amber-300 shadow-xs' : 'border-slate-100 hover:bg-slate-50'
-                                }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() => handleToggleSelectUser(u.id)}
-                                  className="w-4 h-4 text-amber-600 rounded border-slate-300 focus:ring-amber-500 cursor-pointer"
-                                />
-                                <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-xs">
-                                  {u.name[0] || '학'}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <span className="text-xs font-bold text-slate-800">{u.name}</span>
-                                  <span className="text-[11px] text-amber-700 ml-2 font-medium">({u.subText})</span>
-                                </div>
-                              </label>
-                            );
-                          })}
-                        </div>
+                      <div className="grid grid-cols-1 gap-1 pl-1">
+                        {filteredStudents.map((u) => {
+                          const isChecked = selectedUserIds.includes(u.id);
+                          return (
+                            <label
+                              key={u.id}
+                              className={`flex items-center gap-3 p-2 rounded-xl border cursor-pointer transition-all ${
+                                isChecked ? 'bg-indigo-50 border-indigo-300 shadow-xs' : 'border-slate-100 hover:bg-slate-50'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => handleToggleSelectUser(u.id)}
+                                className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                              />
+                              <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center font-bold text-xs">
+                                {u.name[0] || '생'}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <span className="text-xs font-bold text-slate-800">{u.name}</span>
+                                <span className="text-[11px] text-indigo-700 ml-2 font-medium">({u.subText})</span>
+                              </div>
+                            </label>
+                          );
+                        })}
                       </div>
-                    )
+                    </div>
+                  )}
+
+                  {/* Category 4: 학부모 (Parents) - 유치원, 초등부, 중·고등부 모두 노출 */}
+                  {filteredParents.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs font-black text-amber-800 bg-amber-50/80 px-2.5 py-1.5 rounded-lg border border-amber-100">
+                        <div className="flex items-center gap-1.5">
+                          <svg className="w-3.5 h-3.5 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                          </svg>
+                          <span>학부모 ({filteredParents.length}명)</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSelectRole(filteredParents)}
+                          className="text-[11px] font-bold text-amber-800 hover:text-amber-950 hover:underline cursor-pointer"
+                        >
+                          학부모 전체 {filteredParents.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 gap-1 pl-1">
+                        {filteredParents.map((u) => {
+                          const isChecked = selectedUserIds.includes(u.id);
+                          return (
+                            <label
+                              key={u.id}
+                              className={`flex items-center gap-3 p-2 rounded-xl border cursor-pointer transition-all ${
+                                isChecked ? 'bg-amber-50 border-amber-300 shadow-xs' : 'border-slate-100 hover:bg-slate-50'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => handleToggleSelectUser(u.id)}
+                                className="w-4 h-4 text-amber-600 rounded border-slate-300 focus:ring-amber-500 cursor-pointer"
+                              />
+                              <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-xs">
+                                {u.name[0] || '학'}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <span className="text-xs font-bold text-slate-800">{u.name}</span>
+                                <span className="text-[11px] text-amber-700 ml-2 font-medium">({u.subText})</span>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
                   )}
 
                   {/* Category 4: 관리자 (Admins) */}

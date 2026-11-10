@@ -34,8 +34,10 @@ export default function DocumentManager({
   currentUser, 
   isClosing, 
   buses = [], 
-  students = [] 
+  students = [],
+  activeEducationLevel,
 }) {
+  const currentEducationLevel = activeEducationLevel || currentUser?.educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
   const [documents, setDocuments] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -81,21 +83,21 @@ export default function DocumentManager({
 
   const fileInputRef = useRef(null);
 
-  // Load expiry records & calculate summary & sync staff app notifications
+  // Load expiry records & calculate summary & sync staff app notifications (학제별 격리)
   const loadExpiry = () => {
-    const recs = getExpiryRecords();
+    const recs = getExpiryRecords(currentEducationLevel);
     setExpiryRecords(recs);
-    const sum = getOverallExpirySummary(buses);
+    const sum = getOverallExpirySummary(buses, currentEducationLevel);
     setExpirySummary(sum);
-    const staffSync = syncStaffExpiryNotifications(buses);
+    const staffSync = syncStaffExpiryNotifications(buses, currentEducationLevel);
     setStaffNotiSummary(staffSync);
   };
 
-  // Load documents
+  // Load documents (학제별 격리)
   const loadDocs = async () => {
     setIsLoading(true);
     try {
-      const docs = await getDocuments(academyId);
+      const docs = await getDocuments(academyId, currentEducationLevel);
       setDocuments(docs);
     } catch (err) {
       console.error('문서 목록 불러오기 실패:', err);
@@ -118,7 +120,7 @@ export default function DocumentManager({
       window.removeEventListener('takeme_docs_changed', handleDocsChanged);
       window.removeEventListener('takeme_expiry_changed', handleExpiryChanged);
     };
-  }, [academyId, buses]);
+  }, [academyId, buses, currentEducationLevel]);
 
 
   // Handle Drag & Drop
@@ -167,6 +169,7 @@ export default function DocumentManager({
       const categoryLabel = CATEGORIES.find(c => c.id === uploadCategory)?.label || '기타 서류';
       await saveDocument({
         academyId,
+        educationLevel: currentEducationLevel,
         title: uploadTitle.trim(),
         category: categoryLabel,
         file: uploadFile,
@@ -310,7 +313,7 @@ export default function DocumentManager({
       saveExpiryRecord(editingBusExpiry.id, {
         busName: editingBusExpiry.name || editingBusExpiry.busNumber || `${editingBusExpiry.id}호차`,
         ...expiryFormData,
-      });
+      }, currentEducationLevel);
       setEditingBusExpiry(null);
     } catch (err) {
       alert('만료일 정보 저장 중 오류가 발생했습니다.');

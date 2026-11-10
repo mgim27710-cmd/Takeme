@@ -465,7 +465,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   useEffect(() => {
     const updateExpiryStatus = () => {
       try {
-        const summary = getOverallExpirySummary(buses);
+        const summary = getOverallExpirySummary(buses, activeEducationLevel);
         setUrgentExpiryCount(summary.urgentCount);
       } catch (e) {
         console.error('만료 현황 확인 실패:', e);
@@ -474,7 +474,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     updateExpiryStatus();
     window.addEventListener('takeme_expiry_changed', updateExpiryStatus);
     return () => window.removeEventListener('takeme_expiry_changed', updateExpiryStatus);
-  }, [buses]);
+  }, [buses, activeEducationLevel]);
 
   // Real-time Director Alert State
   const [directorAlertToast, setDirectorAlertToast] = useState(null);
@@ -2045,7 +2045,8 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       alert(`[${busName}] 차량이 성공적으로 등록되었습니다.`);
 
       try {
-        const stateRes = await fetch(`${API_BASE_URL}/routing/initial-state?academyId=${targetAcademyId}`);
+        const eduQuery = activeEducationLevel ? `&educationLevel=${encodeURIComponent(activeEducationLevel)}` : '';
+        const stateRes = await fetch(`${API_BASE_URL}/routing/initial-state?academyId=${targetAcademyId}${eduQuery}`);
         if (stateRes.ok) {
           const stateData = await stateRes.json();
           if (Array.isArray(stateData.buses) && typeof computePolygons === 'function') setBuses(computePolygons(stateData.buses));
@@ -2195,9 +2196,10 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     try {
       setIsInitializing(true);
       const targetAcademyId = overrideAcademyId !== undefined ? overrideAcademyId : (selectedAcademyId || currentUser.academyId);
+      const eduQuery = activeEducationLevel ? `&educationLevel=${encodeURIComponent(activeEducationLevel)}` : '';
       const url = targetAcademyId 
-        ? `${API_BASE_URL}/routing/initial-state?academyId=${targetAcademyId}`
-        : `${API_BASE_URL}/routing/initial-state`;
+        ? `${API_BASE_URL}/routing/initial-state?academyId=${targetAcademyId}${eduQuery}`
+        : `${API_BASE_URL}/routing/initial-state?${eduQuery.replace(/^&/, '')}`;
       const res = await fetch(url);
       const data = await res.json();
       
@@ -3392,7 +3394,8 @@ const parseKindergartenExcelSheet = (sheet) => {
       const resData = await res.json();
       
       // Refresh students and buses from initial-state to keep everything synced with DB
-      const stateRes = await fetch(`${API_BASE_URL}/routing/initial-state?academyId=${targetAcademyId}`);
+      const eduQuery = activeEducationLevel ? `&educationLevel=${encodeURIComponent(activeEducationLevel)}` : '';
+      const stateRes = await fetch(`${API_BASE_URL}/routing/initial-state?academyId=${targetAcademyId}${eduQuery}`);
       if (stateRes.ok) {
         const stateData = await stateRes.json();
         if (Array.isArray(stateData.buses)) {
@@ -3845,14 +3848,14 @@ const parseKindergartenExcelSheet = (sheet) => {
       )}
 
       {/* Bookmark Rail (Left Navigation) */}
-      <div className={`w-20 ${terms.themeBg} flex flex-col items-center py-8 gap-6 z-20 shadow-xl transition-colors duration-300`}>
-        <div className="text-white font-bold text-xs mb-1">Takeme</div>
-        <div className="text-xs text-white/80 text-center truncate max-w-[70px] mb-4 font-medium" title={currentUser.name}>
+      <div className={`w-20 h-full max-h-screen shrink-0 ${terms.themeBg} flex flex-col items-center py-6 gap-4 z-20 shadow-xl transition-colors duration-300 overflow-y-auto overflow-x-hidden select-none [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-white/40`}>
+        <div className="text-white font-black text-xs tracking-wider shrink-0 mb-0.5">Takeme</div>
+        <div className="text-[11px] text-white/80 text-center truncate max-w-[70px] mb-3 font-medium shrink-0" title={currentUser.name}>
           {isSuperAdmin ? '플랫폼관리' : (currentUser.name ? `${currentUser.name} 관리자님` : '관리자님')}
         </div>
         <button 
           onClick={() => handleTabChange('status')} 
-          className={`p-4 rounded-2xl transition-all ${activeTab === 'status' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} 
+          className={`p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'status' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} 
           title="차량 및 구역 관리"
         >
           {/* 차량 및 통학버스 아이콘 */}
@@ -3860,7 +3863,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 17a2 2 0 100 4 2 2 0 000-4zm10 0a2 2 0 100 4 2 2 0 000-4zM4 6a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm0 5h16M9 6v5m6-5v5" />
           </svg>
         </button>
-        <button onClick={() => handleTabChange('students')} className={`p-4 rounded-2xl transition-all ${activeTab === 'students' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title={`${terms.students} 정보`}>
+        <button onClick={() => handleTabChange('students')} className={`p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'students' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title={`${terms.students} 정보`}>
           {/* 학생 아이콘 */}
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             {/* 상단 꼭지 단추 */}
@@ -3876,27 +3879,27 @@ const parseKindergartenExcelSheet = (sheet) => {
             <path d="M12.8 5.5 C14.2 8.8 15.2 12.2 15.5 15.8" />
           </svg>
         </button>
-        <button onClick={() => handleTabChange('classes')} className={`p-4 rounded-2xl transition-all ${activeTab === 'classes' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title={`${terms.class} 관리`}>
+        <button onClick={() => handleTabChange('classes')} className={`p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'classes' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title={`${terms.class} 관리`}>
           {/* 교실 학급 칠판 아이콘 */}
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <rect x="3" y="4" width="18" height="12" rx="2" strokeWidth={2} />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h5m-3 4v4m6-4v4m-8 0h10" />
           </svg>
         </button>
-        <button onClick={() => handleTabChange('auth')} className={`p-4 rounded-2xl transition-all ${activeTab === 'auth' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="인증 관리">
+        <button onClick={() => handleTabChange('auth')} className={`p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'auth' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="인증 관리">
           {/* 가입 승인 및 인증 방패 아이콘 */}
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
           </svg>
         </button>
-        <button onClick={() => handleTabChange('log')} className={`p-4 rounded-2xl transition-all ${activeTab === 'log' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="캘린더 및 로그보기">
+        <button onClick={() => handleTabChange('log')} className={`p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'log' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="캘린더 및 로그보기">
           {/* 캘린더 달력 아이콘 */}
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <rect x="3" y="4" width="18" height="18" rx="2" strokeWidth={2} />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 2v4M8 2v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01" />
           </svg>
         </button>
-        <button onClick={() => { setUnreadAlertCount(0); handleTabChange('messages'); }} className={`relative p-4 rounded-2xl transition-all ${activeTab === 'messages' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="메세지함">
+        <button onClick={() => { setUnreadAlertCount(0); handleTabChange('messages'); }} className={`relative p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'messages' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="메세지함">
           {/* 대화 및 메시지함 아이콘 */}
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -3907,7 +3910,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             </span>
           )}
         </button>
-        <button onClick={() => handleTabChange('documents')} className={`relative p-4 rounded-2xl transition-all ${activeTab === 'documents' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="행정 및 안전 서류 관리">
+        <button onClick={() => handleTabChange('documents')} className={`relative p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'documents' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="행정 및 안전 서류 관리">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
@@ -3919,7 +3922,7 @@ const parseKindergartenExcelSheet = (sheet) => {
         </button>
         <button 
           onClick={() => handleTabChange('board')} 
-          className={`relative p-4 rounded-2xl transition-all ${activeTab === 'board' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} 
+          className={`relative p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'board' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} 
           title={terms.board}
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3927,7 +3930,7 @@ const parseKindergartenExcelSheet = (sheet) => {
           </svg>
         </button>
 
-        <button onClick={() => handleTabChange('settings')} className={`p-4 rounded-2xl transition-all mt-auto ${activeTab === 'settings' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="환경설정">
+        <button onClick={() => handleTabChange('settings')} className={`p-4 rounded-2xl transition-all mt-auto pt-2 shrink-0 mb-1 cursor-pointer ${activeTab === 'settings' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="환경설정">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
         </button>
       </div>
@@ -5501,6 +5504,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               currentUser={currentUser}
               buses={buses}
               students={students}
+              activeEducationLevel={activeEducationLevel}
             />
           )}
 
@@ -5513,6 +5517,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               setSearchKeyword={setBoardSearchKeyword}
               onOpenNewPost={() => setIsCreatingBoardPost(true)}
               posts={boardPosts}
+              activeEducationLevel={activeEducationLevel}
             />
           )}
         </div>
@@ -5554,6 +5559,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             isClosing={isDocumentsClosing}
             buses={buses}
             students={students}
+            activeEducationLevel={activeEducationLevel}
           />
         )}
 
@@ -5564,6 +5570,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             selectedAcademyId={selectedAcademyId}
             availableClasses={availableClasses}
             selectedClass={boardSelectedClass}
+            activeEducationLevel={activeEducationLevel}
             setSelectedClass={setBoardSelectedClass}
             searchKeyword={boardSearchKeyword}
             setSearchKeyword={setBoardSearchKeyword}
@@ -6824,7 +6831,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                       }
                       alert('차량이 삭제되었으며 주변 차량으로 구역과 원아가 자동 확장되었습니다.');
                       setEditingBus(null);
-                      const stateRes = await fetch(`${API_BASE_URL}/routing/initial-state?academyId=${targetAcademyId}`);
+                      const eduQuery = activeEducationLevel ? `&educationLevel=${encodeURIComponent(activeEducationLevel)}` : '';
+                      const stateRes = await fetch(`${API_BASE_URL}/routing/initial-state?academyId=${targetAcademyId}${eduQuery}`);
                       if (stateRes.ok) {
                         const stateData = await stateRes.json();
                         if (Array.isArray(stateData.buses)) setBuses(computePolygons(stateData.buses));

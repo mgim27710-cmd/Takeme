@@ -8,7 +8,15 @@ export default function BoardSidebar({
   setSearchKeyword,
   onOpenNewPost,
   posts = [],
+  activeEducationLevel = '유치원',
 }) {
+  const isKinder = activeEducationLevel === '유치원';
+  const isElem = activeEducationLevel === '초등부';
+
+  const titleText = isKinder ? '원아 앨범 · 게시판' : (isElem ? '초등 알림장 · 게시판' : '중·고등 공지 & 커뮤니티');
+  const descText = isKinder 
+    ? '원아들의 활동 사진과 공지사항을 반별 또는 전체 공개로 등록하고 관리하세요.'
+    : (isElem ? '초등부 학생들의 알림장과 활동 소식, 공지사항을 학급별로 등록하고 관리하세요.' : '중·고등부 학생 및 학부모님을 위한 주요 학사 일정과 공지사항을 관리하세요.');
   const totalPostsCount = posts.length;
   const publicPostsCount = posts.filter(p => p.visibility === 'ALL').length;
 
@@ -25,14 +33,14 @@ export default function BoardSidebar({
       <div className="p-5 border-b border-slate-100 bg-white">
         <div className="flex items-center justify-between mb-1.5">
           <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
-            <span>원아 앨범 · 게시판</span>
+            <span>{titleText}</span>
           </h2>
           <span className="text-[11px] font-bold px-2.5 py-0.5 bg-blue-50 text-blue-700 rounded-full border border-blue-100">
             관리자 모드
           </span>
         </div>
         <p className="text-xs text-slate-500 font-medium leading-relaxed">
-          원아들의 활동 사진과 공지사항을 반별 또는 전체 공개로 등록하고 관리하세요.
+          {descText}
         </p>
       </div>
 

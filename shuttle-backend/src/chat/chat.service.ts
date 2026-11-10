@@ -41,14 +41,14 @@ export class ChatService {
     );
   }
 
-  async getAcademyUsers(academyId?: number, currentUserEmail?: string) {
+  async getAcademyUsers(academyId?: number, currentUserEmail?: string, educationLevel?: string) {
     let currentUser: User | null = null;
     if (currentUserEmail) {
       currentUser = await this.userRepo.findOne({ where: { email: currentUserEmail } });
     }
     const targetAcademyId = academyId || currentUser?.academyId;
     if (!targetAcademyId) {
-      return { drivers: [], teachers: [], parents: [], admins: [] };
+      return { drivers: [], teachers: [], parents: [], students: [], admins: [] };
     }
 
     // 1. 차량 정보 조회 (기사 및 동승교사 매핑)
@@ -72,7 +72,7 @@ export class ChatService {
       }
     }
 
-    // 2. 원생 정보 조회 (학부모 매핑)
+    // 2. 원생 정보 조회 (학부모 및 학생 계정 매핑)
     const students = await this.studentRepo.find({
       where: { academy: { id: targetAcademyId } },
       relations: { parentUser: true, studentUser: true },
@@ -80,6 +80,9 @@ export class ChatService {
 
     const parentChildMap = new Map<number, string>();
     const parentUserIds = new Set<number>();
+    const studentUserMap = new Map<number, string>();
+    const studentUserIds = new Set<number>();
+
     for (const s of students) {
       if (s.parentUser) {
         const existing = parentChildMap.get(s.parentUser.id);
@@ -87,21 +90,28 @@ export class ChatService {
         parentChildMap.set(s.parentUser.id, existing ? `${existing}, ${childName}` : `${childName} 학부모`);
         parentUserIds.add(s.parentUser.id);
       }
+      if (s.studentUser) {
+        studentUserMap.set(s.studentUser.id, `${s.className ? s.className + ' · ' : ''}${s.name || '학생'}`);
+        studentUserIds.add(s.studentUser.id);
+      }
     }
 
-    // 3. 사용자 목록 조회 (해당 유치원 소속 사용자만 엄격 격리)
+    // 3. 사용자 목록 조회 (해당 유치원/학원 소속 사용자만 엄격 격리)
     const vIds = vehicleUserIds.size > 0 ? Array.from(vehicleUserIds) : [0];
     const pIds = parentUserIds.size > 0 ? Array.from(parentUserIds) : [0];
+    const sIds = studentUserIds.size > 0 ? Array.from(studentUserIds) : [0];
     const userQuery = this.userRepo.createQueryBuilder('u')
       .where(
-        '(u.academyId = :targetAcademyId OR u.id IN (:...vIds) OR u.id IN (:...pIds))',
-        { targetAcademyId, vIds, pIds }
+        '(u.academyId = :targetAcademyId OR u.id IN (:...vIds) OR u.id IN (:...pIds) OR u.id IN (:...sIds))',
+        { targetAcademyId, vIds, pIds, sIds }
       );
     const allUsers = await userQuery.getMany();
 
+    const isKindergarten = educationLevel === '유치원';
     const drivers: any[] = [];
     const teachers: any[] = [];
     const parents: any[] = [];
+    const studentsList: any[] = [];
     const admins: any[] = [];
 
     for (const u of allUsers) {
@@ -121,7 +131,7 @@ export class ChatService {
         u.role === UserRole.HOMEROOM_TEACHER ||
         u.role === UserRole.SHUTTLE_TEACHER
       ) {
-        const sub = u.assignedClass ? `${u.assignedClass} 담임` : teacherVehicleMap.get(u.id) || '유치원 교사';
+        const sub = u.assignedClass ? `${u.assignedClass} 담임` : teacherVehicleMap.get(u.id) || '교사';
         teachers.push({
           id: u.id,
           name: u.name || '선생님',
@@ -129,6 +139,18 @@ export class ChatService {
           email: u.email,
           subText: sub,
         });
+      } else if (u.role === UserRole.STUDENT) {
+        // 유치원에서는 학생이 스마트폰 앱을 사용하지 않으므로 제외! 초등부와 중등부에서는 포함!
+        if (!isKindergarten) {
+          const sub = studentUserMap.get(u.id) || u.assignedClass || '학생';
+          studentsList.push({
+            id: u.id,
+            name: u.name ? (u.name.includes('학생') ? u.name : `${u.name} 학생`) : '학생',
+            role: u.role,
+            email: u.email,
+            subText: sub,
+          });
+        }
       } else if (u.role === UserRole.PARENT) {
         const sub = parentChildMap.get(u.id) || '학부모';
         parents.push({
@@ -153,9 +175,10 @@ export class ChatService {
     drivers.sort(sortFn);
     teachers.sort(sortFn);
     parents.sort(sortFn);
+    studentsList.sort(sortFn);
     admins.sort(sortFn);
 
-    return { drivers, teachers, parents, admins };
+    return { drivers, teachers, parents, students: studentsList, admins };
   }
 
   async sendSystemNotification(
@@ -241,7 +264,7 @@ export class ChatService {
     }
   }
 
-  async getRoomsByEmail(email: string) {
+  async getRoomsByEmail(email: string, educationLevel?: string) {
     if (!email) return [];
     const user = await this.userRepo.findOne({ where: { email } });
     if (!user) return [];
@@ -319,6 +342,10 @@ export class ChatService {
     for (const room of rooms) {
       // 결재 전용 채널은 제거 (일반 1:1 및 그룹 대화방에서 결재 진행)
       if (room.type === ChatRoomType.PAYMENT_SYSTEM) {
+        continue;
+      }
+      // 학제 격리: 방의 학제 정보가 지정되어 있고 현재 학제와 다르면 제외
+      if ((room as any).educationLevel && educationLevel && (room as any).educationLevel !== educationLevel) {
         continue;
       }
       if (room.type === ChatRoomType.NOTIFICATION_SYSTEM) {

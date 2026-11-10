@@ -55,6 +55,7 @@ export class ChatController {
   async getUsers(
     @Query('academyId') academyId?: string,
     @Query('email') email?: string,
+    @Query('educationLevel') educationLevel?: string,
     @Req() req?: any,
   ) {
     const payload = this.extractTokenPayload(req);
@@ -67,16 +68,20 @@ export class ChatController {
     } else {
       aId = payload?.academyId ? Number(payload.academyId) : undefined;
     }
-    return this.chatService.getAcademyUsers(aId, userEmail);
+    return this.chatService.getAcademyUsers(aId, userEmail, educationLevel);
   }
 
   @Get('rooms')
-  async getRooms(@Req() req: any, @Query('email') email?: string) {
+  async getRooms(
+    @Req() req: any,
+    @Query('email') email?: string,
+    @Query('educationLevel') educationLevel?: string,
+  ) {
     const targetEmail = this.extractEmail(req, email);
     if (!targetEmail) {
       throw new BadRequestException('이메일 또는 인증 정보가 필요합니다.');
     }
-    return this.chatService.getRoomsByEmail(targetEmail);
+    return this.chatService.getRoomsByEmail(targetEmail, educationLevel);
   }
 
   @Get('messages')
