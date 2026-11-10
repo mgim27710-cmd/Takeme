@@ -3,7 +3,9 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import BoardViewer from './board/BoardViewer';
 import MessagePanel from './MessagePanel';
+import LogViewer from './LogViewer';
 import { API_BASE_URL } from './config';
+import { formatTeacherName } from './utils/teacherUtil';
 
 // Haversine Distance Helper
 function getDistanceKm(lat1, lon1, lat2, lon2) {
@@ -360,6 +362,7 @@ export default function TeacherDashboard({
   const [selectedStudentForMemo, setSelectedStudentForMemo] = useState(null);
   const [memoInput, setMemoInput] = useState('');
   const [viewMode, setViewMode] = useState('cell'); // 'cell' (default) | 'card'
+  const [localBoardStatusOverrides, setLocalBoardStatusOverrides] = useState({});
   const [showApprovalHistory, setShowApprovalHistory] = useState(false);
   const [isSavingMemo, setIsSavingMemo] = useState(false);
 
@@ -375,6 +378,7 @@ export default function TeacherDashboard({
   const [rideRequests, setRideRequests] = useState({});
   const [quickRequestModal, setQuickRequestModal] = useState(null); // { student, targetBus, distanceLabel, remainingSeats, capacity, allEvaluatedBuses }
   const [quickRequestRideType, setQuickRequestRideType] = useState('TODAY_ONLY'); // 'TODAY_ONLY' | 'REGULAR'
+  const [quickRequestMode, setQuickRequestMode] = useState('ONE_ON_ONE'); // 'ONE_ON_ONE' | 'CONTEST'
   const [isSendingQuickRequest, setIsSendingQuickRequest] = useState(false);
   const [isDecidingRequest, setIsDecidingRequest] = useState(null);
 
@@ -391,6 +395,7 @@ export default function TeacherDashboard({
 
   // Helper: Effective Board Status (Non-shuttle defaults to SELF_PICKUP)
   const getStudentEffectiveBoardStatus = (st) => {
+    if (st && localBoardStatusOverrides[st.id]) return localBoardStatusOverrides[st.id];
     if (st?.boardStatus) return st.boardStatus;
     if (checkIsNonShuttle(st)) return 'SELF_PICKUP';
     return 'WAITING';
@@ -628,9 +633,7 @@ export default function TeacherDashboard({
           longitude: student.longitude || student.lng,
           rideType: quickRequestRideType,
           requestDate: new Date().toISOString().split('T')[0],
-          note: isTodayOnly
-            ? `오늘 하루 하원 셔틀 탑승 희망 (하차 결재 신청, 익일 자동 픽업 원복)`
-            : `정규 셔틀 탑승 등록 희망 (하차 결재 신청 및 구역 편입)`,
+          note: isTodayOnly ? '오늘 하루 하원 셔틀 탑승 희망 (하차 결재 신청, 익일 자동 픽업 원복)' : '정규 셔틀 탑승 등록 희망 (하차 결재 신청 및 구역 편입)',
           requesterEmail: email
         })
       });
@@ -642,13 +645,13 @@ export default function TeacherDashboard({
           [student.id]: {
             messageId: data.id,
             status: 'PENDING',
-            vehicleId: targetBus.id,
-            busNumber: targetBus.name || targetBus.busNumber,
-            teacherName: targetBus.teacherName || targetBus.teacherUser?.name || '담당 지도교사',
-            driverName: targetBus.driverName || '기사님',
+            vehicleId: targetBus?.id,
+            busNumber: targetBus?.name || targetBus?.busNumber,
+            teacherName: targetBus?.teacherName || targetBus?.teacherUser?.name || '담당 지도교사',
+            driverName: targetBus?.driverName || '기사님',
             boardingLocation: dropoffLocation,
             rideType: quickRequestRideType,
-            note: isTodayOnly ? `오늘 하루 하원 탑승 희망 (익일 자동 원복)` : `정규 셔틀 등록 희망`
+            note: isTodayOnly ? '오늘 하루 탑승 희망 (익일 자동 원복)' : '정규 셔틀 등록 희망'
           }
         }));
 
@@ -914,7 +917,7 @@ export default function TeacherDashboard({
     });
   }, [myStudents, searchQuery, filterMode, rideRequests]);
 
-  // Pinned Changes & Pending Approvals (오늘 변동사항 및 결재 진행 원아)
+  // Pinned Changes & Pending Approvals (오늘 변동사항 및 결재 진행 학생)
   const changedStudents = useMemo(() => {
     return displayedStudents.filter(st => {
       const rideReq = rideRequests[st.id];
@@ -971,14 +974,15 @@ export default function TeacherDashboard({
 
     const amBus = buses.find(b => b.id === (st.assignedBusId || st.assignedVehicle?.id || st.assignedVehicleId));
     const pmBus = buses.find(b => b.id === (st.assignedDepartureBusId || st.assignedDepartureVehicle?.id || st.assignedDepartureVehicleId));
-    const amBusName = amBus?.name || st.raw?.['등원차량'] || '미배정';
-    const pmBusName = pmBus?.name || st.raw?.['하원차량'] || '미배정';
+    const amBusName = amBus?.name || amBus?.busNumber || st.raw?.['등원차량'] || (st.assignedVehicle?.busNumber ? `${st.assignedVehicle.busNumber}호차` : '미배정');
+    const pmBusName = pmBus?.name || pmBus?.busNumber || st.raw?.['하원차량'] || (st.assignedDepartureVehicle?.busNumber ? `${st.assignedDepartureVehicle.busNumber}호차` : '미배정');
 
     const genderStr = st.raw?.['성별'] || st.gender || '-';
     const ageStr = st.raw?.['만나이'] || st.raw?.['나이'] || st.age || '-';
-    const birthStr = st.raw?.['생년월일'] || st.raw?.['생일'] || st.birthDate || '-';
-    const phoneStr = st.raw?.['학부모전화번호'] || st.raw?.['연락처'] || st.parentPhone || '-';
-    const locStr = st.boardingLocation || st.address || st.raw?.['탑승지'] || '미등록';
+    const birthStr = st.birthDate || st.raw?.['생년월일'] || st.raw?.['생일'] || st.raw?.['학생생일'] || '-';
+    const phoneStr = st.raw?.['학부모전화번호'] || st.raw?.['보호자연락처'] || st.raw?.['연락처'] || st.raw?.['부모연락처'] || st.parentPhone || st.parentUser?.phone || '-';
+    const allergyStr = st.allergies || st.raw?.['알레르기'] || st.raw?.['알러지'] || st.raw?.['특이사항(알레르기)'] || '';
+    const isNonShuttle = checkIsNonShuttle(st);
 
     return (
       <tr 
@@ -988,72 +992,154 @@ export default function TeacherDashboard({
         }`}
       >
         <td className="py-2.5 px-3 text-center text-xs text-slate-400 font-mono">{i + 1}</td>
+
+        {/* 1. 학생명 */}
         <td className="py-2.5 px-3">
-          <div className="flex items-center gap-1.5">
-            <span className="font-extrabold text-slate-900 text-xs">{st.name}</span>
-            <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.2 rounded font-semibold">
-              {genderStr} / {ageStr ? `${ageStr}세` : '-'}
-            </span>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="font-extrabold text-slate-900 text-xs sm:text-sm">{st.name}</span>
+            {genderStr && genderStr !== '-' && (
+              <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${genderStr === '남' ? 'bg-blue-50 text-blue-700' : 'bg-pink-50 text-pink-700'}`}>
+                {genderStr}
+              </span>
+            )}
+            {ageStr && ageStr !== '-' && (
+              <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-1 py-0.2 rounded">
+                {ageStr}세
+              </span>
+            )}
           </div>
         </td>
-        <td className="py-2.5 px-3 text-xs text-slate-600 font-mono">{birthStr}</td>
-        <td className="py-2.5 px-3 text-xs text-slate-600 font-mono">{phoneStr}</td>
-        <td className="py-2.5 px-3 text-xs font-bold text-blue-700">{amBusName}</td>
-        <td className="py-2.5 px-3 text-xs font-bold text-indigo-700">{pmBusName}</td>
-        <td className="py-2.5 px-3 text-xs text-slate-500 max-w-[140px] truncate" title={locStr}>{locStr}</td>
-        <td className="py-2.5 px-3">
-          {isRidePending ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
-              결재 승인 대기
-            </span>
-          ) : isRideApproved ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
-              결재 승인 완료
-            </span>
-          ) : isRideReRequested ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-purple-100 text-purple-800 border border-purple-300">
-              새 탑승지 재요청
-            </span>
-          ) : isAbsent ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300">
-              결석
-            </span>
-          ) : isPickup ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-slate-100 text-slate-700 border border-slate-300">
-              개별 하원 (픽업)
-            </span>
+
+        {/* 2. 학부모 전화번호 */}
+        <td className="py-2.5 px-3 text-xs font-mono">
+          {phoneStr && phoneStr !== '-' ? (
+            <a href={`tel:${phoneStr}`} className="text-blue-600 hover:underline font-bold flex items-center gap-1">
+              <svg className="w-3.5 h-3.5 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+              </svg>
+              <span>{phoneStr}</span>
+            </a>
           ) : (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-blue-100 text-blue-800 border border-blue-200">
-              정규 셔틀 탑승
-            </span>
+            <span className="text-slate-400 font-mono">-</span>
           )}
         </td>
-        <td className="py-2.5 px-3 text-right">
-          <div className="flex items-center justify-end gap-1.5">
-            {(!isShuttle || isPickup) ? (
-              <button
-                type="button"
-                onClick={() => handlePromptShuttleRideRequest(st)}
-                className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-black transition shadow-xs cursor-pointer"
-              >
-                셔틀 결재 신청
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => handlePromptShuttleRideRequest(st)}
-                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer"
-              >
-                차량 변경 결재
-              </button>
+
+        {/* 3. 생일 */}
+        <td className="py-2.5 px-3 text-xs text-slate-700 font-mono font-medium">
+          {birthStr}
+        </td>
+
+        {/* 4. 등원차량 */}
+        <td className="py-2.5 px-3">
+          <span className={`text-xs font-bold px-2 py-0.5 rounded-md ${
+            amBusName !== '미배정'
+              ? 'bg-blue-50 text-blue-700 border border-blue-200'
+              : 'text-slate-400 bg-slate-50'
+          }`}>
+            {amBusName}
+          </span>
+        </td>
+
+        {/* 5. 하원차량 */}
+        <td className="py-2.5 px-3">
+          <div className="flex items-center gap-1 flex-wrap">
+            <span className={`text-xs font-bold px-2 py-0.5 rounded-md ${
+              pmBusName !== '미배정'
+                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                : 'text-slate-400 bg-slate-50'
+            }`}>
+              {pmBusName}
+            </span>
+            {isRidePending && (
+              <span className="text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.2 rounded-md animate-pulse">
+                결재 대기
+              </span>
             )}
+            {isRideApproved && (
+              <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 px-1.5 py-0.2 rounded-md">
+                승인 완료
+              </span>
+            )}
+          </div>
+        </td>
+
+        {/* 6. 알레르기 */}
+        <td className="py-2.5 px-3">
+          {allergyStr && allergyStr !== '없음' && allergyStr !== '-' ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-black bg-rose-50 text-rose-700 border border-rose-200 shadow-2xs">
+              <svg className="w-3 h-3 text-rose-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              <span>{allergyStr}</span>
+            </span>
+          ) : (
+            <span className="text-xs text-slate-400">없음</span>
+          )}
+        </td>
+
+        {/* 7. 결석 / 셔틀 탑승 / 픽업 (버튼) */}
+        <td className="py-2.5 px-3">
+          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+            {/* 결석 버튼 */}
+            <button
+              type="button"
+              onClick={() => handleUpdateBoardStatus(st.id, 'ABSENT')}
+              className={`px-2.5 py-1 text-xs font-black rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+                isAbsent
+                  ? 'bg-rose-600 text-white shadow-xs ring-2 ring-rose-200'
+                  : 'bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-slate-200'
+              }`}
+              title="오늘 결석 처리"
+            >
+              <span>결석</span>
+            </button>
+
+            {/* 셔틀 탑승 버튼 */}
+            <button
+              type="button"
+              onClick={() => {
+                if (isNonShuttle && !isRideApproved && !isRidePending) {
+                  handlePromptShuttleRideRequest(st);
+                  return;
+                }
+                handleUpdateBoardStatus(st.id, 'WAITING');
+              }}
+              className={`px-2.5 py-1 text-xs font-black rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+                isShuttle
+                  ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-200'
+                  : 'bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-700 border border-slate-200'
+              }`}
+              title="셔틀 탑승 처리"
+            >
+              <span>셔틀 탑승</span>
+              {isNonShuttle && !isRideApproved && !isRidePending && (
+                <span className="text-[10px] font-normal opacity-80">(신청)</span>
+              )}
+            </button>
+
+            {/* 픽업 버튼 */}
+            <button
+              type="button"
+              onClick={() => handleUpdateBoardStatus(st.id, 'SELF_PICKUP')}
+              className={`px-2.5 py-1 text-xs font-black rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+                isPickup
+                  ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-200'
+                  : 'bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border border-slate-200'
+              }`}
+              title="보호자 직접 픽업 (개별 하원)"
+            >
+              <span>픽업</span>
+            </button>
+
+            {/* 1:1 알림장 메모 버튼 */}
             <button
               type="button"
               onClick={() => {
                 setSelectedStudentForMemo(st);
                 setMemoInput(st.attendanceMemo || st.teacherMemo || '');
               }}
-              className="px-2 py-1 bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-600 rounded-lg text-xs font-bold transition cursor-pointer"
+              className="ml-0.5 px-2 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-500 rounded-lg text-xs font-bold border border-slate-200 transition cursor-pointer"
+              title="1:1 알림장 메모 작성"
             >
               알림장
             </button>
@@ -1065,6 +1151,7 @@ export default function TeacherDashboard({
 
   // Update Student Boarding Mode
   const handleUpdateBoardStatus = async (studentId, newStatus) => {
+    setLocalBoardStatusOverrides(prev => ({ ...prev, [studentId]: newStatus }));
     try {
       const res = await fetch(`${API_BASE_URL}/routing/student/${studentId}/board-status`, {
         method: 'POST',
@@ -1155,6 +1242,20 @@ export default function TeacherDashboard({
           </svg>
         </button>
 
+        {/* Tab: 캘린더 & 일정 관리 */}
+        <button
+          onClick={() => setActiveNavTab('calendar')}
+          className={`p-4 rounded-2xl transition-all ${activeNavTab === 'calendar'
+              ? 'bg-white text-blue-700 shadow-lg scale-110'
+              : 'text-blue-200 hover:bg-blue-600'
+            }`}
+          title="반 및 학원 캘린더 & 일정"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+        </button>
+
         {/* Tab: 출석부 관리 */}
         <button
           onClick={() => setActiveNavTab('attendance')}
@@ -1224,8 +1325,19 @@ export default function TeacherDashboard({
       {/* 2. Main Area (To the right of the Left Rail) */}
       {/* ======================================================== */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* VIEW: Homeroom Shuttle Status Mode */}
-        {activeNavTab === 'shuttle' ? (
+        {/* VIEW: Integrated Calendar Mode */}
+        {activeNavTab === 'calendar' ? (
+          <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-slate-50">
+            <LogViewer
+              buses={buses}
+              students={students}
+              currentTab="ALL"
+              currentUser={localTeacherUser}
+              availableClasses={teacherClass ? [teacherClass, ...availableClasses] : availableClasses}
+              academyId={selectedAcademyId || academy?.id}
+            />
+          </div>
+        ) : activeNavTab === 'shuttle' ? (
           <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
             {/* Header */}
             <div className="bg-white border-b border-slate-200 px-8 py-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
@@ -1461,7 +1573,11 @@ export default function TeacherDashboard({
                 </div>
               ) : attendanceData?.students && attendanceData.students.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {attendanceData.students.map((st) => {
+                  {[...attendanceData.students].sort((a, b) => {
+                    const aChanged = a.boardStatus === 'ABSENT' || a.status === 'ABSENT' || a.status === 'LATE' || a.status === 'EARLY_LEAVE' || a.boardStatus === 'SELF_PICKUP' ? 1 : 0;
+                    const bChanged = b.boardStatus === 'ABSENT' || b.status === 'ABSENT' || b.status === 'LATE' || b.status === 'EARLY_LEAVE' || b.boardStatus === 'SELF_PICKUP' ? 1 : 0;
+                    return bChanged - aChanged;
+                  }).map((st) => {
                     return (
                       <div
                         key={st.studentId}
@@ -1751,7 +1867,7 @@ export default function TeacherDashboard({
                       관리자에게 반 배정을 요청하세요
                     </div>
                     <p className="text-xs text-slate-500 leading-relaxed">
-                      <strong>{localTeacherUser?.name || '선생님'}</strong>님, 환영합니다.<br />
+                      <strong>{formatTeacherName(localTeacherUser?.name)}</strong>, 환영합니다.<br />
                       현재 <strong>{academy?.name || '소속 유치원'}</strong>에 정상 등록되었으며,
                       <strong>관리자님께서 담당 반을 배정</strong>하시면 교실 수업 일정 및 우리 반 원아 명단이 자동으로 활성화됩니다.
                     </p>
@@ -1791,7 +1907,7 @@ export default function TeacherDashboard({
                         {academy?.name || '우리 유치원'} · {teacherClass} 교실
                       </h2>
                       <p className="text-blue-100 text-xs sm:text-sm">
-                        {todayStr} · <strong>{localTeacherUser?.name || '선생님'}</strong>님, 오늘 하루도 안전하고 행복한 보육 되세요!
+                        {todayStr} · <strong>{formatTeacherName(localTeacherUser?.name)}</strong>, 오늘 하루도 안전하고 행복한 보육 되세요!
                       </p>
                     </div>
 
@@ -1948,10 +2064,10 @@ export default function TeacherDashboard({
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
                     <div>
                       <h3 className="text-lg font-black text-slate-900 tracking-tight">
-                        {teacherClass} 원아 명단 & 출결 / 알림장 관리
+                        {teacherClass} 학원생 정보
                       </h3>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        원아별 일일 알림장 메모를 남기고, 오늘 하원 방법(셔틀 / 직접 픽업 / 결석)을 원클릭으로 변경하세요.
+                        학원생별 기본 정보(전화번호, 생일, 등하원 차량, 알레르기)를 확인하고, 하원 방법(결석 / 셔틀 탑승 / 픽업)을 원클릭으로 변경하세요.
                       </p>
                     </div>
 
@@ -2088,7 +2204,7 @@ export default function TeacherDashboard({
                   {/* View Mode Switcher and Approval History Toolbar */}
                   <div className="flex flex-wrap items-center justify-between gap-3 mb-4 bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-black text-slate-700">원아 명단 보기 모드:</span>
+                      <span className="text-xs font-black text-slate-700">학원생 정보 보기 모드:</span>
                       <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1">
                         <button
                           type="button"
@@ -2143,7 +2259,7 @@ export default function TeacherDashboard({
                             <div className="flex items-center gap-2">
                               <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
                               <h4 className="font-black text-amber-950 text-sm">
-                                오늘 변동사항 및 결재 진행 원아 ({changedStudents.length}명)
+                                오늘 변동사항 및 결재 진행 학생 ({changedStudents.length}명)
                               </h4>
                             </div>
                             <span className="text-[11px] font-bold text-amber-800">우선 관리 대상</span>
@@ -2153,14 +2269,13 @@ export default function TeacherDashboard({
                               <thead>
                                 <tr className="bg-amber-100/40 text-[11px] font-extrabold text-amber-900 border-b border-amber-200 uppercase">
                                   <th className="py-2.5 px-3 text-center w-12">No</th>
-                                  <th className="py-2.5 px-3">원아명 (성별/나이/반)</th>
-                                  <th className="py-2.5 px-3">생년월일</th>
-                                  <th className="py-2.5 px-3">전화번호</th>
-                                  <th className="py-2.5 px-3">등원 차량 (AM)</th>
-                                  <th className="py-2.5 px-3">하원 차량 (PM)</th>
-                                  <th className="py-2.5 px-3">승하차 위치</th>
-                                  <th className="py-2.5 px-3">출결 및 결재 상태</th>
-                                  <th className="py-2.5 px-3 text-right">조치 / 신청</th>
+                                  <th className="py-2.5 px-3">학생명</th>
+                                  <th className="py-2.5 px-3">학부모 전화번호</th>
+                                  <th className="py-2.5 px-3">생일</th>
+                                  <th className="py-2.5 px-3">등원차량</th>
+                                  <th className="py-2.5 px-3">하원차량</th>
+                                  <th className="py-2.5 px-3">알레르기</th>
+                                  <th className="py-2.5 px-3 text-center">하원 상태 (결석 / 셔틀 탑승 / 픽업)</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -2180,7 +2295,7 @@ export default function TeacherDashboard({
                           <div key={ageKey} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
                             <div className="bg-slate-100/80 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
                               <h4 className="font-black text-slate-800 text-sm">
-                                {ageKey} 원아 명단 (총 {boys.length + girls.length}명: 남 {boys.length}명, 여 {girls.length}명)
+                                {ageKey} 학원생 명단 (총 {boys.length + girls.length}명: 남 {boys.length}명, 여 {girls.length}명)
                               </h4>
                               <span className="text-xs font-semibold text-slate-500">{teacherClass}</span>
                             </div>
@@ -2190,14 +2305,13 @@ export default function TeacherDashboard({
                                 <thead>
                                   <tr className="bg-slate-50 text-[11px] font-extrabold text-slate-600 border-b border-slate-200 uppercase">
                                     <th className="py-2.5 px-3 text-center w-12">No</th>
-                                    <th className="py-2.5 px-3">원아명 (성별/나이/반)</th>
-                                    <th className="py-2.5 px-3">생년월일</th>
-                                    <th className="py-2.5 px-3">전화번호</th>
-                                    <th className="py-2.5 px-3">등원 차량 (AM)</th>
-                                    <th className="py-2.5 px-3">하원 차량 (PM)</th>
-                                    <th className="py-2.5 px-3">승하차 위치</th>
-                                    <th className="py-2.5 px-3">출결 및 결재 상태</th>
-                                    <th className="py-2.5 px-3 text-right">조치 / 신청</th>
+                                    <th className="py-2.5 px-3">학생명</th>
+                                  <th className="py-2.5 px-3">학부모 전화번호</th>
+                                  <th className="py-2.5 px-3">생일</th>
+                                  <th className="py-2.5 px-3">등원차량</th>
+                                  <th className="py-2.5 px-3">하원차량</th>
+                                  <th className="py-2.5 px-3">알레르기</th>
+                                  <th className="py-2.5 px-3 text-center">하원 상태 (결석 / 셔틀 탑승 / 픽업)</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -2207,7 +2321,7 @@ export default function TeacherDashboard({
                                   {/* Slight spacing / Divider between Boys and Girls per requirement */}
                                   {boys.length > 0 && girls.length > 0 && (
                                     <tr className="bg-slate-100/50">
-                                      <td colSpan={9} className="py-1 px-4 text-[10px] font-bold text-slate-400 text-center border-y border-dashed border-slate-200">
+                                      <td colSpan={8} className="py-1 px-4 text-[10px] font-bold text-slate-400 text-center border-y border-dashed border-slate-200">
                                         남아 / 여아 구분
                                       </td>
                                     </tr>
@@ -2226,7 +2340,7 @@ export default function TeacherDashboard({
                     /* Existing Card View */
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
 
-                      {displayedStudents.map(student => {
+                      {sortedDisplayedStudents.map(student => {
                         const isNonShuttle = checkIsNonShuttle(student);
                         const effectiveStatus = getStudentEffectiveBoardStatus(student);
                         const rideReq = rideRequests[student.id];
@@ -3000,78 +3114,80 @@ export default function TeacherDashboard({
                 </div>
               </div>
 
-              {/* 2번: 배차 추천 차량 (좌석 있는 차량 우선 정렬) */}
-              {quickRequestModal.targetBus ? (
-                <div className="bg-indigo-50/80 border-2 border-indigo-200 rounded-2xl p-4 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-indigo-900">추천 배차 차량:</span>
-                    <div className="flex items-center gap-1.5">
-                      {quickRequestModal.remainingSeats > 0 ? (
-                        <span className="text-xs font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-300">
-                          잔여 {quickRequestModal.remainingSeats}석 ({quickRequestModal.capacity}인승)
-                        </span>
-                      ) : (
-                        <span className="text-xs font-black text-rose-700 bg-rose-100 px-2 py-0.5 rounded-md border border-rose-300">
-                          만차 (0/{quickRequestModal.capacity}석)
-                        </span>
-                      )}
+              {/* 2번: 배차 추천 차량 (1:1 모드일 때 표시) */}
+              {quickRequestMode !== 'CONTEST' && (
+                quickRequestModal.targetBus ? (
+                  <div className="bg-indigo-50/80 border-2 border-indigo-200 rounded-2xl p-4 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black text-indigo-900">추천 배차 차량:</span>
+                      <div className="flex items-center gap-1.5">
+                        {quickRequestModal.remainingSeats > 0 ? (
+                          <span className="text-xs font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-300">
+                            잔여 {quickRequestModal.remainingSeats}석 ({quickRequestModal.capacity}인승)
+                          </span>
+                        ) : (
+                          <span className="text-xs font-black text-rose-700 bg-rose-100 px-2 py-0.5 rounded-md border border-rose-300">
+                            만차 (0/{quickRequestModal.capacity}석)
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Vehicle selector dropdown */}
-                  {quickRequestModal.allEvaluatedBuses && quickRequestModal.allEvaluatedBuses.length > 1 ? (
-                    <div>
-                      <select
-                        value={quickRequestModal.targetBus.id}
-                        onChange={(e) => {
-                          const chosenId = Number(e.target.value);
-                          const matched = quickRequestModal.allEvaluatedBuses.find(item => item.bus.id === chosenId);
-                          if (matched) {
-                            setQuickRequestModal(prev => ({
-                              ...prev,
-                              targetBus: matched.bus,
-                              distanceLabel: matched.label,
-                              remainingSeats: matched.remainingSeats,
-                              capacity: matched.capacity,
-                            }));
-                          }
-                        }}
-                        className="w-full px-3 py-2 text-xs font-bold bg-white border border-indigo-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      >
-                        {quickRequestModal.allEvaluatedBuses.map(item => (
-                          <option key={item.bus.id} value={item.bus.id}>
-                            {item.bus.name} {item.hasSeats ? `(잔여 ${item.remainingSeats}/${item.capacity}석)` : `[만차 0/${item.capacity}석]`} - {item.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  ) : (
-                    <div className="font-extrabold text-sm text-indigo-950 bg-white px-3 py-1.5 rounded-xl border border-indigo-200">
-                      {quickRequestModal.targetBus.name} {quickRequestModal.targetBus.licensePlate ? `(${quickRequestModal.targetBus.licensePlate})` : ''}
-                    </div>
-                  )}
+                    {/* Vehicle selector dropdown */}
+                    {quickRequestModal.allEvaluatedBuses && quickRequestModal.allEvaluatedBuses.length > 1 ? (
+                      <div>
+                        <select
+                          value={quickRequestModal.targetBus.id}
+                          onChange={(e) => {
+                            const chosenId = Number(e.target.value);
+                            const matched = quickRequestModal.allEvaluatedBuses.find(item => item.bus.id === chosenId);
+                            if (matched) {
+                              setQuickRequestModal(prev => ({
+                                ...prev,
+                                targetBus: matched.bus,
+                                distanceLabel: matched.label,
+                                remainingSeats: matched.remainingSeats,
+                                capacity: matched.capacity,
+                              }));
+                            }
+                          }}
+                          className="w-full px-3 py-2 text-xs font-bold bg-white border border-indigo-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                          {quickRequestModal.allEvaluatedBuses.map(item => (
+                            <option key={item.bus.id} value={item.bus.id}>
+                              {item.bus.name} {item.hasSeats ? `(잔여 ${item.remainingSeats}/${item.capacity}석)` : `[만차 0/${item.capacity}석]`} - {item.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div className="font-extrabold text-sm text-indigo-950 bg-white px-3 py-1.5 rounded-xl border border-indigo-200">
+                        {quickRequestModal.targetBus.name} {quickRequestModal.targetBus.licensePlate ? `(${quickRequestModal.targetBus.licensePlate})` : ''}
+                      </div>
+                    )}
 
-                  <div className="flex items-center justify-between text-xs pt-1">
-                    <span className="text-slate-500 font-bold">담당 지도교사:</span>
-                    <span className="font-extrabold text-slate-800">
-                      {quickRequestModal.targetBus.teacherName || quickRequestModal.targetBus.teacherUser?.name || '담당 지도교사'}
-                    </span>
+                    <div className="flex items-center justify-between text-xs pt-1">
+                      <span className="text-slate-500 font-bold">담당 지도교사:</span>
+                      <span className="font-extrabold text-slate-800">
+                        {quickRequestModal.targetBus.teacherName || quickRequestModal.targetBus.teacherUser?.name || '담당 지도교사'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500 font-bold">거리 근접도:</span>
+                      <span className="font-extrabold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                        {quickRequestModal.distanceLabel || '가장 가까운 하차 구역'}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500 font-bold">거리 근접도:</span>
-                    <span className="font-extrabold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                      {quickRequestModal.distanceLabel || '가장 가까운 하차 구역'}
-                    </span>
+                ) : (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 font-bold">
+                    배차 가능한 차량을 찾을 수 없습니다. 오픈 공모로 신청하시거나 관리자님께 문의해주세요.
                   </div>
-                </div>
-              ) : (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 font-bold">
-                  배차 가능한 차량을 찾을 수 없습니다. 관리자님께 배차 등록을 문의해주세요.
-                </div>
+                )
               )}
 
               {/* Full Capacity Warning Alert */}
-              {quickRequestModal.allEvaluatedBuses?.every(b => !b.hasSeats) && (
+              {quickRequestMode !== 'CONTEST' && quickRequestModal.allEvaluatedBuses?.every(b => !b.hasSeats) && (
                 <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-800 font-bold leading-relaxed">
                   주의: 모든 통학버스가 만차(승차 정원 초과) 상태입니다. 원장님 및 담당 지도교사님과 사전 상의 후 신청해주세요.
                 </div>

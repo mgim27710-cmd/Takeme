@@ -128,6 +128,17 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     if (!this.server || !academyId) return;
     this.server.to(`academy_${academyId}`).emit('changeRequestCreated', data);
     this.server.to(`academy_${academyId}`).emit('notificationReceived', { type: 'APPROVAL_REQUEST', data });
+
+    const alertPayload = {
+      id: data.id,
+      category: data.type === 'ABSENCE' ? 'ABSENT' : data.type === 'ONE_TIME_BOARDING' ? 'SHUTTLE_REQUEST' : data.type === 'PICKUP' || data.type === 'INDIVIDUAL_DISMISSAL' ? 'PICKUP' : 'GENERAL',
+      title: `[신청 접수] ${data.studentName} ${data.typeKr} 신청`,
+      message: `${data.studentName} 원아의 ${data.typeKr} 신청이 접수되었습니다. (적용일: ${data.targetDate})`,
+      timestamp: new Date().toISOString(),
+      data,
+    };
+    this.server.to(`academy_${academyId}`).emit('directorAlert', alertPayload);
+    this.server.emit('globalDirectorAlert', alertPayload);
   }
 
   /**
@@ -147,6 +158,19 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     if (data.academyId) {
       this.server.to(`academy_${data.academyId}`).emit('changeRequestDecided', data.request);
       this.server.to(`academy_${data.academyId}`).emit('notificationReceived', { type: 'APPROVAL_RESULT', request: data.request });
+
+      const studentName = data.request?.student?.adminDisplayName || data.request?.student?.name || '원아';
+      const decisionKr = data.request?.decision === 'APPROVED' ? '승인' : '반려';
+      const alertPayload = {
+        id: data.request?.id,
+        category: 'PAYMENT_DECISION',
+        title: `[결재 ${decisionKr}] ${studentName} 신청 ${decisionKr}`,
+        message: `${studentName} 원아의 통학 신청이 최종 ${decisionKr}되었습니다.`,
+        timestamp: new Date().toISOString(),
+        data: data.request,
+      };
+      this.server.to(`academy_${data.academyId}`).emit('directorAlert', alertPayload);
+      this.server.emit('globalDirectorAlert', alertPayload);
     }
     if (data.vehicleId) {
       this.server.to(`vehicle_${data.vehicleId}`).emit('changeRequestDecided', data.request);

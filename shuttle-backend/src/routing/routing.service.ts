@@ -19,7 +19,7 @@ import { BoardPost } from '../entities/board-post.entity';
 import { BoardComment } from '../entities/board-comment.entity';
 import { AuditLog } from '../entities/audit-log.entity';
 import { YearlyZoneMapping } from '../entities/yearly-zone-mapping.entity';
-import { Between } from 'typeorm';
+import { Between, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 import {
   S3_REF_PREFIX,
@@ -34,6 +34,7 @@ import {
 import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE, kstDateString, isValidDateString } from '../utils/school.util';
 import { Attendance, AttendanceStatus } from '../entities/attendance.entity';
 import { AttendanceSubmission } from '../entities/attendance-submission.entity';
+import { formatTeacherName, cleanTeacherBaseName } from '../utils/teacher.util';
 
 @Injectable()
 export class RoutingService {
@@ -264,22 +265,32 @@ export class RoutingService {
   }
 
   private colorPalette = [
-    '#3b82f6', // blue
-    '#ef4444', // red
-    '#10b981', // green
-    '#f59e0b', // amber
-    '#8b5cf6', // purple
-    '#ec4899', // pink
-    '#14b8a6', // teal
-    '#f97316', // orange
-    '#6366f1', // indigo
-    '#84cc16'  // lime
+    '#1d4ed8', // 1: royal blue (파랑)
+    '#059669', // 2: emerald green (초록)
+    '#f97316', // 3: vivid orange (주황)
+    '#7c3aed', // 4: deep purple (보라)
+    '#eab308', // 5: bright gold (골드/노랑)
+    '#0891b2', // 6: deep teal (청록)
+    '#dc2626', // 7: crimson red (빨강)
+    '#78350f', // 8: warm chocolate (브라운)
   ];
   private colorIndex = 0;
   private routeUpdateNotifier?: (academyId?: number, message?: string) => void;
 
   public registerRouteUpdateNotifier(fn: (academyId?: number, message?: string) => void) {
     this.routeUpdateNotifier = fn;
+  }
+
+  private systemNotificationHandler?: (academyId: number | null, category: string, title: string, content: string, extra?: any) => Promise<any>;
+
+  public registerSystemNotificationHandler(fn: (academyId: number | null, category: string, title: string, content: string, extra?: any) => Promise<any>) {
+    this.systemNotificationHandler = fn;
+  }
+
+  public notifySystemNotification(academyId: number | null, category: string, title: string, content: string, extra?: any) {
+    try {
+      this.systemNotificationHandler?.(academyId, category, title, content, extra);
+    } catch {}
   }
 
   public notifyRouteUpdated(academyId?: number, message?: string) {
@@ -649,7 +660,9 @@ export class RoutingService {
         }
         const hasExistingTeacher = existing.teacherName && existing.teacherName !== '미정';
         if (!hasExistingTeacher && v.teacherName && v.teacherName !== '미정') {
-          existing.teacherName = v.teacherName;
+          existing.teacherName = formatTeacherName(v.teacherName);
+        } else if (hasExistingTeacher) {
+          existing.teacherName = formatTeacherName(existing.teacherName);
         }
         const hasExistingTeacherPhone = existing.teacherPhone && existing.teacherPhone !== '000-0000-0000';
         if (!hasExistingTeacherPhone && v.teacherPhone && v.teacherPhone !== '000-0000-0000') {
@@ -665,7 +678,7 @@ export class RoutingService {
           plateNumber: v.plateNumber || '',
           driverName: v.driverName || '미정',
           driverPhone: v.driverPhone || '000-0000-0000',
-          teacherName: v.teacherName || '미정',
+          teacherName: v.teacherName ? formatTeacherName(v.teacherName) : '미정',
           teacherPhone: v.teacherPhone || '000-0000-0000',
           capacity: Number(v.capacity) || 25,
           academy: academy,
@@ -1161,7 +1174,7 @@ export class RoutingService {
         plateNumber: v.plateNumber,
         driverName: v.driverName,
         driverPhone: v.driverPhone,
-        teacherName: v.teacherName,
+        teacherName: v.teacherName ? formatTeacherName(v.teacherName) : '미정',
         teacherPhone: v.teacherPhone,
         capacity: v.capacity,
         driverApprovalStatus: v.driverApprovalStatus,
@@ -1187,6 +1200,9 @@ export class RoutingService {
       try {
         parsedRaw = typeof st.raw === 'string' ? JSON.parse(st.raw) : (st.raw || {});
       } catch(e) {}
+      if (parsedRaw && parsedRaw['담임명']) {
+        parsedRaw['담임명'] = formatTeacherName(parsedRaw['담임명']);
+      }
       if (parsedRaw.isTemporaryRide && parsedRaw.temporaryRideDate && parsedRaw.temporaryRideDate < todayStr) {
         st.assignedVehicle = null;
         st.boardingLocation = parsedRaw.originalBoardingLocation || null;
@@ -1204,14 +1220,48 @@ export class RoutingService {
       await this.studentRepository.save(expiredStudents).catch(err => console.error('Failed to rollback expired temporary rides:', err));
     }
 
+    // Query active overrides for today (일회성 탑승 및 당일 탑승지 변경 조회)
+    const todayOverrides = await this.scheduleOverrideRepository.find({
+      where: {
+        startDate: LessThanOrEqual(todayStr),
+        endDate: MoreThanOrEqual(todayStr),
+      },
+      relations: { student: true },
+    }).catch(() => []);
+    const overrideMap = new Map<number, ScheduleOverride>();
+    for (const ov of todayOverrides) {
+      if (ov.student?.id) overrideMap.set(ov.student.id, ov);
+    }
+
     let formattedStudents = dbStudents.map(st => {
       let parsedRaw: any = {};
       try {
         parsedRaw = typeof st.raw === 'string' ? JSON.parse(st.raw) : (st.raw || {});
       } catch(e) {}
+      if (parsedRaw && parsedRaw['담임명']) {
+        parsedRaw['담임명'] = formatTeacherName(parsedRaw['담임명']);
+      }
 
-      const isNotRiding = Boolean(st.isNotRiding || parsedRaw['미탑승'] || parsedRaw['차량미탑승']);
+      const override = overrideMap.get(st.id);
+      const isOneTimeBoarding = Boolean(override && override.overrideType === OverrideType.ONE_TIME_BOARDING);
+      const isNotRiding = isOneTimeBoarding ? false : Boolean(st.isNotRiding || parsedRaw['미탑승'] || parsedRaw['차량미탑승']);
       const needsAddress = !isNotRiding && (!st.address || st.latitude === null || st.latitude === undefined || isNaN(st.latitude) || !st.longitude || isNaN(st.longitude) || !!parsedRaw['주소입력필요']);
+
+      const isOneTimeRide = Boolean(
+        isOneTimeBoarding ||
+        (override && (override.overrideType === OverrideType.CHANGE_LOCATION || override.overrideType === OverrideType.PICKUP)) ||
+        parsedRaw.isTemporaryRide ||
+        parsedRaw.rideType === 'TODAY_ONLY' ||
+        parsedRaw.isTemporaryLocation ||
+        (st.isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))
+      );
+
+      const effectiveBusId = (isOneTimeBoarding && override?.newVehicleId)
+        ? override.newVehicleId
+        : (st.assignedVehicle ? st.assignedVehicle.id : null);
+      const effectiveVehicle = effectiveBusId
+        ? vehicles.find(v => v.id === effectiveBusId)
+        : st.assignedVehicle;
 
       return {
         id: st.id,
@@ -1221,16 +1271,18 @@ export class RoutingService {
         birthDate: st.birthDate || parsedRaw['생년월일'] || parsedRaw['생일'] || '',
         className: st.className || getStudentClassName(st),
         address: st.address || '',
-        boardingLocation: st.boardingLocation || '',
+        boardingLocation: (override && override.newAddress) ? override.newAddress : (st.boardingLocation || ''),
         dropoffLocation: st.dropoffLocation || parsedRaw['하차지'] || parsedRaw['하원지'] || '',
-        lat: st.latitude,
-        lng: st.longitude,
+        lat: (override && override.latitude) ? Number(override.latitude) : st.latitude,
+        lng: (override && override.longitude) ? Number(override.longitude) : st.longitude,
         isNotRiding,
+        isOneTimeRide,
+        oneTimeType: override?.overrideType || (parsedRaw.isTemporaryLocation ? 'CHANGE_LOCATION' : (isOneTimeBoarding ? 'ONE_TIME_BOARDING' : null)),
         addressNeedsInput: needsAddress,
-        assignedBusId: st.assignedVehicle ? st.assignedVehicle.id : null,
-        assignedDepartureBusId: st.assignedDepartureVehicle ? st.assignedDepartureVehicle.id : null,
-        assignedDepartureBusName: st.assignedDepartureVehicle ? st.assignedDepartureVehicle.busNumber : (parsedRaw['하원차량'] || ''),
-        color: st.assignedVehicle ? (st.assignedVehicle.colorHex || '#64748b') : '#64748b',
+        assignedBusId: effectiveBusId,
+        assignedDepartureBusId: st.assignedDepartureVehicle ? st.assignedDepartureVehicle.id : (isOneTimeBoarding ? effectiveBusId : null),
+        assignedDepartureBusName: effectiveVehicle ? effectiveVehicle.busNumber : (parsedRaw['하원차량'] || ''),
+        color: effectiveVehicle ? (effectiveVehicle.colorHex || '#64748b') : '#64748b',
         allergies: st.allergies || parsedRaw['알레르기'] || parsedRaw['알러지'] || '',
         raw: parsedRaw,
         parentPhone: st.phone || st.parentUser?.phone || parsedRaw['부모연락처'] || parsedRaw['연락처'] || parsedRaw['보호자연락처'] || parsedRaw['보호자 연락처'] || parsedRaw['전화번호'] || parsedRaw['학부모전화번호'] || '',
@@ -1433,25 +1485,32 @@ export class RoutingService {
     return { success: true };
   }
 
-  async setupAcademy(data: { name: string, address: string, lat: number, lng: number, businessNumber?: string }, academyId?: number, userId?: number) {
-    let academy = await this.getAcademy(academyId, userId);
+  async setupAcademy(data: any, academyId?: number, userId?: number) {
+    const targetAcademyId = data?.academyId || data?.id || academyId;
+    let academy = await this.getAcademy(targetAcademyId, userId);
+
+    const lat = data.lat !== undefined ? data.lat : (data.latitude !== undefined ? data.latitude : (academy?.latitude || 37.828456));
+    const lng = data.lng !== undefined ? data.lng : (data.longitude !== undefined ? data.longitude : (academy?.longitude || 127.065123));
+    const address = data.address !== undefined ? data.address : (data.roadAddress !== undefined ? data.roadAddress : (academy?.roadAddress || ''));
+    const name = data.name || academy?.name || '새 유치원';
+
     if (!academy) {
       let code = Math.random().toString(36).substring(2, 8).toUpperCase();
       while (await this.academyRepository.findOne({ where: { authCode: code } })) {
         code = Math.random().toString(36).substring(2, 8).toUpperCase();
       }
       academy = this.academyRepository.create({
-        name: data.name,
-        roadAddress: data.address,
-        latitude: data.lat.toString(),
-        longitude: data.lng.toString(),
+        name: String(name),
+        roadAddress: String(address),
+        latitude: String(lat),
+        longitude: String(lng),
         businessNumber: data.businessNumber || null
       });
     } else {
-      academy.name = data.name;
-      academy.roadAddress = data.address;
-      academy.latitude = data.lat.toString();
-      academy.longitude = data.lng.toString();
+      academy.name = String(name);
+      academy.roadAddress = String(address);
+      academy.latitude = String(lat);
+      academy.longitude = String(lng);
       if (data.businessNumber !== undefined) {
         academy.businessNumber = data.businessNumber;
       }
@@ -1912,7 +1971,7 @@ export class RoutingService {
     const classTeacherMap = new Map<string, string>();
     existingTeachers.forEach(t => {
       if (t.assignedClass && t.name && t.assignedClass !== '미배정') {
-        classTeacherMap.set(t.assignedClass.trim(), t.name.trim());
+        classTeacherMap.set(t.assignedClass.trim(), formatTeacherName(t.name.trim()));
       }
     });
 
@@ -1958,9 +2017,10 @@ export class RoutingService {
         const studentClass = (rawObj['반명'] || rawObj['반'] || '').toString().trim();
         const classTeacher = studentClass ? classTeacherMap.get(studentClass) : null;
         if (classTeacher) {
-          rawObj['담임명'] = classTeacher;
+          rawObj['담임명'] = formatTeacherName(classTeacher);
         } else {
-          rawObj['담임명'] = rawObj['담임명'] || rawObj['담임'] || '';
+          const rawTeacher = rawObj['담임명'] || rawObj['담임'] || rawObj['담임교사'] || rawObj['선생님'] || rawObj['교사'] || '';
+          rawObj['담임명'] = rawTeacher ? formatTeacherName(rawTeacher) : '';
         }
       }
 
@@ -2024,14 +2084,18 @@ export class RoutingService {
   }
 
   async updateStudent(studentId: number, data: any, academyId?: number, userId?: number) {
-    const academy = await this.getAcademy(academyId, userId);
-    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
+    const targetAcademyId = data?.academyId || academyId;
+    let academy = await this.getAcademy(targetAcademyId, userId);
 
-    const student = await this.studentRepository.findOne({
-      where: { id: studentId, academy: { id: academy.id } },
-      relations: { assignedVehicle: true, academy: true }
+    let student = await this.studentRepository.findOne({
+      where: academy ? { id: studentId, academy: { id: academy.id } } : { id: studentId },
+      relations: { assignedVehicle: true, assignedDepartureVehicle: true, academy: true }
     });
     if (!student) throw new NotFoundException('원아를 찾을 수 없습니다.');
+    if (!academy && student.academy) {
+      academy = student.academy;
+    }
+    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
 
     if (data.name !== undefined) student.name = data.name;
     if (data.adminDisplayName !== undefined) student.adminDisplayName = data.adminDisplayName;
@@ -2099,9 +2163,10 @@ export class RoutingService {
       parsedRaw['하차지'] = data.dropoffLocation;
     }
 
-    if (data.assignedBusId) {
+    const inBus = data.assignedBusId !== undefined ? data.assignedBusId : (data.inBusId !== undefined ? data.inBusId : data.assignedVehicleId);
+    if (inBus) {
       const vehicle = await this.vehicleRepository.findOne({
-        where: { id: Number(data.assignedBusId), academy: { id: academy.id } }
+        where: { id: Number(inBus), academy: { id: academy.id } }
       });
       if (vehicle) {
         student.assignedVehicle = vehicle;
@@ -2109,14 +2174,15 @@ export class RoutingService {
         parsedRaw['호차'] = vehicle.busNumber;
         parsedRaw['차량'] = vehicle.busNumber;
       }
-    } else if (data.assignedBusId === null) {
+    } else if (inBus === null) {
       student.assignedVehicle = null as any;
     }
 
-    if (data.assignedDepartureBusId !== undefined) {
-      if (data.assignedDepartureBusId) {
+    const outBus = data.assignedDepartureBusId !== undefined ? data.assignedDepartureBusId : (data.outBusId !== undefined ? data.outBusId : data.assignedDepartureVehicleId);
+    if (outBus !== undefined) {
+      if (outBus) {
         const dVehicle = await this.vehicleRepository.findOne({
-          where: { id: Number(data.assignedDepartureBusId), academy: { id: academy.id } }
+          where: { id: Number(outBus), academy: { id: academy.id } }
         });
         if (dVehicle) {
           student.assignedDepartureVehicle = dVehicle;
@@ -2247,13 +2313,14 @@ export class RoutingService {
     const className = studentData.className || studentData.raw?.['반명'] || '';
 
     // Check if class already has an existing assigned teacher in the system
-    let teacherName = studentData.teacherName || studentData.raw?.['담임명'] || '';
+    const rawTeacherFromInput = studentData.teacherName || studentData.raw?.['담임명'] || studentData.raw?.['담임'] || studentData.raw?.['담임교사'] || studentData.raw?.['선생님'] || studentData.raw?.['교사'] || '';
+    let teacherName = rawTeacherFromInput ? formatTeacherName(rawTeacherFromInput) : '';
     if (className) {
       const classTeacher = await this.userRepository.findOne({
         where: { academy: { id: academy.id }, assignedClass: className }
       });
       if (classTeacher && classTeacher.name) {
-        teacherName = classTeacher.name; // Preserve existing teacher!
+        teacherName = formatTeacherName(classTeacher.name); // Preserve existing teacher!
       }
     }
 
@@ -3091,10 +3158,39 @@ export class RoutingService {
   }
 
   async updateStudentBoardStatus(studentId: number, boardStatus: string) {
-    const student = await this.studentRepository.findOne({ where: { id: studentId } });
+    const student = await this.studentRepository.findOne({ where: { id: studentId }, relations: { academy: true } });
     if (!student) throw new BadRequestException('원아를 찾을 수 없습니다.');
+    const prevStatus = student.boardStatus;
     student.boardStatus = boardStatus;
     await this.studentRepository.save(student);
+
+    const acadId = student.academy?.id || null;
+    if (boardStatus === 'ABSENT') {
+      this.notifySystemNotification(
+        acadId,
+        'ABSENT',
+        '원생 결석 알림',
+        `${student.name} 학생(원아)이(가) 오늘 결석 처리되었습니다.`,
+        { studentId: student.id, studentName: student.name }
+      );
+    } else if (boardStatus === 'SELF_PICKUP') {
+      this.notifySystemNotification(
+        acadId,
+        'PICKUP',
+        '개별 픽업 알림',
+        `${student.name} 학생(원아)의 하원 방법이 보호자 직접 픽업으로 변경되었습니다.`,
+        { studentId: student.id, studentName: student.name }
+      );
+    } else if (boardStatus === 'WAITING' && prevStatus && prevStatus !== 'WAITING') {
+      this.notifySystemNotification(
+        acadId,
+        'SHUTTLE_REQUEST',
+        '셔틀 탑승 희망 알림',
+        `${student.name} 학생(원아)이(가) 셔틀 탑승을 희망하여 탑승 대기로 변경되었습니다.`,
+        { studentId: student.id, studentName: student.name }
+      );
+    }
+
     return { success: true, studentId: student.id, boardStatus: student.boardStatus };
   }
 
@@ -3149,21 +3245,21 @@ export class RoutingService {
   }
 
   async batchUpdateStudents(
-    updates: Array<{
-      id: number;
-      name?: string;
-      gender?: string;
-      birthDate?: string;
-      phone?: string;
-      className?: string;
-      inBusId?: number;
-      outBusId?: number;
-    }>,
+    updates: any[],
     academyId?: number,
     userId?: number,
   ) {
     if (!Array.isArray(updates) || updates.length === 0) return { success: true, count: 0 };
-    const academy = await this.getAcademy(academyId, userId);
+    let academy = await this.getAcademy(academyId, userId);
+    if (!academy && updates[0]?.id) {
+      const sampleSt = await this.studentRepository.findOne({
+        where: { id: updates[0].id },
+        relations: { academy: true }
+      });
+      if (sampleSt?.academy) {
+        academy = sampleSt.academy;
+      }
+    }
     if (!academy) throw new BadRequestException('기관 정보를 찾을 수 없습니다.');
 
     let updatedCount = 0;
@@ -3172,7 +3268,7 @@ export class RoutingService {
       if (!item.id) continue;
       const student = await this.studentRepository.findOne({
         where: { id: item.id, academy: { id: academy.id } },
-        relations: { schedules: { assignedVehicle: true }, assignedVehicle: true },
+        relations: { schedules: { assignedVehicle: true }, assignedVehicle: true, assignedDepartureVehicle: true },
       });
       if (!student) continue;
 
@@ -3185,6 +3281,8 @@ export class RoutingService {
       if (item.name && item.name.trim()) {
         student.name = item.name.trim();
         student.adminDisplayName = item.name.trim();
+        rawObj['원생명'] = item.name.trim();
+        rawObj['학생이름/영문이름'] = item.name.trim();
       }
       if (item.gender !== undefined) {
         student.gender = item.gender;
@@ -3206,8 +3304,9 @@ export class RoutingService {
       }
 
       // 등원 차량 반영
-      if (item.inBusId !== undefined) {
-        const inVehicle = item.inBusId ? await this.vehicleRepository.findOne({ where: { id: item.inBusId } }) : null;
+      const inBus = item.inBusId !== undefined ? item.inBusId : (item.assignedBusId !== undefined ? item.assignedBusId : item.assignedVehicleId);
+      if (inBus !== undefined) {
+        const inVehicle = inBus ? await this.vehicleRepository.findOne({ where: { id: Number(inBus), academy: { id: academy.id } } }) : null;
         let inSched = student.schedules?.find(s => s.type === 'BOARDING');
         if (inSched) {
           inSched.assignedVehicle = inVehicle as any;
@@ -3222,12 +3321,20 @@ export class RoutingService {
           });
           await scheduleRepo.save(newSched);
         }
-        if (inVehicle) student.assignedVehicle = inVehicle;
+        student.assignedVehicle = inVehicle || null as any;
+        if (inVehicle) {
+          rawObj['등원차량'] = inVehicle.busNumber;
+          rawObj['호차'] = inVehicle.busNumber;
+          rawObj['차량'] = inVehicle.busNumber;
+        } else {
+          delete rawObj['등원차량'];
+        }
       }
 
       // 하원 차량 반영
-      if (item.outBusId !== undefined) {
-        const outVehicle = item.outBusId ? await this.vehicleRepository.findOne({ where: { id: item.outBusId } }) : null;
+      const outBus = item.outBusId !== undefined ? item.outBusId : item.assignedDepartureBusId;
+      if (outBus !== undefined) {
+        const outVehicle = outBus ? await this.vehicleRepository.findOne({ where: { id: Number(outBus), academy: { id: academy.id } } }) : null;
         let outSched = student.schedules?.find(s => s.type === 'ALIGHTING');
         if (outSched) {
           outSched.assignedVehicle = outVehicle as any;
@@ -3242,6 +3349,43 @@ export class RoutingService {
           });
           await scheduleRepo.save(newSched);
         }
+        student.assignedDepartureVehicle = outVehicle || null as any;
+        if (outVehicle) {
+          rawObj['하원차량'] = outVehicle.busNumber;
+        } else {
+          delete rawObj['하원차량'];
+        }
+      }
+
+      if (item.isNotRiding !== undefined) {
+        student.isNotRiding = Boolean(item.isNotRiding);
+        rawObj['차량미탑승'] = student.isNotRiding;
+        rawObj['미탑승'] = student.isNotRiding;
+        if (student.isNotRiding) {
+          student.assignedVehicle = null as any;
+          student.assignedDepartureVehicle = null as any;
+        }
+      }
+
+      if (item.address !== undefined) {
+        student.address = item.address;
+        rawObj['도로명주소'] = item.address;
+        rawObj['주소'] = item.address;
+      }
+      if (item.boardingLocation !== undefined) {
+        student.boardingLocation = item.boardingLocation;
+        rawObj['등원지'] = item.boardingLocation;
+        rawObj['탑승지'] = item.boardingLocation;
+      }
+      if (item.latitude !== undefined) student.latitude = item.latitude;
+      if (item.longitude !== undefined) student.longitude = item.longitude;
+      if (item.allergies !== undefined) {
+        student.allergies = item.allergies;
+        rawObj['알레르기'] = item.allergies;
+      }
+      if (item.note !== undefined || item.teacherMemo !== undefined) {
+        student.teacherMemo = item.note || item.teacherMemo;
+        rawObj['비고'] = student.teacherMemo;
       }
 
       student.raw = rawObj;
@@ -3249,6 +3393,7 @@ export class RoutingService {
       updatedCount++;
     }
 
+    this.notifyRouteUpdated(academy.id);
     return { success: true, count: updatedCount };
   }
 
@@ -3357,7 +3502,7 @@ export class RoutingService {
     return teachers.map(t => ({
       id: t.id,
       email: t.email && t.email.includes('@pending.takeme') ? '' : (t.email || ''),
-      name: t.name || '미등록 교사',
+      name: t.name ? formatTeacherName(t.name) : '미등록 교사',
       phone: t.phone || '',
       assignedClass: t.assignedClass || '',
       approvalStatus: t.approvalStatus || 'APPROVED',
@@ -3373,24 +3518,28 @@ export class RoutingService {
 
     const results = [];
     for (const item of teachersList) {
-      const name = item.name ? String(item.name).trim() : '';
-      if (!name) continue;
+      const rawName = item.name ? String(item.name).trim() : '';
+      if (!rawName) continue;
+      const name = formatTeacherName(rawName);
+      const baseName = cleanTeacherBaseName(rawName);
       const assignedClass = item.assignedClass ? String(item.assignedClass).trim() : '';
       const phone = item.phone ? String(item.phone).trim() : null;
 
       // 동명이인 교사 지원: 성함 및 담당 반명(또는 전화번호)으로 개별 교사 식별
       let teacher = await this.userRepository.findOne({
-        where: {
-          name,
-          assignedClass: assignedClass || undefined,
-          academy: { id: academy.id }
-        }
+        where: [
+          { name, assignedClass: assignedClass || undefined, academy: { id: academy.id } },
+          { name: baseName, assignedClass: assignedClass || undefined, academy: { id: academy.id } }
+        ]
       });
 
       if (teacher) {
+        teacher.name = name;
         if (assignedClass && (!teacher.assignedClass || teacher.assignedClass === '미배정')) {
           teacher.assignedClass = assignedClass;
           if (phone && !teacher.phone) teacher.phone = phone;
+          await this.userRepository.save(teacher);
+        } else {
           await this.userRepository.save(teacher);
         }
       } else {
@@ -3410,7 +3559,7 @@ export class RoutingService {
       }
       results.push({
         id: teacher.id,
-        name: teacher.name,
+        name: formatTeacherName(teacher.name),
         assignedClass: teacher.assignedClass,
         phone: teacher.phone,
         approvalStatus: teacher.approvalStatus
@@ -3616,7 +3765,7 @@ export class RoutingService {
         className,
         isSubmitted: !!sub,
         submittedAt: sub?.submittedAt || null,
-        teacherName: sub?.teacherName || null,
+        teacherName: sub?.teacherName ? formatTeacherName(sub.teacherName) : null,
         total: stList.length,
         present,
         absent,

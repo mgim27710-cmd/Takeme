@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { formatTeacherName } from '../utils/teacherUtil';
 
 export default function AuthViewer({
   isClosing,
@@ -710,7 +711,7 @@ export default function AuthViewer({
                         </div>
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-bold text-slate-900 text-base whitespace-nowrap">{teacher.name} 선생님</span>
+                            <span className="font-bold text-slate-900 text-base whitespace-nowrap">{formatTeacherName(teacher.name)}</span>
                             <span className="text-[11px] bg-green-100 text-green-700 px-2.5 py-0.5 rounded-full font-bold border border-green-200 whitespace-nowrap">
                               가입 승인됨
                             </span>
