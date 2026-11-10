@@ -14,7 +14,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AuthUser, type JwtPayload } from '../auth/auth-user.decorator';
 import { MediaService } from './media.service';
 
-@Controller('media')
+@Controller('routing/media')
 @UseGuards(JwtAuthGuard)
 export class MediaController {
   constructor(private readonly mediaService: MediaService) {}

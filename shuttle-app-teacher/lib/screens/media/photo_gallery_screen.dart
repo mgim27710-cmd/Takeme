@@ -52,8 +52,14 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
       }
     } catch (e) {
       if (mounted) {
+        String msg = e.toString();
+        if (msg.contains('서버에 이 기능이 아직 없습니다') || msg.contains('<!doctype') || msg.contains('<html') || msg.contains('FormatException')) {
+          msg = '서버에 이 기능이 아직 없습니다(배포 필요)';
+        } else {
+          msg = msg.replaceFirst(RegExp(r'^Exception:\s*'), '');
+        }
         setState(() {
-          _errorMessage = '사진 목록을 불러오지 못했습니다: $e';
+          _errorMessage = msg;
           _isLoading = false;
         });
       }
@@ -117,9 +123,15 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
       await _loadPhotos();
     } catch (e) {
       if (mounted) {
+        String msg = e.toString();
+        if (msg.contains('서버에 이 기능이 아직 없습니다') || msg.contains('<!doctype') || msg.contains('<html') || msg.contains('FormatException')) {
+          msg = '서버에 이 기능이 아직 없습니다(배포 필요)';
+        } else {
+          msg = msg.replaceFirst(RegExp(r'^Exception:\s*'), '');
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('사진 업로드 실패: $e'),
+            content: Text('사진 업로드 실패: $msg'),
             backgroundColor: const Color(0xFFDC2626),
           ),
         );
@@ -220,8 +232,14 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
       await _loadPhotos();
     } catch (e) {
       if (mounted) {
+        String msg = e.toString();
+        if (msg.contains('서버에 이 기능이 아직 없습니다') || msg.contains('<!doctype') || msg.contains('<html') || msg.contains('FormatException')) {
+          msg = '서버에 이 기능이 아직 없습니다(배포 필요)';
+        } else {
+          msg = msg.replaceFirst(RegExp(r'^Exception:\s*'), '');
+        }
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('삭제 실패: $e'), backgroundColor: const Color(0xFFDC2626)),
+          SnackBar(content: Text('삭제 실패: $msg'), backgroundColor: const Color(0xFFDC2626)),
         );
       }
     }

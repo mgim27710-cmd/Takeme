@@ -36,7 +36,7 @@ export default function PhotoGalleryManager({
       if (filterVehicleId) params.append('vehicleId', filterVehicleId);
       if (filterClass) params.append('className', filterClass);
 
-      const res = await fetch(`${API_BASE_URL}/media?${params.toString()}`, {
+      const res = await fetch(`${API_BASE_URL}/routing/media?${params.toString()}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -92,7 +92,7 @@ export default function PhotoGalleryManager({
     if (!window.confirm('이 사진을 사진 보관함에서 삭제하시겠습니까?')) return;
 
     try {
-      const res = await fetch(`${API_BASE_URL}/media/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/routing/media/${id}`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${token}`,

@@ -946,17 +946,25 @@ class ApiService {
     int? vehicleId,
     String? className,
   }) async {
-    final url = Uri.parse('${AppConfig.apiHost}/media');
+    final url = Uri.parse('${AppConfig.apiHost}/routing/media');
     final payload = {
       'photos': photos,
       if (vehicleId != null) 'vehicleId': vehicleId,
       if (className != null) 'className': className,
     };
     final res = await postWithAuth(url, jsonEncode(payload));
-    if (res.statusCode == 200 || res.statusCode == 201) {
-      return jsonDecode(utf8.decode(res.bodyBytes));
+    final bodyText = utf8.decode(res.bodyBytes).trim();
+    if (bodyText.startsWith('<') || bodyText.toLowerCase().contains('<!doctype html>')) {
+      throw const FormatException('서버에 이 기능이 아직 없습니다(배포 필요)');
     }
-    throw Exception('업로드 실패 (${res.statusCode}): ${res.body}');
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      try {
+        return jsonDecode(bodyText);
+      } catch (_) {
+        throw const FormatException('서버에 이 기능이 아직 없습니다(배포 필요)');
+      }
+    }
+    throw Exception('업로드 실패 (${res.statusCode})');
   }
 
   Future<List<dynamic>> getMediaAssets({
@@ -971,18 +979,30 @@ class ApiService {
     if (vehicleId != null) queryParams['vehicleId'] = vehicleId.toString();
     if (className != null) queryParams['className'] = className;
 
-    final uri = Uri.parse('${AppConfig.apiHost}/media').replace(queryParameters: queryParams.isEmpty ? null : queryParams);
+    final uri = Uri.parse('${AppConfig.apiHost}/routing/media').replace(queryParameters: queryParams.isEmpty ? null : queryParams);
     final res = await getWithAuth(uri);
+    final bodyText = utf8.decode(res.bodyBytes).trim();
+    if (bodyText.startsWith('<') || bodyText.toLowerCase().contains('<!doctype html>')) {
+      throw const FormatException('서버에 이 기능이 아직 없습니다(배포 필요)');
+    }
     if (res.statusCode == 200) {
-      final decoded = jsonDecode(utf8.decode(res.bodyBytes));
-      if (decoded is List) return decoded;
+      try {
+        final decoded = jsonDecode(bodyText);
+        if (decoded is List) return decoded;
+      } catch (_) {
+        throw const FormatException('서버에 이 기능이 아직 없습니다(배포 필요)');
+      }
     }
     return [];
   }
 
   Future<bool> deleteMediaAsset(int id) async {
-    final url = Uri.parse('${AppConfig.apiHost}/media/$id');
+    final url = Uri.parse('${AppConfig.apiHost}/routing/media/$id');
     final res = await deleteWithAuth(url);
+    final bodyText = utf8.decode(res.bodyBytes).trim();
+    if (bodyText.startsWith('<') || bodyText.toLowerCase().contains('<!doctype html>')) {
+      throw const FormatException('서버에 이 기능이 아직 없습니다(배포 필요)');
+    }
     return res.statusCode == 200 || res.statusCode == 204;
   }
 }
