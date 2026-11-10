@@ -10,6 +10,7 @@ import {
 import { Academy } from './academy.entity';
 import { User } from './user.entity';
 import { Vehicle } from './vehicle.entity';
+import { BoardPost } from './board-post.entity';
 
 @Entity('media_assets')
 @Index(['academyId', 'createdAt'])
@@ -38,6 +39,18 @@ export class MediaAsset {
 
   @Column({ length: 100, nullable: true })
   uploaderName: string;
+
+  @Column({ length: 50, default: 'GALLERY' })
+  @Index()
+  sourceType: string; // 'GALLERY' | 'NOTICE' | 'BOARD'
+
+  @Column({ type: 'int', nullable: true })
+  @Index()
+  postId: number | null;
+
+  @ManyToOne(() => BoardPost, { nullable: true, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'postId' })
+  post?: BoardPost | null;
 
   @Column({ type: 'int', nullable: true })
   vehicleId: number | null;

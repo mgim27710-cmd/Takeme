@@ -7,6 +7,7 @@ import {
   Param,
   Query,
   Req,
+  Res,
   UseGuards,
   ParseIntPipe,
 } from '@nestjs/common';
@@ -36,8 +37,23 @@ export class MediaController {
     @Query('to') to?: string,
     @Query('vehicleId') vehicleId?: string,
     @Query('className') className?: string,
+    @Query('sourceType') sourceType?: string,
   ) {
-    return this.mediaService.listMedia(user, { from, to, vehicleId, className });
+    return this.mediaService.listMedia(user, { from, to, vehicleId, className, sourceType });
+  }
+
+  @Get(':id/download')
+  async download(
+    @AuthUser() user: JwtPayload,
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: any,
+  ) {
+    const target = await this.mediaService.getDownloadTarget(user, id);
+    if (target.type === 's3') {
+      return res.redirect(target.url);
+    } else {
+      return res.download(target.filePath, target.filename);
+    }
   }
 
   @Delete(':id')

@@ -1,10 +1,12 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import * as path from 'path';
+import * as fs from 'fs';
 import { MediaAsset } from '../entities/media-asset.entity';
 import { RoutingService } from '../routing/routing.service';
 import { LocationGateway } from '../teacher/location.gateway';
-import { resolveMediaRef } from '../utils/s3.util';
+import { resolveMediaRef, S3_REF_PREFIX, isS3Enabled, signS3Key } from '../utils/s3.util';
 import type { JwtPayload } from '../auth/auth-user.decorator';
 
 export interface UploadMediaItemDto {
@@ -83,6 +85,7 @@ export class MediaService {
         filename: uploadResult.filename,
         mimeType: item.mimeType || null,
         size: uploadResult.size || 0,
+        sourceType: 'GALLERY',
       });
 
       const saved = await this.mediaRepo.save(asset);
@@ -105,6 +108,7 @@ export class MediaService {
       to?: string;
       vehicleId?: string | number;
       className?: string;
+      sourceType?: string;
     },
   ) {
     if (!user.academyId) {
@@ -139,6 +143,10 @@ export class MediaService {
       qb.andWhere('asset.className = :className', { className: query.className });
     }
 
+    if (query.sourceType) {
+      qb.andWhere('asset.sourceType = :sourceType', { sourceType: query.sourceType });
+    }
+
     qb.orderBy('asset.createdAt', 'DESC');
 
     const assets = await qb.getMany();
@@ -155,6 +163,41 @@ export class MediaService {
     );
 
     return results;
+  }
+
+  async getDownloadTarget(user: JwtPayload, id: number) {
+    if (!user.academyId) {
+      throw new BadRequestException('소속 기관 정보가 필요합니다.');
+    }
+
+    const asset = await this.mediaRepo.findOne({ where: { id } });
+    if (!asset || asset.academyId !== user.academyId) {
+      throw new NotFoundException('해당 사진을 찾을 수 없습니다.');
+    }
+
+    const filename = asset.filename || `photo_${asset.id}.jpg`;
+
+    if (asset.storageKey.startsWith(S3_REF_PREFIX)) {
+      if (!isS3Enabled()) {
+        throw new BadRequestException('S3 스토리지 설정이 되어 있지 않습니다.');
+      }
+      const s3Key = asset.storageKey.slice(S3_REF_PREFIX.length);
+      const url = await signS3Key(s3Key);
+      return { type: 's3' as const, url, filename };
+    }
+
+    // Disk storage: resolve file path
+    let relPath = asset.storageKey;
+    if (relPath.startsWith('/uploads/')) {
+      relPath = relPath.slice(1);
+    } else if (relPath.startsWith('/')) {
+      relPath = relPath.slice(1);
+    }
+    const fullPath = path.resolve(process.cwd(), relPath);
+    if (!fs.existsSync(fullPath)) {
+      throw new NotFoundException('서버 디스크에서 사진 파일을 찾을 수 없습니다.');
+    }
+    return { type: 'disk' as const, filePath: fullPath, filename };
   }
 
   async deleteMedia(user: JwtPayload, id: number) {
