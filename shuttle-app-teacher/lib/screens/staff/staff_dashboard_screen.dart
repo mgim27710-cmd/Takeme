@@ -35,7 +35,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   Timer? _notificationPollTimer;
 
   int _currentRunNumber = 1;
-  bool _isBottomPanelExpanded = false;
 
   double? _busLat;
   double? _busLng;
@@ -973,35 +972,66 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                       color: const Color(0xFFF8FAFC),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Flexible(
-                            child: Text(
-                              '탑승 명단 (${runList.where((s) => s.boarded).length}/${runList.length}명) · $_currentRunNumber차',
-                              style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF334155), fontSize: 14),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (_selectedStudentIds.isNotEmpty)
-                            GestureDetector(
-                              onTap: _showBroadcastModal,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFEFF6FF),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: const Color(0xFFBFDBFE)),
-                                ),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Flexible(
                                 child: Text(
-                                  '선택 메시지 전송 (${_selectedStudentIds.length})',
-                                  style: const TextStyle(color: Color(0xFF2563EB), fontWeight: FontWeight.bold, fontSize: 11),
+                                  '탑승 명단 (${runList.where((s) => s.boarded).length}/${runList.length}명) · $_currentRunNumber차',
+                                  style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF334155), fontSize: 14),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
+                              if (_selectedStudentIds.isNotEmpty)
+                                GestureDetector(
+                                  onTap: _showBroadcastModal,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFEFF6FF),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: const Color(0xFFBFDBFE)),
+                                    ),
+                                    child: Text(
+                                      '선택 메시지 전송 (${_selectedStudentIds.length})',
+                                      style: const TextStyle(color: Color(0xFF2563EB), fontWeight: FontWeight.bold, fontSize: 11),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          if (availableRuns.length > 1) ...[
+                            const SizedBox(height: 6),
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: availableRuns.map((r) {
+                                  final isSelected = _currentRunNumber == r;
+                                  return Padding(
+                                    padding: const EdgeInsets.only(right: 6),
+                                    child: ChoiceChip(
+                                      label: Text('$r차 운행'),
+                                      selected: isSelected,
+                                      onSelected: (_) => setState(() => _currentRunNumber = r),
+                                      selectedColor: const Color(0xFF2563EB),
+                                      visualDensity: VisualDensity.compact,
+                                      labelStyle: TextStyle(
+                                        fontSize: 12,
+                                        color: isSelected ? Colors.white : const Color(0xFF475569),
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
                             ),
+                          ],
                         ],
                       ),
                     ),
@@ -1041,9 +1071,9 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
           boxShadow: [
-            BoxShadow(color: Color(0x1A000000), blurRadius: 10, offset: Offset(0, -3)),
+            BoxShadow(color: Color(0x12000000), blurRadius: 8, offset: Offset(0, -2)),
           ],
         ),
         child: SafeArea(
@@ -1052,153 +1082,87 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
           left: true,
           right: true,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Row(
               children: [
-                // Drag Handle (손잡이)
-                GestureDetector(
-                  onTap: () => setState(() => _isBottomPanelExpanded = !_isBottomPanelExpanded),
-                  behavior: HitTestBehavior.opaque,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Center(
-                      child: Container(
-                        width: 44,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFCBD5E1),
-                          borderRadius: BorderRadius.circular(3),
+                // Escort Button / Badge
+                Expanded(
+                  child: _escortConfirmedAt != null
+                      ? Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFDCFCE7),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFF86EFAC)),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.verified, size: 18, color: Color(0xFF15803D)),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Tooltip(
+                                  message: _escortName != null && _escortName!.isNotEmpty ? '동승자: $_escortName' : '',
+                                  child: Text(
+                                    '동승 확인됨 · ${_formatTime(_escortConfirmedAt)}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 13,
+                                      color: Color(0xFF15803D),
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ElevatedButton.icon(
+                          onPressed: _isCheckingIn ? null : _handleEscortCheckIn,
+                          icon: _isCheckingIn
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                )
+                              : const Icon(Icons.airline_seat_recline_normal, color: Colors.white, size: 18),
+                          label: const Text(
+                            '동승 시작',
+                            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: Colors.white),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _isDriverOperating ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            elevation: 0,
+                          ),
                         ),
-                      ),
+                ),
+
+                const SizedBox(width: 8),
+
+                // 단체 메시지
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _showBroadcastModal,
+                    icon: const Icon(Icons.campaign, color: Colors.white, size: 18),
+                    label: const Text(
+                      '단체 메시지',
+                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: Colors.white),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1E293B),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
                     ),
                   ),
                 ),
-
-                // Bottom Panel Main Row (Always visible): 동승 시작 / 확인됨 + 단체 메시지
-                Row(
-                  children: [
-                    // Escort Button / Badge
-                    Expanded(
-                      child: _escortConfirmedAt != null
-                          ? Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFDCFCE7),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: const Color(0xFF86EFAC)),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(Icons.verified, size: 18, color: Color(0xFF15803D)),
-                                  const SizedBox(width: 6),
-                                  Flexible(
-                                    child: Text(
-                                      _escortName != null && _escortName!.isNotEmpty
-                                          ? '동승: $_escortName (${_formatTime(_escortConfirmedAt)})'
-                                          : '동승 완료 (${_formatTime(_escortConfirmedAt)})',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 13,
-                                        color: Color(0xFF15803D),
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : ElevatedButton.icon(
-                              onPressed: _isCheckingIn ? null : _handleEscortCheckIn,
-                              icon: _isCheckingIn
-                                  ? const SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                    )
-                                  : const Icon(Icons.airline_seat_recline_normal, color: Colors.white, size: 18),
-                              label: const Text(
-                                '동승 시작',
-                                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: Colors.white),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: _isDriverOperating ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                elevation: 0,
-                              ),
-                            ),
-                    ),
-
-                    const SizedBox(width: 8),
-
-                    // 단체 메시지 (동승 시작 버튼 바로 옆, 한 줄에 두 버튼)
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: _showBroadcastModal,
-                        icon: const Icon(Icons.campaign, color: Colors.white, size: 18),
-                        label: const Text(
-                          '단체 메시지',
-                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: Colors.white),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1E293B),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          elevation: 0,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(width: 4),
-
-                    // Expand / Collapse Toggle Button
-                    IconButton(
-                      onPressed: () => setState(() => _isBottomPanelExpanded = !_isBottomPanelExpanded),
-                      icon: Icon(
-                        _isBottomPanelExpanded ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
-                        color: const Color(0xFF64748B),
-                        size: 26,
-                      ),
-                      tooltip: _isBottomPanelExpanded ? '패널 접기' : '회차 선택 펼치기',
-                    ),
-                  ],
-                ),
-
-                // Expanded controls
-                if (_isBottomPanelExpanded) ...[
-                  const SizedBox(height: 12),
-
-                  // Run Selector chips
-                  if (availableRuns.length > 1)
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: availableRuns.map((r) {
-                          final isSelected = _currentRunNumber == r;
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: ChoiceChip(
-                              label: Text('$r차 운행'),
-                              selected: isSelected,
-                              onSelected: (_) => setState(() => _currentRunNumber = r),
-                              selectedColor: const Color(0xFF2563EB),
-                              labelStyle: TextStyle(
-                                color: isSelected ? Colors.white : const Color(0xFF475569),
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                ],
               ],
             ),
           ),
