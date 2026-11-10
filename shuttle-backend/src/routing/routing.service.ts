@@ -1249,7 +1249,7 @@ export class RoutingService {
 
       const isOneTimeRide = Boolean(
         isOneTimeBoarding ||
-        (override && (override.overrideType === OverrideType.CHANGE_LOCATION || override.overrideType === OverrideType.PARENT_PICKUP)) ||
+        (override && (override.overrideType === OverrideType.CHANGE_LOCATION || override.overrideType === OverrideType.PICKUP)) ||
         parsedRaw.isTemporaryRide ||
         parsedRaw.rideType === 'TODAY_ONLY' ||
         parsedRaw.isTemporaryLocation ||
