@@ -894,12 +894,17 @@ class DriverNavigator extends ChangeNotifier {
       return;
     }
     map.resetZoom();
+    final uturns = slots[mode]!.plan?.guides
+        .where((g) => g.text.contains('유턴') || g.text.contains('U턴'))
+        .map((g) => g.point)
+        .toList();
     map.setRoutes(
       primary: slots[mode]!.plan?.path,
       traffic: slots[mode]!.plan?.traffic,
       alternate: slots[mode.other]!.plan?.path,
       stops: _stopsJson(stops),
       academy: academy,
+      uturnPoints: uturns,
       fit: true,
     );
   }
@@ -982,11 +987,16 @@ class DriverNavigator extends ChangeNotifier {
     final shouldFitOverview = fit && (!driving || !follow);
     if (shouldFitOverview) map.resetZoom();
     map.setHeadingUp(headingUp);
+    final uturns = plan.guides
+        .where((g) => g.text.contains('유턴') || g.text.contains('U턴'))
+        .map((g) => g.point)
+        .toList();
     map.setRoutes(
       primary: plan.path,
       traffic: plan.traffic,
       stops: _stopsJson(activeStops),
       academy: academy,
+      uturnPoints: uturns,
       fit: shouldFitOverview,
     );
     map.updateRouteProgress(segmentIndex: 0, fraction: 0.0);
