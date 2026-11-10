@@ -64,3 +64,4 @@ export class MediaAsset {
   @CreateDateColumn()
   createdAt: Date;
 }
+

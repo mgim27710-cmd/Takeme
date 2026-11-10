@@ -17,3 +17,4 @@ import { TeacherModule } from '../teacher/teacher.module';
   exports: [MediaService],
 })
 export class MediaModule {}
+

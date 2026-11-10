@@ -10,14 +10,20 @@ export class ChatMessage {
   @ManyToOne(() => ChatRoom, room => room.messages, { onDelete: 'CASCADE' })
   room: ChatRoom;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  sender: User;
+  @ManyToOne(() => User, { onDelete: 'CASCADE', nullable: true })
+  sender: User | null;
 
   @Column({ type: 'text' })
   text: string;
 
   @Column({ type: 'simple-array', nullable: true })
   readBy: number[]; // Array of User IDs
+
+  @Column({ length: 50, nullable: true })
+  messageType?: string;
+
+  @Column({ type: 'jsonb', nullable: true })
+  metadata?: any;
 
   @CreateDateColumn()
   createdAt: Date;

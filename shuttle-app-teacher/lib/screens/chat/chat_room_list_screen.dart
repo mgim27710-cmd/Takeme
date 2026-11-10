@@ -108,9 +108,13 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
     final role = targetUser?['role']?.toString();
     final assignedClass = targetUser?['assignedClass']?.toString();
 
+    final isSystem = room['type'] == 'SYSTEM' || room['name'] == 'TakeMe 알림' || room['isSystem'] == true;
     String badgeLabel = '';
     Color badgeColor = const Color(0xFF64748B);
-    if (role == 'ACADEMY_ADMIN' || role == 'SUPER_ADMIN') {
+    if (isSystem) {
+      badgeLabel = '시스템';
+      badgeColor = const Color(0xFF2563EB);
+    } else if (role == 'ACADEMY_ADMIN' || role == 'SUPER_ADMIN') {
       badgeLabel = '관리자';
       badgeColor = const Color(0xFFDC2626);
     } else if (role == 'HOMEROOM_TEACHER') {
@@ -134,14 +138,53 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
         child: Row(
           children: [
             // Avatar
-            CircleAvatar(
-              radius: 24,
-              backgroundColor: const Color(0xFFEFF6FF),
-              child: Text(
-                displayName.isNotEmpty ? displayName.substring(0, 1) : '?',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF2563EB)),
+            if (isSystem)
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F172A),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Icon(Icons.notifications_active, color: Colors.white, size: 24),
+                  ),
+                  if (unreadCount > 0)
+                    Positioned(
+                      right: -3,
+                      bottom: -3,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEF4444),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                        constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                        alignment: Alignment.center,
+                        child: Text(
+                          unreadCount > 9 ? '9+' : '$unreadCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              )
+            else
+              CircleAvatar(
+                radius: 24,
+                backgroundColor: const Color(0xFFEFF6FF),
+                child: Text(
+                  displayName.isNotEmpty ? displayName.substring(0, 1) : '?',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF2563EB)),
+                ),
               ),
-            ),
             const SizedBox(width: 14),
             // Info
             Expanded(

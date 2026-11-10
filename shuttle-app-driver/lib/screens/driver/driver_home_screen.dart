@@ -17,6 +17,7 @@ import '../login_screen.dart';
 import '../../services/api_service.dart';
 import 'operation_log_screen.dart';
 import 'driver_notification_screen.dart';
+import '../chat/chat_room_list_screen.dart';
 
 /// 기사 전용 화면 (팀 앱과 같은 크기·글꼴)
 /// - 1단계(운행 준비): 전체 지도 + 하단 준비 패널('경로 탐색' 버튼)
@@ -618,6 +619,16 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                             ),
                           ),
                       ],
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.forum_outlined, color: Color(0xFF0F172A), size: 22),
+                      tooltip: '메신저',
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const ChatRoomListScreen()),
+                        ).then((_) => _loadUnreadCount());
+                      },
                     ),
                     _menu(),
                   ],

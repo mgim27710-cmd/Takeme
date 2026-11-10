@@ -323,7 +323,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 activeTrackColor: const Color(0xFF93C5FD),
-                activeColor: const Color(0xFF2563EB),
+                activeThumbColor: const Color(0xFF2563EB),
                 title: const Text('통학 변동', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF0F172A))),
                 subtitle: const Text('탑승 원아의 결석, 지각, 하원 변경 등 노선 변동 알림', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
                 value: _notiChangeRequest,
@@ -333,7 +333,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 activeTrackColor: const Color(0xFF93C5FD),
-                activeColor: const Color(0xFF2563EB),
+                activeThumbColor: const Color(0xFF2563EB),
                 title: const Text('동승 확인', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF0F172A))),
                 subtitle: const Text('지도교사의 버스 동승 탑승 확인 알림', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
                 value: _notiEscort,
@@ -343,7 +343,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 activeTrackColor: const Color(0xFF93C5FD),
-                activeColor: const Color(0xFF2563EB),
+                activeThumbColor: const Color(0xFF2563EB),
                 title: const Text('메시지', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF0F172A))),
                 subtitle: const Text('지도교사, 원내 교직원, 기관 관리자 메시지 알림', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
                 value: _notiChat,

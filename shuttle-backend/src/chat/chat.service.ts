@@ -11,6 +11,7 @@ import { Academy } from '../entities/academy.entity';
 import { Notification } from '../entities/notification.entity';
 import { ChatGateway } from './chat.gateway';
 import { getStudentClassName, isSameClass } from '../utils/school.util';
+import { isNotificationEnabled } from '../utils/notification.util';
 
 @Injectable()
 export class ChatService {
@@ -372,9 +373,120 @@ export class ChatService {
   }
 
   /**
+   * 사용자의 "TakeMe 알림" 전용 시스템 대화방 조회 또는 생성
+   */
+  async getOrCreateSystemRoom(userId: number): Promise<ChatRoom> {
+    const existingMember = await this.memberRepo.findOne({
+      where: {
+        user: { id: userId },
+        room: { type: ChatRoomType.SYSTEM },
+      },
+      relations: { room: true },
+    });
+
+    if (existingMember?.room) {
+      return existingMember.room;
+    }
+
+    const newRoom = this.roomRepo.create({
+      name: 'TakeMe 알림',
+      type: ChatRoomType.SYSTEM,
+    });
+    const savedRoom = await this.roomRepo.save(newRoom);
+
+    const member = this.memberRepo.create({
+      room: savedRoom,
+      user: { id: userId },
+    });
+    await this.memberRepo.save(member);
+
+    return savedRoom;
+  }
+
+  /**
+   * 시스템 알림 메시지 발송 (메신저 "TakeMe 알림" 방으로 전송)
+   * - 알림 수신 설정(isNotificationEnabled)을 확인하여 꺼진 알림은 발송하지 않음
+   * - 안 읽은 메시지로 추가되며 실시간 소켓 브로드캐스트
+   */
+  async sendSystemNotificationToUser(
+    userId: number,
+    title: string,
+    message: string,
+    options?: {
+      type?: 'change_request' | 'chat' | 'notice' | 'escort' | 'shuttle' | 'board' | string;
+      metadata?: any;
+      actionUrl?: string;
+    },
+  ) {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) return null;
+
+    // 알림 수신 설정 확인 (수신 거부된 종류는 발송하지 않음)
+    if (options?.type && !isNotificationEnabled(user, options.type as any)) {
+      console.log(`[sendSystemNotificationToUser] User ${userId} muted notification type: ${options.type}`);
+      return null;
+    }
+
+    const systemRoom = await this.getOrCreateSystemRoom(userId);
+
+    const chatMsg = this.messageRepo.create({
+      room: systemRoom,
+      sender: null,
+      text: `[${title}]\n${message}`,
+      messageType: 'SYSTEM',
+      metadata: options?.metadata || { type: options?.type, actionUrl: options?.actionUrl },
+      readBy: [],
+    });
+    const saved = await this.messageRepo.save(chatMsg);
+    await this.roomRepo.update(systemRoom.id, { updatedAt: new Date() });
+
+    // 실시간 소켓 브로드캐스트
+    if (this.chatGateway?.server) {
+      this.chatGateway.server.to(`chat_${systemRoom.id}`).emit('receiveMessage', saved);
+      this.chatGateway.server.to(`user_${userId}`).emit('receiveMessage', saved);
+      this.chatGateway.server.to(`user_${userId}`).emit('roomUpdated', { roomId: systemRoom.id });
+      this.chatGateway.server.to(`user_${userId}`).emit('notificationReceived', {
+        type: options?.type || 'SYSTEM',
+        title,
+        message,
+        roomId: systemRoom.id,
+        createdAt: saved.createdAt,
+      });
+    }
+
+    return saved;
+  }
+
+  /**
+   * 다수 사용자에게 시스템 알림 발송
+   */
+  async sendSystemNotificationToUsers(
+    userIds: number[],
+    title: string,
+    message: string,
+    options?: {
+      type?: 'change_request' | 'chat' | 'notice' | 'escort' | 'shuttle' | 'board' | string;
+      metadata?: any;
+      actionUrl?: string;
+    },
+  ) {
+    const uniqueIds = Array.from(new Set(userIds.filter(Boolean)));
+    const results = [];
+    for (const uid of uniqueIds) {
+      const res = await this.sendSystemNotificationToUser(uid, title, message, options);
+      if (res) results.push(res);
+    }
+    return results;
+  }
+
+  /**
    * 내가 참여한 대화방 목록 조회 (안 읽은 개수, 최신 메시지, 상대방 정보 포함)
+   * - "TakeMe 알림" 방은 항상 최상단 고정 (핀 고정)
    */
   async getRoomsByUser(userId: number) {
+    // 1. 시스템 전용 알림 방 보장
+    await this.getOrCreateSystemRoom(userId);
+
     const query = this.roomRepo.createQueryBuilder('room')
       .innerJoin('room.members', 'myMember', 'myMember.userId = :userId', { userId })
       .leftJoinAndSelect('room.members', 'allMembers')
@@ -397,7 +509,8 @@ export class ChatService {
       });
       let unread = 0;
       for (const m of allMsgs) {
-        if (m.sender && m.sender.id !== userId) {
+        // 본인이 보낸 메시지가 아니거나 시스템 메시지인 경우, 본인이 readBy에 없으면 unread 증가
+        if (!m.sender || m.sender.id !== userId) {
           const reads = (m.readBy || []).map(Number);
           if (!reads.includes(userId)) {
             unread++;
@@ -408,8 +521,10 @@ export class ChatService {
       this.decorateRoomForUser(room, userId);
     }
 
-    // 최신 메시지 시각순 정렬
+    // 최신 메시지 시각순 정렬 (TakeMe 알림 방은 항상 최상단 고정)
     rooms.sort((a: any, b: any) => {
+      if (a.type === ChatRoomType.SYSTEM) return -1;
+      if (b.type === ChatRoomType.SYSTEM) return 1;
       const timeA = a.latestMessage ? new Date(a.latestMessage.createdAt).getTime() : new Date(a.updatedAt || a.createdAt).getTime();
       const timeB = b.latestMessage ? new Date(b.latestMessage.createdAt).getTime() : new Date(b.updatedAt || b.createdAt).getTime();
       return timeB - timeA;
@@ -419,6 +534,14 @@ export class ChatService {
   }
 
   decorateRoomForUser(room: ChatRoom, currentUserId: number) {
+    if (room.type === ChatRoomType.SYSTEM) {
+      (room as any).displayName = 'TakeMe 알림';
+      (room as any).targetUser = null;
+      (room as any).isSystem = true;
+      (room as any).isPinned = true;
+      return room;
+    }
+
     const otherMembers = (room.members || []).filter(m => m.user?.id !== currentUserId);
     if (otherMembers.length === 1) {
       const target = otherMembers[0].user;
@@ -618,6 +741,14 @@ export class ChatService {
       throw new ForbiddenException('대화방 참여자만 메시지를 보낼 수 있습니다.');
     }
 
+    const room = await this.roomRepo.findOne({
+      where: { id: roomId },
+      relations: { members: { user: true } },
+    });
+    if (room?.type === ChatRoomType.SYSTEM) {
+      throw new ForbiddenException('시스템 알림 전용 대화방입니다. 답장을 보낼 수 없습니다.');
+    }
+
     const sender = await this.userRepo.findOne({
       where: { id: senderId },
       relations: { academy: true },
@@ -634,12 +765,12 @@ export class ChatService {
 
     await this.roomRepo.update(roomId, { updatedAt: new Date() });
 
-    const room = await this.roomRepo.findOne({
+    const updatedRoom = await this.roomRepo.findOne({
       where: { id: roomId },
       relations: { members: { user: true } },
     });
-    const memberCount = room?.members?.length || 2;
-    const memberUserIds = (room?.members || []).map(m => m.user.id);
+    const memberCount = updatedRoom?.members?.length || 2;
+    const memberUserIds = (updatedRoom?.members || []).map(m => m.user.id);
 
     const fullMessage = await this.messageRepo.findOne({
       where: { id: saved.id },

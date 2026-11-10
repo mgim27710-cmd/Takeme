@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, ForbiddenException, Inject, forwardRef, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Student } from '../entities/student.entity';
@@ -16,6 +16,7 @@ import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE, kstD
 import { isNotificationEnabled } from '../utils/notification.util';
 import { Attendance, AttendanceStatus } from '../entities/attendance.entity';
 import { AttendanceSubmission } from '../entities/attendance-submission.entity';
+import { ChatService } from '../chat/chat.service';
 
 @Injectable()
 export class TeacherService {
@@ -31,7 +32,10 @@ export class TeacherService {
     @InjectRepository(AcademyHoliday) private academyHolidayRepository: Repository<AcademyHoliday>,
     @InjectRepository(Attendance) private attendanceRepository: Repository<Attendance>,
     @InjectRepository(AttendanceSubmission) private submissionRepository: Repository<AttendanceSubmission>,
-    private readonly locationGateway: LocationGateway
+    private readonly locationGateway: LocationGateway,
+    @Inject(forwardRef(() => ChatService))
+    @Optional()
+    private readonly chatService?: ChatService
   ) {}
 
   private async isTodayHoliday(): Promise<boolean> {
@@ -468,7 +472,22 @@ export class TeacherService {
     await this.notificationRepository.save(adminNoti);
 
     // 2. Ideally, send push notification to student's parent here
-    // e.g. sendPushToParent(student.parentUser.email, "탑승 완료")
+    if (this.chatService && student.parentUser) {
+      this.chatService.sendSystemNotificationToUser(
+        student.parentUser.id,
+        '셔틀 탑승 안내 (QR)',
+        `${student.adminDisplayName || student.name} 학생이 셔틀버스에 탑승했습니다.`,
+        { type: 'shuttle' }
+      ).catch(() => {});
+    }
+    if (this.chatService && student.parentUser) {
+      await this.chatService.sendSystemNotificationToUser(
+        student.parentUser.id,
+        '셔틀 탑승 안내',
+        `${student.adminDisplayName || student.name} 원생이 ${vehicle.busNumber}호차에 탑승 완료했습니다.`,
+        { type: 'shuttle' }
+      ).catch(() => {});
+    }
 
     // 3. Append to OperationLog
     await this.appendBoardingLog(vehicle.id, student.id, student.adminDisplayName || student.name, 'MANUAL');
@@ -480,7 +499,10 @@ export class TeacherService {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
 
-    const student = await this.studentRepository.findOne({ where: { id: studentId } });
+    const student = await this.studentRepository.findOne({
+      where: { id: studentId },
+      relations: { parentUser: true },
+    });
     if (!student) throw new BadRequestException('Student not found');
 
     student.boardStatus = 'ABSENT';
@@ -494,6 +516,15 @@ export class TeacherService {
       });
       await this.notificationRepository.save(adminNoti);
       await this.appendBoardingLog(vehicle.id, studentId, `${student.adminDisplayName || student.name} 원생 결석 처리`, 'SYSTEM');
+
+      if (this.chatService && student.parentUser) {
+        await this.chatService.sendSystemNotificationToUser(
+          student.parentUser.id,
+          '결석/미탑승 안내',
+          `${student.adminDisplayName || student.name} 원생이 오늘 결석(미탑승) 처리되었습니다.`,
+          { type: 'shuttle' }
+        ).catch(() => {});
+      }
     }
 
     return { success: true, studentName: student.adminDisplayName || student.name };
@@ -604,6 +635,15 @@ export class TeacherService {
             createdAt: escortNoti.createdAt,
           });
         }
+
+        if (this.chatService) {
+          await this.chatService.sendSystemNotificationToUser(
+            vehicle.driverUser.id,
+            '동승 확인 완료',
+            `${escortName} 지도교사가 동승 확인을 완료하였습니다.`,
+            { type: 'escort' }
+          ).catch(() => {});
+        }
       }
     } catch (_) {}
 
@@ -693,6 +733,22 @@ export class TeacherService {
       if (this.locationGateway) {
         this.locationGateway.broadcastOperationStatus(vehicle.id, true, vehicle.busNumber);
       }
+
+      if (this.chatService) {
+        this.getTodayStudentsForVehicle(vehicle.id).then((students) => {
+          const parentIds = students
+            .map((s) => s.parentUser?.id)
+            .filter((id): id is number => typeof id === 'number');
+          if (parentIds.length > 0) {
+            this.chatService?.sendSystemNotificationToUsers(
+              parentIds,
+              '운행 시작 안내',
+              `${busName} 운행이 시작되었습니다. 지도에서 실시간 위치를 확인할 수 있습니다.`,
+              { type: 'shuttle' }
+            ).catch(() => {});
+          }
+        }).catch(() => {});
+      }
     }
     return { success: true };
   }
@@ -716,6 +772,22 @@ export class TeacherService {
 
       if (this.locationGateway) {
         this.locationGateway.broadcastOperationStatus(vehicle.id, false, vehicle.busNumber);
+      }
+
+      if (this.chatService) {
+        this.getTodayStudentsForVehicle(vehicle.id).then((students) => {
+          const parentIds = students
+            .map((s) => s.parentUser?.id)
+            .filter((id): id is number => typeof id === 'number');
+          if (parentIds.length > 0) {
+            this.chatService?.sendSystemNotificationToUsers(
+              parentIds,
+              '운행 종료 안내',
+              `${busName} 운행이 안전하게 종료되었습니다.`,
+              { type: 'shuttle' }
+            ).catch(() => {});
+          }
+        }).catch(() => {});
       }
 
       // 미탑승 학생 자동 결석 처리
@@ -781,6 +853,14 @@ export class TeacherService {
     }));
 
     // 2. Ideally, send push notification to student's parent here
+    if (this.chatService && student.parentUser) {
+      this.chatService.sendSystemNotificationToUser(
+        student.parentUser.id,
+        '셔틀 탑승 안내 (QR)',
+        `${student.adminDisplayName || student.name} 학생이 셔틀버스에 탑승했습니다.`,
+        { type: 'shuttle' }
+      ).catch(() => {});
+    }
     
     // 3. Append to OperationLog
     await this.appendBoardingLog(vehicle.id, student.id, student.adminDisplayName || student.name, 'QR');

@@ -68,3 +68,4 @@ describe('MediaService', () => {
     expect(mockLocationGateway.broadcastMediaDeleted).toHaveBeenCalledWith(10, 99);
   });
 });
+

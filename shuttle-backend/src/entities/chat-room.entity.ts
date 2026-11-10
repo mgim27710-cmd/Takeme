@@ -5,6 +5,7 @@ import { ChatMessage } from './chat-message.entity';
 export enum ChatRoomType {
   STAFF = 'STAFF',
   STUDENT = 'STUDENT',
+  SYSTEM = 'SYSTEM',
 }
 
 @Entity('chat_rooms')

@@ -8,12 +8,16 @@ class ChatConversationScreen extends StatefulWidget {
   final int roomId;
   final String title;
   final Map<String, dynamic>? targetUser;
+  final bool isSystem;
+  final Map<String, dynamic>? room;
 
   const ChatConversationScreen({
     super.key,
     required this.roomId,
     required this.title,
     this.targetUser,
+    this.isSystem = false,
+    this.room,
   });
 
   @override
@@ -208,15 +212,89 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
     final timeStr = _formatMessageTime(msg['createdAt']);
     final unreadCount = _toNumber(msg['unreadCount']);
     final senderName = msg['sender']?['name'] ?? '상대방';
+    final isSystemMessage = msg['sender'] == null ||
+        msg['messageType'] == 'SYSTEM' ||
+        widget.isSystem ||
+        widget.title == 'TakeMe 알림' ||
+        widget.room?['type'] == 'SYSTEM' ||
+        widget.room?['name'] == 'TakeMe 알림';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (showDate) _buildDateSeparator(dateText),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-          child: isMe
-              ? Row(
+        if (isSystemMessage && !isMe)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F172A),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.notifications_active, color: Colors.white, size: 20),
+                ),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.04),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'TakeMe 시스템 알림',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF2563EB),
+                              ),
+                            ),
+                            Text(
+                              timeStr,
+                              style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          text,
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            color: Color(0xFF1E293B),
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+            child: isMe
+                ? Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -456,67 +534,88 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                           },
                         ),
             ),
-            // Bottom Input Bar
-            Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
-              ),
-              padding: EdgeInsets.fromLTRB(
-                12,
-                8,
-                12,
-                8 + MediaQuery.of(context).viewInsets.bottom,
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      child: TextField(
-                        controller: _textController,
-                        maxLines: 4,
-                        minLines: 1,
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) => _handleSendMessage(),
-                        decoration: const InputDecoration(
-                          hintText: '메시지를 입력하세요...',
-                          hintStyle: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
-                          border: InputBorder.none,
-                          isDense: true,
-                          contentPadding: EdgeInsets.symmetric(vertical: 10),
+            // Bottom Input Bar or System Room Notice
+            if (widget.isSystem || widget.title == 'TakeMe 알림' || widget.room?['type'] == 'SYSTEM' || widget.room?['name'] == 'TakeMe 알림' || widget.room?['isSystem'] == true)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: const BoxDecoration(
+                  color: Color(0xFFF8FAFC),
+                  border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.lock_outline, size: 16, color: Color(0xFF64748B)),
+                    SizedBox(width: 8),
+                    Text(
+                      '시스템 알림 전용 대화방입니다. 답장을 보낼 수 없습니다.',
+                      style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B), fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              )
+            else
+              Container(
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+                ),
+                padding: EdgeInsets.fromLTRB(
+                  12,
+                  8,
+                  12,
+                  8 + MediaQuery.of(context).viewInsets.bottom,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        child: TextField(
+                          controller: _textController,
+                          maxLines: 4,
+                          minLines: 1,
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => _handleSendMessage(),
+                          decoration: const InputDecoration(
+                            hintText: '메시지를 입력하세요...',
+                            hintStyle: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(vertical: 10),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: _isSending ? const Color(0xFF94A3B8) : const Color(0xFF2563EB),
-                      shape: BoxShape.circle,
+                    const SizedBox(width: 8),
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: _isSending ? const Color(0xFF94A3B8) : const Color(0xFF2563EB),
+                        shape: BoxShape.circle,
+                      ),
+                      child: IconButton(
+                        icon: _isSending
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.send_rounded, color: Colors.white, size: 20),
+                        onPressed: _isSending ? null : _handleSendMessage,
+                      ),
                     ),
-                    child: IconButton(
-                      icon: _isSending
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                            )
-                          : const Icon(Icons.send_rounded, color: Colors.white, size: 20),
-                      onPressed: _isSending ? null : _handleSendMessage,
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ),

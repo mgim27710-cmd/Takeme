@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   Inject,
   forwardRef,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
@@ -24,6 +25,7 @@ import { Notification } from '../entities/notification.entity';
 import { AcademyHoliday, CalendarEventType } from '../entities/academy-holiday.entity';
 import { StudentSchedule } from '../entities/student-schedule.entity';
 import { LocationGateway } from '../teacher/location.gateway';
+import { ChatService } from '../chat/chat.service';
 import {
   getStudentClassName,
   isSameClass,
@@ -98,6 +100,9 @@ export class ApprovalService {
     private readonly scheduleRepo: Repository<StudentSchedule>,
     @Inject(forwardRef(() => LocationGateway))
     private readonly locationGateway: LocationGateway,
+    @Inject(forwardRef(() => ChatService))
+    @Optional()
+    private readonly chatService?: ChatService,
   ) {}
 
   /**
@@ -292,6 +297,27 @@ export class ApprovalService {
         isCapacityExceeded,
         candidateVehicles,
       });
+    }
+
+    if (this.chatService && academyId) {
+      const studentClass = getStudentClassName(student) || undefined;
+      const whereConditions: any[] = [{ academy: { id: academyId }, role: UserRole.ACADEMY_ADMIN }];
+      if (studentClass) {
+        whereConditions.push({ academy: { id: academyId }, assignedClass: studentClass, role: UserRole.HOMEROOM_TEACHER });
+      }
+      this.userRepo.find({
+        where: whereConditions,
+      }).then((users) => {
+        const ids = users.map((u) => u.id);
+        if (ids.length > 0) {
+          this.chatService?.sendSystemNotificationToUsers(
+            ids,
+            '통학 변동 신청 접수',
+            `[신규 신청] ${student.adminDisplayName || student.name} 원아의 ${typeKr} 신청이 접수되었습니다. (적용일: ${targetDate})`,
+            { type: 'change_request' }
+          ).catch(() => {});
+        }
+      }).catch(() => {});
     }
 
     return {
@@ -541,6 +567,15 @@ export class ApprovalService {
         message,
       });
       await this.notificationRepo.save(noti);
+
+      if (this.chatService) {
+        this.chatService.sendSystemNotificationToUser(
+          parentUser.id,
+          `통학 변동 신청 ${decisionKr}`,
+          message,
+          { type: 'change_request' }
+        ).catch(() => {});
+      }
     }
 
     // 2. 차량 기사 및 지도교사 알림 (승인인 경우, 기사 알림 수신 설정 확인)
@@ -555,6 +590,15 @@ export class ApprovalService {
           message: `[운행 변동] ${student.adminDisplayName || student.name} (${targetDate} ${typeKr})`,
         });
         await this.notificationRepo.save(vNoti);
+
+        if (this.chatService && driver) {
+          this.chatService.sendSystemNotificationToUser(
+            driver.id,
+            '운행 변동 안내',
+            `[운행 변동] ${student.adminDisplayName || student.name} (${targetDate} ${typeKr})`,
+            { type: 'change_request' }
+          ).catch(() => {});
+        }
       }
     }
 

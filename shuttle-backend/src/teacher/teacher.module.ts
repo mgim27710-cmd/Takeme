@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TeacherService } from './teacher.service';
 import { TeacherController } from './teacher.controller';
@@ -15,11 +15,13 @@ import { AcademyHoliday } from '../entities/academy-holiday.entity';
 import { Attendance } from '../entities/attendance.entity';
 import { AttendanceSubmission } from '../entities/attendance-submission.entity';
 import { RoutingModule } from '../routing/routing.module';
+import { ChatModule } from '../chat/chat.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Student, StudentSchedule, Vehicle, Notification, User, ParentMessage, OperationLog, ScheduleOverride, AcademyHoliday, Attendance, AttendanceSubmission]),
-    RoutingModule
+    RoutingModule,
+    forwardRef(() => ChatModule),
   ],
   controllers: [TeacherController],
   providers: [TeacherService, LocationGateway],
