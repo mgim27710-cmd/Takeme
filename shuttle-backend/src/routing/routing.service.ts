@@ -1485,25 +1485,32 @@ export class RoutingService {
     return { success: true };
   }
 
-  async setupAcademy(data: { name: string, address: string, lat: number, lng: number, businessNumber?: string }, academyId?: number, userId?: number) {
-    let academy = await this.getAcademy(academyId, userId);
+  async setupAcademy(data: any, academyId?: number, userId?: number) {
+    const targetAcademyId = data?.academyId || data?.id || academyId;
+    let academy = await this.getAcademy(targetAcademyId, userId);
+
+    const lat = data.lat !== undefined ? data.lat : (data.latitude !== undefined ? data.latitude : (academy?.latitude || 37.828456));
+    const lng = data.lng !== undefined ? data.lng : (data.longitude !== undefined ? data.longitude : (academy?.longitude || 127.065123));
+    const address = data.address !== undefined ? data.address : (data.roadAddress !== undefined ? data.roadAddress : (academy?.roadAddress || ''));
+    const name = data.name || academy?.name || '새 유치원';
+
     if (!academy) {
       let code = Math.random().toString(36).substring(2, 8).toUpperCase();
       while (await this.academyRepository.findOne({ where: { authCode: code } })) {
         code = Math.random().toString(36).substring(2, 8).toUpperCase();
       }
       academy = this.academyRepository.create({
-        name: data.name,
-        roadAddress: data.address,
-        latitude: data.lat.toString(),
-        longitude: data.lng.toString(),
+        name: String(name),
+        roadAddress: String(address),
+        latitude: String(lat),
+        longitude: String(lng),
         businessNumber: data.businessNumber || null
       });
     } else {
-      academy.name = data.name;
-      academy.roadAddress = data.address;
-      academy.latitude = data.lat.toString();
-      academy.longitude = data.lng.toString();
+      academy.name = String(name);
+      academy.roadAddress = String(address);
+      academy.latitude = String(lat);
+      academy.longitude = String(lng);
       if (data.businessNumber !== undefined) {
         academy.businessNumber = data.businessNumber;
       }
@@ -2077,14 +2084,18 @@ export class RoutingService {
   }
 
   async updateStudent(studentId: number, data: any, academyId?: number, userId?: number) {
-    const academy = await this.getAcademy(academyId, userId);
-    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
+    const targetAcademyId = data?.academyId || academyId;
+    let academy = await this.getAcademy(targetAcademyId, userId);
 
-    const student = await this.studentRepository.findOne({
-      where: { id: studentId, academy: { id: academy.id } },
-      relations: { assignedVehicle: true, academy: true }
+    let student = await this.studentRepository.findOne({
+      where: academy ? { id: studentId, academy: { id: academy.id } } : { id: studentId },
+      relations: { assignedVehicle: true, assignedDepartureVehicle: true, academy: true }
     });
     if (!student) throw new NotFoundException('원아를 찾을 수 없습니다.');
+    if (!academy && student.academy) {
+      academy = student.academy;
+    }
+    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
 
     if (data.name !== undefined) student.name = data.name;
     if (data.adminDisplayName !== undefined) student.adminDisplayName = data.adminDisplayName;
@@ -2152,9 +2163,10 @@ export class RoutingService {
       parsedRaw['하차지'] = data.dropoffLocation;
     }
 
-    if (data.assignedBusId) {
+    const inBus = data.assignedBusId !== undefined ? data.assignedBusId : (data.inBusId !== undefined ? data.inBusId : data.assignedVehicleId);
+    if (inBus) {
       const vehicle = await this.vehicleRepository.findOne({
-        where: { id: Number(data.assignedBusId), academy: { id: academy.id } }
+        where: { id: Number(inBus), academy: { id: academy.id } }
       });
       if (vehicle) {
         student.assignedVehicle = vehicle;
@@ -2162,14 +2174,15 @@ export class RoutingService {
         parsedRaw['호차'] = vehicle.busNumber;
         parsedRaw['차량'] = vehicle.busNumber;
       }
-    } else if (data.assignedBusId === null) {
+    } else if (inBus === null) {
       student.assignedVehicle = null as any;
     }
 
-    if (data.assignedDepartureBusId !== undefined) {
-      if (data.assignedDepartureBusId) {
+    const outBus = data.assignedDepartureBusId !== undefined ? data.assignedDepartureBusId : (data.outBusId !== undefined ? data.outBusId : data.assignedDepartureVehicleId);
+    if (outBus !== undefined) {
+      if (outBus) {
         const dVehicle = await this.vehicleRepository.findOne({
-          where: { id: Number(data.assignedDepartureBusId), academy: { id: academy.id } }
+          where: { id: Number(outBus), academy: { id: academy.id } }
         });
         if (dVehicle) {
           student.assignedDepartureVehicle = dVehicle;
@@ -3232,21 +3245,21 @@ export class RoutingService {
   }
 
   async batchUpdateStudents(
-    updates: Array<{
-      id: number;
-      name?: string;
-      gender?: string;
-      birthDate?: string;
-      phone?: string;
-      className?: string;
-      inBusId?: number;
-      outBusId?: number;
-    }>,
+    updates: any[],
     academyId?: number,
     userId?: number,
   ) {
     if (!Array.isArray(updates) || updates.length === 0) return { success: true, count: 0 };
-    const academy = await this.getAcademy(academyId, userId);
+    let academy = await this.getAcademy(academyId, userId);
+    if (!academy && updates[0]?.id) {
+      const sampleSt = await this.studentRepository.findOne({
+        where: { id: updates[0].id },
+        relations: { academy: true }
+      });
+      if (sampleSt?.academy) {
+        academy = sampleSt.academy;
+      }
+    }
     if (!academy) throw new BadRequestException('기관 정보를 찾을 수 없습니다.');
 
     let updatedCount = 0;
@@ -3255,7 +3268,7 @@ export class RoutingService {
       if (!item.id) continue;
       const student = await this.studentRepository.findOne({
         where: { id: item.id, academy: { id: academy.id } },
-        relations: { schedules: { assignedVehicle: true }, assignedVehicle: true },
+        relations: { schedules: { assignedVehicle: true }, assignedVehicle: true, assignedDepartureVehicle: true },
       });
       if (!student) continue;
 
@@ -3268,6 +3281,8 @@ export class RoutingService {
       if (item.name && item.name.trim()) {
         student.name = item.name.trim();
         student.adminDisplayName = item.name.trim();
+        rawObj['원생명'] = item.name.trim();
+        rawObj['학생이름/영문이름'] = item.name.trim();
       }
       if (item.gender !== undefined) {
         student.gender = item.gender;
@@ -3289,8 +3304,9 @@ export class RoutingService {
       }
 
       // 등원 차량 반영
-      if (item.inBusId !== undefined) {
-        const inVehicle = item.inBusId ? await this.vehicleRepository.findOne({ where: { id: item.inBusId } }) : null;
+      const inBus = item.inBusId !== undefined ? item.inBusId : (item.assignedBusId !== undefined ? item.assignedBusId : item.assignedVehicleId);
+      if (inBus !== undefined) {
+        const inVehicle = inBus ? await this.vehicleRepository.findOne({ where: { id: Number(inBus), academy: { id: academy.id } } }) : null;
         let inSched = student.schedules?.find(s => s.type === 'BOARDING');
         if (inSched) {
           inSched.assignedVehicle = inVehicle as any;
@@ -3305,12 +3321,20 @@ export class RoutingService {
           });
           await scheduleRepo.save(newSched);
         }
-        if (inVehicle) student.assignedVehicle = inVehicle;
+        student.assignedVehicle = inVehicle || null as any;
+        if (inVehicle) {
+          rawObj['등원차량'] = inVehicle.busNumber;
+          rawObj['호차'] = inVehicle.busNumber;
+          rawObj['차량'] = inVehicle.busNumber;
+        } else {
+          delete rawObj['등원차량'];
+        }
       }
 
       // 하원 차량 반영
-      if (item.outBusId !== undefined) {
-        const outVehicle = item.outBusId ? await this.vehicleRepository.findOne({ where: { id: item.outBusId } }) : null;
+      const outBus = item.outBusId !== undefined ? item.outBusId : item.assignedDepartureBusId;
+      if (outBus !== undefined) {
+        const outVehicle = outBus ? await this.vehicleRepository.findOne({ where: { id: Number(outBus), academy: { id: academy.id } } }) : null;
         let outSched = student.schedules?.find(s => s.type === 'ALIGHTING');
         if (outSched) {
           outSched.assignedVehicle = outVehicle as any;
@@ -3325,6 +3349,43 @@ export class RoutingService {
           });
           await scheduleRepo.save(newSched);
         }
+        student.assignedDepartureVehicle = outVehicle || null as any;
+        if (outVehicle) {
+          rawObj['하원차량'] = outVehicle.busNumber;
+        } else {
+          delete rawObj['하원차량'];
+        }
+      }
+
+      if (item.isNotRiding !== undefined) {
+        student.isNotRiding = Boolean(item.isNotRiding);
+        rawObj['차량미탑승'] = student.isNotRiding;
+        rawObj['미탑승'] = student.isNotRiding;
+        if (student.isNotRiding) {
+          student.assignedVehicle = null as any;
+          student.assignedDepartureVehicle = null as any;
+        }
+      }
+
+      if (item.address !== undefined) {
+        student.address = item.address;
+        rawObj['도로명주소'] = item.address;
+        rawObj['주소'] = item.address;
+      }
+      if (item.boardingLocation !== undefined) {
+        student.boardingLocation = item.boardingLocation;
+        rawObj['등원지'] = item.boardingLocation;
+        rawObj['탑승지'] = item.boardingLocation;
+      }
+      if (item.latitude !== undefined) student.latitude = item.latitude;
+      if (item.longitude !== undefined) student.longitude = item.longitude;
+      if (item.allergies !== undefined) {
+        student.allergies = item.allergies;
+        rawObj['알레르기'] = item.allergies;
+      }
+      if (item.note !== undefined || item.teacherMemo !== undefined) {
+        student.teacherMemo = item.note || item.teacherMemo;
+        rawObj['비고'] = student.teacherMemo;
       }
 
       student.raw = rawObj;
@@ -3332,6 +3393,7 @@ export class RoutingService {
       updatedCount++;
     }
 
+    this.notifyRouteUpdated(academy.id);
     return { success: true, count: updatedCount };
   }
 
