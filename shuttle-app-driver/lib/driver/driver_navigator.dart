@@ -1581,11 +1581,20 @@ class DriverNavigator extends ChangeNotifier {
       if (a == null) return;
       _simMeters = math.min(_simMeters + 11, a.cum.last);
       var p = pointAlong(a.path, a.cum, _simMeters);
-      if (_offRouteTestTicks > 0) {
+      double? simHeading;
+
+      if (_wrongTurnTicks > 0) {
+        _wrongTurnTicks--;
+        // 6단계 ②: 교차로에서 반대 방향으로 잘못 진입 (도로 방향과 180도 반대로 주행)
+        final roadHeading = _roadBearingAt(a.path, _progress) ?? 0.0;
+        simHeading = (roadHeading + 180.0) % 360.0;
+        p = GeoPoint(p.lat - 0.0004, p.lng);
+      } else if (_offRouteTestTicks > 0) {
         _offRouteTestTicks--;
         p = GeoPoint(p.lat + 0.0012, p.lng); // 북쪽으로 약 130m 벗어남
       }
-      _onPosition(p, simulated: true);
+
+      _onPosition(p, gpsHeading: simHeading, speedMps: 11.0, simulated: true);
       if (_simMeters >= a.cum.last) _stopSimulation();
     });
     notifyListeners();
@@ -1597,6 +1606,7 @@ class DriverNavigator extends ChangeNotifier {
     simulating = false;
     speedKmh = 0;
     _offRouteTestTicks = 0;
+    _wrongTurnTicks = 0;
   }
 
   void stopSimulation() {
@@ -1608,6 +1618,16 @@ class DriverNavigator extends ChangeNotifier {
   void simulateOffRoute() {
     if (!simulating) return;
     _offRouteTestTicks = 4;
+    _lastReroute = DateTime.fromMillisecondsSinceEpoch(0);
+    notifyListeners();
+  }
+
+  int _wrongTurnTicks = 0;
+
+  /// 6단계 ②: 교차로에서 반대 방향으로 잘못 진입 테스트 (2~3초 내 재탐색 확인용)
+  void simulateWrongTurn() {
+    if (!simulating) return;
+    _wrongTurnTicks = 3;
     _lastReroute = DateTime.fromMillisecondsSinceEpoch(0);
     notifyListeners();
   }

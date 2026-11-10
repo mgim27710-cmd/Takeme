@@ -497,6 +497,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
         }
       case 'offroute':
         _nav.simulateOffRoute();
+      case 'wrong_turn':
+        _nav.simulateWrongTurn();
       case 'switch':
         await _nav.selectMode(_nav.mode.other);
       case 'send':
@@ -928,7 +930,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     } else {
       items.add(_menuItem('sim', _nav.simulating ? Icons.pause : Icons.play_arrow,
           _nav.simulating ? '시뮬레이션 멈추기' : '주행 시뮬레이션 시작'));
-      if (_nav.simulating) items.add(_menuItem('offroute', Icons.alt_route, '경로 이탈 테스트'));
+      if (_nav.simulating) {
+        items.add(_menuItem('offroute', Icons.alt_route, '경로 이탈 테스트'));
+        items.add(_menuItem('wrong_turn', Icons.turn_sharp_right, '교차로 반대 방향 오진입 테스트'));
+      }
       items.add(_menuItem('switch', Icons.swap_horiz, '${_nav.mode.other.title}로 바꾸기'));
       if (_nav.serverLive) {
         items.add(_menuItem('send', _nav.simSendToServer ? Icons.check_box : Icons.check_box_outline_blank,
