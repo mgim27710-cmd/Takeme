@@ -891,21 +891,24 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   };
 
   const getRoleBadge = (role) => {
-    switch (role) {
+    switch (role?.toUpperCase?.() || role) {
       case 'DRIVER':
         return <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded">기사</span>;
-      case 'TEACHER':
       case 'HOMEROOM_TEACHER':
+        return <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded">담임교사</span>;
       case 'SHUTTLE_TEACHER':
+        return <span className="bg-sky-100 text-sky-700 text-[10px] font-bold px-1.5 py-0.5 rounded">지도교사</span>;
+      case 'TEACHER':
         return <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded">교사</span>;
       case 'PARENT':
         return <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 rounded">학부모</span>;
+      case 'STUDENT':
+        return <span className="bg-violet-100 text-violet-700 text-[10px] font-bold px-1.5 py-0.5 rounded">학생</span>;
       case 'ACADEMY_ADMIN':
-        return <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded">관리자</span>;
       case 'SUPER_ADMIN':
-        return <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded">통합관리</span>;
+        return <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded">기관 관리자</span>;
       default:
-        return null;
+        return <span className="bg-slate-100 text-slate-600 text-[10px] font-medium px-1.5 py-0.5 rounded">알 수 없음</span>;
     }
   };
 

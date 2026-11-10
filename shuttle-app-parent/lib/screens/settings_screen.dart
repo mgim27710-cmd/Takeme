@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../models/student_model.dart';
+import '../models/user_model.dart';
 import 'login_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -505,11 +506,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const Divider(height: 20, color: Color(0xFFF1F5F9)),
                         _buildInfoRow(
                           '계정 역할',
-                          user?.role == 'DRIVER'
-                              ? '기사님'
-                              : (user?.role == 'TEACHER'
-                                  ? '지도교사'
-                                  : (user?.role == 'PARENT' ? '학부모' : '학생')),
+                          UserModel.getRoleKorean(user?.role),
                         ),
                         const Divider(height: 20, color: Color(0xFFF1F5F9)),
                         Row(

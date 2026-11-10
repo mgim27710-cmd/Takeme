@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../models/user_model.dart';
 import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
 import 'chat_conversation_screen.dart';
@@ -115,20 +116,29 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
       badgeLabel = '시스템';
       badgeColor = const Color(0xFF2563EB);
     } else if (role == 'ACADEMY_ADMIN' || role == 'SUPER_ADMIN') {
-      badgeLabel = '관리자';
+      badgeLabel = '기관 관리자';
       badgeColor = const Color(0xFFDC2626);
     } else if (role == 'HOMEROOM_TEACHER') {
-      badgeLabel = assignedClass != null ? '$assignedClass 담임' : '담임';
+      badgeLabel = assignedClass != null ? '$assignedClass 담임교사' : '담임교사';
       badgeColor = const Color(0xFF2563EB);
-    } else if (role == 'TEACHER' || role == 'SHUTTLE_TEACHER') {
+    } else if (role == 'SHUTTLE_TEACHER') {
       badgeLabel = '지도교사';
       badgeColor = const Color(0xFF0284C7);
+    } else if (role == 'TEACHER') {
+      badgeLabel = '교사';
+      badgeColor = const Color(0xFF0284C7);
     } else if (role == 'DRIVER') {
-      badgeLabel = '기사님';
+      badgeLabel = '기사';
       badgeColor = const Color(0xFFD97706);
     } else if (role == 'PARENT') {
       badgeLabel = '학부모';
       badgeColor = const Color(0xFF10B981);
+    } else if (role == 'STUDENT') {
+      badgeLabel = '학생';
+      badgeColor = const Color(0xFF8B5CF6);
+    } else {
+      badgeLabel = UserModel.getRoleKorean(role);
+      badgeColor = const Color(0xFF64748B);
     }
 
     return InkWell(

@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import '../../models/user_model.dart';
 import '../../services/api_service.dart';
 
 class TeacherBoardView extends StatefulWidget {
@@ -1132,9 +1133,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                                       borderRadius: BorderRadius.circular(4),
                                                     ),
                                                     child: Text(
-                                                      post['authorRole'] == 'ADMIN' || post['authorRole'] == 'ACADEMY_ADMIN'
-                                                          ? '기관 관리자'
-                                                          : (post['authorRole'] == 'HOMEROOM_TEACHER' ? '담임교사' : '지도교사'),
+                                                      UserModel.getRoleKorean(post['authorRole']),
                                                       style: TextStyle(
                                                         fontSize: 10,
                                                         fontWeight: FontWeight.bold,
