@@ -2591,19 +2591,20 @@ const parseKindergartenExcelSheet = (sheet) => {
         const rebalanceLogs = [];
 
         addressMap.forEach((item, idx) => {
-          const coords = item.address ? geocodeLookup.get(item.address) : null;
+          const trimmedAddr = (item.address || '').trim();
+          const coords = trimmedAddr ? (geocodeLookup.get(item.address) || geocodeLookup.get(trimmedAddr)) : null;
           const isGeocoded = Boolean(coords && coords.lat && coords.lng);
 
           let lat = null;
           let lng = null;
-          let address = '';
-          let boardingLocation = '';
+          let address = trimmedAddr;
+          let boardingLocation = item.boardingLocation || trimmedAddr;
           let assignedBus = null;
 
           if (isGeocoded) {
             lat = coords.lat;
             lng = coords.lng;
-            address = item.address;
+            address = trimmedAddr;
             boardingLocation = item.boardingLocation || address;
             successCount++;
 
@@ -2681,10 +2682,10 @@ const parseKindergartenExcelSheet = (sheet) => {
               busLoadTracker[assignedBus.id] = (busLoadTracker[assignedBus.id] || 0) + 1;
             }
           } else {
-            // Geocoding failed: remove road address, mark for manual input
+            // Geocoding failed: keep address text intact, mark for coordinate input if necessary
             failedCount++;
-            address = '';
-            boardingLocation = '';
+            address = trimmedAddr;
+            boardingLocation = item.boardingLocation || trimmedAddr;
             lat = null;
             lng = null;
             assignedBus = null;

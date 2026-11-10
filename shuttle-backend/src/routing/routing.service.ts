@@ -2523,6 +2523,45 @@ export class RoutingService {
   async geocodeBulk(addresses: string[]) {
     if (!Array.isArray(addresses)) return [];
     const cache = new Map<string, { lat: number, lng: number } | null>();
+
+    const getBaseKey = (addr: string) => {
+      let s = String(addr || '').trim();
+      s = s.replace(/\([0-9]+\s*호차\)/g, '').replace(/\[[0-9]+\s*호차\]/g, '');
+      s = s.replace(/\d+\s*동\s*\d+\s*호/g, '').replace(/\d+\s*동/g, '').replace(/\d+\s*호/g, '').replace(/\d+\s*-\s*\d+/g, '');
+      return s.trim();
+    };
+
+    const validAddresses = Array.from(new Set(addresses.map(a => (a && typeof a === 'string') ? a.trim() : '').filter(Boolean)));
+    const baseKeyToAddresses = new Map<string, string[]>();
+    for (const addr of validAddresses) {
+      const baseKey = getBaseKey(addr);
+      if (!baseKeyToAddresses.has(baseKey)) {
+        baseKeyToAddresses.set(baseKey, []);
+      }
+      baseKeyToAddresses.get(baseKey)!.push(addr);
+    }
+
+    const uniqueBaseKeys = Array.from(baseKeyToAddresses.keys());
+    const BATCH_SIZE = 15;
+    for (let i = 0; i < uniqueBaseKeys.length; i += BATCH_SIZE) {
+      const batch = uniqueBaseKeys.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(async (baseKey) => {
+        const sampleAddr = baseKeyToAddresses.get(baseKey)![0];
+        try {
+          const coords = await this.geocodeAddress(sampleAddr);
+          for (const addr of baseKeyToAddresses.get(baseKey)!) {
+            cache.set(addr, coords);
+          }
+          cache.set(baseKey, coords);
+        } catch (e) {
+          for (const addr of baseKeyToAddresses.get(baseKey)!) {
+            cache.set(addr, null);
+          }
+          cache.set(baseKey, null);
+        }
+      }));
+    }
+
     const results = [];
     for (const address of addresses) {
       if (!address || typeof address !== 'string' || !address.trim()) {
@@ -2530,13 +2569,7 @@ export class RoutingService {
         continue;
       }
       const trimmed = address.trim();
-      let coords;
-      if (cache.has(trimmed)) {
-        coords = cache.get(trimmed);
-      } else {
-        coords = await this.geocodeAddress(trimmed);
-        cache.set(trimmed, coords);
-      }
+      const coords = cache.get(trimmed) || cache.get(getBaseKey(trimmed)) || null;
       results.push({ address: trimmed, coords });
     }
     return results;
