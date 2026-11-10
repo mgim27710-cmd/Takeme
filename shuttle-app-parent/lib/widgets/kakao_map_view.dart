@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/route_model.dart';
 
@@ -397,6 +399,8 @@ class _KakaoMapViewState extends State<KakaoMapView> {
 
   @override
   Widget build(BuildContext context) {
+    final viewPadding = MediaQuery.viewPaddingOf(context);
+
     return Stack(
       children: [
         // Map Container
@@ -409,8 +413,8 @@ class _KakaoMapViewState extends State<KakaoMapView> {
 
         // Controls Overlay
         Positioned(
-          top: 12,
-          right: 12,
+          top: 12 + (widget.isFullScreen ? viewPadding.top : 0),
+          right: 12 + (widget.isFullScreen ? viewPadding.right : 0),
           child: Column(
             children: [
               // Fullscreen Toggle
@@ -557,7 +561,7 @@ class _KakaoMapViewState extends State<KakaoMapView> {
   }
 }
 
-class KakaoMapFullscreenPage extends StatelessWidget {
+class KakaoMapFullscreenPage extends StatefulWidget {
   final List<RouteStop> stops;
   final List<Map<String, dynamic>> routePoints;
   final List<dynamic>? actualRoadPath;
@@ -586,8 +590,48 @@ class KakaoMapFullscreenPage extends StatelessWidget {
   });
 
   @override
+  State<KakaoMapFullscreenPage> createState() => _KakaoMapFullscreenPageState();
+}
+
+class _KakaoMapFullscreenPageState extends State<KakaoMapFullscreenPage> {
+  bool _isCardDismissed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkCardDismissed();
+  }
+
+  Future<void> _checkCardDismissed() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final dismissedDate = prefs.getString('hide_child_stop_card_date');
+      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      if (dismissedDate == today && mounted) {
+        setState(() {
+          _isCardDismissed = true;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _dismissCardForToday() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      await prefs.setString('hide_child_stop_card_date', today);
+    } catch (_) {}
+    if (mounted) {
+      setState(() {
+        _isCardDismissed = true;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final myStop = stops.cast<RouteStop?>().firstWhere((s) => s?.isMyChild == true, orElse: () => null);
+    final myStop = widget.stops.cast<RouteStop?>().firstWhere((s) => s?.isMyChild == true, orElse: () => null);
+    final viewPadding = MediaQuery.viewPaddingOf(context);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -596,12 +640,12 @@ class KakaoMapFullscreenPage extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              academyName ?? '유치원 통학차량 실시간 지도',
+              widget.academyName ?? '유치원 통학차량 실시간 지도',
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
             ),
-            if (myChildName != null)
+            if (widget.myChildName != null)
               Text(
-                '$myChildName 원아 탑승 노선',
+                '${widget.myChildName} 원아 탑승 노선',
                 style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
               ),
           ],
@@ -625,92 +669,111 @@ class KakaoMapFullscreenPage extends StatelessWidget {
           // Fullscreen Map View
           Positioned.fill(
             child: KakaoMapView(
-              stops: stops,
-              routePoints: routePoints,
-              actualRoadPath: actualRoadPath,
-              progressIndex: progressIndex,
-              busLat: busLat,
-              busLng: busLng,
-              academyLat: academyLat,
-              academyLng: academyLng,
-              academyName: academyName,
-              myChildName: myChildName,
-              myChildAddress: myChildAddress,
+              stops: widget.stops,
+              routePoints: widget.routePoints,
+              actualRoadPath: widget.actualRoadPath,
+              progressIndex: widget.progressIndex,
+              busLat: widget.busLat,
+              busLng: widget.busLng,
+              academyLat: widget.academyLat,
+              academyLng: widget.academyLng,
+              academyName: widget.academyName,
+              myChildName: widget.myChildName,
+              myChildAddress: widget.myChildAddress,
               isFullScreen: true,
             ),
           ),
 
-          // Bottom Info Card
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: 24,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.12),
-                    blurRadius: 16,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF5F3FF),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFDDD6FE)),
+          // Bottom Info Card ("우리 아이 탑승 장소" / "탑승지 설정됨")
+          if (!_isCardDismissed)
+            Positioned(
+              left: 16 + viewPadding.left,
+              right: 16 + viewPadding.right,
+              bottom: 24 + viewPadding.bottom,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.12),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
                     ),
-                    child: const Icon(Icons.stars_rounded, color: Color(0xFF7C3AED), size: 26),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          children: [
-                            const Text(
-                              '우리 아이 탑승 장소',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFF7C3AED)),
-                            ),
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFEFF6FF),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                '총 ${stops.length}개 정류장',
-                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          myStop?.address ?? myChildAddress ?? (myStop?.name ?? '탑승지 설정됨'),
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF1E293B)),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
+                  ],
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF5F3FF),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFDDD6FE)),
+                      ),
+                      child: const Icon(Icons.stars_rounded, color: Color(0xFF7C3AED), size: 26),
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              const Text(
+                                '우리 아이 탑승 장소',
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFF7C3AED)),
+                              ),
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFEFF6FF),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  '총 ${widget.stops.length}개 정류장',
+                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            myStop?.address ?? widget.myChildAddress ?? (myStop?.name ?? '탑승지 설정됨'),
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF1E293B)),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // Close button (X) to dismiss for today
+                    InkWell(
+                      onTap: _dismissCardForToday,
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFF1F5F9),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.close,
+                          size: 16,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
         ],
       ),
     );

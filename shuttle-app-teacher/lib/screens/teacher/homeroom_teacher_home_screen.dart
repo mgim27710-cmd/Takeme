@@ -382,6 +382,8 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
         child: SafeArea(
           top: false,
           bottom: true,
+          left: true,
+          right: true,
           child: SizedBox(
             height: 64,
             child: Row(
