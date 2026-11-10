@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -1181,6 +1182,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                 color: selected ? _C.blue : _C.slate600,
               ),
             ),
+            if ((kDebugMode || _nav.testMode) && plan.provider != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                '[길찾기: ${plan.provider == 'kakao' ? '카카오' : plan.provider == 'naver' ? '네이버' : '폴백'}]',
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: selected ? _C.blue : _C.slate500),
+              ),
+            ],
           ],
         );
       case PlanStatus.idle:
@@ -1410,6 +1418,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                               fontWeight: FontWeight.w600,
                             ),
                           ),
+                          if ((kDebugMode || _nav.testMode) && _nav.currentProvider != null) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              '[길찾기: ${_nav.currentProvider == 'kakao' ? '카카오' : _nav.currentProvider == 'naver' ? '네이버' : '폴백'}]',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
                         ],
                       ),
               ),

@@ -77,6 +77,7 @@ class RoutePlan {
   final int turnCount;
   final List<TrafficSegment> traffic; // 교통 상황 색 표시용
   final String criteriaFromServer; // 서버가 실제로 적용했다고 알려준 기준 (검증용)
+  final String? provider; // 5단계: 사용한 길찾기 서비스 ('kakao' | 'naver' | 'fallback')
   final DateTime createdAt;
 
   RoutePlan({
@@ -90,6 +91,7 @@ class RoutePlan {
     required this.turnCount,
     required this.traffic,
     required this.criteriaFromServer,
+    this.provider,
   }) : createdAt = DateTime.now();
 
   double get avgSpeed => durationS > 0 ? math.max(2, distanceM / durationS) : 8;
@@ -276,6 +278,9 @@ class DriverNavigator extends ChangeNotifier {
     final a = active;
     return a == null ? '-' : '${(remainingM / a.avgSpeed / 60).ceil()}분';
   }
+
+  /// 5단계: 현재 활성 경로의 길찾기 제공자 ('kakao' | 'naver' | 'fallback')
+  String? get currentProvider => active?.provider;
 
   /// 다음 회전 안내 (거리, 문구)
   (double, String)? get nextTurn {
@@ -794,6 +799,7 @@ class DriverNavigator extends ChangeNotifier {
       for (final t in (r['traffic'] as List? ?? []))
         TrafficSegment((t['from'] as num).toInt(), (t['to'] as num).toInt(), (t['state'] as num?)?.toInt() ?? 0),
     ];
+    final provider = r['provider'] as String?;
     final plan = RoutePlan(
       mode: m,
       origin: origin,
@@ -805,9 +811,10 @@ class DriverNavigator extends ChangeNotifier {
       turnCount: (r['turnCount'] as num?)?.toInt() ?? guides.length,
       traffic: traffic,
       criteriaFromServer: criteria,
+      provider: provider,
     );
     debugPrint('[nav] ${m.key}: ${plan.distanceM.round()}m ${plan.durationS.round()}s '
-        'turns=${plan.turnCount} points=${path.length} ($criteria)');
+        'turns=${plan.turnCount} points=${path.length} provider=$provider ($criteria)');
     return plan;
   }
 
