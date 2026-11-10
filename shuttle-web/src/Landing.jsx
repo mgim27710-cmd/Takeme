@@ -364,15 +364,34 @@ export default function Landing() {
         if (data.refreshToken) {
           localStorage.setItem('takeme_refresh_token', data.refreshToken);
         }
-        localStorage.setItem('takeme_user', JSON.stringify({
-          ...data.user,
-          accessToken: data.accessToken || null
-        }));
-        const isSuperAdmin = data.user?.role === 'SUPER_ADMIN';
-        const targetLevel = isSuperAdmin
-          ? (educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원')
-          : (data.user?.educationLevel || educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원');
+        // 로그인한 계정에 저장된 정보를 토대로 교육 부문(초등부, 중·고등부, 유치원) 자동 결정
+        let targetLevel = data.user?.educationLevel;
+        if (!targetLevel || targetLevel === '전체') {
+          const userMeta = `${data.user?.academyName || ''} ${data.user?.name || ''} ${data.user?.email || ''}`.toLowerCase();
+          if (userMeta.includes('초등') || userMeta.includes('elem')) {
+            targetLevel = '초등부';
+          } else if (userMeta.includes('중등') || userMeta.includes('고등') || userMeta.includes('middle') || userMeta.includes('high')) {
+            targetLevel = '중,고등부';
+          } else {
+            targetLevel = '유치원';
+          }
+        }
         
+        // 정규화
+        if (targetLevel.includes('초등')) {
+          targetLevel = '초등부';
+        } else if (targetLevel.includes('중') || targetLevel.includes('고')) {
+          targetLevel = '중,고등부';
+        } else if (targetLevel.includes('유치')) {
+          targetLevel = '유치원';
+        }
+
+        const updatedUser = {
+          ...data.user,
+          educationLevel: targetLevel,
+          accessToken: data.accessToken || null
+        };
+        localStorage.setItem('takeme_user', JSON.stringify(updatedUser));
         localStorage.setItem('takeme_selected_education_level', targetLevel);
 
         if (targetLevel === '초등부') {
@@ -396,35 +415,6 @@ export default function Landing() {
 
         {mode === 'login' && (
           <form onSubmit={handleLogin} className="space-y-4">
-            {/* Education Level Selector: 유치원 / 초등부 / 중,고등부 */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1.5">교육 부문 선택</label>
-              <div className="grid grid-cols-3 gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200">
-                {[
-                  { id: 'kindergarten', label: '유치원', icon: '🏫' },
-                  { id: 'elementary', label: '초등부', icon: '🎒' },
-                  { id: 'middle_high', label: '중,고등부', icon: '🎓' },
-                ].map(level => (
-                  <button
-                    key={level.id}
-                    type="button"
-                    onClick={() => {
-                      setEducationLevel(level.label);
-                      localStorage.setItem('takeme_selected_education_level', level.label);
-                    }}
-                    className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
-                      educationLevel === level.label
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                    }`}
-                  >
-                    <span>{level.icon}</span>
-                    <span>{level.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">이메일</label>
               <input type="email" placeholder="user@example.com" value={email} onChange={e=>setEmail(e.target.value)} className="form-input" required />

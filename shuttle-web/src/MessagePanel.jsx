@@ -129,7 +129,9 @@ function ComparisonLocationMap({ original, suggested }) {
   );
 }
 
-export default function MessagePanel({ currentUser, selectedAcademyId, socket, isClosing, initialStudent, onClearInitialStudent }) {
+export default function MessagePanel({ currentUser, selectedAcademyId, socket, isClosing, initialStudent, onClearInitialStudent, activeEducationLevel }) {
+  const currentEducationLevel = activeEducationLevel || currentUser?.educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
+  const isMiddleHigh = currentEducationLevel === '중,고등부';
   const [rooms, setRooms] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -191,7 +193,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
   // New Chat Modal State
   const [isNewChatModalOpen, setIsNewChatModalOpen] = useState(false);
-  const [categoryUsers, setCategoryUsers] = useState({ drivers: [], teachers: [], parents: [], admins: [] });
+  const [categoryUsers, setCategoryUsers] = useState({ drivers: [], teachers: [], parents: [], students: [], admins: [] });
   const [selectedUserIds, setSelectedUserIds] = useState([]);
   const [searchUserQuery, setSearchUserQuery] = useState('');
   const [customGroupName, setCustomGroupName] = useState('');
@@ -387,6 +389,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       const q = new URLSearchParams();
       if (targetAcademyId) q.append('academyId', String(targetAcademyId));
       if (myUser?.email) q.append('email', myUser.email);
+      if (currentEducationLevel) q.append('educationLevel', currentEducationLevel);
       const res = await fetch(`${API_BASE_URL}/chat/users?${q.toString()}`, {
         headers: getAuthHeaders(),
       });
@@ -396,6 +399,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           drivers: data.drivers || [],
           teachers: data.teachers || [],
           parents: data.parents || [],
+          students: data.students || (isMiddleHigh ? (data.parents || []) : []),
           admins: data.admins || [],
         });
       }
@@ -1014,6 +1018,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         return <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded">교사</span>;
       case 'PARENT':
         return <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 rounded">학부모</span>;
+      case 'STUDENT':
+        return <span className="bg-indigo-100 text-indigo-800 text-[10px] font-bold px-1.5 py-0.5 rounded">학생</span>;
       case 'ACADEMY_ADMIN':
         return <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded">관리자</span>;
       case 'SUPER_ADMIN':
@@ -1103,6 +1109,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   const filteredDrivers = filterUserList(categoryUsers.drivers);
   const filteredTeachers = filterUserList(categoryUsers.teachers);
   const filteredParents = filterUserList(categoryUsers.parents);
+  const filteredStudents = filterUserList(categoryUsers.students || []);
   const filteredAdmins = filterUserList(categoryUsers.admins);
 
   // Group messages by date for date pill separators
@@ -1970,43 +1977,84 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     </div>
                   )}
 
-                  {/* Category 3: 학부모 (Parents) */}
-                  {filteredParents.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-1.5 text-xs font-black text-amber-800 bg-amber-50/80 px-2.5 py-1.5 rounded-lg border border-amber-100">
-                        <svg className="w-3.5 h-3.5 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                        </svg>
-                        <span>학부모 ({filteredParents.length}명)</span>
+                  {/* Category 3: 중등부는 학생(Students), 유치원/초등부는 학부모(Parents) */}
+                  {isMiddleHigh ? (
+                    filteredStudents.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5 text-xs font-black text-indigo-800 bg-indigo-50/80 px-2.5 py-1.5 rounded-lg border border-indigo-100">
+                          <svg className="w-3.5 h-3.5 text-indigo-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l9-5-9-5-9 5 9 5z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
+                          </svg>
+                          <span>학생 ({filteredStudents.length}명)</span>
+                        </div>
+                        <div className="grid grid-cols-1 gap-1 pl-1">
+                          {filteredStudents.map((u) => {
+                            const isChecked = selectedUserIds.includes(u.id);
+                            return (
+                              <label
+                                key={u.id}
+                                className={`flex items-center gap-3 p-2 rounded-xl border cursor-pointer transition-all ${
+                                  isChecked ? 'bg-indigo-50 border-indigo-300 shadow-xs' : 'border-slate-100 hover:bg-slate-50'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => handleToggleSelectUser(u.id)}
+                                  className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                                />
+                                <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center font-bold text-xs">
+                                  {u.name[0] || '생'}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-xs font-bold text-slate-800">{u.name}</span>
+                                  <span className="text-[11px] text-indigo-700 ml-2 font-medium">({u.subText})</span>
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
                       </div>
-                      <div className="grid grid-cols-1 gap-1 pl-1">
-                        {filteredParents.map((u) => {
-                          const isChecked = selectedUserIds.includes(u.id);
-                          return (
-                            <label
-                              key={u.id}
-                              className={`flex items-center gap-3 p-2 rounded-xl border cursor-pointer transition-all ${
-                                isChecked ? 'bg-amber-50 border-amber-300 shadow-xs' : 'border-slate-100 hover:bg-slate-50'
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() => handleToggleSelectUser(u.id)}
-                                className="w-4 h-4 text-amber-600 rounded border-slate-300 focus:ring-amber-500 cursor-pointer"
-                              />
-                              <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-xs">
-                                {u.name[0] || '학'}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <span className="text-xs font-bold text-slate-800">{u.name}</span>
-                                <span className="text-[11px] text-amber-700 ml-2 font-medium">({u.subText})</span>
-                              </div>
-                            </label>
-                          );
-                        })}
+                    )
+                  ) : (
+                    filteredParents.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5 text-xs font-black text-amber-800 bg-amber-50/80 px-2.5 py-1.5 rounded-lg border border-amber-100">
+                          <svg className="w-3.5 h-3.5 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                          </svg>
+                          <span>학부모 ({filteredParents.length}명)</span>
+                        </div>
+                        <div className="grid grid-cols-1 gap-1 pl-1">
+                          {filteredParents.map((u) => {
+                            const isChecked = selectedUserIds.includes(u.id);
+                            return (
+                              <label
+                                key={u.id}
+                                className={`flex items-center gap-3 p-2 rounded-xl border cursor-pointer transition-all ${
+                                  isChecked ? 'bg-amber-50 border-amber-300 shadow-xs' : 'border-slate-100 hover:bg-slate-50'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => handleToggleSelectUser(u.id)}
+                                  className="w-4 h-4 text-amber-600 rounded border-slate-300 focus:ring-amber-500 cursor-pointer"
+                                />
+                                <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center font-bold text-xs">
+                                  {u.name[0] || '학'}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-xs font-bold text-slate-800">{u.name}</span>
+                                  <span className="text-[11px] text-amber-700 ml-2 font-medium">({u.subText})</span>
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
+                    )
                   )}
 
                   {/* Category 4: 관리자 (Admins) */}

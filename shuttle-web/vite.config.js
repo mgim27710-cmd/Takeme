@@ -11,35 +11,35 @@ export default defineConfig({
   server: {
     proxy: {
       '/routing': {
-        target: 'http://52.63.245.203:3000',
+        target: 'http://localhost:8081',
         changeOrigin: true,
       },
       '/auth': {
-        target: 'http://52.63.245.203:3000',
+        target: 'http://localhost:8081',
         changeOrigin: true,
       },
       '/parent': {
-        target: 'http://52.63.245.203:3000',
+        target: 'http://localhost:8081',
         changeOrigin: true,
       },
       '/teacher': {
-        target: 'http://52.63.245.203:3000',
+        target: 'http://localhost:8081',
         changeOrigin: true,
       },
       '/chat': {
-        target: 'http://52.63.245.203:3000',
+        target: 'http://localhost:8081',
         changeOrigin: true,
       },
       '/approval': {
-        target: 'http://52.63.245.203:3000',
+        target: 'http://localhost:8081',
         changeOrigin: true,
       },
       '/directions': {
-        target: 'http://52.63.245.203:3000',
+        target: 'http://localhost:8081',
         changeOrigin: true,
       },
       '/socket.io': {
-        target: 'http://52.63.245.203:3000',
+        target: 'http://localhost:8081',
         ws: true,
         changeOrigin: true,
       },

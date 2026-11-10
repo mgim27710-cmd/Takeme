@@ -425,12 +425,54 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const [showAcademyModal, setShowAcademyModal] = useState(false);
   const [setupStep, setSetupStep] = useState(1);
   const [isInitializing, setIsInitializing] = useState(true);
-  const [academyForm, setAcademyForm] = useState({ name: '', address: '', businessNumber: '' });
+  const [academyForm, setAcademyForm] = useState({ name: '', address: '', roadAddress: '', detailAddress: '', businessNumber: '' });
   const [isResettingZones, setIsResettingZones] = useState(false);
   const resetFileInputRef = useRef(null);
   const setupFileInputRef = useRef(null);
   const [isChangingAcademy, setIsChangingAcademy] = useState(false);
-  const [academyChangeForm, setAcademyChangeForm] = useState({ name: '', address: '', businessNumber: '' });
+  const [academyChangeForm, setAcademyChangeForm] = useState({ name: '', address: '', roadAddress: '', detailAddress: '', businessNumber: '' });
+
+  // 유치원/기관 도로명 주소 검색 (Daum Postcode)
+  const openAcademyAddressSearch = (isChangeMode = true) => {
+    const triggerPostcode = () => {
+      new window.daum.Postcode({
+        oncomplete: (data) => {
+          const selectedRoadAddr = data.roadAddress || data.jibunAddress || data.address;
+          let extraAddr = '';
+          if (data.bname !== '' && /[동|로|가]$/g.test(data.bname)) {
+            extraAddr += data.bname;
+          }
+          if (data.buildingName !== '' && data.apartment === 'Y') {
+            extraAddr += (extraAddr !== '' ? ', ' + data.buildingName : data.buildingName);
+          }
+          const fullRoadAddr = extraAddr ? `${selectedRoadAddr} (${extraAddr})` : selectedRoadAddr;
+
+          if (isChangeMode) {
+            setAcademyChangeForm(prev => ({
+              ...prev,
+              roadAddress: fullRoadAddr,
+              address: prev.detailAddress ? `${fullRoadAddr} ${prev.detailAddress}`.trim() : fullRoadAddr
+            }));
+          } else {
+            setAcademyForm(prev => ({
+              ...prev,
+              roadAddress: fullRoadAddr,
+              address: prev.detailAddress ? `${fullRoadAddr} ${prev.detailAddress}`.trim() : fullRoadAddr
+            }));
+          }
+        }
+      }).open();
+    };
+
+    if (window.daum && window.daum.Postcode) {
+      triggerPostcode();
+    } else {
+      const script = document.createElement('script');
+      script.src = '//t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js';
+      script.onload = triggerPostcode;
+      document.head.appendChild(script);
+    }
+  };
   
   // Zone Editing State
   const [isZoneEditingMode, setIsZoneEditingMode] = useState(false);
@@ -1841,21 +1883,25 @@ export default function Dashboard({ initialEducationLevel } = {}) {
 
   const handleAcademySubmit = async (e) => {
     e.preventDefault();
-    if (!academyForm.name || !academyForm.address) return alert('유치원명과 주소를 입력해주세요.');
+    const targetRoad = academyForm.roadAddress || academyForm.address;
+    if (!academyForm.name || !targetRoad) return alert('유치원명과 도로명 주소를 입력해주세요.');
 
     setIsProcessing(true);
     try {
       const res = await fetch(`${API_BASE_URL}/routing/geocode-bulk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ addresses: [academyForm.address] })
+        body: JSON.stringify({ addresses: [targetRoad] })
       });
       const geocoded = await res.json();
       
       if (geocoded.length > 0 && geocoded[0].coords && !isNaN(geocoded[0].coords.lat) && !isNaN(geocoded[0].coords.lng)) {
+        const fullAddress = `${targetRoad} ${academyForm.detailAddress || ''}`.trim();
         const newAcademy = {
           name: academyForm.name,
-          address: academyForm.address,
+          address: fullAddress,
+          roadAddress: targetRoad,
+          detailAddress: academyForm.detailAddress || '',
           businessNumber: academyForm.businessNumber ? academyForm.businessNumber.trim() : '',
           lat: geocoded[0].coords.lat,
           lng: geocoded[0].coords.lng
@@ -1889,21 +1935,25 @@ export default function Dashboard({ initialEducationLevel } = {}) {
 
   const handleChangeAcademySubmit = async (e) => {
     e.preventDefault();
-    if (!academyChangeForm.name || !academyChangeForm.address) return alert('유치원명과 주소를 입력해주세요.');
+    const targetRoad = academyChangeForm.roadAddress || academyChangeForm.address;
+    if (!academyChangeForm.name || !targetRoad) return alert('유치원명과 도로명 주소를 입력해주세요.');
 
     setIsProcessing(true);
     try {
       const res = await fetch(`${API_BASE_URL}/routing/geocode-bulk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ addresses: [academyChangeForm.address] })
+        body: JSON.stringify({ addresses: [targetRoad] })
       });
       const geocoded = await res.json();
       
       if (geocoded.length > 0 && geocoded[0].coords && !isNaN(geocoded[0].coords.lat) && !isNaN(geocoded[0].coords.lng)) {
+        const fullAddress = `${targetRoad} ${academyChangeForm.detailAddress || ''}`.trim();
         const newAcademy = {
           name: academyChangeForm.name,
-          address: academyChangeForm.address,
+          address: fullAddress,
+          roadAddress: targetRoad,
+          detailAddress: academyChangeForm.detailAddress || '',
           businessNumber: academyChangeForm.businessNumber ? academyChangeForm.businessNumber.trim() : '',
           lat: geocoded[0].coords.lat,
           lng: geocoded[0].coords.lng
@@ -1925,7 +1975,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         setIsChangingAcademy(false);
         alert('유치원 정보가 성공적으로 변경되었습니다!');
       } else {
-        alert('주소를 좌표로 변환할 수 없습니다. 정확한 주소를 입력해주세요.');
+        alert('주소를 좌표로 변환할 수 없습니다. 정확한 도로명 주소를 입력해주세요.');
       }
     } catch (err) {
       alert('주소 변환 중 에러가 발생했습니다.');
@@ -3249,13 +3299,40 @@ const parseKindergartenExcelSheet = (sheet) => {
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">원 도로명 주소 <span className="text-red-500">*</span></label>
+                    <div className="flex gap-2 mb-2">
+                      <input 
+                        type="text" 
+                        value={academyForm.roadAddress || ''} 
+                        readOnly
+                        onClick={() => openAcademyAddressSearch(false)}
+                        className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer placeholder-slate-400"
+                        placeholder="주소 검색 버튼을 눌러 도로명 주소를 선택하세요"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => openAcademyAddressSearch(false)}
+                        className="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition-colors whitespace-nowrap shadow-sm flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        주소 검색
+                      </button>
+                    </div>
                     <input 
                       type="text" 
-                      value={academyForm.address} 
-                      onChange={e => setAcademyForm({...academyForm, address: e.target.value})}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                      placeholder="예: 서울 강남구 역삼로 123"
-                      required
+                      value={academyForm.detailAddress || ''} 
+                      onChange={e => {
+                        const detail = e.target.value;
+                        setAcademyForm(prev => ({
+                          ...prev,
+                          detailAddress: detail,
+                          address: `${prev.roadAddress || ''} ${detail}`.trim()
+                        }));
+                      }}
+                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all placeholder-slate-400"
+                      placeholder="상세주소 직접 입력 (예: 101호, 2층)"
                     />
                   </div>
                   <button 
@@ -4548,9 +4625,12 @@ const parseKindergartenExcelSheet = (sheet) => {
                       </div>
                     )}
                     <button onClick={() => {
+                      const curAddr = academy?.address || '';
                       setAcademyChangeForm({ 
                         name: academy?.name || '', 
-                        address: academy?.address || '',
+                        roadAddress: academy?.roadAddress || curAddr,
+                        detailAddress: academy?.detailAddress || '',
+                        address: curAddr,
                         businessNumber: academy?.businessNumber || ''
                       });
                       setIsChangingAcademy(true);
@@ -4583,14 +4663,41 @@ const parseKindergartenExcelSheet = (sheet) => {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-orange-800 mb-1">새 원 주소 (도로명/지번) <span className="text-red-500">*</span></label>
+                      <label className="block text-xs font-bold text-orange-800 mb-1">새 원 주소 (도로명 주소 검색) <span className="text-red-500">*</span></label>
+                      <div className="flex gap-2 mb-2">
+                        <input 
+                          type="text" 
+                          value={academyChangeForm.roadAddress || ''} 
+                          readOnly
+                          onClick={() => openAcademyAddressSearch(true)}
+                          className="flex-1 px-3 py-2 bg-slate-50 border border-orange-200 rounded-xl text-sm outline-none cursor-pointer placeholder-slate-400"
+                          placeholder="주소 검색 버튼을 눌러 도로명 주소를 선택하세요"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => openAcademyAddressSearch(true)}
+                          className="px-3.5 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold transition-colors whitespace-nowrap shadow-xs flex items-center gap-1 cursor-pointer"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                          </svg>
+                          주소 검색
+                        </button>
+                      </div>
                       <input 
                         type="text" 
-                        value={academyChangeForm.address} 
-                        onChange={e => setAcademyChangeForm({...academyChangeForm, address: e.target.value})}
-                        className="w-full px-3 py-2 bg-white border border-orange-200 rounded-xl text-sm outline-none"
-                        placeholder="주소"
-                        required
+                        value={academyChangeForm.detailAddress || ''} 
+                        onChange={e => {
+                          const detail = e.target.value;
+                          setAcademyChangeForm(prev => ({
+                            ...prev,
+                            detailAddress: detail,
+                            address: `${prev.roadAddress || ''} ${detail}`.trim()
+                          }));
+                        }}
+                        className="w-full px-3 py-2 bg-white border border-orange-200 rounded-xl text-sm outline-none placeholder-slate-400"
+                        placeholder="상세주소 직접 입력 (예: 101호, 2층, 원장실)"
                       />
                     </div>
                     <button 
@@ -4817,6 +4924,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             initialStudent={selectedPaymentStudent}
             onClearInitialStudent={() => setSelectedPaymentStudent(null)}
             isClosing={isMessageClosing}
+            activeEducationLevel={activeEducationLevel}
           />
         )}
 
