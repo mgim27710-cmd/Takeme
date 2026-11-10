@@ -152,6 +152,22 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     }
   }
 
+  /**
+   * 새 사진 업로드 알림 (기관 소켓 방 academy_{id})
+   */
+  broadcastMediaUploaded(academyId: number, mediaAsset: any) {
+    if (!this.server || !academyId) return;
+    this.server.to(`academy_${academyId}`).emit('mediaUploaded', mediaAsset);
+  }
+
+  /**
+   * 사진 삭제 알림 (기관 소켓 방 academy_{id})
+   */
+  broadcastMediaDeleted(academyId: number, mediaId: number) {
+    if (!this.server || !academyId) return;
+    this.server.to(`academy_${academyId}`).emit('mediaDeleted', { id: mediaId });
+  }
+
   @SubscribeMessage('joinVehicleRoom')
   async handleJoinVehicleRoom(
     @MessageBody() data: { vehicleId: number },

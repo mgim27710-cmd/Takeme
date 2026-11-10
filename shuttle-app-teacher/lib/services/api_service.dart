@@ -940,4 +940,49 @@ class ApiService {
     } catch (_) {}
     return false;
   }
+
+  Future<dynamic> uploadMediaAssets({
+    required List<Map<String, dynamic>> photos,
+    int? vehicleId,
+    String? className,
+  }) async {
+    final url = Uri.parse('${AppConfig.apiHost}/media');
+    final payload = {
+      'photos': photos,
+      if (vehicleId != null) 'vehicleId': vehicleId,
+      if (className != null) 'className': className,
+    };
+    final res = await postWithAuth(url, jsonEncode(payload));
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      return jsonDecode(utf8.decode(res.bodyBytes));
+    }
+    throw Exception('업로드 실패 (${res.statusCode}): ${res.body}');
+  }
+
+  Future<List<dynamic>> getMediaAssets({
+    String? from,
+    String? to,
+    int? vehicleId,
+    String? className,
+  }) async {
+    final queryParams = <String, String>{};
+    if (from != null) queryParams['from'] = from;
+    if (to != null) queryParams['to'] = to;
+    if (vehicleId != null) queryParams['vehicleId'] = vehicleId.toString();
+    if (className != null) queryParams['className'] = className;
+
+    final uri = Uri.parse('${AppConfig.apiHost}/media').replace(queryParameters: queryParams.isEmpty ? null : queryParams);
+    final res = await getWithAuth(uri);
+    if (res.statusCode == 200) {
+      final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+      if (decoded is List) return decoded;
+    }
+    return [];
+  }
+
+  Future<bool> deleteMediaAsset(int id) async {
+    final url = Uri.parse('${AppConfig.apiHost}/media/$id');
+    final res = await deleteWithAuth(url);
+    return res.statusCode == 200 || res.statusCode == 204;
+  }
 }

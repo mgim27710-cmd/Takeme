@@ -8,6 +8,7 @@ import '../chat/chat_room_list_screen.dart';
 import 'homeroom_attendance_view.dart';
 import 'homeroom_change_requests_view.dart';
 import 'teacher_notification_screen.dart';
+import '../media/photo_gallery_screen.dart';
 
 class HomeroomTeacherHomeScreen extends StatefulWidget {
   const HomeroomTeacherHomeScreen({super.key});
@@ -208,6 +209,20 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
           actions: [
             _buildNotificationButton(),
             IconButton(
+              icon: const Icon(Icons.cloud_outlined, color: Color(0xFF475569)),
+              tooltip: '사진 보관함',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PhotoGalleryScreen(
+                      initialClassName: user?.assignedClass,
+                    ),
+                  ),
+                );
+              },
+            ),
+            IconButton(
               icon: const Icon(Icons.settings_outlined, color: Color(0xFF475569)),
               onPressed: () {
                 Navigator.push(
@@ -344,6 +359,20 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
               backgroundColor: Colors.white,
               elevation: 0,
               actions: [
+                IconButton(
+                  icon: const Icon(Icons.cloud_outlined, color: Color(0xFF475569)),
+                  tooltip: '사진 보관함',
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PhotoGalleryScreen(
+                          initialClassName: user.assignedClass,
+                        ),
+                      ),
+                    );
+                  },
+                ),
                 IconButton(
                   icon: const Icon(Icons.settings_outlined, color: Color(0xFF475569)),
                   onPressed: () {
