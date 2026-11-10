@@ -395,6 +395,8 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
   }
 
   /// 경로선 30m 이내 스냅 상세 계산 (투영점, 세그먼트 인덱스, 비율, 스냅 여부 산출)
+  /// 1단계 개선: 현재 진행 위치(_impl.routeProgressIndex) 기준 앞쪽 300m 이내의 구간만 후보로 하며,
+  /// 속도 3m/s(약 11km/h) 이상 주행 시 진행 방향과 60도 초과 차이나는 반대 방향/이탈 구간은 스냅하지 않는다.
   (LatLng point, int segIndex, double t, bool isSnapped) _snapToRouteDetail(
     LatLng rawPos,
     List<LatLng>? primaryRoute,
@@ -416,7 +418,12 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
     int bestSeg = 0;
     double bestT = 0.0;
 
-    for (int i = 0; i < primaryRoute.length - 1; i++) {
+    final startIdx = _impl.routeProgressIndex.clamp(0, primaryRoute.length - 2);
+    final speedMps = (_impl.currentSpeedKmh ?? 0.0) / 3.6;
+    final carHeading = _impl.currentHeading;
+
+    double cumDist = 0.0;
+    for (int i = startIdx; i < primaryRoute.length - 1; i++) {
       final a = primaryRoute[i];
       final b = primaryRoute[i + 1];
 
@@ -428,7 +435,25 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
       final dx = bx - ax;
       final dy = by - ay;
       final segLenSq = dx * dx + dy * dy;
+      final segLen = math.sqrt(segLenSq);
       if (segLenSq < 1e-6) continue;
+
+      if (i > startIdx) {
+        cumDist += segLen;
+        if (cumDist > 300.0 && (i - startIdx) >= 2) {
+          break; // 앞쪽 300m 이내만 탐색
+        }
+      }
+
+      // 속도 3m/s 이상이고 방향값이 있으면 60도 초과 차이나는 반대 구간/역방향 제외
+      if (speedMps >= 3.0 && carHeading != null && !carHeading.isNaN) {
+        final segBearing = (math.atan2(dx, dy) * 180.0 / math.pi + 360.0) % 360.0;
+        final angleDiff = ((carHeading - segBearing).abs()) % 360.0;
+        final normalizedDiff = angleDiff > 180.0 ? 360.0 - angleDiff : angleDiff;
+        if (normalizedDiff > 60.0) {
+          continue;
+        }
+      }
 
       final t = ((px - ax) * dx + (py - ay) * dy) / segLenSq;
       final clampedT = t.clamp(0.0, 1.0);
@@ -451,7 +476,7 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
     if (bestPoint != null) {
       return (bestPoint, bestSeg, bestT, true);
     }
-    return (rawPos, 0, 0.0, false);
+    return (rawPos, startIdx, 0.0, false);
   }
 
   List<Polyline> _buildPolylines() {

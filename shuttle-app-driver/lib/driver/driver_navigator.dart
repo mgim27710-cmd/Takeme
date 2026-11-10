@@ -1286,28 +1286,70 @@ class DriverNavigator extends ChangeNotifier {
     }
   }
 
-  /// 경로 선분 중 p 와 가장 가까운 선분 인덱스, 선분 내 비율(0~1), 스냅 좌표, 이탈 거리(m), 도로 방향(도)을 구한다.
-  (int, double, GeoPoint, double, double) _findNearestSegment(
+  static double _angleDiff(double a, double b) {
+    final d = ((a - b).abs()) % 360.0;
+    return d > 180.0 ? 360.0 - d : d;
+  }
+
+  /// 경로 선분 중 p 와 가장 가까운 선분 인덱스, 선분 내 비율(0~1), 스냅 좌표, 이탈 거리(m), 도로 방향(도), 유효 스냅 여부를 구한다.
+  /// 1단계 개선: 현재 진행 위치(_progress) 기준 앞쪽 300m 이내의 구간만 후보로 하며,
+  /// 속도 3m/s 이상 주행 시 진행 방향과 60도 초과 차이나는 반대 방향/이탈 구간은 스냅하지 않는다.
+  (int, double, GeoPoint, double, double, bool) _findNearestSegment(
     List<GeoPoint> path,
     GeoPoint p, {
     int from = 0,
-    int? to,
+    List<double>? cumDist,
+    double forwardMeters = 300.0,
+    double? gpsHeading,
+    double? speedMps,
   }) {
-    if (path.isEmpty) return (0, 0.0, p, 0.0, 0.0);
-    if (path.length == 1) return (0, 0.0, path[0], distanceM(path[0], p), 0.0);
+    if (path.isEmpty) return (0, 0.0, p, 0.0, 0.0, false);
+    if (path.length == 1) {
+      final d = distanceM(path[0], p);
+      return (0, 0.0, path[0], d, 0.0, d <= 35.0);
+    }
 
-    final end = math.min(to ?? (path.length - 2), path.length - 2);
-    final start = math.max(0, from).clamp(0, end);
+    final start = math.max(0, from).clamp(0, path.length - 2);
+    final maxEnd = path.length - 2;
+
+    int end = start;
+    if (cumDist != null && cumDist.length == path.length) {
+      final baseCum = cumDist[start];
+      while (end < maxEnd) {
+        if (cumDist[end + 1] - baseCum > forwardMeters && (end - start) >= 2) {
+          break;
+        }
+        end++;
+      }
+    } else {
+      double acc = 0;
+      while (end < maxEnd) {
+        acc += distanceM(path[end], path[end + 1]);
+        if (acc > forwardMeters && (end - start) >= 2) {
+          break;
+        }
+        end++;
+      }
+    }
 
     var bestSeg = start;
     var bestT = 0.0;
     var bestPoint = path[start];
     var bestDist = double.infinity;
-    var bestBearing = 0.0;
+    var bestBearing = bearingDeg(path[start], path[start + 1]);
+    bool foundValid = false;
+
+    final filterHeading = (speedMps != null && speedMps >= 3.0 && gpsHeading != null && gpsHeading >= 0);
 
     for (var i = start; i <= end; i++) {
       final a = path[i];
       final b = path[i + 1];
+
+      final segBearing = bearingDeg(a, b);
+      if (filterHeading && _angleDiff(segBearing, gpsHeading) > 60.0) {
+        // 주행 중 진행 방향과 60도 초과 차이나는 반대 구간/역방향 제외
+        continue;
+      }
 
       final cosLat = math.cos(a.lat * math.pi / 180.0);
       final dx = (b.lng - a.lng) * cosLat;
@@ -1334,11 +1376,19 @@ class DriverNavigator extends ChangeNotifier {
         bestSeg = i;
         bestT = t;
         bestPoint = projPoint;
-        bestBearing = bearingDeg(a, b);
+        bestBearing = segBearing;
+        foundValid = true;
       }
     }
 
-    return (bestSeg, bestT, bestPoint, bestDist, bestBearing);
+    final isSnapped = foundValid && bestDist <= 35.0;
+    if (!isSnapped) {
+      final fallbackDist = distanceM(path[start], p);
+      final fallbackBearing = bearingDeg(path[start], path[math.min(start + 1, path.length - 1)]);
+      return (start, 0.0, path[start], fallbackDist, fallbackBearing, false);
+    }
+
+    return (bestSeg, bestT, bestPoint, bestDist, bestBearing, true);
   }
 
   void _updateProgress({double? gpsHeading, double? speedMps, GeoPoint? prev}) {
@@ -1346,25 +1396,37 @@ class DriverNavigator extends ChangeNotifier {
     final pos = position;
     if (a == null || pos == null) return;
 
-    final (segIdx, frac, _, off, roadBearing) = _findNearestSegment(
+    final speedMpsVal = speedMps ?? (speedKmh / 3.6);
+
+    final (segIdx, frac, _, off, roadBearing, isSnapped) = _findNearestSegment(
       a.path,
       pos,
-      from: math.max(0, _progress - 5),
-      to: _progress + 80,
+      from: _progress,
+      cumDist: a.cum,
+      forwardMeters: 300.0,
+      gpsHeading: gpsHeading,
+      speedMps: speedMpsVal,
     );
-    _progress = segIdx;
-    _progressFrac = frac;
 
-    // 화살표 방향: 경로선 30m 이내면 도로 구간 방향, 아니면 속도 2m/s 이상일 때만 GPS 방향, 정지 중엔 마지막 방향
-    final speedMpsVal = speedMps ?? (speedKmh / 3.6);
-    if (driving && off <= 30.0) {
-      heading = roadBearing;
-    } else if (speedMpsVal >= 2.0 && gpsHeading != null && gpsHeading >= 0) {
-      heading = gpsHeading;
-    } else if (speedMpsVal >= 2.0 && prev != null && distanceM(prev, pos) > 2) {
-      heading = bearingDeg(prev, pos);
+    // 1단계: 진행 위치는 항상 앞으로만 움직임
+    if (isSnapped) {
+      if (segIdx > _progress || (segIdx == _progress && frac >= _progressFrac)) {
+        _progress = segIdx;
+        _progressFrac = frac;
+      }
     }
-    // 정지 중(speedMpsVal < 2.0)이면 마지막 방향(heading) 유지
+
+    // 2단계 화살표 방향:
+    // 속도가 3m/s 이상이면 GPS 방향, 그 아래는 1단계의 앞방향 도로 구간 방향, 정지 중(0.5m/s 미만)에는 마지막 값 유지.
+    // 도로 반대 방향은 절대 쓰지 않는다.
+    if (speedMpsVal >= 3.0 && gpsHeading != null && gpsHeading >= 0) {
+      heading = gpsHeading;
+    } else if (speedMpsVal >= 3.0 && prev != null && distanceM(prev, pos) > 2) {
+      heading = bearingDeg(prev, pos);
+    } else if (speedMpsVal >= 0.5 && isSnapped) {
+      heading = roadBearing;
+    }
+    // speedMpsVal < 0.5 이면 이전 heading 유지
 
     // 70m 이상 벗어난 상태가 3번 연속이면 재탐색 (20초에 한 번, 중복 요청 방지)
     _offRouteCount = off > 70 ? _offRouteCount + 1 : 0;
