@@ -995,6 +995,33 @@ class DriverNavigator extends ChangeNotifier {
     if (driving && position != null) {
       map.moveMe(position!, heading: heading, follow: follow, navigating: true, speedKmh: speedKmh.toDouble());
     }
+
+    // 3단계: 새 경로를 받으면 첫 안내 음성을 즉시 냄
+    if (driving) {
+      final turn = nextTurn;
+      if (turn != null) {
+        final (d, text) = turn;
+        NavGuide? g;
+        for (final x in plan.guides) {
+          if (x.pathIndex > _progress) {
+            g = x;
+            break;
+          }
+        }
+        if (d <= 60) {
+          if (g != null) {
+            g.saidNear = true;
+            g.saidFar = true;
+          }
+          _speak('곧 $text');
+        } else {
+          if (g != null) {
+            g.saidFar = true;
+          }
+          _speak('${(d / 10).round() * 10}미터 앞에서 $text');
+        }
+      }
+    }
   }
 
   // ───────────── 실제 운행 ─────────────
@@ -1428,12 +1455,19 @@ class DriverNavigator extends ChangeNotifier {
     }
     // speedMpsVal < 0.5 이면 이전 heading 유지
 
-    // 70m 이상 벗어난 상태가 3번 연속이면 재탐색 (20초에 한 번, 중복 요청 방지)
-    _offRouteCount = off > 70 ? _offRouteCount + 1 : 0;
-    if (_offRouteCount >= 3 && !rerouting && DateTime.now().difference(_lastReroute).inSeconds > 20) {
+    // 3단계 빠른 재탐색:
+    // 이탈 조건: 경로와 거리 35m 이상이거나, 진행 방향과 경로 방향 차이가 100도 이상인 상태가 연속 2회
+    final curHeading = heading;
+    final headingDeviated = (speedMpsVal >= 3.0 && curHeading != null)
+        ? _angleDiff(curHeading, roadBearing) >= 100.0
+        : false;
+    final isOff = (!isSnapped && off >= 35.0) || headingDeviated;
+
+    _offRouteCount = isOff ? _offRouteCount + 1 : 0;
+    if (_offRouteCount >= 2 && !rerouting && DateTime.now().difference(_lastReroute).inSeconds >= 8) {
       _offRouteCount = 0;
       _lastReroute = DateTime.now();
-      _speak('경로를 벗어났습니다. 경로를 다시 찾습니다.');
+      _speak('경로를 다시 찾습니다.');
       _reroute(reason: 'off-route');
       return;
     }
