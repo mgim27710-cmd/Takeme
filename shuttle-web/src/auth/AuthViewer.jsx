@@ -124,7 +124,7 @@ export default function AuthViewer({
   }, [buses]);
 
   const filteredSubstituteBuses = useMemo(() => {
-    return buses.filter(bus => {
+    const list = buses.filter(bus => {
       const isDriverMode = substituteRoleTab === 'DRIVER';
       const isResting = isDriverMode 
         ? Boolean(bus.isDriverResting || bus.substituteDriver?.isActive)
@@ -146,6 +146,15 @@ export default function AuthViewer({
         return busName.includes(kw) || plate.includes(kw) || origName.includes(kw) || subName.includes(kw) || subEmail.includes(kw) || subPhone.includes(kw);
       }
       return true;
+    });
+
+    // 호차 번호 순으로 안정 정렬하여 엇갈림 방지
+    return [...list].sort((a, b) => {
+      const matchA = (a.name || '').match(/\d+/);
+      const matchB = (b.name || '').match(/\d+/);
+      const numA = matchA ? parseInt(matchA[0], 10) : (Number(a.busNumber) || a.id || 999);
+      const numB = matchB ? parseInt(matchB[0], 10) : (Number(b.busNumber) || b.id || 999);
+      return numA - numB;
     });
   }, [buses, substituteRoleTab, substituteStatusFilter, searchKeyword]);
 
@@ -239,14 +248,14 @@ export default function AuthViewer({
               onClick={() => setCurrentTab('SUBSTITUTE')}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                 currentTab === 'SUBSTITUTE'
-                  ? 'bg-white text-amber-700 shadow-xs'
+                  ? 'bg-white text-blue-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <span>대체 기사 임시 계정</span>
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
                 buses.some(b => b.isDriverResting || b.substituteDriver?.isActive)
-                  ? 'bg-amber-100 text-amber-800'
+                  ? 'bg-blue-100 text-blue-800'
                   : 'bg-slate-200 text-slate-700'
               }`}>
                 {buses.some(b => b.isDriverResting || b.substituteDriver?.isActive)
@@ -857,18 +866,18 @@ export default function AuthViewer({
                 </div>
               </div>
 
-              <div className="bg-white p-4 rounded-2xl border border-amber-200/80 shadow-xs flex items-center justify-between bg-gradient-to-br from-white to-amber-50/40">
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
                 <div>
-                  <div className="text-[11px] font-bold text-amber-700">현재 대체기사 운행중</div>
-                  <div className="text-2xl font-black text-amber-600 mt-0.5 flex items-center gap-1.5">
+                  <div className="text-[11px] font-bold text-slate-600">현재 대체기사 운행중</div>
+                  <div className="text-2xl font-black text-blue-600 mt-0.5 flex items-center gap-1.5">
                     {substituteStats.activeDrivers}명
                     {substituteStats.activeDrivers > 0 && (
-                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping inline-block" />
+                      <span className="w-2 h-2 rounded-full bg-blue-600 inline-block" />
                     )}
                   </div>
                 </div>
-                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-lg font-bold">
-                  ⚡
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-lg font-bold">
+                  🔄
                 </div>
               </div>
 
@@ -882,24 +891,24 @@ export default function AuthViewer({
                 </div>
               </div>
 
-              <div className="bg-white p-4 rounded-2xl border border-indigo-200/80 shadow-xs flex items-center justify-between bg-gradient-to-br from-white to-indigo-50/40">
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
                 <div>
-                  <div className="text-[11px] font-bold text-indigo-700">대체 지도교사 운행중</div>
-                  <div className="text-2xl font-black text-indigo-600 mt-0.5">{substituteStats.activeTeachers}명</div>
+                  <div className="text-[11px] font-bold text-slate-600">대체 지도교사 운행중</div>
+                  <div className="text-2xl font-black text-slate-800 mt-0.5">{substituteStats.activeTeachers}명</div>
                 </div>
-                <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center text-lg font-bold">
+                <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center text-lg font-bold">
                   👩‍🏫
                 </div>
               </div>
             </div>
 
             {/* Security Notice Banner */}
-            <div className="p-4 bg-gradient-to-r from-amber-500/10 via-amber-50 to-orange-50/40 border border-amber-200/80 rounded-2xl flex items-start gap-3 text-xs text-amber-900 leading-relaxed shadow-xs">
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex items-start gap-3 text-xs text-slate-700 leading-relaxed shadow-xs">
               <span className="text-lg shrink-0 mt-0.5">🛡️</span>
               <div className="min-w-0">
-                <span className="font-bold text-amber-950 block mb-0.5">대체 인력 임시 계정 보안 관리 수칙</span>
+                <span className="font-bold text-slate-900 block mb-0.5">대체 인력 임시 계정 보안 관리 수칙</span>
                 대체 기사 임시 계정은 정규 기사님이 휴식(연차·병가 등) 처리된 동안에만 로그인할 수 있도록 설계되어 있습니다.
-                평소에는 무단 접속 방지를 위해 <b>비활성화(로그인 불가 잠금)</b> 상태로 유지되며, [휴식/대체 설정] 시 즉시 활성화됩니다.
+                평소에는 무단 접속 방지를 위해 <strong className="text-slate-900">비활성화(로그인 불가 잠금)</strong> 상태로 유지되며, <strong className="text-blue-700">[휴식/대체 설정]</strong> 시 즉시 활성화됩니다.
               </div>
             </div>
 
@@ -913,12 +922,12 @@ export default function AuthViewer({
                     onClick={() => setSubstituteRoleTab('DRIVER')}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                       substituteRoleTab === 'DRIVER'
-                        ? 'bg-white text-amber-700 shadow-xs'
+                        ? 'bg-white text-slate-900 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     <span>🚌 대체 기사 임시 계정</span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-amber-100 text-amber-800">
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-blue-50 text-blue-700 border border-blue-200">
                       {substituteStats.totalBuses}
                     </span>
                   </button>
@@ -928,12 +937,12 @@ export default function AuthViewer({
                     onClick={() => setSubstituteRoleTab('TEACHER')}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                       substituteRoleTab === 'TEACHER'
-                        ? 'bg-white text-indigo-700 shadow-xs'
+                        ? 'bg-white text-slate-900 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     <span>👩‍🏫 대체 교사 임시 계정</span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-indigo-100 text-indigo-800">
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-slate-100 text-slate-700 border border-slate-200">
                       {substituteStats.totalBuses}
                     </span>
                   </button>
@@ -945,7 +954,7 @@ export default function AuthViewer({
                     type="button"
                     onClick={() => setSubstituteStatusFilter('ALL')}
                     className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer ${
-                      substituteStatusFilter === 'ALL' ? 'bg-slate-700 text-white' : 'text-slate-600 hover:text-slate-900'
+                      substituteStatusFilter === 'ALL' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     전체 보기 ({buses.length})
@@ -954,7 +963,7 @@ export default function AuthViewer({
                     type="button"
                     onClick={() => setSubstituteStatusFilter('ACTIVE')}
                     className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer ${
-                      substituteStatusFilter === 'ACTIVE' ? 'bg-amber-600 text-white' : 'text-slate-600 hover:text-slate-900'
+                      substituteStatusFilter === 'ACTIVE' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     운행 중 활성 ({substituteRoleTab === 'DRIVER' ? substituteStats.activeDrivers : substituteStats.activeTeachers})
@@ -963,7 +972,7 @@ export default function AuthViewer({
                     type="button"
                     onClick={() => setSubstituteStatusFilter('INACTIVE')}
                     className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer ${
-                      substituteStatusFilter === 'INACTIVE' ? 'bg-slate-500 text-white' : 'text-slate-600 hover:text-slate-900'
+                      substituteStatusFilter === 'INACTIVE' ? 'bg-slate-600 text-white' : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     대기 잠금 ({substituteRoleTab === 'DRIVER' ? substituteStats.inactiveDrivers : substituteStats.inactiveTeachers})
@@ -1012,12 +1021,12 @@ export default function AuthViewer({
                     key={bus.id}
                     className={`p-5 bg-white rounded-2xl border transition-all shadow-xs flex flex-col justify-between gap-4 ${
                       isResting
-                        ? 'border-amber-300 ring-2 ring-amber-100 shadow-amber-50/50'
+                        ? 'border-blue-400 ring-2 ring-blue-50'
                         : 'border-slate-200 hover:border-slate-300'
                     }`}
                   >
-                    {/* Card Header: Bus & Original Staff Status */}
-                    <div className="flex items-start justify-between gap-3">
+                    {/* Card Header: Bus & Overall Status */}
+                    <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
                       <div className="flex items-center gap-3 min-w-0">
                         <div
                           className="w-11 h-11 rounded-2xl flex items-center justify-center font-black text-white text-base shrink-0 shadow-xs"
@@ -1034,57 +1043,78 @@ export default function AuthViewer({
                               </span>
                             )}
                           </div>
-                          <div className="text-xs text-slate-500 mt-1 flex items-center gap-1.5 flex-wrap">
-                            <span>본래 {isDriver ? '기사' : '교사'}: <b>{originalName}</b></span>
-                            {originalPhone && <span className="text-slate-400">({originalPhone})</span>}
-                            <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md ${
-                              isResting ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-slate-100 text-slate-600'
-                            }`}>
-                              {isResting ? '⚠️ 휴식 중' : '정상 운행'}
-                            </span>
-                          </div>
+                          <span className="text-[11px] text-slate-400 block mt-0.5">
+                            정원: {bus.capacity || 25}인승
+                          </span>
                         </div>
                       </div>
 
                       {/* Status Badge */}
                       <div className="shrink-0 text-right">
                         {isResting ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500 text-white shadow-xs animate-pulse">
-                            <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                            운행 중 (로그인 허용)
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-600 text-white shadow-xs">
+                            <span className="w-2 h-2 rounded-full bg-white" />
+                            대체 운행 중 (로그인 허용)
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                            <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                            <span className="w-2 h-2 rounded-full bg-slate-400" />
                             보안 잠금 (로그인 차단)
                           </span>
                         )}
                       </div>
                     </div>
 
-                    {/* Middle: Substitute Staff & Account Info Box */}
-                    <div className="bg-slate-50/90 border border-slate-200/80 rounded-xl p-3.5 space-y-2.5 text-xs">
-                      <div className="flex items-center justify-between pb-2 border-b border-slate-200/70">
+                    {/* Section 1: Regular Staff (본래 정규 기사/교사) */}
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/70 flex items-center justify-between gap-3 text-xs">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 block mb-0.5">
+                          1️⃣ 배정된 본래 정규 {isDriver ? '기사님' : '지도교사님'}
+                        </span>
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-800">
-                            {sub.name || (isDriver ? '대체 기사님' : '대체 지도교사님')}
-                          </span>
-                          {sub.phone && (
-                            <span className="text-slate-500 font-mono text-[11px]">{sub.phone}</span>
-                          )}
+                          <span className="font-bold text-slate-800 text-sm">{originalName}</span>
+                          {originalPhone && <span className="text-slate-500 font-mono text-xs">({originalPhone})</span>}
                         </div>
-                        <span className="text-[11px] text-amber-800 bg-amber-100/80 font-bold px-2 py-0.5 rounded-md">
+                      </div>
+                      <div>
+                        {isResting ? (
+                          <span className="px-2.5 py-1 bg-blue-50 text-blue-900 font-bold rounded-lg border border-blue-200 text-[11px] flex items-center gap-1">
+                            <span>ℹ️</span> 휴식 중 (대체 투입)
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 font-bold rounded-lg border border-emerald-200 text-[11px]">
+                            🟢 정상 근무 중
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Section 2: Substitute Staff & Temp Account (대체 기사/교사 임시 계정) */}
+                    <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5 text-xs">
+                      <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+                        <div>
+                          <span className="text-[10px] font-bold text-slate-500 block mb-0.5">
+                            2️⃣ 임시 투입 대체 {isDriver ? '기사님' : '교사님'}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-extrabold text-slate-900 text-sm">
+                              {sub.name || (isDriver ? '대체 기사님' : '대체 지도교사님')}
+                            </span>
+                            {sub.phone && <span className="text-slate-600 font-mono text-xs">{sub.phone}</span>}
+                          </div>
+                        </div>
+                        <span className="text-[11px] font-semibold text-slate-700 bg-white px-2 py-0.5 rounded-md border border-slate-200">
                           사유: {sub.reason || (isDriver ? '연차 휴가' : '병가')}
                         </span>
                       </div>
 
                       {/* Credentials Row */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {/* Email / ID */}
-                        <div className="bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between gap-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                        {/* ID */}
+                        <div className="bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between gap-1 shadow-2xs">
                           <div className="min-w-0">
-                            <span className="text-[10px] text-slate-400 font-bold block">임시 계정 아이디 (이메일)</span>
-                            <span className="font-mono text-xs text-slate-800 font-bold truncate block" title={accountEmail}>
+                            <span className="text-[10px] text-slate-400 font-bold block">임시 로그인 아이디</span>
+                            <span className="font-mono text-xs text-slate-900 font-bold truncate block" title={accountEmail}>
                               {accountEmail}
                             </span>
                           </div>
@@ -1104,10 +1134,10 @@ export default function AuthViewer({
                         </div>
 
                         {/* Password */}
-                        <div className="bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between gap-1">
+                        <div className="bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between gap-1 shadow-2xs">
                           <div className="min-w-0">
                             <span className="text-[10px] text-slate-400 font-bold block">임시 비밀번호</span>
-                            <span className="font-mono text-xs text-slate-800 font-bold truncate block">
+                            <span className="font-mono text-xs text-slate-900 font-bold truncate block">
                               {isPasswordVisible ? accountPassword : '••••••••••••'}
                             </span>
                           </div>
@@ -1169,8 +1199,8 @@ export default function AuthViewer({
                         }}
                         className={`py-1.5 px-3.5 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer ${
                           isResting
-                            ? 'bg-amber-600 hover:bg-amber-700 text-white'
-                            : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                            ? 'bg-slate-800 hover:bg-slate-900 text-white'
+                            : 'bg-blue-600 hover:bg-blue-700 text-white'
                         }`}
                       >
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

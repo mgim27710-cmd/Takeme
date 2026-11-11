@@ -801,27 +801,207 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     }));
   };
 
+  // 대체 기사 및 교사 임시 계정 프리셋 목록 생성 (드롭다운 선택 지원)
+  const getSubstituteDriverPresets = (currentBus) => {
+    if (!currentBus) return [];
+    const list = [];
+    const currentSub = currentBus.substituteDriver || {};
+    const defaultEmail = `sub_driver${currentBus.id}@takeme.com`;
+
+    // 1. 현재 호차 전용 기본 계정
+    list.push({
+      key: 'current_default',
+      category: '현재 호차 계정',
+      label: `[현재 호차] ${currentBus.name} 전용 (${currentSub.email || defaultEmail})`,
+      name: currentSub.name || '대체 기사님',
+      phone: currentSub.phone || '010-9999-1001',
+      email: currentSub.email || defaultEmail,
+      password: currentSub.password || 'password123!',
+      reason: currentSub.reason || '연차 휴가'
+    });
+
+    // 2. 다른 호차의 등록 계정들
+    buses.filter(b => b.id !== currentBus.id).forEach(b => {
+      const bSub = b.substituteDriver || {};
+      const bEmail = bSub.email || `sub_driver${b.id}@takeme.com`;
+      list.push({
+        key: `bus_${b.id}`,
+        category: '타 호차 계정',
+        label: `[${b.name}] ${bEmail} (${bSub.name || '대체기사'})`,
+        name: bSub.name || '대체 기사님',
+        phone: bSub.phone || '010-9999-1001',
+        email: bEmail,
+        password: bSub.password || 'password123!',
+        reason: bSub.reason || '호차간 대체 운행'
+      });
+    });
+
+    // 3. 공용 예비 풀 (Spare Pool) 계정 3종
+    list.push(
+      {
+        key: 'spare_1',
+        category: '예비 기사 풀 (공용)',
+        label: `[예비 1호] sub_driver_spare1@takeme.com (이예비 기사님)`,
+        name: '이예비 기사님',
+        phone: '010-9999-9001',
+        email: 'sub_driver_spare1@takeme.com',
+        password: 'password123!',
+        reason: '긴급 대체 지원'
+      },
+      {
+        key: 'spare_2',
+        category: '예비 기사 풀 (공용)',
+        label: `[예비 2호] sub_driver_spare2@takeme.com (박예비 기사님)`,
+        name: '박예비 기사님',
+        phone: '010-9999-9002',
+        email: 'sub_driver_spare2@takeme.com',
+        password: 'password123!',
+        reason: '연차 휴가 대체'
+      },
+      {
+        key: 'spare_3',
+        category: '예비 기사 풀 (공용)',
+        label: `[예비 3호] sub_driver_spare3@takeme.com (최예비 기사님)`,
+        name: '최예비 기사님',
+        phone: '010-9999-9003',
+        email: 'sub_driver_spare3@takeme.com',
+        password: 'password123!',
+        reason: '차량 정비 및 휴식'
+      }
+    );
+
+    return list;
+  };
+
+  const getSubstituteTeacherPresets = (currentBus) => {
+    if (!currentBus) return [];
+    const list = [];
+    const currentSub = currentBus.substituteTeacher || {};
+    const defaultEmail = `sub_teacher${currentBus.id}@takeme.com`;
+
+    list.push({
+      key: 'current_default',
+      category: '현재 호차 계정',
+      label: `[현재 호차] ${currentBus.name} 전용 (${currentSub.email || defaultEmail})`,
+      name: currentSub.name || '대체 교사님',
+      phone: currentSub.phone || '010-9999-2001',
+      email: currentSub.email || defaultEmail,
+      password: currentSub.password || 'password123!',
+      reason: currentSub.reason || '병가'
+    });
+
+    buses.filter(b => b.id !== currentBus.id).forEach(b => {
+      const bSub = b.substituteTeacher || {};
+      const bEmail = bSub.email || `sub_teacher${b.id}@takeme.com`;
+      list.push({
+        key: `bus_${b.id}`,
+        category: '타 호차 계정',
+        label: `[${b.name}] ${bEmail} (${bSub.name || '대체교사'})`,
+        name: bSub.name || '대체 교사님',
+        phone: bSub.phone || '010-9999-2001',
+        email: bEmail,
+        password: bSub.password || 'password123!',
+        reason: bSub.reason || '호차간 대체'
+      });
+    });
+
+    list.push(
+      {
+        key: 'spare_1',
+        category: '예비 교사 풀 (공용)',
+        label: `[예비 1호] sub_teacher_spare1@takeme.com (김예비 교사님)`,
+        name: '김예비 교사님',
+        phone: '010-9999-9101',
+        email: 'sub_teacher_spare1@takeme.com',
+        password: 'password123!',
+        reason: '긴급 대체 동승'
+      },
+      {
+        key: 'spare_2',
+        category: '예비 교사 풀 (공용)',
+        label: `[예비 2호] sub_teacher_spare2@takeme.com (정예비 교사님)`,
+        name: '정예비 교사님',
+        phone: '010-9999-9102',
+        email: 'sub_teacher_spare2@takeme.com',
+        password: 'password123!',
+        reason: '병가 대체'
+      }
+    );
+
+    return list;
+  };
+
+  const handleSelectDriverPreset = (presetKey) => {
+    if (presetKey === 'custom') {
+      setSubstituteForm(prev => ({
+        ...prev,
+        selectedDriverPreset: 'custom'
+      }));
+      return;
+    }
+    const presets = getSubstituteDriverPresets(substituteModalBus);
+    const found = presets.find(p => p.key === presetKey);
+    if (found) {
+      setSubstituteForm(prev => ({
+        ...prev,
+        selectedDriverPreset: found.key,
+        driverName: found.name,
+        driverPhone: found.phone,
+        driverEmail: found.email,
+        driverPassword: found.password,
+        driverReason: found.reason || prev.driverReason
+      }));
+    }
+  };
+
+  const handleSelectTeacherPreset = (presetKey) => {
+    if (presetKey === 'custom') {
+      setSubstituteForm(prev => ({
+        ...prev,
+        selectedTeacherPreset: 'custom'
+      }));
+      return;
+    }
+    const presets = getSubstituteTeacherPresets(substituteModalBus);
+    const found = presets.find(p => p.key === presetKey);
+    if (found) {
+      setSubstituteForm(prev => ({
+        ...prev,
+        selectedTeacherPreset: found.key,
+        teacherName: found.name,
+        teacherPhone: found.phone,
+        teacherEmail: found.email,
+        teacherPassword: found.password,
+        teacherReason: found.reason || prev.teacherReason
+      }));
+    }
+  };
+
   const handleOpenSubstituteModal = (bus) => {
     if (!bus) return;
     setSubstituteModalBus(bus);
     setSubstituteFormTab('driver');
     const subD = bus.substituteDriver || {};
     const subT = bus.substituteTeacher || {};
+    const isDriverResting = Boolean(bus.isDriverResting || subD.isActive);
+    const isTeacherResting = Boolean(bus.isTeacherResting || subT.isActive);
     setSubstituteForm({
-      isDriverResting: Boolean(bus.isDriverResting || subD.isActive),
+      isDriverResting: isDriverResting,
       driverReason: subD.reason || '연차 휴가',
-      driverName: subD.name || '임시기사',
+      driverName: subD.name || '대체 기사님',
       driverPhone: subD.phone || '010-9999-1001',
       driverEmail: subD.email || `sub_driver${bus.id}@takeme.com`,
       driverPassword: subD.password || 'password123!',
-      driverIsActive: Boolean(subD.isActive),
-      isTeacherResting: Boolean(bus.isTeacherResting || subT.isActive),
+      driverIsActive: isDriverResting, // 상태 일치화
+      selectedDriverPreset: 'current_default',
+      isTeacherResting: isTeacherResting,
       teacherReason: subT.reason || '병가',
-      teacherName: subT.name || '임시교사',
+      teacherName: subT.name || '대체 교사님',
       teacherPhone: subT.phone || '010-9999-2001',
       teacherEmail: subT.email || `sub_teacher${bus.id}@takeme.com`,
       teacherPassword: subT.password || 'password123!',
-      teacherIsActive: Boolean(subT.isActive)
+      teacherIsActive: isTeacherResting, // 상태 일치화
+      selectedTeacherPreset: 'current_default'
     });
   };
 
@@ -847,7 +1027,9 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       newTeacherIsActive = false;
     }
 
+    const targetAcadId = selectedAcademyId || currentUser?.academyId || academy?.id || 1;
     const payload = {
+      academyId: targetAcadId,
       busId,
       isDriverResting: newIsDriverResting,
       substituteDriver: {
@@ -4239,23 +4421,19 @@ const parseKindergartenExcelSheet = (sheet) => {
                   handleTabChange('auth');
                   setAuthTab('SUBSTITUTE');
                 }}
-                className={`w-full py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-between border shadow-2xs cursor-pointer ${
-                  buses.some(b => b.isDriverResting || b.substituteDriver?.isActive)
-                    ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-amber-200'
-                    : 'bg-amber-50/80 hover:bg-amber-100/80 text-amber-900 border-amber-200/80'
-                }`}
+                className="w-full py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-between border shadow-2xs cursor-pointer bg-slate-50 hover:bg-slate-100/90 text-slate-800 border-slate-200"
               >
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="text-sm">📋</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-slate-500">📋</span>
                   <span className="truncate">대체 기사 임시 계정 일괄 현황</span>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center gap-1.5 shrink-0">
                   {buses.some(b => b.isDriverResting || b.substituteDriver?.isActive) ? (
-                    <span className="bg-white text-amber-700 px-1.5 py-0.2 rounded-md text-[10px] font-black animate-pulse">
-                      운행 중 {buses.filter(b => b.isDriverResting || b.substituteDriver?.isActive).length}건
+                    <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-md text-[10px] font-bold">
+                      대체 운행 {buses.filter(b => b.isDriverResting || b.substituteDriver?.isActive).length}건
                     </span>
                   ) : (
-                    <span className="text-[11px] text-amber-700/80">
+                    <span className="text-[11px] text-slate-500 font-medium">
                       총 {buses.length}호차 &gt;
                     </span>
                   )}
@@ -4474,17 +4652,17 @@ const parseKindergartenExcelSheet = (sheet) => {
                             {bus.driverName || '미등록'}
                           </span>
                           {bus.isDriverResting || bus.substituteDriver?.isActive ? (
-                            <div className="mt-1 pt-1 border-t border-amber-200 text-[11px] text-amber-900 font-bold truncate flex items-center gap-1">
+                            <div className="mt-1 pt-1 border-t border-blue-200 text-[11px] text-blue-900 font-bold truncate flex items-center gap-1">
                               <span>🔄</span>
                               <span>대체: {bus.substituteDriver?.name || '대체기사'}</span>
                             </div>
                           ) : null}
                         </div>
-                        <div className={`p-2 rounded-xl border transition-colors ${bus.isTeacherResting || bus.substituteTeacher?.isActive ? 'bg-amber-50/90 border-amber-200' : 'bg-slate-50 border-slate-100'}`}>
+                        <div className={`p-2 rounded-xl border transition-colors ${bus.isTeacherResting || bus.substituteTeacher?.isActive ? 'bg-blue-50/80 border-blue-200' : 'bg-slate-50 border-slate-100'}`}>
                           <div className="flex items-center justify-between mb-0.5">
                             <span className="text-slate-400 block text-[11px] font-medium">지도교사</span>
                             {bus.isTeacherResting || bus.substituteTeacher?.isActive ? (
-                              <span className="text-[10px] bg-amber-200 text-amber-800 font-black px-1.5 py-0.5 rounded border border-amber-300">
+                              <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded border border-blue-200">
                                 휴식 중
                               </span>
                             ) : (
@@ -4497,7 +4675,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                             {bus.teacherName || '미등록'}
                           </span>
                           {bus.isTeacherResting || bus.substituteTeacher?.isActive ? (
-                            <div className="mt-1 pt-1 border-t border-amber-200 text-[11px] text-amber-900 font-bold truncate flex items-center gap-1">
+                            <div className="mt-1 pt-1 border-t border-blue-200 text-[11px] text-blue-900 font-bold truncate flex items-center gap-1">
                               <span>🔄</span>
                               <span>대체: {bus.substituteTeacher?.name || '대체교사'}</span>
                             </div>
@@ -4514,7 +4692,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                         }}
                         className={`w-full py-1.5 px-2.5 mb-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border shadow-2xs cursor-pointer ${
                           bus.isDriverResting || bus.substituteDriver?.isActive || bus.isTeacherResting || bus.substituteTeacher?.isActive
-                            ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-amber-200 animate-pulse'
+                            ? 'bg-slate-900 hover:bg-slate-800 text-white border-slate-900 shadow-xs'
                             : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200 hover:border-slate-300'
                         }`}
                         title="기사님 휴식 처리 및 대체 기사 임시 계정을 발급/관리합니다."
@@ -5510,26 +5688,26 @@ const parseKindergartenExcelSheet = (sheet) => {
                   onClick={() => setAuthTab('SUBSTITUTE')} 
                   className={`w-full p-3.5 rounded-2xl font-bold transition-all flex items-center justify-between text-left cursor-pointer ${
                     authTab === 'SUBSTITUTE' 
-                      ? 'bg-amber-600 text-white shadow-md ring-2 ring-amber-400/30' 
+                      ? 'bg-slate-900 text-white shadow-md ring-2 ring-slate-400/30' 
                       : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/70'
                   }`}
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="min-w-0">
                       <div className="text-sm font-bold truncate">대체 기사 임시 계정</div>
-                      <div className={`text-xs ${authTab === 'SUBSTITUTE' ? 'text-amber-100' : 'text-slate-500'} truncate`}>
+                      <div className={`text-xs ${authTab === 'SUBSTITUTE' ? 'text-slate-300' : 'text-slate-500'} truncate`}>
                         기사 휴식 및 대체 인력 일괄 관리
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0 ml-2">
                     {buses.some(b => b.isDriverResting || b.substituteDriver?.isActive) && (
-                      <span className="bg-amber-500 text-white text-xs font-black px-2 py-0.5 rounded-full animate-pulse shadow-xs">
+                      <span className="bg-blue-600 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-xs">
                         운행중 {buses.filter(b => b.isDriverResting || b.substituteDriver?.isActive).length}
                       </span>
                     )}
                     <span className={`text-xs font-bold px-2 py-0.5 rounded-lg ${
-                      authTab === 'SUBSTITUTE' ? 'bg-amber-700/60 text-white' : 'bg-slate-200 text-slate-600'
+                      authTab === 'SUBSTITUTE' ? 'bg-slate-800 text-slate-200' : 'bg-slate-200 text-slate-600'
                     }`}>
                       {buses.length}호차
                     </span>
@@ -5666,34 +5844,30 @@ const parseKindergartenExcelSheet = (sheet) => {
               </div>
 
               {/* 지도 학원 마커 아이콘 설정 카드 */}
-              <div className="relative overflow-hidden bg-white rounded-2xl p-5 border border-slate-200 shadow-xs hover:shadow-sm transition-all">
-                <div className="pointer-events-none absolute -top-12 -right-12 w-40 h-40 bg-gradient-to-br from-indigo-200/30 to-blue-100/20 rounded-full blur-xl" />
-
-                {/* Header */}
-                <div className="relative flex items-center justify-between mb-4">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <div 
-                        className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-base shadow-xs overflow-hidden" 
-                        style={{ backgroundColor: academyIconSettings.bgColor || '#2563eb' }}
-                      >
-                        {academyIconSettings.type === 'image' && academyIconSettings.imageUrl ? (
-                          <img src={academyIconSettings.imageUrl} alt="학원 로고" className="w-full h-full object-cover" />
-                        ) : (
-                          academyIconSettings.symbol || '🏫'
-                        )}
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
-                          지도 학원 마커 아이콘 / 로고 이미지 설정
-                          <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.2 rounded-md">
-                            실시간 반영
-                          </span>
-                        </h3>
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          지도 관제 화면에 표시되는 학원 마커의 아이콘(이모지) 또는 로고 이미지, 테마 색상, 라벨을 설정합니다.
-                        </p>
-                      </div>
+              <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs transition-all space-y-3.5">
+                {/* Header (Compact) */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div className="flex items-center gap-2.5">
+                    <div 
+                      className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-base shadow-xs overflow-hidden shrink-0 border"
+                      style={{ 
+                        backgroundColor: academyIconSettings.type === 'image' && academyIconSettings.imageUrl ? '#ffffff' : (academyIconSettings.bgColor || '#2563eb'),
+                        borderColor: academyIconSettings.bgColor || '#2563eb'
+                      }}
+                    >
+                      {academyIconSettings.type === 'image' && academyIconSettings.imageUrl ? (
+                        <img src={academyIconSettings.imageUrl} alt="학원 로고" className="w-full h-full object-cover" />
+                      ) : (
+                        academyIconSettings.symbol || '🏫'
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="font-extrabold text-slate-800 text-sm leading-tight">
+                        지도 학원 마커 설정
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        관제 지도 중심 핀 및 로고 커스텀
+                      </p>
                     </div>
                   </div>
 
@@ -5709,292 +5883,302 @@ const parseKindergartenExcelSheet = (sheet) => {
                         customEmoji: ''
                       });
                     }}
-                    className="text-[11px] font-medium text-slate-500 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                    className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-2 py-1 rounded-lg transition-colors cursor-pointer"
+                    title="기본값 초기화"
                   >
-                    기본값 복원
+                    초기화
                   </button>
                 </div>
 
-                {/* Body: Preview + Controls */}
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pt-1">
-                  {/* Left: Preview */}
-                  <div className="md:col-span-4 bg-slate-50/80 border border-slate-200/80 rounded-xl p-4 flex flex-col items-center justify-center text-center min-h-[170px] relative">
-                    <span className="text-[10px] font-semibold text-slate-400 absolute top-2 left-3">
-                      지도 마커 미리보기
-                    </span>
-                    <div className="flex flex-col items-center mt-2">
-                      {academyIconSettings.showLabel !== false && (
-                        <div 
-                          className="px-2.5 py-0.5 rounded-full text-[11px] font-bold shadow-xs mb-1 border"
-                          style={{
-                            backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                            color: academyIconSettings.bgColor || '#2563eb',
-                            borderColor: academyIconSettings.bgColor || '#2563eb'
-                          }}
-                        >
-                          {academy?.name || '우리 학원'}
-                        </div>
-                      )}
-                      <div 
-                        className="w-12 h-12 rounded-full border-3 shadow-md flex items-center justify-center text-2xl transition-all overflow-hidden"
-                        style={{ 
-                          backgroundColor: academyIconSettings.type === 'image' && academyIconSettings.imageUrl ? '#ffffff' : (academyIconSettings.bgColor || '#2563eb'),
-                          borderColor: academyIconSettings.type === 'image' && academyIconSettings.imageUrl ? (academyIconSettings.bgColor || '#2563eb') : '#ffffff'
-                        }}
-                      >
-                        {academyIconSettings.type === 'image' && academyIconSettings.imageUrl ? (
-                          <img 
-                            src={academyIconSettings.imageUrl} 
-                            alt="학원 로고" 
-                            className="w-full h-full object-cover" 
-                            onError={(e) => {
-                              e.currentTarget.style.display = 'none';
-                            }}
-                          />
-                        ) : (
-                          academyIconSettings.symbol || '🏫'
-                        )}
-                      </div>
-                      <div 
-                        className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] -mt-[1px]"
-                        style={{ borderTopColor: academyIconSettings.bgColor || '#2563eb' }}
-                      />
-                    </div>
-                    <span className="text-[11px] text-slate-500 font-medium mt-3">
-                      {academy?.name || '우리 학원'} 위치
-                    </span>
+                {/* Mini Map Preview: 가로로 안정적이고 컴팩트한 와이드 뷰포트 (높이 120px) */}
+                <div className="relative w-full h-[120px] rounded-xl overflow-hidden border border-slate-200 shadow-inner flex items-center justify-center bg-slate-100 select-none">
+                  {/* Map Grid & Simulated Vector Roads */}
+                  <div className="absolute inset-0 opacity-40 pointer-events-none">
+                    <svg className="w-full h-full" xmlns="http://www.w3.org/2000/svg">
+                      <defs>
+                        <pattern id="compact-map-grid" width="30" height="30" patternUnits="userSpaceOnUse">
+                          <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#cbd5e1" strokeWidth="1" />
+                        </pattern>
+                      </defs>
+                      <rect width="100%" height="100%" fill="#f8fafc" />
+                      <rect width="100%" height="100%" fill="url(#compact-map-grid)" />
+                      <path d="M -20 60 L 380 60" fill="none" stroke="#ffffff" strokeWidth="16" />
+                      <path d="M -20 60 L 380 60" fill="none" stroke="#e2e8f0" strokeWidth="8" />
+                      <path d="M 160 -10 L 160 130" fill="none" stroke="#ffffff" strokeWidth="16" />
+                      <path d="M 160 -10 L 160 130" fill="none" stroke="#e2e8f0" strokeWidth="8" />
+                      <rect x="20" y="15" width="60" height="35" rx="6" fill="#ecfdf5" stroke="#a7f3d0" strokeWidth="1" />
+                      <rect x="240" y="70" width="70" height="40" rx="6" fill="#f1f5f9" stroke="#cbd5e1" strokeWidth="1" />
+                    </svg>
                   </div>
 
-                  {/* Right: Icon selection & Color & Options */}
-                  <div className="md:col-span-8 space-y-3.5">
-                    {/* Mode Selector: Emoji vs Logo Image */}
-                    <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-xl">
-                      <button
-                        type="button"
-                        onClick={() => updateAcademyIconSettings({ type: 'emoji' })}
-                        className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                          academyIconSettings.type !== 'image'
-                            ? 'bg-white text-indigo-700 shadow-xs'
-                            : 'text-slate-600 hover:text-slate-800'
-                        }`}
+                  {/* Center Target Wave Ring */}
+                  <div 
+                    className="absolute w-20 h-20 rounded-full border border-dashed opacity-40 pointer-events-none"
+                    style={{ borderColor: academyIconSettings.bgColor || '#2563eb' }}
+                  />
+
+                  {/* Center Pin Marker */}
+                  <div className="relative z-10 flex flex-col items-center">
+                    {academyIconSettings.showLabel !== false && (
+                      <div 
+                        className="px-2 py-0.5 rounded-full text-[10px] font-black shadow-sm mb-1 border backdrop-blur-xs whitespace-nowrap leading-none"
+                        style={{
+                          backgroundColor: 'rgba(255, 255, 255, 0.96)',
+                          color: academyIconSettings.bgColor || '#2563eb',
+                          borderColor: academyIconSettings.bgColor || '#2563eb'
+                        }}
                       >
-                        ✨ 기본 아이콘 / 이모지
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => updateAcademyIconSettings({ type: 'image' })}
-                        className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                          academyIconSettings.type === 'image'
-                            ? 'bg-white text-indigo-700 shadow-xs'
-                            : 'text-slate-600 hover:text-slate-800'
-                        }`}
-                      >
-                        🖼️ 학원 로고 이미지 등록
-                      </button>
-                    </div>
-
-                    {/* Mode 1: Emoji / Icon */}
-                    {academyIconSettings.type !== 'image' ? (
-                      <>
-                        {/* Preset Icons */}
-                        <div>
-                          <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                            추천 아이콘 선택
-                          </label>
-                          <div className="grid grid-cols-8 gap-1.5">
-                            {['🏫', '🏛️', '🏰', '🎓', '🚌', '🌟', '🎈', '📚', '🎨', '🔬', '🎵', '⚽', '🧸', '🌈', '💡', '🏆'].map((emoji) => {
-                              const isSelected = academyIconSettings.symbol === emoji;
-                              return (
-                                <button
-                                  key={emoji}
-                                  type="button"
-                                  onClick={() => updateAcademyIconSettings({ symbol: emoji, customEmoji: '' })}
-                                  className={`h-9 rounded-lg flex items-center justify-center text-lg transition-all cursor-pointer ${
-                                    isSelected
-                                      ? 'bg-indigo-50 border-2 border-indigo-600 shadow-xs scale-105'
-                                      : 'bg-slate-50 hover:bg-slate-100 border border-slate-200'
-                                  }`}
-                                >
-                                  {emoji}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {/* Custom Symbol Input */}
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1">
-                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                              직접 입력 (이모지 또는 글자)
-                            </label>
-                            <input
-                              type="text"
-                              maxLength={4}
-                              value={academyIconSettings.customEmoji || ''}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                updateAcademyIconSettings(prev => ({
-                                  ...prev,
-                                  customEmoji: val,
-                                  symbol: val.trim() ? val.trim() : prev.symbol
-                                }));
-                              }}
-                              placeholder="예: 🚀, 🥋, 🎹, 園"
-                              className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
-                            />
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      /* Mode 2: Image Upload & URL */
-                      <div className="space-y-2.5">
-                        <label className="block text-xs font-semibold text-slate-700">
-                          학원 로고 이미지 등록
-                        </label>
-
-                        {/* Upload Controls */}
-                        <div className="flex flex-col sm:flex-row gap-2">
-                          <label 
-                            htmlFor="academy-logo-file-input"
-                            className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-indigo-50 hover:bg-indigo-100/80 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-700 cursor-pointer transition-colors"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            <span>내 컴퓨터에서 이미지 파일 선택</span>
-                            <input
-                              id="academy-logo-file-input"
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                if (!file) return;
-                                if (file.size > 2 * 1024 * 1024) {
-                                  alert('이미지 파일 크기는 2MB 이하여야 합니다.');
-                                  return;
-                                }
-                                const reader = new FileReader();
-                                reader.onload = (ev) => {
-                                  const base64 = ev.target?.result;
-                                  if (base64) {
-                                    updateAcademyIconSettings({
-                                      type: 'image',
-                                      imageUrl: base64
-                                    });
-                                  }
-                                };
-                                reader.readAsDataURL(file);
-                              }}
-                            />
-                          </label>
-
-                          {academyIconSettings.imageUrl && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                updateAcademyIconSettings({
-                                  imageUrl: '',
-                                  type: 'emoji'
-                                });
-                              }}
-                              className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0"
-                            >
-                              이미지 삭제
-                            </button>
-                          )}
-                        </div>
-
-                        {/* URL Direct Input */}
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="url"
-                              value={academyIconSettings.imageUrl || ''}
-                              onChange={(e) => {
-                                updateAcademyIconSettings({
-                                  type: 'image',
-                                  imageUrl: e.target.value.trim()
-                                });
-                              }}
-                              placeholder="또는 이미지 웹 링크 URL (https://...)"
-                              className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 font-mono"
-                            />
-                          </div>
-                          <p className="text-[10px] text-slate-400 mt-1">
-                            * PNG, JPG, WebP, SVG 파일 지원 (2MB 이하 권장). 마커 형태에 맞춰 원형으로 자동 표시됩니다.
-                          </p>
-                        </div>
+                        📍 {academy?.name || '우리 학원'}
                       </div>
                     )}
 
-                    {/* Common Options: Label Toggle & Color Palette */}
-                    <div className="pt-1 border-t border-slate-100 space-y-2.5">
-                      {/* Label Toggle */}
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-semibold text-slate-700">
-                          학원명 상시 표시
-                        </label>
-                        <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 select-none">
-                          <input
-                            type="checkbox"
-                            checked={academyIconSettings.showLabel !== false}
-                            onChange={(e) => updateAcademyIconSettings({ showLabel: e.target.checked })}
-                            className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
-                          />
-                          <span className="text-[11px] text-slate-600">지도 마커 상단에 학원 이름 표시</span>
-                        </label>
-                      </div>
+                    {/* Pin Head */}
+                    <div 
+                      className="w-11 h-11 rounded-full border-2 shadow-md flex items-center justify-center text-xl transition-all overflow-hidden bg-white"
+                      style={{ 
+                        backgroundColor: academyIconSettings.type === 'image' && academyIconSettings.imageUrl ? '#ffffff' : (academyIconSettings.bgColor || '#2563eb'),
+                        borderColor: academyIconSettings.type === 'image' && academyIconSettings.imageUrl ? (academyIconSettings.bgColor || '#2563eb') : '#ffffff'
+                      }}
+                    >
+                      {academyIconSettings.type === 'image' && academyIconSettings.imageUrl ? (
+                        <img 
+                          src={academyIconSettings.imageUrl} 
+                          alt="학원 로고" 
+                          className="w-full h-full object-cover" 
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        />
+                      ) : (
+                        <span className="drop-shadow-xs">{academyIconSettings.symbol || '🏫'}</span>
+                      )}
+                    </div>
 
-                      {/* Color Theme Palette */}
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <label className="text-xs font-semibold text-slate-700">
-                            마커 테마 색상 (테두리 및 핀 포인트)
-                          </label>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[11px] text-slate-500 font-mono">{academyIconSettings.bgColor || '#2563eb'}</span>
-                            <input
-                              type="color"
-                              value={academyIconSettings.bgColor || '#2563eb'}
-                              onChange={(e) => updateAcademyIconSettings({ bgColor: e.target.value })}
-                              className="w-5 h-5 rounded cursor-pointer border border-slate-200 p-0"
-                              title="사용자 지정 색상"
-                            />
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {[
-                            { name: '로열블루', color: '#2563eb' },
-                            { name: '인디고', color: '#4f46e5' },
-                            { name: '바이올렛', color: '#9333ea' },
-                            { name: '핑크', color: '#db2777' },
-                            { name: '로즈', color: '#e11d48' },
-                            { name: '오렌지', color: '#ea580c' },
-                            { name: '앰버', color: '#d97706' },
-                            { name: '에메랄드', color: '#059669' },
-                            { name: '틸', color: '#0d9488' },
-                            { name: '슬레이트', color: '#1e293b' }
-                          ].map((c) => {
-                            const isSelected = (academyIconSettings.bgColor || '#2563eb').toLowerCase() === c.color.toLowerCase();
-                            return (
-                              <button
-                                key={c.color}
-                                type="button"
-                                onClick={() => updateAcademyIconSettings({ bgColor: c.color })}
-                                title={c.name}
-                                className={`w-7 h-7 rounded-lg transition-transform cursor-pointer ${
-                                  isSelected ? 'scale-115 ring-2 ring-offset-2 ring-indigo-500 shadow-xs' : 'hover:scale-105 opacity-90 hover:opacity-100'
-                                }`}
-                                style={{ backgroundColor: c.color }}
-                              />
-                            );
-                          })}
-                        </div>
-                      </div>
+                    {/* Pin Pointer Tip */}
+                    <div 
+                      className="w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[7px] -mt-[1px]"
+                      style={{ borderTopColor: academyIconSettings.bgColor || '#2563eb' }}
+                    />
+                    {/* Ground Shadow */}
+                    <div className="w-6 h-1.5 rounded-full bg-slate-900/20 blur-[1px] mt-0.5" />
+                  </div>
+
+                  <span className="absolute bottom-1.5 right-2 text-[9px] font-bold text-slate-400 bg-white/80 px-1.5 py-0.5 rounded border border-slate-200/60">
+                    실시간 미리보기
+                  </span>
+                </div>
+
+                {/* Segment Tabs (아이콘 vs 로고 이미지) */}
+                <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200/70 text-xs font-bold">
+                  <button
+                    type="button"
+                    onClick={() => updateAcademyIconSettings({ type: 'emoji' })}
+                    className={`flex-1 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                      academyIconSettings.type !== 'image'
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <span>🏫</span>
+                    <span>기본 아이콘</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateAcademyIconSettings({ type: 'image' })}
+                    className={`flex-1 py-1.5 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                      academyIconSettings.type === 'image'
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <span>🖼️</span>
+                    <span>로고 이미지</span>
+                  </button>
+                </div>
+
+                {/* Tab 1 Content: Emoji Grid + Custom Input */}
+                {academyIconSettings.type !== 'image' ? (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-8 gap-1">
+                      {['🏫', '🏛️', '🏰', '🎓', '🚌', '🌟', '🎈', '📚', '🎨', '🔬', '🎵', '⚽', '🧸', '🌈', '💡', '🏆'].map((emoji) => {
+                        const isSelected = academyIconSettings.symbol === emoji;
+                        return (
+                          <button
+                            key={emoji}
+                            type="button"
+                            onClick={() => updateAcademyIconSettings({ symbol: emoji, customEmoji: '' })}
+                            className={`h-8 rounded-lg flex items-center justify-center text-base transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-blue-50 border-2 border-blue-600 shadow-xs scale-105'
+                                : 'bg-slate-50 hover:bg-slate-100 border border-slate-200'
+                            }`}
+                          >
+                            {emoji}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 pt-1">
+                      <span className="text-[11px] font-bold text-slate-500 shrink-0">직접 입력:</span>
+                      <input
+                        type="text"
+                        maxLength={4}
+                        value={academyIconSettings.customEmoji || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          updateAcademyIconSettings(prev => ({
+                            ...prev,
+                            customEmoji: val,
+                            symbol: val.trim() ? val.trim() : prev.symbol
+                          }));
+                        }}
+                        placeholder="이모지 또는 글자 (예: 🚀, 園)"
+                        className="flex-1 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 outline-none focus:border-blue-500 focus:bg-white"
+                      />
                     </div>
                   </div>
+                ) : (
+                  /* Tab 2 Content: Image Upload & Preview */
+                  <div className="space-y-2">
+                    {academyIconSettings.imageUrl ? (
+                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-9 h-9 rounded-lg bg-white border border-slate-200 overflow-hidden shrink-0 p-0.5">
+                            <img src={academyIconSettings.imageUrl} alt="로고" className="w-full h-full object-contain" />
+                          </div>
+                          <div className="min-w-0">
+                            <span className="text-xs font-bold text-slate-800 block truncate">등록된 로고 적용 중</span>
+                            <span className="text-[10px] text-emerald-600 font-semibold block">마커에 원형 표시</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <label
+                            htmlFor="academy-logo-file-input"
+                            className="px-2 py-1 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-lg border border-slate-200 cursor-pointer"
+                          >
+                            교체
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => updateAcademyIconSettings({ imageUrl: '', type: 'emoji' })}
+                            className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-lg border border-rose-200 cursor-pointer"
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <label 
+                        htmlFor="academy-logo-file-input"
+                        className="flex flex-col items-center justify-center p-3.5 bg-slate-50 hover:bg-blue-50/40 border-2 border-dashed border-slate-300 hover:border-blue-400 rounded-xl transition-all cursor-pointer text-center"
+                      >
+                        <span className="text-base mb-0.5">📁</span>
+                        <span className="text-xs font-bold text-slate-700">이미지 파일 선택</span>
+                        <span className="text-[10px] text-slate-400 mt-0.5">PNG, JPG, SVG, WebP (2MB 이하)</span>
+                      </label>
+                    )}
+
+                    <input
+                      id="academy-logo-file-input"
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        if (file.size > 2 * 1024 * 1024) {
+                          alert('이미지 파일 크기는 2MB 이하여야 합니다.');
+                          return;
+                        }
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          const base64 = ev.target?.result;
+                          if (base64) {
+                            updateAcademyIconSettings({
+                              type: 'image',
+                              imageUrl: base64
+                            });
+                          }
+                        };
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+
+                    <input
+                      type="url"
+                      value={academyIconSettings.imageUrl || ''}
+                      onChange={(e) => updateAcademyIconSettings({ type: 'image', imageUrl: e.target.value.trim() })}
+                      placeholder="또는 이미지 웹 링크 (https://...)"
+                      className="w-full px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-800 outline-none focus:border-blue-500 focus:bg-white"
+                    />
+                  </div>
+                )}
+
+                {/* Theme Color Swatches (10 colors in 2 rows of 5) */}
+                <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-700">마커 테마 색상</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-mono text-slate-400">{academyIconSettings.bgColor || '#2563eb'}</span>
+                      <input
+                        type="color"
+                        value={academyIconSettings.bgColor || '#2563eb'}
+                        onChange={(e) => updateAcademyIconSettings({ bgColor: e.target.value })}
+                        className="w-4 h-4 rounded cursor-pointer border border-slate-200 p-0"
+                        title="사용자 지정 색상"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {[
+                      { name: '로열블루', color: '#2563eb' },
+                      { name: '인디고', color: '#4f46e5' },
+                      { name: '바이올렛', color: '#9333ea' },
+                      { name: '핑크', color: '#db2777' },
+                      { name: '로즈', color: '#e11d48' },
+                      { name: '오렌지', color: '#ea580c' },
+                      { name: '앰버', color: '#d97706' },
+                      { name: '에메랄드', color: '#059669' },
+                      { name: '틸', color: '#0d9488' },
+                      { name: '슬레이트', color: '#1e293b' }
+                    ].map((c) => {
+                      const isSelected = (academyIconSettings.bgColor || '#2563eb').toLowerCase() === c.color.toLowerCase();
+                      return (
+                        <button
+                          key={c.color}
+                          type="button"
+                          onClick={() => updateAcademyIconSettings({ bgColor: c.color })}
+                          title={c.name}
+                          className={`h-7 rounded-lg transition-all flex items-center justify-center cursor-pointer shadow-2xs ${
+                            isSelected ? 'ring-2 ring-offset-1 ring-slate-800 scale-105' : 'hover:opacity-90'
+                          }`}
+                          style={{ backgroundColor: c.color }}
+                        >
+                          {isSelected && (
+                            <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Name Label Toggle */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">학원명 말풍선 상시 표시</span>
+                    <span className="text-[10px] text-slate-400">마커 핀 상단에 [{academy?.name || '우리 학원'}] 노출</span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={academyIconSettings.showLabel !== false}
+                      onChange={(e) => updateAcademyIconSettings({ showLabel: e.target.checked })}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600 shadow-inner"></div>
+                  </label>
                 </div>
               </div>
 
@@ -7483,10 +7667,10 @@ const parseKindergartenExcelSheet = (sheet) => {
                 <label className="block text-xs font-bold text-slate-600 mb-1">차량 정원 (명)</label>
                 <input type="number" value={editingBus.capacity || 25} onChange={e => setEditingBus({...editingBus, capacity: e.target.value})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="25" />
               </div>
-              <div className="p-3 bg-amber-50/90 rounded-xl border border-amber-200 flex items-center justify-between">
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-bold text-amber-900 block">기사님 휴식 및 대체 기사 배정</span>
-                  <span className="text-[11px] text-amber-700">대체 기사 임시 계정 발급 및 활성화 관리</span>
+                  <span className="text-xs font-bold text-slate-800 block">기사님 휴식 및 대체 기사 배정</span>
+                  <span className="text-[11px] text-slate-500">대체 기사 임시 계정 발급 및 활성화 관리</span>
                 </div>
                 <button
                   type="button"
@@ -7495,7 +7679,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                     setEditingBus(null);
                     handleOpenSubstituteModal(target);
                   }}
-                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-lg transition-colors shadow-2xs cursor-pointer"
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-lg transition-colors shadow-2xs cursor-pointer"
                 >
                   휴식/대체 설정
                 </button>
@@ -7550,16 +7734,16 @@ const parseKindergartenExcelSheet = (sheet) => {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-100 flex flex-col max-h-[92vh] animate-fade-in">
             {/* Modal Header */}
-            <div className="bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 px-6 py-5 text-white flex items-center justify-between">
+            <div className="bg-slate-900 px-6 py-5 text-white flex items-center justify-between border-b border-slate-800">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-white/20 border border-white/30 flex items-center justify-center text-xl">
+                <div className="w-10 h-10 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-xl">
                   🔄
                 </div>
                 <div>
                   <h3 className="text-base font-extrabold tracking-tight">
                     {substituteModalBus.name || `${substituteModalBus.busNumber}호차`} 기사/교사 휴식 및 대체 관리
                   </h3>
-                  <p className="text-xs text-amber-100">
+                  <p className="text-xs text-slate-300">
                     차량번호: {substituteModalBus.plateNumber || '미등록'} · 정원: {substituteModalBus.capacity || 25}인승
                   </p>
                 </div>
@@ -7578,31 +7762,31 @@ const parseKindergartenExcelSheet = (sheet) => {
               <button
                 type="button"
                 onClick={() => setSubstituteFormTab('driver')}
-                className={`flex-1 py-2 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                   substituteFormTab === 'driver'
-                    ? 'bg-white text-amber-700 shadow-xs border border-amber-200/60'
+                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
                 <span>🚗</span>
                 <span>기사님 대체 및 휴식</span>
                 {substituteForm.driverIsActive && (
-                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                  <span className="w-2 h-2 rounded-full bg-blue-600"></span>
                 )}
               </button>
               <button
                 type="button"
                 onClick={() => setSubstituteFormTab('teacher')}
-                className={`flex-1 py-2 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                   substituteFormTab === 'teacher'
-                    ? 'bg-white text-amber-700 shadow-xs border border-amber-200/60'
+                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200'
                     : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
                 <span>👩‍🏫</span>
                 <span>지도교사 대체 및 휴식</span>
                 {substituteForm.teacherIsActive && (
-                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                  <span className="w-2 h-2 rounded-full bg-blue-600"></span>
                 )}
               </button>
             </div>
@@ -7619,8 +7803,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                       <span className="text-xs text-slate-500 ml-2">({substituteModalBus.driverPhone || '연락처 없음'})</span>
                     </div>
                     {substituteForm.driverIsActive ? (
-                      <span className="px-2.5 py-1 bg-amber-100 text-amber-800 border border-amber-300 font-black rounded-lg flex items-center gap-1">
-                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                      <span className="px-2.5 py-1 bg-blue-50 text-blue-800 border border-blue-200 font-bold rounded-lg flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-blue-600"></span>
                         휴식 중 (대체 운행)
                       </span>
                     ) : (
@@ -7641,7 +7825,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                           onClick={() => setSubstituteForm({ ...substituteForm, driverReason: r })}
                           className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors border cursor-pointer ${
                             substituteForm.driverReason === r
-                              ? 'bg-amber-100 text-amber-800 border-amber-300'
+                              ? 'bg-slate-900 text-white border-slate-900'
                               : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                           }`}
                         >
@@ -7654,8 +7838,80 @@ const parseKindergartenExcelSheet = (sheet) => {
                       value={substituteForm.driverReason}
                       onChange={e => setSubstituteForm({ ...substituteForm, driverReason: e.target.value })}
                       placeholder="사유를 직접 입력하거나 위 항목을 선택하세요"
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-xs font-semibold"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-semibold"
                     />
+                  </div>
+
+                  {/* 임시 계정 선택 박스 (풀 / 프리셋 드롭다운) */}
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/90 shadow-2xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm">🔑</span>
+                        <label className="text-xs font-bold text-slate-800">
+                          임시 계정 선택 (등록 계정 및 예비 풀)
+                        </label>
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-600 bg-slate-200/80 px-2 py-0.5 rounded-md">
+                        원클릭 자동 완성
+                      </span>
+                    </div>
+
+                    <select
+                      value={substituteForm.selectedDriverPreset || 'current_default'}
+                      onChange={(e) => handleSelectDriverPreset(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs cursor-pointer"
+                    >
+                      <optgroup label="현재 및 다른 호차 계정">
+                        {getSubstituteDriverPresets(substituteModalBus).filter(p => p.category !== '예비 기사 풀 (공용)').map(p => (
+                          <option key={p.key} value={p.key}>{p.label}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="공용 예비 기사 풀 (Spare Pool)">
+                        {getSubstituteDriverPresets(substituteModalBus).filter(p => p.category === '예비 기사 풀 (공용)').map(p => (
+                          <option key={p.key} value={p.key}>{p.label}</option>
+                        ))}
+                      </optgroup>
+                      <option value="custom">➕ 직접 새 계정 / 기사 정보 입력 (사용자 지정)</option>
+                    </select>
+
+                    {/* 빠른 선택 칩 버튼들 */}
+                    <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                      <span className="text-[10px] text-slate-500 font-bold shrink-0">빠른 선택:</span>
+                      {getSubstituteDriverPresets(substituteModalBus).map(p => {
+                        const isSelected = substituteForm.selectedDriverPreset === p.key;
+                        let chipName = '호차 기본';
+                        if (p.key === 'spare_1') chipName = '예비 1호';
+                        else if (p.key === 'spare_2') chipName = '예비 2호';
+                        else if (p.key === 'spare_3') chipName = '예비 3호';
+                        else if (p.key.startsWith('bus_')) chipName = p.label.split(']')[0].replace('[', '');
+
+                        return (
+                          <button
+                            key={p.key}
+                            type="button"
+                            onClick={() => handleSelectDriverPreset(p.key)}
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
+                              isSelected
+                                ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            {chipName}
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectDriverPreset('custom')}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
+                          substituteForm.selectedDriverPreset === 'custom'
+                            ? 'bg-slate-800 text-white border-slate-800 shadow-2xs'
+                            : 'bg-white hover:bg-slate-100 text-slate-600 border-slate-200'
+                        }`}
+                      >
+                        직접입력
+                      </button>
+                    </div>
                   </div>
 
                   {/* 대체 기사 정보 */}
@@ -7667,7 +7923,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                         value={substituteForm.driverName}
                         onChange={e => setSubstituteForm({ ...substituteForm, driverName: e.target.value })}
                         placeholder="예: 홍길동 (대체)"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-xs font-semibold"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-semibold"
                       />
                     </div>
                     <div>
@@ -7678,21 +7934,21 @@ const parseKindergartenExcelSheet = (sheet) => {
                         onChange={e => setSubstituteForm({ ...substituteForm, driverPhone: formatPhoneNumber(e.target.value) })}
                         placeholder="010-0000-0000"
                         maxLength={13}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-xs font-semibold"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-semibold"
                       />
                     </div>
                   </div>
 
                   {/* 대체 기사 전용 임시 계정 (보안 핵심 영역) */}
-                  <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50/90 via-blue-50/50 to-indigo-50/40 border border-indigo-200/80 space-y-3">
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
                         <span className="text-sm">🔑</span>
-                        <span className="font-extrabold text-indigo-950 text-xs">대체 기사 임시 계정 (기사 전용 앱)</span>
+                        <span className="font-extrabold text-slate-800 text-xs">대체 기사 임시 계정 (기사 전용 앱)</span>
                       </div>
                       {substituteForm.driverIsActive ? (
-                        <span className="text-[10px] bg-emerald-100 text-emerald-800 font-black px-2 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full border border-blue-200 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
                           로그인 활성화됨 (승인)
                         </span>
                       ) : (
@@ -7702,8 +7958,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                       )}
                     </div>
 
-                    <div className="text-[11px] text-slate-600 leading-relaxed bg-white/80 p-2.5 rounded-xl border border-indigo-100">
-                      🔒 <strong className="text-indigo-900">보안 정책:</strong> 이 계정은 보안을 위해 <span className="text-rose-600 font-bold">평소에는 로그인이 자동 차단</span>됩니다. 관리자가 아래 <strong className="text-amber-800">‘대체 운행 활성화’</strong>를 켰을 때만 기사 앱(포트 8081 등)에 로그인할 수 있습니다.
+                    <div className="text-[11px] text-slate-600 leading-relaxed bg-white p-2.5 rounded-xl border border-slate-200">
+                      🔒 <strong className="text-slate-800">보안 정책:</strong> 이 계정은 보안을 위해 <span className="text-rose-600 font-bold">평소에는 로그인이 자동 차단</span>됩니다. 관리자가 아래 <strong className="text-blue-700">‘대체 운행 활성화’</strong>를 켰을 때만 기사 앱(포트 8081 등)에 로그인할 수 있습니다.
                     </div>
 
                     <div className="grid grid-cols-2 gap-2.5">
@@ -7714,7 +7970,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                             type="text"
                             value={substituteForm.driverEmail}
                             onChange={e => setSubstituteForm({ ...substituteForm, driverEmail: e.target.value })}
-                            className="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-lg text-xs font-mono font-semibold"
+                            className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono font-semibold"
                           />
                           <button
                             type="button"
@@ -7722,7 +7978,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                               navigator.clipboard.writeText(substituteForm.driverEmail);
                               alert('임시 아이디가 클립보드에 복사되었습니다.');
                             }}
-                            className="px-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-bold text-xs rounded-lg whitespace-nowrap cursor-pointer"
+                            className="px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg whitespace-nowrap cursor-pointer"
                             title="아이디 복사"
                           >
                             복사
@@ -7736,7 +7992,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                             type="text"
                             value={substituteForm.driverPassword}
                             onChange={e => setSubstituteForm({ ...substituteForm, driverPassword: e.target.value })}
-                            className="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-lg text-xs font-mono font-semibold"
+                            className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono font-semibold"
                           />
                           <button
                             type="button"
@@ -7744,7 +8000,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                               navigator.clipboard.writeText(substituteForm.driverPassword);
                               alert('임시 비밀번호가 클립보드에 복사되었습니다.');
                             }}
-                            className="px-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-bold text-xs rounded-lg whitespace-nowrap cursor-pointer"
+                            className="px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg whitespace-nowrap cursor-pointer"
                             title="비밀번호 복사"
                           >
                             복사
@@ -7764,8 +8020,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                       <span className="text-xs text-slate-500 ml-2">({substituteModalBus.teacherPhone || '연락처 없음'})</span>
                     </div>
                     {substituteForm.teacherIsActive ? (
-                      <span className="px-2.5 py-1 bg-amber-100 text-amber-800 border border-amber-300 font-black rounded-lg flex items-center gap-1">
-                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                      <span className="px-2.5 py-1 bg-blue-50 text-blue-800 border border-blue-200 font-bold rounded-lg flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-blue-600"></span>
                         휴식 중 (대체 교사)
                       </span>
                     ) : (
@@ -7782,8 +8038,79 @@ const parseKindergartenExcelSheet = (sheet) => {
                       value={substituteForm.teacherReason}
                       onChange={e => setSubstituteForm({ ...substituteForm, teacherReason: e.target.value })}
                       placeholder="예: 병가, 개인사정, 연차 등"
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-xs font-semibold"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-semibold"
                     />
+                  </div>
+
+                  {/* 임시 교사 계정 선택 박스 (풀 / 프리셋 드롭다운) */}
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/90 shadow-2xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm">🔑</span>
+                        <label className="text-xs font-bold text-slate-800">
+                          임시 교사 계정 선택 (등록 계정 및 예비 풀)
+                        </label>
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-600 bg-slate-200/80 px-2 py-0.5 rounded-md">
+                        원클릭 자동 완성
+                      </span>
+                    </div>
+
+                    <select
+                      value={substituteForm.selectedTeacherPreset || 'current_default'}
+                      onChange={(e) => handleSelectTeacherPreset(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs cursor-pointer"
+                    >
+                      <optgroup label="현재 및 다른 호차 계정">
+                        {getSubstituteTeacherPresets(substituteModalBus).filter(p => p.category !== '예비 교사 풀 (공용)').map(p => (
+                          <option key={p.key} value={p.key}>{p.label}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="공용 예비 교사 풀 (Spare Pool)">
+                        {getSubstituteTeacherPresets(substituteModalBus).filter(p => p.category === '예비 교사 풀 (공용)').map(p => (
+                          <option key={p.key} value={p.key}>{p.label}</option>
+                        ))}
+                      </optgroup>
+                      <option value="custom">➕ 직접 새 계정 / 교사 정보 입력 (사용자 지정)</option>
+                    </select>
+
+                    {/* 빠른 선택 칩 버튼들 */}
+                    <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                      <span className="text-[10px] text-slate-500 font-bold shrink-0">빠른 선택:</span>
+                      {getSubstituteTeacherPresets(substituteModalBus).map(p => {
+                        const isSelected = substituteForm.selectedTeacherPreset === p.key;
+                        let chipName = '호차 기본';
+                        if (p.key === 'spare_1') chipName = '예비 1호';
+                        else if (p.key === 'spare_2') chipName = '예비 2호';
+                        else if (p.key.startsWith('bus_')) chipName = p.label.split(']')[0].replace('[', '');
+
+                        return (
+                          <button
+                            key={p.key}
+                            type="button"
+                            onClick={() => handleSelectTeacherPreset(p.key)}
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
+                              isSelected
+                                ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            {chipName}
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() => handleSelectTeacherPreset('custom')}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
+                          substituteForm.selectedTeacherPreset === 'custom'
+                            ? 'bg-slate-800 text-white border-slate-800 shadow-2xs'
+                            : 'bg-white hover:bg-slate-100 text-slate-600 border-slate-200'
+                        }`}
+                      >
+                        직접입력
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -7794,7 +8121,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                         value={substituteForm.teacherName}
                         onChange={e => setSubstituteForm({ ...substituteForm, teacherName: e.target.value })}
                         placeholder="예: 김선생님 (대체)"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-xs font-semibold"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-semibold"
                       />
                     </div>
                     <div>
@@ -7805,13 +8132,13 @@ const parseKindergartenExcelSheet = (sheet) => {
                         onChange={e => setSubstituteForm({ ...substituteForm, teacherPhone: formatPhoneNumber(e.target.value) })}
                         placeholder="010-0000-0000"
                         maxLength={13}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-xs font-semibold"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-semibold"
                       />
                     </div>
                   </div>
 
-                  <div className="p-4 rounded-2xl bg-indigo-50/80 border border-indigo-200/80 space-y-2">
-                    <span className="font-extrabold text-indigo-950 text-xs block">교사 전용 앱 임시 계정</span>
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                    <span className="font-extrabold text-slate-800 text-xs block">교사 전용 앱 임시 계정</span>
                     <div className="grid grid-cols-2 gap-2.5">
                       <div>
                         <label className="block text-[11px] font-bold text-slate-600 mb-0.5">아이디</label>
@@ -7819,7 +8146,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                           type="text"
                           value={substituteForm.teacherEmail}
                           onChange={e => setSubstituteForm({ ...substituteForm, teacherEmail: e.target.value })}
-                          className="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-lg text-xs font-mono font-semibold"
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono font-semibold"
                         />
                       </div>
                       <div>
@@ -7828,7 +8155,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                           type="text"
                           value={substituteForm.teacherPassword}
                           onChange={e => setSubstituteForm({ ...substituteForm, teacherPassword: e.target.value })}
-                          className="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-lg text-xs font-mono font-semibold"
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono font-semibold"
                         />
                       </div>
                     </div>
@@ -7846,7 +8173,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                       <button
                         type="button"
                         onClick={() => handleSaveSubstituteStaff('RESTORE_DRIVER')}
-                        className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         <span>🔙</span>
                         <span>원래 기사님 복귀 (대체 운행 종료 & 계정 잠금)</span>
@@ -7855,7 +8182,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                       <button
                         type="button"
                         onClick={() => handleSaveSubstituteStaff('ACTIVATE_DRIVER')}
-                        className="flex-1 py-3 px-4 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-black rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         <span>🚀</span>
                         <span>기사 휴식 처리 및 대체 운행 활성화 (로그인 허용)</span>
@@ -7886,7 +8213,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                       <button
                         type="button"
                         onClick={() => handleSaveSubstituteStaff('RESTORE_TEACHER')}
-                        className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         <span>🔙</span>
                         <span>원래 지도교사님 복귀 (대체 종료)</span>
@@ -7895,7 +8222,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                       <button
                         type="button"
                         onClick={() => handleSaveSubstituteStaff('ACTIVATE_TEACHER')}
-                        className="flex-1 py-3 px-4 bg-amber-600 hover:bg-amber-700 text-white font-black rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         <span>🚀</span>
                         <span>교사 휴식 처리 및 대체 교사 활성화</span>
