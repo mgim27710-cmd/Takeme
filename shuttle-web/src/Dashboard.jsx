@@ -681,6 +681,48 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     teacherIsActive: false
   });
 
+  // Academy Marker Icon Customization State (지도 학원 마커 아이콘 설정)
+  const [academyIconSettings, setAcademyIconSettings] = useState(() => {
+    try {
+      const saved = localStorage.getItem('takeme_academy_icon_settings');
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return {
+      type: 'emoji', // 'emoji' | 'image'
+      imageUrl: '',
+      symbol: '🏫',
+      bgColor: '#2563eb',
+      showLabel: true,
+      customEmoji: ''
+    };
+  });
+
+  useEffect(() => {
+    if (!academy?.id) return;
+    try {
+      const saved = localStorage.getItem(`takeme_academy_icon_settings_${academy.id}`);
+      if (saved) {
+        setAcademyIconSettings(JSON.parse(saved));
+      } else {
+        const globalSaved = localStorage.getItem('takeme_academy_icon_settings');
+        if (globalSaved) setAcademyIconSettings(JSON.parse(globalSaved));
+      }
+    } catch (_) {}
+  }, [academy?.id]);
+
+  const updateAcademyIconSettings = (patch) => {
+    setAcademyIconSettings(prev => {
+      const next = typeof patch === 'function' ? patch(prev) : { ...prev, ...patch };
+      try {
+        localStorage.setItem('takeme_academy_icon_settings', JSON.stringify(next));
+        if (academy?.id) {
+          localStorage.setItem(`takeme_academy_icon_settings_${academy.id}`, JSON.stringify(next));
+        }
+      } catch (_) {}
+      return next;
+    });
+  };
+
   // Student Addition Modal State
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
   const [editingStudentId, setEditingStudentId] = useState(null);
@@ -2299,14 +2341,41 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     return value.replace(/(\d{2,3})[-.]?(\d{3,4})[-.]?(\d{4})/, '$1-****-$3');
   };
 
-  // Custom icon for Academy
-  const academyIcon = L.divIcon({
-    html: '<div style="font-size: 36px; line-height: 1; text-align: center; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3));">🏫</div>',
-    className: 'bg-transparent',
-    iconSize: [36, 36],
-    iconAnchor: [18, 36],
-    popupAnchor: [0, -36]
-  });
+  // Custom dynamic icon for Academy (지도 학원 마커 커스텀 아이콘 / 로고 이미지)
+  const academyIcon = useMemo(() => {
+    const isImage = academyIconSettings.type === 'image' && !!academyIconSettings.imageUrl;
+    const symbol = academyIconSettings.symbol || '🏫';
+    const bg = academyIconSettings.bgColor || '#2563eb';
+    const showLabel = academyIconSettings.showLabel !== false;
+    const academyName = academy?.name || '우리 학원';
+
+    const innerHtml = isImage ? `
+      <img src="${academyIconSettings.imageUrl}" alt="${academyName}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+      <span style="display: none; width: 100%; height: 100%; align-items: center; justify-content: center; font-size: 20px;">${symbol}</span>
+    ` : `
+      <span style="display: flex; align-items: center; justify-content: center; font-size: 22px; line-height: 1;">${symbol}</span>
+    `;
+
+    return L.divIcon({
+      html: `
+        <div style="position: relative; display: flex; flex-direction: column; align-items: center; cursor: pointer; transform: translateZ(0);">
+          ${showLabel ? `
+            <div style="background: rgba(255, 255, 255, 0.96); color: ${bg}; border: 1.5px solid ${bg}; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 800; white-space: nowrap; box-shadow: 0 4px 10px rgba(0,0,0,0.18); margin-bottom: 3px; backdrop-filter: blur(2px);">
+              ${academyName}
+            </div>
+          ` : ''}
+          <div style="position: relative; width: 44px; height: 44px; border-radius: 50%; background: ${isImage ? '#ffffff' : bg}; border: 3px solid ${isImage ? bg : '#ffffff'}; box-shadow: 0 6px 16px rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; overflow: hidden; transition: transform 0.2s ease;">
+            ${innerHtml}
+          </div>
+          <div style="width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 7px solid ${bg}; transform: translateY(-1px); filter: drop-shadow(0 2px 2px rgba(0,0,0,0.25));"></div>
+        </div>
+      `,
+      className: 'custom-academy-marker-wrapper',
+      iconSize: [44, showLabel ? 72 : 54],
+      iconAnchor: [22, showLabel ? 72 : 54],
+      popupAnchor: [0, -(showLabel ? 72 : 54)]
+    });
+  }, [academyIconSettings, academy?.name]);
 
   const computePolygons = (busArray) => {
     return (busArray || []).map(bus => {
@@ -5534,6 +5603,339 @@ const parseKindergartenExcelSheet = (sheet) => {
                     </button>
                   </form>
                 )}
+              </div>
+
+              {/* 지도 학원 마커 아이콘 설정 카드 */}
+              <div className="relative overflow-hidden bg-white rounded-2xl p-5 border border-slate-200 shadow-xs hover:shadow-sm transition-all">
+                <div className="pointer-events-none absolute -top-12 -right-12 w-40 h-40 bg-gradient-to-br from-indigo-200/30 to-blue-100/20 rounded-full blur-xl" />
+
+                {/* Header */}
+                <div className="relative flex items-center justify-between mb-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <div 
+                        className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-base shadow-xs overflow-hidden" 
+                        style={{ backgroundColor: academyIconSettings.bgColor || '#2563eb' }}
+                      >
+                        {academyIconSettings.type === 'image' && academyIconSettings.imageUrl ? (
+                          <img src={academyIconSettings.imageUrl} alt="학원 로고" className="w-full h-full object-cover" />
+                        ) : (
+                          academyIconSettings.symbol || '🏫'
+                        )}
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                          지도 학원 마커 아이콘 / 로고 이미지 설정
+                          <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.2 rounded-md">
+                            실시간 반영
+                          </span>
+                        </h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          지도 관제 화면에 표시되는 학원 마커의 아이콘(이모지) 또는 로고 이미지, 테마 색상, 라벨을 설정합니다.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateAcademyIconSettings({
+                        type: 'emoji',
+                        imageUrl: '',
+                        symbol: '🏫',
+                        bgColor: '#2563eb',
+                        showLabel: true,
+                        customEmoji: ''
+                      });
+                    }}
+                    className="text-[11px] font-medium text-slate-500 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                  >
+                    기본값 복원
+                  </button>
+                </div>
+
+                {/* Body: Preview + Controls */}
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pt-1">
+                  {/* Left: Preview */}
+                  <div className="md:col-span-4 bg-slate-50/80 border border-slate-200/80 rounded-xl p-4 flex flex-col items-center justify-center text-center min-h-[170px] relative">
+                    <span className="text-[10px] font-semibold text-slate-400 absolute top-2 left-3">
+                      지도 마커 미리보기
+                    </span>
+                    <div className="flex flex-col items-center mt-2">
+                      {academyIconSettings.showLabel !== false && (
+                        <div 
+                          className="px-2.5 py-0.5 rounded-full text-[11px] font-bold shadow-xs mb-1 border"
+                          style={{
+                            backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                            color: academyIconSettings.bgColor || '#2563eb',
+                            borderColor: academyIconSettings.bgColor || '#2563eb'
+                          }}
+                        >
+                          {academy?.name || '우리 학원'}
+                        </div>
+                      )}
+                      <div 
+                        className="w-12 h-12 rounded-full border-3 shadow-md flex items-center justify-center text-2xl transition-all overflow-hidden"
+                        style={{ 
+                          backgroundColor: academyIconSettings.type === 'image' && academyIconSettings.imageUrl ? '#ffffff' : (academyIconSettings.bgColor || '#2563eb'),
+                          borderColor: academyIconSettings.type === 'image' && academyIconSettings.imageUrl ? (academyIconSettings.bgColor || '#2563eb') : '#ffffff'
+                        }}
+                      >
+                        {academyIconSettings.type === 'image' && academyIconSettings.imageUrl ? (
+                          <img 
+                            src={academyIconSettings.imageUrl} 
+                            alt="학원 로고" 
+                            className="w-full h-full object-cover" 
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          academyIconSettings.symbol || '🏫'
+                        )}
+                      </div>
+                      <div 
+                        className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] -mt-[1px]"
+                        style={{ borderTopColor: academyIconSettings.bgColor || '#2563eb' }}
+                      />
+                    </div>
+                    <span className="text-[11px] text-slate-500 font-medium mt-3">
+                      {academy?.name || '우리 학원'} 위치
+                    </span>
+                  </div>
+
+                  {/* Right: Icon selection & Color & Options */}
+                  <div className="md:col-span-8 space-y-3.5">
+                    {/* Mode Selector: Emoji vs Logo Image */}
+                    <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => updateAcademyIconSettings({ type: 'emoji' })}
+                        className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          academyIconSettings.type !== 'image'
+                            ? 'bg-white text-indigo-700 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-800'
+                        }`}
+                      >
+                        ✨ 기본 아이콘 / 이모지
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => updateAcademyIconSettings({ type: 'image' })}
+                        className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          academyIconSettings.type === 'image'
+                            ? 'bg-white text-indigo-700 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-800'
+                        }`}
+                      >
+                        🖼️ 학원 로고 이미지 등록
+                      </button>
+                    </div>
+
+                    {/* Mode 1: Emoji / Icon */}
+                    {academyIconSettings.type !== 'image' ? (
+                      <>
+                        {/* Preset Icons */}
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                            추천 아이콘 선택
+                          </label>
+                          <div className="grid grid-cols-8 gap-1.5">
+                            {['🏫', '🏛️', '🏰', '🎓', '🚌', '🌟', '🎈', '📚', '🎨', '🔬', '🎵', '⚽', '🧸', '🌈', '💡', '🏆'].map((emoji) => {
+                              const isSelected = academyIconSettings.symbol === emoji;
+                              return (
+                                <button
+                                  key={emoji}
+                                  type="button"
+                                  onClick={() => updateAcademyIconSettings({ symbol: emoji, customEmoji: '' })}
+                                  className={`h-9 rounded-lg flex items-center justify-center text-lg transition-all cursor-pointer ${
+                                    isSelected
+                                      ? 'bg-indigo-50 border-2 border-indigo-600 shadow-xs scale-105'
+                                      : 'bg-slate-50 hover:bg-slate-100 border border-slate-200'
+                                  }`}
+                                >
+                                  {emoji}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Custom Symbol Input */}
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1">
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                              직접 입력 (이모지 또는 글자)
+                            </label>
+                            <input
+                              type="text"
+                              maxLength={4}
+                              value={academyIconSettings.customEmoji || ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                updateAcademyIconSettings(prev => ({
+                                  ...prev,
+                                  customEmoji: val,
+                                  symbol: val.trim() ? val.trim() : prev.symbol
+                                }));
+                              }}
+                              placeholder="예: 🚀, 🥋, 🎹, 園"
+                              className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      /* Mode 2: Image Upload & URL */
+                      <div className="space-y-2.5">
+                        <label className="block text-xs font-semibold text-slate-700">
+                          학원 로고 이미지 등록
+                        </label>
+
+                        {/* Upload Controls */}
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <label 
+                            htmlFor="academy-logo-file-input"
+                            className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-indigo-50 hover:bg-indigo-100/80 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-700 cursor-pointer transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            <span>내 컴퓨터에서 이미지 파일 선택</span>
+                            <input
+                              id="academy-logo-file-input"
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                if (file.size > 2 * 1024 * 1024) {
+                                  alert('이미지 파일 크기는 2MB 이하여야 합니다.');
+                                  return;
+                                }
+                                const reader = new FileReader();
+                                reader.onload = (ev) => {
+                                  const base64 = ev.target?.result;
+                                  if (base64) {
+                                    updateAcademyIconSettings({
+                                      type: 'image',
+                                      imageUrl: base64
+                                    });
+                                  }
+                                };
+                                reader.readAsDataURL(file);
+                              }}
+                            />
+                          </label>
+
+                          {academyIconSettings.imageUrl && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateAcademyIconSettings({
+                                  imageUrl: '',
+                                  type: 'emoji'
+                                });
+                              }}
+                              className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0"
+                            >
+                              이미지 삭제
+                            </button>
+                          )}
+                        </div>
+
+                        {/* URL Direct Input */}
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="url"
+                              value={academyIconSettings.imageUrl || ''}
+                              onChange={(e) => {
+                                updateAcademyIconSettings({
+                                  type: 'image',
+                                  imageUrl: e.target.value.trim()
+                                });
+                              }}
+                              placeholder="또는 이미지 웹 링크 URL (https://...)"
+                              className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 font-mono"
+                            />
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-1">
+                            * PNG, JPG, WebP, SVG 파일 지원 (2MB 이하 권장). 마커 형태에 맞춰 원형으로 자동 표시됩니다.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Common Options: Label Toggle & Color Palette */}
+                    <div className="pt-1 border-t border-slate-100 space-y-2.5">
+                      {/* Label Toggle */}
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-semibold text-slate-700">
+                          학원명 상시 표시
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 select-none">
+                          <input
+                            type="checkbox"
+                            checked={academyIconSettings.showLabel !== false}
+                            onChange={(e) => updateAcademyIconSettings({ showLabel: e.target.checked })}
+                            className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                          />
+                          <span className="text-[11px] text-slate-600">지도 마커 상단에 학원 이름 표시</span>
+                        </label>
+                      </div>
+
+                      {/* Color Theme Palette */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="text-xs font-semibold text-slate-700">
+                            마커 테마 색상 (테두리 및 핀 포인트)
+                          </label>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-slate-500 font-mono">{academyIconSettings.bgColor || '#2563eb'}</span>
+                            <input
+                              type="color"
+                              value={academyIconSettings.bgColor || '#2563eb'}
+                              onChange={(e) => updateAcademyIconSettings({ bgColor: e.target.value })}
+                              className="w-5 h-5 rounded cursor-pointer border border-slate-200 p-0"
+                              title="사용자 지정 색상"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {[
+                            { name: '로열블루', color: '#2563eb' },
+                            { name: '인디고', color: '#4f46e5' },
+                            { name: '바이올렛', color: '#9333ea' },
+                            { name: '핑크', color: '#db2777' },
+                            { name: '로즈', color: '#e11d48' },
+                            { name: '오렌지', color: '#ea580c' },
+                            { name: '앰버', color: '#d97706' },
+                            { name: '에메랄드', color: '#059669' },
+                            { name: '틸', color: '#0d9488' },
+                            { name: '슬레이트', color: '#1e293b' }
+                          ].map((c) => {
+                            const isSelected = (academyIconSettings.bgColor || '#2563eb').toLowerCase() === c.color.toLowerCase();
+                            return (
+                              <button
+                                key={c.color}
+                                type="button"
+                                onClick={() => updateAcademyIconSettings({ bgColor: c.color })}
+                                title={c.name}
+                                className={`w-7 h-7 rounded-lg transition-transform cursor-pointer ${
+                                  isSelected ? 'scale-115 ring-2 ring-offset-2 ring-indigo-500 shadow-xs' : 'hover:scale-105 opacity-90 hover:opacity-100'
+                                }`}
+                                style={{ backgroundColor: c.color }}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* 전체 명단 엑셀 다운로드 카드 - Compact & Slim Design */}
