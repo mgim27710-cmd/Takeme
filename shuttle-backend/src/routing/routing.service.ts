@@ -1318,7 +1318,7 @@ export class RoutingService {
 
       const override = overrideMap.get(st.id);
       const isOneTimeBoarding = Boolean(override && override.overrideType === OverrideType.ONE_TIME_BOARDING);
-      const isNotRiding = isOneTimeBoarding ? false : Boolean(st.isNotRiding || parsedRaw['미탑승'] || parsedRaw['차량미탑승']);
+      const isNotRiding = isOneTimeBoarding ? false : Boolean(st.isNotRiding || (override && override.overrideType === OverrideType.ABSENCE) || parsedRaw['미탑승'] || parsedRaw['차량미탑승']);
       const needsAddress = !isNotRiding && (!st.address || st.latitude === null || st.latitude === undefined || isNaN(st.latitude) || !st.longitude || isNaN(st.longitude) || !!parsedRaw['주소입력필요']);
 
       const isOneTimeRide = Boolean(

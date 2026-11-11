@@ -65,6 +65,7 @@ class SocketService {
   }
 
   void onLocationUpdated(Function(Map<String, dynamic> data) callback) {
+    _socket?.off('locationUpdated');
     _socket?.on('locationUpdated', (data) {
       if (data is Map<String, dynamic>) {
         callback(data);
@@ -74,7 +75,23 @@ class SocketService {
     });
   }
 
+  void onChildBoardStatusChanged(Function(Map<String, dynamic> data) callback) {
+    _socket?.off('childBoardStatusChanged');
+    _socket?.off('globalChildBoardStatusChanged');
+    _socket?.on('childBoardStatusChanged', (data) {
+      if (data is Map) {
+        callback(Map<String, dynamic>.from(data));
+      }
+    });
+    _socket?.on('globalChildBoardStatusChanged', (data) {
+      if (data is Map) {
+        callback(Map<String, dynamic>.from(data));
+      }
+    });
+  }
+
   void onChangeRequestDecided(Function(Map<String, dynamic> data) callback) {
+    _socket?.off('changeRequestDecided');
     _socket?.on('changeRequestDecided', (data) {
       if (data is Map) {
         callback(Map<String, dynamic>.from(data));

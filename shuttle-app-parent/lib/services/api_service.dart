@@ -382,9 +382,12 @@ class ApiService {
     return [];
   }
 
-  Future<RouteDataModel?> getParentRoute(String email) async {
+  Future<RouteDataModel?> getParentRoute(String email, {int? studentId, String? direction}) async {
     try {
-      final url = Uri.parse('${AppConfig.apiHost}/parent/route?email=${Uri.encodeComponent(email)}');
+      String urlStr = '${AppConfig.apiHost}/parent/route?email=${Uri.encodeComponent(email)}';
+      if (studentId != null) urlStr += '&studentId=$studentId';
+      if (direction != null) urlStr += '&direction=$direction';
+      final url = Uri.parse(urlStr);
       final res = await getWithAuth(url).timeout(const Duration(seconds: 6));
       if (res.statusCode == 200) {
         final decoded = jsonDecode(utf8.decode(res.bodyBytes));

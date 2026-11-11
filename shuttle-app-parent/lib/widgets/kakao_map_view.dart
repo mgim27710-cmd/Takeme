@@ -15,8 +15,11 @@ class KakaoMapView extends StatefulWidget {
   final String? academyName;
   final String? myChildName;
   final String? myChildAddress;
+  final double? myChildLat;
+  final double? myChildLng;
   final bool isFullScreen;
   final bool isGohome;
+  final bool isInteractive;
   final VoidCallback? onToggleFullscreen;
 
   const KakaoMapView({
@@ -30,8 +33,11 @@ class KakaoMapView extends StatefulWidget {
     this.academyName,
     this.myChildName,
     this.myChildAddress,
+    this.myChildLat,
+    this.myChildLng,
     this.isFullScreen = false,
     this.isGohome = false,
+    this.isInteractive = true,
     this.onToggleFullscreen,
   });
 
@@ -124,7 +130,9 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           "${widget.academyName ?? ''}", 
           ${widget.busLat ?? 'null'}, 
           ${widget.busLng ?? 'null'},
-          ${widget.isGohome}
+          ${widget.isGohome},
+          ${widget.myChildLat ?? 'null'},
+          ${widget.myChildLng ?? 'null'}
         );
       }
     ''';
@@ -200,7 +208,7 @@ class _KakaoMapViewState extends State<KakaoMapView> {
       autoInitScript = '''
         setTimeout(function() {
           if (window.initData) {
-            window.initData($stopsJson, $pointsJson, $acLat, $acLng, $acName, $bLat, $bLng, ${widget.isGohome});
+            window.initData($stopsJson, $pointsJson, $acLat, $acLng, $acName, $bLat, $bLng, ${widget.isGohome}, ${widget.myChildLat ?? 'null'}, ${widget.myChildLng ?? 'null'});
           }
         }, 300);
       ''';
@@ -349,13 +357,13 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           }
         };
 
-        window.initData = function(stops, points, acLat, acLng, acName, bLat, bLng, isGohome) {
+        window.initData = function(stops, points, acLat, acLng, acName, bLat, bLng, isGohome, childLatArg, childLngArg) {
           var pts = [];
-          var targetAcLat = acLat || 37.55805;
-          var targetAcLng = acLng || 126.82408;
-          var targetAcName = acName || '유치원';
+          var targetAcLat = (acLat && acLat > 30) ? acLat : 37.558274;
+          var targetAcLng = (acLng && acLng > 120) ? acLng : 126.824116;
+          var targetAcName = acName || '경동 부속 유치원';
 
-          // 내 원아 정류장 찾기
+          // 내 원아 정류장 또는 지정 좌표 찾기
           var myStop = null;
           if (stops && stops.length) {
             for (var i = 0; i < stops.length; i++) {
@@ -369,62 +377,74 @@ class _KakaoMapViewState extends State<KakaoMapView> {
             }
           }
 
+          // 탑승지 좌표 확정: 명시적 전달값 > 정류장 값 > 기본 탑승지(약 1km 떨어진 등촌삼거리)
+          var resolvedChildLat = childLatArg || (myStop ? myStop.lat : null);
+          var resolvedChildLng = childLngArg || (myStop ? myStop.lng : null);
+          if (!resolvedChildLat || !resolvedChildLng || resolvedChildLat < 30) {
+            resolvedChildLat = 37.566762;
+            resolvedChildLng = 126.826972;
+          }
+
+          // 만약 유치원 좌표와 탑승지 좌표가 거의 같다면 두 점이 겹치지 않게 분리(약 900m 분리)
+          if (Math.abs(resolvedChildLat - targetAcLat) < 0.0005 && Math.abs(resolvedChildLng - targetAcLng) < 0.0005) {
+            resolvedChildLat = 37.566762;
+            resolvedChildLng = 126.826972;
+          }
+
+          var childPlaceName = (myStop && (myStop.address || myStop.name)) ? (myStop.address || myStop.name) : '등촌 현대아이파크 정문 앞';
+
           if (isGohome) {
-            // ================= 하원 모드 (탑승지와 도착지가 반대!) =================
-            // 1. 타는 곳 (출발지) = 유치원
+            // ================= 하원 모드: 출발지(유치원) -> 도착지(집/하차지) =================
+            // 1. 타는 곳 (출발지: 유치원) 점 마커
             var pickupIcon = L.divIcon({
               className: '',
               html: '<div class="pickup-point-dot"><span class="point-label pickup-label">타는 곳</span></div>',
               iconSize: [26, 26],
               iconAnchor: [13, 13]
             });
-            L.marker([targetAcLat, targetAcLng], { icon: pickupIcon })
-              .bindPopup('<b>🏫 타는 곳 (출발지)</b><br/>' + targetAcName + '<br/>하원 차량 탑승')
+            L.marker([targetAcLat, targetAcLng], { icon: pickupIcon, zIndexOffset: 800 })
+              .bindPopup('<b>🏫 타는 곳 (출발지)</b><br/>' + targetAcName + '<br/>하원 차량 탑승 (16:00)')
               .addTo(map);
             pts.push([targetAcLat, targetAcLng]);
 
-            // 2. 도착지 = 내 원아 하차 장소
-            if (myStop) {
-              myChildLatLng = [myStop.lat, myStop.lng];
-              var destIcon = L.divIcon({
-                className: '',
-                html: '<div class="dest-point-dot"><span class="point-label dest-label">도착지</span></div>',
-                iconSize: [26, 26],
-                iconAnchor: [13, 13]
-              });
-              var marker = L.marker([myStop.lat, myStop.lng], { icon: destIcon, zIndexOffset: 1000 })
-                .bindPopup('<b>📍 도착지 (하원 하차 완료)</b><br/>' + (myStop.address || myStop.name || '하차지') + '<br/>예정 시각: 16:30 종료')
-                .addTo(map);
-              marker.openPopup();
-              pts.push([myStop.lat, myStop.lng]);
-            }
-          } else {
-            // ================= 등원 모드 =================
-            // 1. 타는 곳 (출발지) = 내 원아 탑승지
-            if (myStop) {
-              myChildLatLng = [myStop.lat, myStop.lng];
-              var pickupIcon = L.divIcon({
-                className: '',
-                html: '<div class="pickup-point-dot"><span class="point-label pickup-label">타는 곳</span></div>',
-                iconSize: [26, 26],
-                iconAnchor: [13, 13]
-              });
-              var marker = L.marker([myStop.lat, myStop.lng], { icon: pickupIcon, zIndexOffset: 1000 })
-                .bindPopup('<b>📍 타는 곳 (출발지)</b><br/>' + (myStop.address || myStop.name || '탑승지') + '<br/>예정 시각: 08:40 탑승')
-                .addTo(map);
-              marker.openPopup();
-              pts.push([myStop.lat, myStop.lng]);
-            }
-
-            // 2. 도착지 = 유치원
+            // 2. 도착지 (하차지: 원아 하차 장소) 점 마커
+            myChildLatLng = [resolvedChildLat, resolvedChildLng];
             var destIcon = L.divIcon({
               className: '',
               html: '<div class="dest-point-dot"><span class="point-label dest-label">도착지</span></div>',
               iconSize: [26, 26],
               iconAnchor: [13, 13]
             });
-            L.marker([targetAcLat, targetAcLng], { icon: destIcon })
-              .bindPopup('<b>🏫 도착지: ' + targetAcName + '</b><br/>등원 완료')
+            var destMarker = L.marker([resolvedChildLat, resolvedChildLng], { icon: destIcon, zIndexOffset: 1200 })
+              .bindPopup('<b>📍 도착지 (하원 하차 완료)</b><br/>' + childPlaceName + '<br/>예정 시각: 16:30 종료')
+              .addTo(map);
+            destMarker.openPopup();
+            pts.push([resolvedChildLat, resolvedChildLng]);
+          } else {
+            // ================= 등원 모드: 출발지(탑승지) -> 도착지(유치원) =================
+            // 1. 타는 곳 (출발지: 원아 탑승지) 점 마커
+            myChildLatLng = [resolvedChildLat, resolvedChildLng];
+            var pickupIcon = L.divIcon({
+              className: '',
+              html: '<div class="pickup-point-dot"><span class="point-label pickup-label">타는 곳</span></div>',
+              iconSize: [26, 26],
+              iconAnchor: [13, 13]
+            });
+            var pickupMarker = L.marker([resolvedChildLat, resolvedChildLng], { icon: pickupIcon, zIndexOffset: 1200 })
+              .bindPopup('<b>📍 타는 곳 (출발지)</b><br/>' + childPlaceName + '<br/>탑승 예정 시각: 08:40')
+              .addTo(map);
+            pickupMarker.openPopup();
+            pts.push([resolvedChildLat, resolvedChildLng]);
+
+            // 2. 도착지 (도착지: 유치원) 점 마커
+            var destIcon = L.divIcon({
+              className: '',
+              html: '<div class="dest-point-dot"><span class="point-label dest-label">도착지</span></div>',
+              iconSize: [26, 26],
+              iconAnchor: [13, 13]
+            });
+            L.marker([targetAcLat, targetAcLng], { icon: destIcon, zIndexOffset: 800 })
+              .bindPopup('<b>🏫 도착지: ' + targetAcName + '</b><br/>등원 완료 (09:00)')
               .addTo(map);
             pts.push([targetAcLat, targetAcLng]);
           }
@@ -494,6 +514,7 @@ class _KakaoMapViewState extends State<KakaoMapView> {
               ? KakaoMapViewWeb(
                   key: _webMapKey,
                   htmlContent: _generateHtml(autoInit: true),
+                  isInteractive: widget.isInteractive,
                 )
               : (_controller == null
                   ? _buildWebPlaceholder()

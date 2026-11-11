@@ -332,14 +332,28 @@ export class ParentService {
     };
   }
 
-  async getRoute(email: string) {
-    let student = await this.studentRepository.createQueryBuilder('student')
-      .leftJoinAndSelect('student.parentUser', 'parentUser')
-      .leftJoinAndSelect('student.studentUser', 'studentUser')
-      .leftJoinAndSelect('student.assignedVehicle', 'vehicle')
-      .leftJoinAndSelect('student.academy', 'academy')
-      .where('parentUser.email = :email OR studentUser.email = :email', { email })
-      .getOne();
+  async getRoute(email: string, studentId?: number, direction: string = 'GOTO') {
+    let student: Student | null = null;
+
+    if (studentId) {
+      student = await this.studentRepository.createQueryBuilder('student')
+        .leftJoinAndSelect('student.parentUser', 'parentUser')
+        .leftJoinAndSelect('student.studentUser', 'studentUser')
+        .leftJoinAndSelect('student.assignedVehicle', 'vehicle')
+        .leftJoinAndSelect('student.academy', 'academy')
+        .where('student.id = :studentId AND (parentUser.email = :email OR studentUser.email = :email)', { studentId, email })
+        .getOne();
+    }
+
+    if (!student) {
+      student = await this.studentRepository.createQueryBuilder('student')
+        .leftJoinAndSelect('student.parentUser', 'parentUser')
+        .leftJoinAndSelect('student.studentUser', 'studentUser')
+        .leftJoinAndSelect('student.assignedVehicle', 'vehicle')
+        .leftJoinAndSelect('student.academy', 'academy')
+        .where('parentUser.email = :email OR studentUser.email = :email', { email })
+        .getOne();
+    }
 
     if (!student) {
       student = await this.studentRepository.findOne({
@@ -349,8 +363,10 @@ export class ParentService {
     }
 
     if (!student || !student.assignedVehicle) {
-      return { routePoints: [], stops: [], academy: null, myChildStop: null };
+      return { routePoints: [], stops: [], academy: null, myChildStop: null, academyPickupPoints: [] };
     }
+
+    const isGohome = direction?.toUpperCase() === 'GOHOME';
 
     // Get all students assigned to this vehicle (소속 유치원 일치 보장)
     const allStudents = await this.studentRepository.find({
@@ -361,41 +377,64 @@ export class ParentService {
       relations: { academy: true }
     });
 
-    // 오늘 결석한 원아 체크 (override 또는 boardStatus)
+    // 오늘 결석 또는 직접 픽업 원아 체크 (override 또는 boardStatus)
     const today = new Date();
     const tzOffset = today.getTimezoneOffset() * 60000;
     const localISOTime = (new Date(today.getTime() - tzOffset)).toISOString().slice(0, 10);
     const overrides = await this.overrideRepository.find({
       where: {
         startDate: localISOTime,
-        overrideType: OverrideType.ABSENCE
       },
       relations: { student: true }
     });
-    const absentStudentIds = new Set(overrides.map(o => o.student?.id).filter(Boolean));
+
+    const excludedStudentIds = new Set<number>();
+    for (const ov of overrides) {
+      if (!ov.student?.id) continue;
+      if (ov.overrideType === OverrideType.ABSENCE) {
+        excludedStudentIds.add(ov.student.id);
+      } else if (isGohome && ov.overrideType === OverrideType.PICKUP) {
+        // 하원 시 보호자 직접 픽업은 하원 차량 미탑승 처리
+        excludedStudentIds.add(ov.student.id);
+      }
+    }
 
     // Extract valid locations
     const stops = allStudents
-      .filter(s => s.latitude && s.longitude && s.boardStatus !== 'ABSENT' && !absentStudentIds.has(s.id))
+      .filter(s => s.latitude && s.longitude && s.boardStatus !== 'ABSENT' && !excludedStudentIds.has(s.id))
       .map(s => {
         const isMyChild = s.id === student!.id;
         const displayName = isMyChild 
-          ? `${s.adminDisplayName || s.name} (우리 아이 탑승지)` 
+          ? `${s.adminDisplayName || s.name} (우리 아이 ${isGohome ? '하차지' : '탑승지'})` 
           : (s.adminDisplayName || s.name);
+        
+        let expectedTime = isGohome ? '16:30' : '08:40';
+        if (s.raw) {
+          if (isGohome) {
+            expectedTime = s.raw['하원예상시간'] || s.raw['예상하차시간'] || '16:30';
+          } else {
+            expectedTime = s.raw['등원예상시간'] || s.raw['예상탑승시간'] || '08:40';
+          }
+        }
+
+        const stopAddress = isGohome 
+          ? (s.dropoffLocation || s.boardingLocation || s.address)
+          : (s.boardingLocation || s.address);
+
         return {
           id: s.id,
           name: displayName,
           rawName: s.name,
           isMyChild,
-          address: s.boardingLocation || s.address,
+          address: stopAddress,
           latitude: parseFloat(s.latitude as any),
           longitude: parseFloat(s.longitude as any),
-          expectedTime: s.raw ? s.raw['예상탑승시간'] || '15:30' : '15:30'
+          expectedTime,
         };
       });
 
     const academy = student.academy;
-    const routePoints = [];
+    const routePoints: any[] = [];
     if (academy && academy.latitude && academy.longitude) {
       routePoints.push({
         latitude: parseFloat(academy.latitude as any),
@@ -436,6 +475,7 @@ export class ParentService {
       myChildStop
     };
   }
+
 
   async createMessage(email: string, targetRoles: string[], message: string) {
     if (!message || message.trim() === '') {

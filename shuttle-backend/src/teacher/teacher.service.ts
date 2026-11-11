@@ -155,7 +155,7 @@ export class TeacherService {
 
   /**
    * 로그인한 직원(지도교사 또는 기사)에게 배정된 차량 찾기.
-   * 기존에는 teacherUser 로만 찾아서 기사(DRIVER) 계정은 차량을 못 찾던 문제 수정.
+   * 테넌트 격리(Tenant Isolation)를 보장하며, 타 학원 차량이나 임의 1호차 자동 할당을 차단합니다.
    */
   private async findAssignedVehicle(userId: number, relations: any = {}) {
     let v =
@@ -165,18 +165,12 @@ export class TeacherService {
 
     const user = await this.userRepository.findOne({ where: { id: userId }, relations: { academy: true } });
     if (user?.academy) {
+      // 해당 학원의 배정 차량 탐색 (타 학원 차량 침범 금지)
       v = await this.vehicleRepository.findOne({ where: { academy: { id: user.academy.id } }, relations });
-      if (v) {
-        if (!v.driverUser && user.role === 'DRIVER') {
-          v.driverUser = user;
-          await this.vehicleRepository.save(v).catch(() => {});
-        }
-        return v;
-      }
+      if (v) return v;
     }
 
-    const allVehicles = await this.vehicleRepository.find({ relations, take: 1 });
-    return allVehicles[0] || null;
+    return null;
   }
 
   async getStudents(email: string) {
@@ -498,6 +492,48 @@ export class TeacherService {
     return { success: true };
   }
 
+  /** 원아 탑승/하차/결석 시 학부모에게 실시간 소켓 및 알림 발송 */
+  private async notifyParentBoardStatus(
+    student: Student,
+    vehicle: Vehicle | null,
+    status: 'BOARDED' | 'WAITING' | 'ABSENT',
+    tagMethod: string = 'MANUAL'
+  ) {
+    const parent = student.parentUser;
+    const studentName = student.adminDisplayName || student.name;
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    let statusKr = '탑승 대기';
+    if (status === 'BOARDED') statusKr = '탑승 완료';
+    else if (status === 'ABSENT') statusKr = '미탑승/결석';
+
+    const message = `[통학 라이브] ${studentName} 원아가 ${vehicle ? vehicle.busNumber + '호차에 ' : ''}${statusKr}되었습니다. (${timeStr})`;
+
+    if (parent) {
+      try {
+        const noti = this.notificationRepository.create({
+          recipient: parent,
+          recipientRole: 'PARENT',
+          type: 'BOARD_STATUS',
+          message,
+        });
+        await this.notificationRepository.save(noti);
+      } catch (err) {
+        console.error('[notifyParentBoardStatus] notification save error:', err);
+      }
+    }
+
+    if (this.locationGateway) {
+      this.locationGateway.broadcastChildBoardStatus({
+        parentUserId: parent?.id,
+        studentId: student.id,
+        studentName,
+        boardStatus: status,
+        vehicleId: vehicle?.id,
+      });
+    }
+  }
+
   async boardStudent(email: string, studentId: number, reason?: string) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
@@ -516,21 +552,25 @@ export class TeacherService {
     await this.studentRepository.save(student);
 
     // 1. Create a Notification for the academy admin
-    let msg = `${vehicle.busNumber}호차 ${student.adminDisplayName || student.name} 원생 ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 탑승 완료`;
+    let msg = `${vehicle?.busNumber || '통학'}호차 ${student.adminDisplayName || student.name} 원생 ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 탑승 완료`;
     if (reason) {
       msg += ` (수동 탑승 사유: ${reason})`;
     }
-    const adminNoti = this.notificationRepository.create({
-      vehicle: vehicle,
-      message: msg
-    });
-    await this.notificationRepository.save(adminNoti);
+    if (vehicle) {
+      const adminNoti = this.notificationRepository.create({
+        vehicle: vehicle,
+        message: msg
+      });
+      await this.notificationRepository.save(adminNoti);
+    }
 
-    // 2. Ideally, send push notification to student's parent here
-    // e.g. sendPushToParent(student.parentUser.email, "탑승 완료")
+    // 2. 학부모 실시간 알림 및 소켓 브로드캐스트
+    await this.notifyParentBoardStatus(student, vehicle, 'BOARDED', 'MANUAL');
 
     // 3. Append to OperationLog
-    await this.appendBoardingLog(vehicle.id, student.id, student.adminDisplayName || student.name, 'MANUAL');
+    if (vehicle) {
+      await this.appendBoardingLog(vehicle.id, student.id, student.adminDisplayName || student.name, 'MANUAL');
+    }
 
     return { success: true, studentName: student.adminDisplayName || student.name };
   }
@@ -539,7 +579,10 @@ export class TeacherService {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
 
-    const student = await this.studentRepository.findOne({ where: { id: studentId } });
+    const student = await this.studentRepository.findOne({ 
+      where: { id: studentId },
+      relations: { parentUser: true }
+    });
     if (!student) throw new BadRequestException('Student not found');
 
     student.boardStatus = 'ABSENT';
@@ -555,6 +598,9 @@ export class TeacherService {
       await this.appendBoardingLog(vehicle.id, studentId, `${student.adminDisplayName || student.name} 원생 결석 처리`, 'SYSTEM');
     }
 
+    // 학부모 실시간 알림 및 소켓 브로드캐스트
+    await this.notifyParentBoardStatus(student, vehicle, 'ABSENT', 'SYSTEM');
+
     return { success: true, studentName: student.adminDisplayName || student.name };
   }
 
@@ -567,7 +613,7 @@ export class TeacherService {
 
     const student = await this.studentRepository.findOne({ 
       where: { id: studentId },
-      relations: { assignedVehicle: true }
+      relations: { assignedVehicle: true, parentUser: true }
     });
     if (!student) throw new BadRequestException('Student not found');
 
@@ -587,6 +633,9 @@ export class TeacherService {
       `${student.adminDisplayName || student.name} 탑승 취소`,
       'MANUAL'
     );
+
+    // 학부모 실시간 알림 및 소켓 브로드캐스트
+    await this.notifyParentBoardStatus(student, vehicle, 'WAITING', 'MANUAL');
 
     return { success: true, studentName: student.adminDisplayName || student.name };
   }
@@ -837,7 +886,8 @@ export class TeacherService {
       message: `${student.adminDisplayName || student.name} 학생이 셔틀버스에 탑승했습니다. ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 탑승 완료 (QR)`
     }));
 
-    // 2. Ideally, send push notification to student's parent here
+    // 2. 학부모 실시간 알림 및 소켓 브로드캐스트
+    await this.notifyParentBoardStatus(student, vehicle, 'BOARDED', 'QR');
     
     // 3. Append to OperationLog
     await this.appendBoardingLog(vehicle.id, student.id, student.adminDisplayName || student.name, 'QR');

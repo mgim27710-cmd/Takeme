@@ -175,6 +175,7 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     if (data.vehicleId) {
       this.server.to(`vehicle_${data.vehicleId}`).emit('changeRequestDecided', data.request);
       this.server.to(`vehicle_${data.vehicleId}`).emit('routeNeedsRefresh', { vehicleId: data.vehicleId });
+      this.server.to(`vehicle_${data.vehicleId}`).emit('routeUpdated', { vehicleId: data.vehicleId });
       this.server.to(`vehicle_${data.vehicleId}`).emit('notificationReceived', { type: 'SCHEDULE_CHANGE', request: data.request });
     }
     if (data.parentUserId) {
@@ -217,6 +218,32 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       this.server.to(room).emit('driverDepartSignal', payload);
       this.server.emit('driverDepartSignal', payload);
     }
+  }
+
+  /** 원아 탑승/하차/결석 실시간 상태 브로드캐스트 (학부모 앱 및 차량 방 연계) */
+  broadcastChildBoardStatus(data: {
+    parentUserId?: number;
+    studentId: number;
+    studentName: string;
+    boardStatus: string;
+    vehicleId?: number;
+    timestamp?: string;
+  }) {
+    if (!this.server) return;
+    const payload = {
+      studentId: data.studentId,
+      studentName: data.studentName,
+      boardStatus: data.boardStatus,
+      vehicleId: data.vehicleId,
+      timestamp: data.timestamp || new Date().toISOString(),
+    };
+    if (data.parentUserId) {
+      this.server.to(`user_${data.parentUserId}`).emit('childBoardStatusChanged', payload);
+    }
+    if (data.vehicleId) {
+      this.server.to(`vehicle_${data.vehicleId}`).emit('childBoardStatusChanged', payload);
+    }
+    this.server.emit('globalChildBoardStatusChanged', payload);
   }
 
   @SubscribeMessage('joinVehicleRoom')

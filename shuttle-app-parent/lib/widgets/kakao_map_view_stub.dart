@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 class KakaoMapViewWeb extends StatelessWidget {
   final String htmlContent;
+  final bool isInteractive;
   final VoidCallback? onZoomIn;
   final VoidCallback? onZoomOut;
   final VoidCallback? onFitAll;
@@ -10,6 +11,7 @@ class KakaoMapViewWeb extends StatelessWidget {
   const KakaoMapViewWeb({
     super.key,
     required this.htmlContent,
+    this.isInteractive = true,
     this.onZoomIn,
     this.onZoomOut,
     this.onFitAll,
