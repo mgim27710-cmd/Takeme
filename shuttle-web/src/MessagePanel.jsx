@@ -983,13 +983,17 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     setIsSubmittingPayment(true);
 
     try {
+      // 결재는 관리자-교사 간에만 이루어지므로 상대방이 교사인 경우에만 현재 방 유지, 학부모 방일 경우 교사 전용 방으로 라우팅
+      const isCurrentRoomWithTeacher = !isChatWithParent && activeOtherUser?.role === 'TEACHER';
+      const targetRoomId = isCurrentRoomWithTeacher ? activeRoom?.id : undefined;
+
       const res = await fetch(`${API_BASE_URL}/chat/payment-request`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
           studentId: paymentForm.selectedStudentId ? Number(paymentForm.selectedStudentId) : undefined,
           studentName,
-          roomId: activeRoom?.id,
+          roomId: targetRoomId,
           vehicleId: Number(paymentForm.selectedVehicleId),
           rideType: paymentForm.rideType || 'TODAY_ONLY',
           boardingLocation,
@@ -1006,13 +1010,15 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       if (res.ok) {
         const createdMsg = await res.json();
         setIsPaymentModalOpen(false);
-        // If current active room is payment system room, append message
-        if (activeRoom && (!createdMsg.roomId || Number(createdMsg.roomId) === Number(activeRoom.id))) {
+        // If current active room matches created message room, append message
+        if (activeRoom && createdMsg.roomId && Number(createdMsg.roomId) === Number(activeRoom.id)) {
           setMessages((prev) => {
             if (prev.some((m) => m.id === createdMsg.id)) return prev;
             return [...prev, createdMsg];
           });
           scrollToBottom();
+        } else if (createdMsg.roomId) {
+          alert('담당 차량 지도교사와의 결재 대화방으로 결재 신청서가 안전하게 발송되었습니다.\n(학부모 대화방에는 결재 카드가 노출되지 않습니다.)');
         }
         await fetchRooms();
       } else {
@@ -1246,6 +1252,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   const isCurrentRoomPaymentSystem = activeRoom?.type === 'PAYMENT_SYSTEM' || activeRoom?.name === '결재 전용 채널';
   const isCurrentRoomNotificationSystem = activeRoom?.type === 'NOTIFICATION_SYSTEM' || activeRoom?.name === '실시간 알림 채널';
 
+  const activeOtherUser = (activeRoom?.members || [])
+    .map((m) => m.user)
+    .find((u) => u && u.email !== myUser.email);
+  const isChatWithParent = activeOtherUser?.role === 'PARENT' || activeRoom?.type === 'PARENT' || activeRoom?.name?.includes('학부모');
+
   return (
     <div
       className={`absolute inset-0 z-[2000] flex bg-slate-100 h-full overflow-hidden transition-all duration-300 ${
@@ -1445,8 +1456,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
               </div>
 
               <div className="flex items-center gap-2">
-                {/* 결재 신청 버튼 (학부모는 이용 불가, 실시간 알림 채널 제외) */}
-                {!isCurrentRoomNotificationSystem && !isParent && (
+                {/* 결재 신청 버튼 (선생-관리자 사이의 내부 절차이므로 학부모 계정 및 학부모와의 대화방에서는 숨김) */}
+                {!isCurrentRoomNotificationSystem && !isParent && !isChatWithParent && (
                   <button
                     type="button"
                     onClick={handleOpenPaymentModal}
@@ -1503,6 +1514,15 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
               ) : (
                 messagesWithDates
                   .filter(m => !showBookmarksOnly || bookmarkedIds.includes(m.id))
+                  .filter(m => {
+                    // ★ 핵심 권한 격리: 결재는 선생-관리자 간의 내부 절차이므로 학부모 계정 또는 학부모와의 대화방에서는 완전 숨김
+                    if (isParent || isChatWithParent) {
+                      if (m.type === 'PAYMENT_REQUEST' || m.payload?.studentName) {
+                        return false;
+                      }
+                    }
+                    return true;
+                  })
                   .map((msg) => {
                   const isMine = msg.sender?.email === myUser.email || msg.sender?.id === myUser.id;
                   const senderName = msg.sender?.name || msg.sender?.email || '알 수 없음';
@@ -2048,17 +2068,19 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 {showPlusMenu && (
                   <div className="absolute bottom-20 left-4 z-30 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2 w-64 space-y-1 animate-scale-up">
                     <div className="text-[11px] font-black text-slate-400 px-2 py-1 uppercase">빠른 서식 / 결재 신청</div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowPlusMenu(false);
-                        handleOpenPaymentModal();
-                      }}
-                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-indigo-50 text-indigo-950 font-bold text-xs flex items-center gap-2 transition"
-                    >
-                      <span className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs font-black">결</span>
-                      <span>셔틀 탑승 결재 요청</span>
-                    </button>
+                    {!isParent && !isChatWithParent && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowPlusMenu(false);
+                          handleOpenPaymentModal();
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-indigo-50 text-indigo-950 font-bold text-xs flex items-center gap-2 transition"
+                      >
+                        <span className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs font-black">결</span>
+                        <span>셔틀 탑승 결재 요청</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {

@@ -661,6 +661,26 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const [busLocations, setBusLocations] = useState({});
   const [operatingBuses, setOperatingBuses] = useState({}); // { [busId]: boolean }
 
+  // Substitute Driver & Teacher Modal State
+  const [substituteModalBus, setSubstituteModalBus] = useState(null);
+  const [substituteFormTab, setSubstituteFormTab] = useState('driver'); // 'driver' | 'teacher'
+  const [substituteForm, setSubstituteForm] = useState({
+    isDriverResting: false,
+    driverReason: '연차 휴가',
+    driverName: '',
+    driverPhone: '',
+    driverEmail: '',
+    driverPassword: 'password123!',
+    driverIsActive: false,
+    isTeacherResting: false,
+    teacherReason: '병가',
+    teacherName: '',
+    teacherPhone: '',
+    teacherEmail: '',
+    teacherPassword: 'password123!',
+    teacherIsActive: false
+  });
+
   // Student Addition Modal State
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
   const [editingStudentId, setEditingStudentId] = useState(null);
@@ -700,13 +720,22 @@ export default function Dashboard({ initialEducationLevel } = {}) {
 
   const handleStudentMapClick = (st) => {
     if (!st) return;
+
+    // 이미 선택된 원아를 다시 클릭한 경우 -> 선택 해제 (토글 취소)
+    if (highlightedStudentId === st.id) {
+      setHighlightedStudentId(null);
+      setHighlightedStudentLocation(null);
+      return;
+    }
+
     const sLat = Number(st.lat || st.latitude);
     const sLng = Number(st.lng || st.longitude);
     if (sLat && sLng && !isNaN(sLat) && !isNaN(sLng)) {
       setHighlightedStudentId(st.id);
       setHighlightedStudentLocation({ lat: sLat, lng: sLng, student: st, timestamp: Date.now() });
-      if (activeTab !== 'map') {
-        setActiveTab('map');
+      // 만약 지도를 덮는 전면 뷰어/모달 탭이 열려있다면 원아 정보 탭으로 안전하게 복귀
+      if (['log', 'messages', 'documents', 'board', 'classes', 'auth'].includes(activeTab)) {
+        handleTabChange('students');
       }
     } else {
       alert(`${st.name} 원아의 등록된 탑승지/주소 좌표가 없습니다. 주소를 등록해주세요.`);
@@ -728,6 +757,128 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       ...prev,
       [key]: !prev[key]
     }));
+  };
+
+  const handleOpenSubstituteModal = (bus) => {
+    if (!bus) return;
+    setSubstituteModalBus(bus);
+    setSubstituteFormTab('driver');
+    const subD = bus.substituteDriver || {};
+    const subT = bus.substituteTeacher || {};
+    setSubstituteForm({
+      isDriverResting: Boolean(bus.isDriverResting || subD.isActive),
+      driverReason: subD.reason || '연차 휴가',
+      driverName: subD.name || '임시기사',
+      driverPhone: subD.phone || '010-9999-1001',
+      driverEmail: subD.email || `sub_driver${bus.id}@takeme.com`,
+      driverPassword: subD.password || 'password123!',
+      driverIsActive: Boolean(subD.isActive),
+      isTeacherResting: Boolean(bus.isTeacherResting || subT.isActive),
+      teacherReason: subT.reason || '병가',
+      teacherName: subT.name || '임시교사',
+      teacherPhone: subT.phone || '010-9999-2001',
+      teacherEmail: subT.email || `sub_teacher${bus.id}@takeme.com`,
+      teacherPassword: subT.password || 'password123!',
+      teacherIsActive: Boolean(subT.isActive)
+    });
+  };
+
+  const handleSaveSubstituteStaff = async (mode) => {
+    if (!substituteModalBus) return;
+    const busId = substituteModalBus.id;
+    let newIsDriverResting = substituteForm.isDriverResting;
+    let newDriverIsActive = substituteForm.driverIsActive;
+    let newIsTeacherResting = substituteForm.isTeacherResting;
+    let newTeacherIsActive = substituteForm.teacherIsActive;
+
+    if (mode === 'ACTIVATE_DRIVER') {
+      newIsDriverResting = true;
+      newDriverIsActive = true;
+    } else if (mode === 'RESTORE_DRIVER') {
+      newIsDriverResting = false;
+      newDriverIsActive = false;
+    } else if (mode === 'ACTIVATE_TEACHER') {
+      newIsTeacherResting = true;
+      newTeacherIsActive = true;
+    } else if (mode === 'RESTORE_TEACHER') {
+      newIsTeacherResting = false;
+      newTeacherIsActive = false;
+    }
+
+    const payload = {
+      busId,
+      isDriverResting: newIsDriverResting,
+      substituteDriver: {
+        name: substituteForm.driverName || '대체 기사님',
+        phone: substituteForm.driverPhone || '010-9999-1001',
+        reason: substituteForm.driverReason || '연차 휴가',
+        email: substituteForm.driverEmail || `sub_driver${busId}@takeme.com`,
+        password: substituteForm.driverPassword || 'password123!',
+        isActive: newDriverIsActive,
+        assignedAt: new Date().toISOString()
+      },
+      isTeacherResting: newIsTeacherResting,
+      substituteTeacher: {
+        name: substituteForm.teacherName || '대체 교사님',
+        phone: substituteForm.teacherPhone || '010-9999-2001',
+        reason: substituteForm.teacherReason || '병가',
+        email: substituteForm.teacherEmail || `sub_teacher${busId}@takeme.com`,
+        password: substituteForm.teacherPassword || 'password123!',
+        isActive: newTeacherIsActive,
+        assignedAt: new Date().toISOString()
+      }
+    };
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/routing/substitute-staff`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error('대체 인력 정보 저장에 실패했습니다.');
+
+      // Update local buses state
+      setBuses(prev => prev.map(b => {
+        if (b.id === busId) {
+          return {
+            ...b,
+            isDriverResting: newIsDriverResting,
+            substituteDriver: payload.substituteDriver,
+            isTeacherResting: newIsTeacherResting,
+            substituteTeacher: payload.substituteTeacher
+          };
+        }
+        return b;
+      }));
+
+      // Update form state
+      setSubstituteForm(prev => ({
+        ...prev,
+        isDriverResting: newIsDriverResting,
+        driverIsActive: newDriverIsActive,
+        isTeacherResting: newIsTeacherResting,
+        teacherIsActive: newTeacherIsActive
+      }));
+
+      if (mode === 'ACTIVATE_DRIVER') {
+        alert(`[${substituteModalBus.name}] 기사님이 휴식 처리되었으며,\n대체 기사(${payload.substituteDriver.name}) 임시 계정 로그인이 활성화되었습니다!\n\n로그인 아이디: ${payload.substituteDriver.email}\n비밀번호: ${payload.substituteDriver.password}`);
+        setSubstituteModalBus(null);
+      } else if (mode === 'RESTORE_DRIVER') {
+        alert(`[${substituteModalBus.name}] 원래 기사님이 복귀하셨습니다.\n대체 기사 임시 계정은 보안을 위해 즉시 비활성화(잠금)되었습니다.`);
+        setSubstituteModalBus(null);
+      } else if (mode === 'ACTIVATE_TEACHER') {
+        alert(`[${substituteModalBus.name}] 지도교사님이 휴식 처리되었으며,\n대체 교사(${payload.substituteTeacher.name}) 임시 계정이 활성화되었습니다.`);
+        setSubstituteModalBus(null);
+      } else if (mode === 'RESTORE_TEACHER') {
+        alert(`[${substituteModalBus.name}] 원래 지도교사님이 복귀하셨으며,\n대체 교사 임시 계정이 비활성화되었습니다.`);
+        setSubstituteModalBus(null);
+      } else {
+        alert('대체 인력 설정 정보가 성공적으로 저장되었습니다.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert(err.message || '저장 중 오류가 발생했습니다.');
+    }
   };
 
   const getStudentRaw = (st) => {
@@ -4206,20 +4357,76 @@ const parseKindergartenExcelSheet = (sheet) => {
                       </div>
 
                       {/* Info Summary Grid */}
-                      <div className="grid grid-cols-2 gap-2 text-xs mb-3">
-                        <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                          <span className="text-slate-400 block text-xs font-medium">기사님</span>
-                          <span className="font-bold text-slate-800 truncate block mt-0.5">
+                      <div className="grid grid-cols-2 gap-2 text-xs mb-2">
+                        <div className={`p-2 rounded-xl border transition-colors ${bus.isDriverResting || bus.substituteDriver?.isActive ? 'bg-amber-50/90 border-amber-200' : 'bg-slate-50 border-slate-100'}`}>
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-slate-400 block text-[11px] font-medium">기사님</span>
+                            {bus.isDriverResting || bus.substituteDriver?.isActive ? (
+                              <span className="text-[10px] bg-amber-200 text-amber-800 font-black px-1.5 py-0.5 rounded border border-amber-300">
+                                휴식 중
+                              </span>
+                            ) : (
+                              <span className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-1.5 py-0.5 rounded">
+                                정상
+                              </span>
+                            )}
+                          </div>
+                          <span className="font-bold text-slate-800 truncate block">
                             {bus.driverName || '미등록'}
                           </span>
+                          {bus.isDriverResting || bus.substituteDriver?.isActive ? (
+                            <div className="mt-1 pt-1 border-t border-amber-200 text-[11px] text-amber-900 font-bold truncate flex items-center gap-1">
+                              <span>🔄</span>
+                              <span>대체: {bus.substituteDriver?.name || '대체기사'}</span>
+                            </div>
+                          ) : null}
                         </div>
-                        <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                          <span className="text-slate-400 block text-xs font-medium">지도교사</span>
-                          <span className="font-bold text-slate-800 truncate block mt-0.5">
+                        <div className={`p-2 rounded-xl border transition-colors ${bus.isTeacherResting || bus.substituteTeacher?.isActive ? 'bg-amber-50/90 border-amber-200' : 'bg-slate-50 border-slate-100'}`}>
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-slate-400 block text-[11px] font-medium">지도교사</span>
+                            {bus.isTeacherResting || bus.substituteTeacher?.isActive ? (
+                              <span className="text-[10px] bg-amber-200 text-amber-800 font-black px-1.5 py-0.5 rounded border border-amber-300">
+                                휴식 중
+                              </span>
+                            ) : (
+                              <span className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-1.5 py-0.5 rounded">
+                                정상
+                              </span>
+                            )}
+                          </div>
+                          <span className="font-bold text-slate-800 truncate block">
                             {bus.teacherName || '미등록'}
                           </span>
+                          {bus.isTeacherResting || bus.substituteTeacher?.isActive ? (
+                            <div className="mt-1 pt-1 border-t border-amber-200 text-[11px] text-amber-900 font-bold truncate flex items-center gap-1">
+                              <span>🔄</span>
+                              <span>대체: {bus.substituteTeacher?.name || '대체교사'}</span>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
+
+                      {/* 대체 기사 / 휴식 관리 버튼 */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenSubstituteModal(bus);
+                        }}
+                        className={`w-full py-1.5 px-2.5 mb-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border shadow-2xs cursor-pointer ${
+                          bus.isDriverResting || bus.substituteDriver?.isActive || bus.isTeacherResting || bus.substituteTeacher?.isActive
+                            ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-amber-200 animate-pulse'
+                            : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200 hover:border-slate-300'
+                        }`}
+                        title="기사님 휴식 처리 및 대체 기사 임시 계정을 발급/관리합니다."
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                        </svg>
+                        {bus.isDriverResting || bus.substituteDriver?.isActive
+                          ? '대체 기사 운행 중 (설정 / 복귀 관리)'
+                          : '기사 휴식 및 대체 기사 배정'}
+                      </button>
 
                       {/* Zone & Students Status Bar */}
                       <div 
@@ -4575,7 +4782,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                 )}
 
                 {/* Students Content Area */}
-                <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                <div className="flex-1 overflow-y-auto space-y-2.5 px-1.5 py-1">
                   {studentFilterMode === 'ALL' ? (
                     // Flat List with Student Detail Toggle (+)
                     sortStudentsList(filteredStudents).map(st => {
@@ -4591,7 +4798,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                           title="클릭 시 지도에서 탑승지 위치를 눈에 띄게 확인합니다"
                           className={`p-2.5 rounded-xl shadow-xs hover:shadow-md transition-all group cursor-pointer ${
                             highlightedStudentId === st.id
-                              ? 'ring-2 ring-indigo-500 border-indigo-400 bg-indigo-50/30'
+                              ? 'relative ring-2 ring-indigo-500 border-indigo-500 bg-indigo-50/40 z-1'
                               : needsAddress
                               ? 'bg-red-50/30 border-2 border-red-500 ring-2 ring-red-100'
                               : 'bg-white border border-slate-200 hover:border-indigo-300'
@@ -4818,7 +5025,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                                       title="클릭 시 지도에서 탑승지 위치를 눈에 띄게 확인합니다"
                                       className={`p-2.5 rounded-xl shadow-xs hover:shadow-md transition-all group cursor-pointer ${
                                         highlightedStudentId === st.id
-                                          ? 'ring-2 ring-indigo-500 border-indigo-400 bg-indigo-50/30'
+                                          ? 'relative ring-2 ring-indigo-500 border-indigo-500 bg-indigo-50/40 z-1'
                                           : needsAddress
                                           ? 'bg-red-50/30 border-2 border-red-500 ring-2 ring-red-100'
                                           : 'bg-white border border-slate-200 hover:border-indigo-300'
@@ -6813,6 +7020,23 @@ const parseKindergartenExcelSheet = (sheet) => {
                 <label className="block text-xs font-bold text-slate-600 mb-1">차량 정원 (명)</label>
                 <input type="number" value={editingBus.capacity || 25} onChange={e => setEditingBus({...editingBus, capacity: e.target.value})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="25" />
               </div>
+              <div className="p-3 bg-amber-50/90 rounded-xl border border-amber-200 flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-amber-900 block">기사님 휴식 및 대체 기사 배정</span>
+                  <span className="text-[11px] text-amber-700">대체 기사 임시 계정 발급 및 활성화 관리</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = editingBus;
+                    setEditingBus(null);
+                    handleOpenSubstituteModal(target);
+                  }}
+                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-lg transition-colors shadow-2xs cursor-pointer"
+                >
+                  휴식/대체 설정
+                </button>
+              </div>
               <div className="pt-3 border-t border-slate-100 flex justify-between items-center mt-6">
                 <button
                   type="button"
@@ -6854,6 +7078,386 @@ const parseKindergartenExcelSheet = (sheet) => {
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 대체 기사 / 교사 휴식 관리 모달 */}
+      {substituteModalBus && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-100 flex flex-col max-h-[92vh] animate-fade-in">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 px-6 py-5 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-white/20 border border-white/30 flex items-center justify-center text-xl">
+                  🔄
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold tracking-tight">
+                    {substituteModalBus.name || `${substituteModalBus.busNumber}호차`} 기사/교사 휴식 및 대체 관리
+                  </h3>
+                  <p className="text-xs text-amber-100">
+                    차량번호: {substituteModalBus.plateNumber || '미등록'} · 정원: {substituteModalBus.capacity || 25}인승
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setSubstituteModalBus(null)} 
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center text-lg font-bold transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Tabs (기사님 대체 / 지도교사 대체) */}
+            <div className="flex border-b border-slate-200 bg-slate-50/70 p-1.5 gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => setSubstituteFormTab('driver')}
+                className={`flex-1 py-2 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  substituteFormTab === 'driver'
+                    ? 'bg-white text-amber-700 shadow-xs border border-amber-200/60'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <span>🚗</span>
+                <span>기사님 대체 및 휴식</span>
+                {substituteForm.driverIsActive && (
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubstituteFormTab('teacher')}
+                className={`flex-1 py-2 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  substituteFormTab === 'teacher'
+                    ? 'bg-white text-amber-700 shadow-xs border border-amber-200/60'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <span>👩‍🏫</span>
+                <span>지도교사 대체 및 휴식</span>
+                {substituteForm.teacherIsActive && (
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                )}
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-4 text-xs">
+              {substituteFormTab === 'driver' ? (
+                <>
+                  {/* 현재 기사님 상태 카드 */}
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] text-slate-500 font-semibold block">현재 배정된 정규 기사</span>
+                      <span className="text-sm font-bold text-slate-800">{substituteModalBus.driverName || '미등록'}</span>
+                      <span className="text-xs text-slate-500 ml-2">({substituteModalBus.driverPhone || '연락처 없음'})</span>
+                    </div>
+                    {substituteForm.driverIsActive ? (
+                      <span className="px-2.5 py-1 bg-amber-100 text-amber-800 border border-amber-300 font-black rounded-lg flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                        휴식 중 (대체 운행)
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 font-bold rounded-lg">
+                        정상 운행 중
+                      </span>
+                    )}
+                  </div>
+
+                  {/* 휴식 사유 */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">기사님 휴식 사유</label>
+                    <div className="flex gap-1.5 flex-wrap mb-1.5">
+                      {['연차 휴가', '병가 / 입원', '경조사', '차량 긴급 정비', '개인 사정'].map(r => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => setSubstituteForm({ ...substituteForm, driverReason: r })}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors border cursor-pointer ${
+                            substituteForm.driverReason === r
+                              ? 'bg-amber-100 text-amber-800 border-amber-300'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      type="text"
+                      value={substituteForm.driverReason}
+                      onChange={e => setSubstituteForm({ ...substituteForm, driverReason: e.target.value })}
+                      placeholder="사유를 직접 입력하거나 위 항목을 선택하세요"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-xs font-semibold"
+                    />
+                  </div>
+
+                  {/* 대체 기사 정보 */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">대체 기사 성명</label>
+                      <input
+                        type="text"
+                        value={substituteForm.driverName}
+                        onChange={e => setSubstituteForm({ ...substituteForm, driverName: e.target.value })}
+                        placeholder="예: 홍길동 (대체)"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-xs font-semibold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">대체 기사 연락처</label>
+                      <input
+                        type="text"
+                        value={substituteForm.driverPhone}
+                        onChange={e => setSubstituteForm({ ...substituteForm, driverPhone: formatPhoneNumber(e.target.value) })}
+                        placeholder="010-0000-0000"
+                        maxLength={13}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-xs font-semibold"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 대체 기사 전용 임시 계정 (보안 핵심 영역) */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50/90 via-blue-50/50 to-indigo-50/40 border border-indigo-200/80 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm">🔑</span>
+                        <span className="font-extrabold text-indigo-950 text-xs">대체 기사 임시 계정 (기사 전용 앱)</span>
+                      </div>
+                      {substituteForm.driverIsActive ? (
+                        <span className="text-[10px] bg-emerald-100 text-emerald-800 font-black px-2 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          로그인 활성화됨 (승인)
+                        </span>
+                      ) : (
+                        <span className="text-[10px] bg-slate-200 text-slate-600 font-bold px-2 py-0.5 rounded-full">
+                          평소 비활성화 (잠금)
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="text-[11px] text-slate-600 leading-relaxed bg-white/80 p-2.5 rounded-xl border border-indigo-100">
+                      🔒 <strong className="text-indigo-900">보안 정책:</strong> 이 계정은 보안을 위해 <span className="text-rose-600 font-bold">평소에는 로그인이 자동 차단</span>됩니다. 관리자가 아래 <strong className="text-amber-800">‘대체 운행 활성화’</strong>를 켰을 때만 기사 앱(포트 8081 등)에 로그인할 수 있습니다.
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-0.5">임시 아이디 (이메일)</label>
+                        <div className="flex gap-1">
+                          <input
+                            type="text"
+                            value={substituteForm.driverEmail}
+                            onChange={e => setSubstituteForm({ ...substituteForm, driverEmail: e.target.value })}
+                            className="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-lg text-xs font-mono font-semibold"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(substituteForm.driverEmail);
+                              alert('임시 아이디가 클립보드에 복사되었습니다.');
+                            }}
+                            className="px-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-bold text-xs rounded-lg whitespace-nowrap cursor-pointer"
+                            title="아이디 복사"
+                          >
+                            복사
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-0.5">임시 비밀번호</label>
+                        <div className="flex gap-1">
+                          <input
+                            type="text"
+                            value={substituteForm.driverPassword}
+                            onChange={e => setSubstituteForm({ ...substituteForm, driverPassword: e.target.value })}
+                            className="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-lg text-xs font-mono font-semibold"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(substituteForm.driverPassword);
+                              alert('임시 비밀번호가 클립보드에 복사되었습니다.');
+                            }}
+                            className="px-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-bold text-xs rounded-lg whitespace-nowrap cursor-pointer"
+                            title="비밀번호 복사"
+                          >
+                            복사
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* 지도교사 대체 폼 */}
+                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] text-slate-500 font-semibold block">현재 배정된 정규 지도교사</span>
+                      <span className="text-sm font-bold text-slate-800">{substituteModalBus.teacherName || '미등록'}</span>
+                      <span className="text-xs text-slate-500 ml-2">({substituteModalBus.teacherPhone || '연락처 없음'})</span>
+                    </div>
+                    {substituteForm.teacherIsActive ? (
+                      <span className="px-2.5 py-1 bg-amber-100 text-amber-800 border border-amber-300 font-black rounded-lg flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                        휴식 중 (대체 교사)
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 font-bold rounded-lg">
+                        정상 탑승 중
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">교사님 휴식 사유</label>
+                    <input
+                      type="text"
+                      value={substituteForm.teacherReason}
+                      onChange={e => setSubstituteForm({ ...substituteForm, teacherReason: e.target.value })}
+                      placeholder="예: 병가, 개인사정, 연차 등"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-xs font-semibold"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">대체 교사 성명</label>
+                      <input
+                        type="text"
+                        value={substituteForm.teacherName}
+                        onChange={e => setSubstituteForm({ ...substituteForm, teacherName: e.target.value })}
+                        placeholder="예: 김선생님 (대체)"
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-xs font-semibold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">대체 교사 연락처</label>
+                      <input
+                        type="text"
+                        value={substituteForm.teacherPhone}
+                        onChange={e => setSubstituteForm({ ...substituteForm, teacherPhone: formatPhoneNumber(e.target.value) })}
+                        placeholder="010-0000-0000"
+                        maxLength={13}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none text-xs font-semibold"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-indigo-50/80 border border-indigo-200/80 space-y-2">
+                    <span className="font-extrabold text-indigo-950 text-xs block">교사 전용 앱 임시 계정</span>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-0.5">아이디</label>
+                        <input
+                          type="text"
+                          value={substituteForm.teacherEmail}
+                          onChange={e => setSubstituteForm({ ...substituteForm, teacherEmail: e.target.value })}
+                          className="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-lg text-xs font-mono font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-0.5">비밀번호</label>
+                        <input
+                          type="text"
+                          value={substituteForm.teacherPassword}
+                          onChange={e => setSubstituteForm({ ...substituteForm, teacherPassword: e.target.value })}
+                          className="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-lg text-xs font-mono font-semibold"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Modal Actions Footer */}
+            <div className="p-5 border-t border-slate-100 bg-slate-50 flex flex-col gap-2 shrink-0">
+              {substituteFormTab === 'driver' ? (
+                <>
+                  <div className="flex gap-2">
+                    {substituteForm.driverIsActive ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSaveSubstituteStaff('RESTORE_DRIVER')}
+                        className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <span>🔙</span>
+                        <span>원래 기사님 복귀 (대체 운행 종료 & 계정 잠금)</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleSaveSubstituteStaff('ACTIVATE_DRIVER')}
+                        className="flex-1 py-3 px-4 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-black rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <span>🚀</span>
+                        <span>기사 휴식 처리 및 대체 운행 활성화 (로그인 허용)</span>
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex justify-between items-center pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleSaveSubstituteStaff('SAVE_ONLY')}
+                      className="px-3.5 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                    >
+                      설정 내용만 저장
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSubstituteModalBus(null)}
+                      className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                    >
+                      닫기
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex gap-2">
+                    {substituteForm.teacherIsActive ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSaveSubstituteStaff('RESTORE_TEACHER')}
+                        className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <span>🔙</span>
+                        <span>원래 지도교사님 복귀 (대체 종료)</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleSaveSubstituteStaff('ACTIVATE_TEACHER')}
+                        className="flex-1 py-3 px-4 bg-amber-600 hover:bg-amber-700 text-white font-black rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <span>🚀</span>
+                        <span>교사 휴식 처리 및 대체 교사 활성화</span>
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex justify-between items-center pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleSaveSubstituteStaff('SAVE_ONLY')}
+                      className="px-3.5 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                    >
+                      설정 내용만 저장
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSubstituteModalBus(null)}
+                      className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                    >
+                      닫기
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
