@@ -295,7 +295,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const [isClassesClosing, setIsClassesClosing] = useState(false);
   const [hasUnsavedClassChanges, setHasUnsavedClassChanges] = useState(false);
   const [isAuthClosing, setIsAuthClosing] = useState(false);
-  const [authTab, setAuthTab] = useState('STUDENT'); // 'STUDENT' | 'STAFF' | 'TEACHER'
+  const [authTab, setAuthTab] = useState('STUDENT'); // 'STUDENT' | 'STAFF' | 'TEACHER' | 'SUBSTITUTE'
   const [boardSelectedClass, setBoardSelectedClass] = useState('ALL');
   const [boardSearchKeyword, setBoardSearchKeyword] = useState('');
   const [isCreatingBoardPost, setIsCreatingBoardPost] = useState(false);
@@ -4232,6 +4232,36 @@ const parseKindergartenExcelSheet = (sheet) => {
                 </button>
               </div>
 
+              {/* 대체 기사 임시 계정 일괄 관리 바로가기 버튼 */}
+              <button
+                type="button"
+                onClick={() => {
+                  handleTabChange('auth');
+                  setAuthTab('SUBSTITUTE');
+                }}
+                className={`w-full py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-between border shadow-2xs cursor-pointer ${
+                  buses.some(b => b.isDriverResting || b.substituteDriver?.isActive)
+                    ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-amber-200'
+                    : 'bg-amber-50/80 hover:bg-amber-100/80 text-amber-900 border-amber-200/80'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-sm">📋</span>
+                  <span className="truncate">대체 기사 임시 계정 일괄 현황</span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {buses.some(b => b.isDriverResting || b.substituteDriver?.isActive) ? (
+                    <span className="bg-white text-amber-700 px-1.5 py-0.2 rounded-md text-[10px] font-black animate-pulse">
+                      운행 중 {buses.filter(b => b.isDriverResting || b.substituteDriver?.isActive).length}건
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-amber-700/80">
+                      총 {buses.length}호차 &gt;
+                    </span>
+                  )}
+                </div>
+              </button>
+
               {/* Integrated Zone Remapping Panel */}
               {isResettingZones && (
                 <div className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50/60 rounded-2xl border border-blue-200 shadow-xs space-y-3">
@@ -5475,6 +5505,36 @@ const parseKindergartenExcelSheet = (sheet) => {
                     </span>
                   </div>
                 </button>
+
+                <button 
+                  onClick={() => setAuthTab('SUBSTITUTE')} 
+                  className={`w-full p-3.5 rounded-2xl font-bold transition-all flex items-center justify-between text-left cursor-pointer ${
+                    authTab === 'SUBSTITUTE' 
+                      ? 'bg-amber-600 text-white shadow-md ring-2 ring-amber-400/30' 
+                      : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/70'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="min-w-0">
+                      <div className="text-sm font-bold truncate">대체 기사 임시 계정</div>
+                      <div className={`text-xs ${authTab === 'SUBSTITUTE' ? 'text-amber-100' : 'text-slate-500'} truncate`}>
+                        기사 휴식 및 대체 인력 일괄 관리
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                    {buses.some(b => b.isDriverResting || b.substituteDriver?.isActive) && (
+                      <span className="bg-amber-500 text-white text-xs font-black px-2 py-0.5 rounded-full animate-pulse shadow-xs">
+                        운행중 {buses.filter(b => b.isDriverResting || b.substituteDriver?.isActive).length}
+                      </span>
+                    )}
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-lg ${
+                      authTab === 'SUBSTITUTE' ? 'bg-amber-700/60 text-white' : 'bg-slate-200 text-slate-600'
+                    }`}>
+                      {buses.length}호차
+                    </span>
+                  </div>
+                </button>
               </div>
 
               {/* 하단 팁 */}
@@ -6227,6 +6287,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             refreshAllData={refreshAllData}
             handleGenerateAuthCode={handleGenerateAuthCode}
             handleUnlockUser={handleUnlockUser}
+            onOpenSubstituteModal={handleOpenSubstituteModal}
             isProcessing={isProcessing}
           />
         )}
