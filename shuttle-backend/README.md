@@ -45,6 +45,15 @@ $ docker run --name takeme-dev-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRE
 $ cp .env.development.example .env.development
 ```
 
+### 3. 기존 게시글 사진을 사진 보관함(MediaAsset)으로 동기화 마이그레이션
+기존 알림장 및 게시판에 업로드되었던 사진들을 사진 보관함(MediaAsset)으로 동기화하려면 다음 명령어를 실행합니다:
+```bash
+# shuttle-backend 디렉터리에서 실행
+$ npm run sync:board-media
+```
+* 이 작업은 중복 삽입을 방지하며, 아직 보관함에 등록되지 않은 게시글 사진들만 `sourceType`('NOTICE' 또는 'BOARD')과 함께 안전하게 마이그레이션합니다.
+
+
 내용 예시:
 ```env
 DB_HOST=localhost

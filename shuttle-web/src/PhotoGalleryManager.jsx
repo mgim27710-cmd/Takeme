@@ -18,10 +18,15 @@ export default function PhotoGalleryManager({
   const [filterTo, setFilterTo] = useState('');
   const [filterVehicleId, setFilterVehicleId] = useState('');
   const [filterClass, setFilterClass] = useState('');
+  const [filterSourceType, setFilterSourceType] = useState('');
   const [searchUploader, setSearchUploader] = useState('');
 
   // Selected Photo for Fullscreen Modal
   const [activePhoto, setActivePhoto] = useState(null);
+
+  // Multi-selection for batch download
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [isSelectMode, setIsSelectMode] = useState(false);
 
   const token = localStorage.getItem('takeme_token');
 
@@ -35,6 +40,7 @@ export default function PhotoGalleryManager({
       if (filterTo) params.append('to', filterTo);
       if (filterVehicleId) params.append('vehicleId', filterVehicleId);
       if (filterClass) params.append('className', filterClass);
+      if (filterSourceType) params.append('sourceType', filterSourceType);
 
       const res = await fetch(`${API_BASE_URL}/routing/media?${params.toString()}`, {
         headers: {
@@ -58,7 +64,7 @@ export default function PhotoGalleryManager({
 
   useEffect(() => {
     fetchPhotos();
-  }, [selectedAcademyId, filterFrom, filterTo, filterVehicleId, filterClass]);
+  }, [selectedAcademyId, filterFrom, filterTo, filterVehicleId, filterClass, filterSourceType]);
 
   // Real-time socket events
   useEffect(() => {
@@ -113,18 +119,43 @@ export default function PhotoGalleryManager({
 
   const handleDownload = (photo, e) => {
     if (e) e.stopPropagation();
-    if (!photo.url) {
-      alert('다운로드 링크를 찾을 수 없습니다.');
-      return;
-    }
+    const downloadUrl = `${API_BASE_URL}/routing/media/${photo.id}/download?token=${token}`;
     const link = document.createElement('a');
-    link.href = photo.url;
+    link.href = downloadUrl;
     link.download = photo.filename || `photo_${photo.id}.jpg`;
     link.target = '_blank';
     link.rel = 'noreferrer';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const toggleSelectPhoto = (id, e) => {
+    if (e) e.stopPropagation();
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleBatchDownload = async () => {
+    if (selectedIds.length === 0) {
+      alert('다운로드할 사진을 선택해주세요.');
+      return;
+    }
+    const selectedPhotos = photos.filter((p) => selectedIds.includes(p.id));
+    for (let i = 0; i < selectedPhotos.length; i++) {
+      const photo = selectedPhotos[i];
+      const downloadUrl = `${API_BASE_URL}/routing/media/${photo.id}/download?token=${token}`;
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = photo.filename || `photo_${photo.id}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      if (i < selectedPhotos.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+    }
   };
 
   const filteredPhotos = useMemo(() => {
@@ -260,6 +291,66 @@ export default function PhotoGalleryManager({
           </select>
         </div>
 
+        <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
+          <span>출처:</span>
+          <select
+            value={filterSourceType}
+            onChange={(e) => setFilterSourceType(e.target.value)}
+            className="px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+          >
+            <option value="">전체 출처</option>
+            <option value="GALLERY">보관함 업로드</option>
+            <option value="NOTICE">알림장</option>
+            <option value="BOARD">게시판</option>
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs">
+          <button
+            onClick={() => {
+              if (isSelectMode) {
+                setIsSelectMode(false);
+                setSelectedIds([]);
+              } else {
+                setIsSelectMode(true);
+              }
+            }}
+            className={`px-3 py-1.5 rounded-lg font-bold transition border ${
+              isSelectMode
+                ? 'bg-slate-800 text-white border-slate-800'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+            }`}
+          >
+            {isSelectMode ? '선택 취소' : '선택 모드'}
+          </button>
+          {isSelectMode && (
+            <>
+              <button
+                onClick={() => {
+                  if (selectedIds.length === filteredPhotos.length) {
+                    setSelectedIds([]);
+                  } else {
+                    setSelectedIds(filteredPhotos.map((p) => p.id));
+                  }
+                }}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 font-medium text-slate-600"
+              >
+                {selectedIds.length === filteredPhotos.length ? '전체 해제' : '전체 선택'}
+              </button>
+              <button
+                onClick={handleBatchDownload}
+                disabled={selectedIds.length === 0}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold shadow-xs transition flex items-center gap-1.5"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                {selectedIds.length}장 일괄 다운로드
+              </button>
+            </>
+          )}
+        </div>
+
         <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium ml-auto">
           <input
             type="text"
@@ -268,13 +359,14 @@ export default function PhotoGalleryManager({
             onChange={(e) => setSearchUploader(e.target.value)}
             className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs focus:ring-2 focus:ring-indigo-500 outline-none w-40"
           />
-          {(filterFrom || filterTo || filterVehicleId || filterClass || searchUploader) && (
+          {(filterFrom || filterTo || filterVehicleId || filterClass || filterSourceType || searchUploader) && (
             <button
               onClick={() => {
                 setFilterFrom('');
                 setFilterTo('');
                 setFilterVehicleId('');
                 setFilterClass('');
+                setFilterSourceType('');
                 setSearchUploader('');
               }}
               className="text-xs text-slate-400 hover:text-slate-600 underline"
@@ -336,6 +428,19 @@ export default function PhotoGalleryManager({
 
                   {/* Badges on top */}
                   <div className="absolute top-2 left-2 flex flex-wrap gap-1">
+                    {photo.sourceType === 'NOTICE' ? (
+                      <span className="px-2 py-0.5 rounded-md bg-amber-500/90 text-white text-[10px] font-bold backdrop-blur-xs">
+                        알림장
+                      </span>
+                    ) : photo.sourceType === 'BOARD' ? (
+                      <span className="px-2 py-0.5 rounded-md bg-sky-600/90 text-white text-[10px] font-bold backdrop-blur-xs">
+                        게시판
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-md bg-purple-600/90 text-white text-[10px] font-bold backdrop-blur-xs">
+                        보관함
+                      </span>
+                    )}
                     {photo.className && (
                       <span className="px-2 py-0.5 rounded-md bg-indigo-600/90 text-white text-[10px] font-bold backdrop-blur-xs">
                         {photo.className}
@@ -347,6 +452,20 @@ export default function PhotoGalleryManager({
                       </span>
                     )}
                   </div>
+
+                  {/* Multi-selection Checkbox */}
+                  {isSelectMode && (
+                    <div
+                      onClick={(e) => toggleSelectPhoto(photo.id, e)}
+                      className="absolute top-2 right-2 z-10 w-6 h-6 rounded-lg bg-white/90 border border-slate-300 flex items-center justify-center shadow-sm cursor-pointer"
+                    >
+                      {selectedIds.includes(photo.id) ? (
+                        <div className="w-4 h-4 rounded-md bg-indigo-600 flex items-center justify-center text-white text-xs font-bold">
+                          ✓
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
 
                   {/* Actions overlay */}
                   <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
@@ -402,9 +521,18 @@ export default function PhotoGalleryManager({
             {/* Modal Header */}
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
               <div>
-                <h3 className="font-bold text-slate-800 text-sm">
-                  {activePhoto.uploaderName || '교직원'} ({formatRole(activePhoto.uploaderRole)})
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-slate-800 text-sm">
+                    {activePhoto.uploaderName || '교직원'} ({formatRole(activePhoto.uploaderRole)})
+                  </h3>
+                  {activePhoto.sourceType === 'NOTICE' ? (
+                    <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-700 text-[10px] font-bold">알림장</span>
+                  ) : activePhoto.sourceType === 'BOARD' ? (
+                    <span className="px-2 py-0.5 rounded-md bg-sky-100 text-sky-700 text-[10px] font-bold">게시판</span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-md bg-purple-100 text-purple-700 text-[10px] font-bold">보관함</span>
+                  )}
+                </div>
                 <p className="text-xs text-slate-400">
                   {activePhoto.createdAt ? new Date(activePhoto.createdAt).toLocaleString('ko-KR') : ''}
                   {activePhoto.className && ` · ${activePhoto.className}`}

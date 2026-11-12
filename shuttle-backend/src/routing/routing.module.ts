@@ -19,6 +19,7 @@ import { BoardComment } from '../entities/board-comment.entity';
 import { AuditLog } from '../entities/audit-log.entity';
 import { Attendance } from '../entities/attendance.entity';
 import { AttendanceSubmission } from '../entities/attendance-submission.entity';
+import { MediaAsset } from '../entities/media-asset.entity';
 
 @Module({
   imports: [
@@ -27,7 +28,7 @@ import { AttendanceSubmission } from '../entities/attendance-submission.entity';
       OperationLog, ParentMessage, ScheduleOverride,
       AcademyHoliday, Notification, PickupPoint,
       BoardPost, BoardComment, AuditLog,
-      Attendance, AttendanceSubmission
+      Attendance, AttendanceSubmission, MediaAsset
     ]),
     HttpModule
   ],

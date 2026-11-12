@@ -972,12 +972,14 @@ class ApiService {
     String? to,
     int? vehicleId,
     String? className,
+    String? sourceType,
   }) async {
     final queryParams = <String, String>{};
     if (from != null) queryParams['from'] = from;
     if (to != null) queryParams['to'] = to;
     if (vehicleId != null) queryParams['vehicleId'] = vehicleId.toString();
     if (className != null) queryParams['className'] = className;
+    if (sourceType != null && sourceType.isNotEmpty) queryParams['sourceType'] = sourceType;
 
     final uri = Uri.parse('${AppConfig.apiHost}/routing/media').replace(queryParameters: queryParams.isEmpty ? null : queryParams);
     final res = await getWithAuth(uri);

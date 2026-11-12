@@ -32,6 +32,7 @@ import {
 import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE, kstDateString, isValidDateString } from '../utils/school.util';
 import { Attendance, AttendanceStatus } from '../entities/attendance.entity';
 import { AttendanceSubmission } from '../entities/attendance-submission.entity';
+import { MediaAsset } from '../entities/media-asset.entity';
 
 @Injectable()
 export class RoutingService {
@@ -67,6 +68,8 @@ export class RoutingService {
     private attendanceRepository: Repository<Attendance>,
     @InjectRepository(AttendanceSubmission)
     private submissionRepository: Repository<AttendanceSubmission>,
+    @InjectRepository(MediaAsset)
+    private mediaAssetRepository: Repository<MediaAsset>,
     private httpService: HttpService,
     private configService: ConfigService,
   ) {}
@@ -2235,6 +2238,33 @@ export class RoutingService {
       likedUserIds: [],
     } as any);
     const saved = (await this.boardPostRepository.save(post)) as unknown as BoardPost;
+
+    const rawRefs: string[] = [];
+    if (saved.imageUrl) rawRefs.push(saved.imageUrl);
+    if (Array.isArray(saved.images)) {
+      for (const img of saved.images) {
+        if (img && !rawRefs.includes(img)) rawRefs.push(img);
+      }
+    }
+
+    if (rawRefs.length > 0 && academy?.id) {
+      const sourceType = saved.targetClass ? 'NOTICE' : 'BOARD';
+      for (const ref of rawRefs) {
+        const asset = this.mediaAssetRepository.create({
+          academyId: academy.id,
+          uploaderId: userId || 0,
+          uploaderName: body.authorName || '작성자',
+          uploaderRole: authorRole,
+          storageKey: ref,
+          filename: ref.split('/').pop() || 'photo.jpg',
+          sourceType,
+          postId: saved.id,
+          className: saved.targetClass || null,
+        });
+        await this.mediaAssetRepository.save(asset);
+      }
+    }
+
     if (academy?.id) {
       this.notifyRouteUpdated(academy.id, '새 알림장이 등록되었습니다.');
     }
@@ -2271,6 +2301,10 @@ export class RoutingService {
     const isAdmin = userRole === 'ADMIN' || userRole === 'ACADEMY_ADMIN';
     if (!isAdmin && userId && post.authorUserId && post.authorUserId !== userId) {
       throw new ForbiddenException('작성자 본인 또는 기관 관리자만 삭제할 수 있습니다.');
+    }
+    const relatedMedia = await this.mediaAssetRepository.find({ where: { postId: id } });
+    if (relatedMedia.length > 0) {
+      await this.mediaAssetRepository.remove(relatedMedia);
     }
     await this.boardPostRepository.delete(id);
     return { success: true };

@@ -1,6 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:http/http.dart' as http;
+import '../../config.dart';
 import '../../services/api_service.dart';
 
 class PhotoGalleryScreen extends StatefulWidget {
@@ -23,9 +27,14 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
 
   bool _isLoading = true;
   bool _isUploading = false;
+  bool _isSaving = false;
   String? _errorMessage;
 
   List<dynamic> _photos = [];
+
+  String _selectedSource = ''; // '' 전체, 'GALLERY' 보관함, 'NOTICE' 알림장, 'BOARD' 게시판
+  bool _isSelectMode = false;
+  final Set<int> _selectedIds = {};
 
   @override
   void initState() {
@@ -43,11 +52,13 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
       final res = await _api.getMediaAssets(
         vehicleId: widget.initialVehicleId,
         className: widget.initialClassName,
+        sourceType: _selectedSource.isNotEmpty ? _selectedSource : null,
       );
       if (mounted) {
         setState(() {
           _photos = res;
           _isLoading = false;
+          _selectedIds.clear();
         });
       }
     } catch (e) {
@@ -245,6 +256,87 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
     }
   }
 
+  Future<bool> _savePhotoToDevice(dynamic photo, {bool showToast = true}) async {
+    try {
+      final token = _api.token ?? '';
+      final url = Uri.parse('${AppConfig.apiHost}/routing/media/${photo['id']}/download?token=$token');
+      final res = await http.get(url);
+      if (res.statusCode != 200) {
+        throw Exception('다운로드 실패 (코드: ${res.statusCode})');
+      }
+
+      Directory? baseDir;
+      if (Platform.isAndroid) {
+        final extDir = Directory('/storage/emulated/0/Pictures/TakeMe');
+        if (await extDir.exists()) {
+          baseDir = extDir;
+        } else {
+          try {
+            await extDir.create(recursive: true);
+            baseDir = extDir;
+          } catch (_) {
+            baseDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+          }
+        }
+      } else {
+        baseDir = await getApplicationDocumentsDirectory();
+      }
+
+      final filename = photo['filename'] ?? 'takeme_${photo['id']}.jpg';
+      final file = File('${baseDir.path}/$filename');
+      await file.writeAsBytes(res.bodyBytes);
+
+      if (mounted && showToast) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('사진이 저장되었습니다: ${file.path}'),
+            backgroundColor: const Color(0xFF16A34A),
+          ),
+        );
+      }
+      return true;
+    } catch (e) {
+      if (mounted && showToast) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('사진 저장 실패: $e'),
+            backgroundColor: const Color(0xFFDC2626),
+          ),
+        );
+      }
+      return false;
+    }
+  }
+
+  Future<void> _saveSelectedPhotosToDevice() async {
+    if (_selectedIds.isEmpty) return;
+    setState(() => _isSaving = true);
+    int savedCount = 0;
+    try {
+      for (final id in _selectedIds) {
+        final photo = _photos.firstWhere((p) => p['id'] == id, orElse: () => null);
+        if (photo != null) {
+          final ok = await _savePhotoToDevice(photo, showToast: false);
+          if (ok) savedCount++;
+        }
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$savedCount장의 사진이 저장되었습니다.'),
+            backgroundColor: const Color(0xFF16A34A),
+          ),
+        );
+        setState(() {
+          _isSelectMode = false;
+          _selectedIds.clear();
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
   void _openFullScreenViewer(dynamic photo) {
     final currentUserId = _api.currentUser?.id;
     final isOwner = photo['uploaderId'] == currentUserId;
@@ -263,9 +355,34 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  photo['uploaderName'] ?? '교직원',
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: photo['sourceType'] == 'NOTICE'
+                            ? const Color(0xFFF59E0B)
+                            : photo['sourceType'] == 'BOARD'
+                                ? const Color(0xFF0284C7)
+                                : const Color(0xFF7C3AED),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        photo['sourceType'] == 'NOTICE'
+                            ? '알림장'
+                            : photo['sourceType'] == 'BOARD'
+                                ? '게시판'
+                                : '보관함',
+                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      photo['uploaderName'] ?? '교직원',
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                  ],
                 ),
                 Text(
                   _formatDate(photo['createdAt']),
@@ -274,6 +391,11 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
               ],
             ),
             actions: [
+              IconButton(
+                icon: const Icon(Icons.download_rounded, color: Colors.white),
+                tooltip: '사진 저장',
+                onPressed: () => _savePhotoToDevice(photo),
+              ),
               if (canDelete)
                 IconButton(
                   icon: const Icon(Icons.delete_outline, color: Color(0xFFEF4444)),
@@ -342,6 +464,50 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
     return map;
   }
 
+  Widget _buildSourceChips() {
+    final chips = [
+      {'label': '전체', 'value': ''},
+      {'label': '보관함 업로드', 'value': 'GALLERY'},
+      {'label': '알림장', 'value': 'NOTICE'},
+      {'label': '게시판', 'value': 'BOARD'},
+    ];
+
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: chips.map((c) {
+            final isSelected = _selectedSource == c['value'];
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(
+                  c['label']!,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    color: isSelected ? Colors.white : const Color(0xFF475569),
+                  ),
+                ),
+                selected: isSelected,
+                selectedColor: const Color(0xFF2563EB),
+                backgroundColor: const Color(0xFFF1F5F9),
+                onSelected: (val) {
+                  if (val) {
+                    setState(() => _selectedSource = c['value']!);
+                    _loadPhotos();
+                  }
+                },
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentUserId = _api.currentUser?.id;
@@ -350,214 +516,305 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text(
-          '사진 보관함 (클라우드)',
-          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
+        title: Text(
+          _isSelectMode ? '${_selectedIds.length}장 선택됨' : '사진 보관함 (클라우드)',
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
         ),
         backgroundColor: Colors.white,
         elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh, color: Color(0xFF64748B)),
-            tooltip: '새로고침',
-            onPressed: _loadPhotos,
+            icon: Icon(_isSelectMode ? Icons.close : Icons.checklist_rounded, color: const Color(0xFF475569)),
+            tooltip: _isSelectMode ? '선택 취소' : '선택 모드',
+            onPressed: () {
+              setState(() {
+                _isSelectMode = !_isSelectMode;
+                _selectedIds.clear();
+              });
+            },
           ),
-          IconButton(
-            icon: const Icon(Icons.add_a_photo, color: Color(0xFF2563EB)),
-            tooltip: '사진 추가',
-            onPressed: _isUploading ? null : _showUploadSourceSheet,
-          ),
+          if (!_isSelectMode) ...[
+            IconButton(
+              icon: const Icon(Icons.refresh, color: Color(0xFF64748B)),
+              tooltip: '새로고침',
+              onPressed: _loadPhotos,
+            ),
+            IconButton(
+              icon: const Icon(Icons.add_a_photo, color: Color(0xFF2563EB)),
+              tooltip: '사진 추가',
+              onPressed: _isUploading ? null : _showUploadSourceSheet,
+            ),
+          ],
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(color: const Color(0xFFF1F5F9), height: 1),
         ),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)))
-          : _errorMessage != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.error_outline, size: 40, color: Color(0xFFEF4444)),
-                      const SizedBox(height: 12),
-                      Text(_errorMessage!, style: const TextStyle(color: Color(0xFF64748B))),
-                      const SizedBox(height: 12),
-                      ElevatedButton(
-                        onPressed: _loadPhotos,
-                        child: const Text('다시 시도'),
-                      ),
-                    ],
-                  ),
-                )
-              : _photos.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Container(
-                            width: 72,
-                            height: 72,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFEFF6FF),
-                              borderRadius: BorderRadius.circular(36),
+      body: Column(
+        children: [
+          _buildSourceChips(),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)))
+                : _errorMessage != null
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.error_outline, size: 40, color: Color(0xFFEF4444)),
+                            const SizedBox(height: 12),
+                            Text(_errorMessage!, style: const TextStyle(color: Color(0xFF64748B))),
+                            const SizedBox(height: 12),
+                            ElevatedButton(
+                              onPressed: _loadPhotos,
+                              child: const Text('다시 시도'),
                             ),
-                            child: const Icon(Icons.cloud_outlined, size: 36, color: Color(0xFF2563EB)),
-                          ),
-                          const SizedBox(height: 16),
-                          const Text(
-                            '보관함에 저장된 사진이 없습니다.',
-                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
-                          ),
-                          const SizedBox(height: 6),
-                          const Text(
-                            '현장 사진을 안전하게 클라우드에 보관하고\n관리자 웹과 실시간으로 공유하세요.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-                          ),
-                          const SizedBox(height: 20),
-                          ElevatedButton.icon(
-                            onPressed: _showUploadSourceSheet,
-                            icon: const Icon(Icons.add_a_photo, size: 18),
-                            label: const Text('사진 올리기'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF2563EB),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : Stack(
-                      children: [
-                        RefreshIndicator(
-                          onRefresh: _loadPhotos,
-                          color: const Color(0xFF2563EB),
-                          child: ListView.builder(
-                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
-                            itemCount: grouped.keys.length,
-                            itemBuilder: (ctx, idx) {
-                              final dateKey = grouped.keys.elementAt(idx);
-                              final datePhotos = grouped[dateKey]!;
-
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 8),
-                                    child: Row(
-                                      children: [
-                                        const Icon(Icons.calendar_today, size: 14, color: Color(0xFF64748B)),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          dateKey,
-                                          style: const TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w800,
-                                            color: Color(0xFF334155),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          '(${datePhotos.length})',
-                                          style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8), fontWeight: FontWeight.bold),
-                                        ),
-                                      ],
-                                    ),
+                          ],
+                        ),
+                      )
+                    : _photos.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  width: 72,
+                                  height: 72,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFEFF6FF),
+                                    borderRadius: BorderRadius.circular(36),
                                   ),
-                                  GridView.builder(
-                                    shrinkWrap: true,
-                                    physics: const NeverScrollableScrollPhysics(),
-                                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                                      crossAxisCount: 3,
-                                      crossAxisSpacing: 8,
-                                      mainAxisSpacing: 8,
-                                      childAspectRatio: 1,
-                                    ),
-                                    itemCount: datePhotos.length,
-                                    itemBuilder: (context, pIdx) {
-                                      final photo = datePhotos[pIdx];
-                                      final isMyPhoto = photo['uploaderId'] == currentUserId;
+                                  child: const Icon(Icons.cloud_outlined, size: 36, color: Color(0xFF2563EB)),
+                                ),
+                                const SizedBox(height: 16),
+                                const Text(
+                                  '보관함에 저장된 사진이 없습니다.',
+                                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                                ),
+                                const SizedBox(height: 6),
+                                const Text(
+                                  '현장 사진을 안전하게 클라우드에 보관하고\n관리자 웹과 실시간으로 공유하세요.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                                ),
+                                const SizedBox(height: 20),
+                                ElevatedButton.icon(
+                                  onPressed: _showUploadSourceSheet,
+                                  icon: const Icon(Icons.add_a_photo, size: 18),
+                                  label: const Text('사진 올리기'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF2563EB),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : Stack(
+                            children: [
+                              RefreshIndicator(
+                                onRefresh: _loadPhotos,
+                                color: const Color(0xFF2563EB),
+                                child: ListView.builder(
+                                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
+                                  itemCount: grouped.keys.length,
+                                  itemBuilder: (ctx, idx) {
+                                    final dateKey = grouped.keys.elementAt(idx);
+                                    final datePhotos = grouped[dateKey]!;
 
-                                      return GestureDetector(
-                                        onTap: () => _openFullScreenViewer(photo),
-                                        child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(10),
-                                          child: Stack(
-                                            fit: StackFit.expand,
+                                    return Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(vertical: 8),
+                                          child: Row(
                                             children: [
-                                              photo['url'] != null && photo['url'].toString().isNotEmpty
-                                                  ? Image.network(
-                                                      photo['url'],
-                                                      fit: BoxFit.cover,
-                                                      errorBuilder: (ctx, err, stack) => Container(
-                                                        color: const Color(0xFFE2E8F0),
-                                                        child: const Icon(Icons.broken_image, color: Color(0xFF94A3B8)),
-                                                      ),
-                                                    )
-                                                  : Container(
-                                                      color: const Color(0xFFE2E8F0),
-                                                      child: const Icon(Icons.image, color: Color(0xFF94A3B8)),
-                                                    ),
-                                              if (isMyPhoto)
-                                                Positioned(
-                                                  top: 4,
-                                                  right: 4,
-                                                  child: Container(
-                                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                                    decoration: BoxDecoration(
-                                                      color: const Color(0xD92563EB),
-                                                      borderRadius: BorderRadius.circular(4),
-                                                    ),
-                                                    child: const Text(
-                                                      '내 사진',
-                                                      style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
-                                                    ),
-                                                  ),
+                                              const Icon(Icons.calendar_today, size: 14, color: Color(0xFF64748B)),
+                                              const SizedBox(width: 6),
+                                              Text(
+                                                dateKey,
+                                                style: const TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: Color(0xFF334155),
                                                 ),
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Text(
+                                                '(${datePhotos.length})',
+                                                style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8), fontWeight: FontWeight.bold),
+                                              ),
                                             ],
                                           ),
                                         ),
-                                      );
-                                    },
-                                  ),
-                                  const SizedBox(height: 12),
-                                ],
-                              );
-                            },
-                          ),
-                        ),
-                        if (_isUploading)
-                          Container(
-                            color: const Color(0x4D000000),
-                            child: const Center(
-                              child: Card(
-                                child: Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      CircularProgressIndicator(color: Color(0xFF2563EB)),
-                                      SizedBox(height: 14),
-                                      Text('클라우드에 사진 업로드 중...', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                                    ],
-                                  ),
+                                        GridView.builder(
+                                          shrinkWrap: true,
+                                          physics: const NeverScrollableScrollPhysics(),
+                                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                            crossAxisCount: 3,
+                                            crossAxisSpacing: 8,
+                                            mainAxisSpacing: 8,
+                                            childAspectRatio: 1,
+                                          ),
+                                          itemCount: datePhotos.length,
+                                          itemBuilder: (context, pIdx) {
+                                            final photo = datePhotos[pIdx];
+                                            final isMyPhoto = photo['uploaderId'] == currentUserId;
+                                            final photoId = photo['id'] as int? ?? 0;
+                                            final isSelected = _selectedIds.contains(photoId);
+
+                                            return GestureDetector(
+                                              onTap: () {
+                                                if (_isSelectMode) {
+                                                  setState(() {
+                                                    if (isSelected) {
+                                                      _selectedIds.remove(photoId);
+                                                    } else {
+                                                      _selectedIds.add(photoId);
+                                                    }
+                                                  });
+                                                } else {
+                                                  _openFullScreenViewer(photo);
+                                                }
+                                              },
+                                              child: ClipRRect(
+                                                borderRadius: BorderRadius.circular(10),
+                                                child: Stack(
+                                                  fit: StackFit.expand,
+                                                  children: [
+                                                    photo['url'] != null && photo['url'].toString().isNotEmpty
+                                                        ? Image.network(
+                                                            photo['url'],
+                                                            fit: BoxFit.cover,
+                                                            errorBuilder: (ctx, err, stack) => Container(
+                                                              color: const Color(0xFFE2E8F0),
+                                                              child: const Icon(Icons.broken_image, color: Color(0xFF94A3B8)),
+                                                            ),
+                                                          )
+                                                        : Container(
+                                                            color: const Color(0xFFE2E8F0),
+                                                            child: const Icon(Icons.image, color: Color(0xFF94A3B8)),
+                                                          ),
+
+                                                    // Source Badge (Top-Left)
+                                                    Positioned(
+                                                      top: 4,
+                                                      left: 4,
+                                                      child: Container(
+                                                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                                        decoration: BoxDecoration(
+                                                          color: photo['sourceType'] == 'NOTICE'
+                                                              ? const Color(0xE6F59E0B)
+                                                              : photo['sourceType'] == 'BOARD'
+                                                                  ? const Color(0xE60284C7)
+                                                                  : const Color(0xE67C3AED),
+                                                          borderRadius: BorderRadius.circular(4),
+                                                        ),
+                                                        child: Text(
+                                                          photo['sourceType'] == 'NOTICE'
+                                                              ? '알림장'
+                                                              : photo['sourceType'] == 'BOARD'
+                                                                  ? '게시판'
+                                                                  : '보관함',
+                                                          style: const TextStyle(color: Colors.white, fontSize: 8.5, fontWeight: FontWeight.bold),
+                                                        ),
+                                                      ),
+                                                    ),
+
+                                                    // Top-Right: Selection Checkbox or My Photo Badge
+                                                    if (_isSelectMode)
+                                                      Positioned(
+                                                        top: 4,
+                                                        right: 4,
+                                                        child: Container(
+                                                          width: 22,
+                                                          height: 22,
+                                                          decoration: BoxDecoration(
+                                                            color: isSelected ? const Color(0xFF2563EB) : const Color(0xCCFFFFFF),
+                                                            shape: BoxShape.circle,
+                                                            border: Border.all(
+                                                              color: isSelected ? const Color(0xFF2563EB) : const Color(0xFFCBD5E1),
+                                                              width: 2,
+                                                            ),
+                                                          ),
+                                                          child: isSelected
+                                                              ? const Icon(Icons.check, size: 14, color: Colors.white)
+                                                              : null,
+                                                        ),
+                                                      )
+                                                    else if (isMyPhoto)
+                                                      Positioned(
+                                                        top: 4,
+                                                        right: 4,
+                                                        child: Container(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                                          decoration: BoxDecoration(
+                                                            color: const Color(0xD92563EB),
+                                                            borderRadius: BorderRadius.circular(4),
+                                                          ),
+                                                          child: const Text(
+                                                            '내 사진',
+                                                            style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                  ],
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                        const SizedBox(height: 12),
+                                      ],
+                                    );
+                                  },
                                 ),
                               ),
-                            ),
+                              if (_isUploading || _isSaving)
+                                Container(
+                                  color: const Color(0x4D000000),
+                                  child: Center(
+                                    child: Card(
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const CircularProgressIndicator(color: Color(0xFF2563EB)),
+                                            const SizedBox(height: 14),
+                                            Text(
+                                              _isSaving ? '스마트폰 갤러리에 저장 중...' : '클라우드에 사진 업로드 중...',
+                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
-                      ],
-                    ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _isUploading ? null : _showUploadSourceSheet,
-        backgroundColor: const Color(0xFF2563EB),
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.add_a_photo),
-        label: const Text('사진 올리기', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
       ),
+      floatingActionButton: _isSelectMode
+          ? FloatingActionButton.extended(
+              onPressed: _selectedIds.isEmpty || _isSaving ? null : _saveSelectedPhotosToDevice,
+              backgroundColor: const Color(0xFF16A34A),
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.download_rounded),
+              label: Text('${_selectedIds.length}장 스마트폰에 저장', style: const TextStyle(fontWeight: FontWeight.bold)),
+            )
+          : FloatingActionButton.extended(
+              onPressed: _isUploading ? null : _showUploadSourceSheet,
+              backgroundColor: const Color(0xFF2563EB),
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add_a_photo),
+              label: const Text('사진 올리기', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
     );
   }
 }
