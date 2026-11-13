@@ -262,10 +262,11 @@ export class RoutingController {
     @Query('visibility') visibility?: string,
     @Query('targetClass') targetClass?: string,
     @Query('search') search?: string,
+    @Query('postType') postType?: string,
   ) {
     const academyId = academyIdHeader ? Number(academyIdHeader) : (academyIdQuery ? Number(academyIdQuery) : undefined);
     const userId = userIdHeader ? Number(userIdHeader) : undefined;
-    return this.routingService.getBoardPosts({ academyId, userId, visibility, targetClass, search });
+    return this.routingService.getBoardPosts({ academyId, userId, visibility, targetClass, search, postType });
   }
 
   @Get('board/posts/:id')

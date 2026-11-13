@@ -41,6 +41,32 @@ export class MeController {
     }
     if (body.notifyBoardPost !== undefined) {
       user.notifyBoardPost = !!body.notifyBoardPost;
+      if (body.notifyNotice === undefined) {
+        user.notifyNotice = !!body.notifyBoardPost;
+        updated.notifyNotice = !!body.notifyBoardPost;
+        updated.notice = !!body.notifyBoardPost;
+      }
+      if (body.notifyPost === undefined) {
+        user.notifyPost = !!body.notifyBoardPost;
+        updated.notifyPost = !!body.notifyBoardPost;
+        updated.post = !!body.notifyBoardPost;
+      }
+    }
+    if (body.notifyNotice !== undefined) {
+      user.notifyNotice = !!body.notifyNotice;
+      updated.notice = !!body.notifyNotice;
+    }
+    if (body.notice !== undefined) {
+      user.notifyNotice = !!body.notice;
+      updated.notifyNotice = !!body.notice;
+    }
+    if (body.notifyPost !== undefined) {
+      user.notifyPost = !!body.notifyPost;
+      updated.post = !!body.notifyPost;
+    }
+    if (body.post !== undefined) {
+      user.notifyPost = !!body.post;
+      updated.notifyPost = !!body.post;
     }
 
     await this.userRepository.save(user);

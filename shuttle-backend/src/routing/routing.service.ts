@@ -2110,8 +2110,9 @@ export class RoutingService {
     visibility?: string;
     targetClass?: string;
     search?: string;
+    postType?: string;
   }) {
-    const { academyId, userId, visibility, targetClass, search } = params;
+    const { academyId, userId, visibility, targetClass, search, postType } = params;
     const academy = await this.getAcademy(academyId, userId);
 
     const qb = this.boardPostRepository.createQueryBuilder('post')
@@ -2123,6 +2124,10 @@ export class RoutingService {
       qb.where('post.academyId = :academyId', { academyId: academy.id });
     } else {
       qb.where('1 = 0');
+    }
+
+    if (postType && postType.trim()) {
+      qb.andWhere('post.postType = :postType', { postType: postType.trim() });
     }
 
     if (visibility && visibility !== 'ALL_INCL') {
@@ -2205,11 +2210,13 @@ export class RoutingService {
     authorRole?: string;
     visibility?: string;
     targetClass?: string;
+    postType?: string;
     academyId?: number;
   }, academyId?: number, userId?: number) {
     const academy = await this.getAcademy(body.academyId || academyId, userId);
     let targetClass = body.targetClass || null;
     let authorRole = body.authorRole || 'ADMIN';
+    const postType = body.postType === 'NOTICE' ? 'NOTICE' : 'POST';
 
     if (userId) {
       const callingUser = await this.userRepository.findOne({ where: { id: userId } });
@@ -2225,6 +2232,7 @@ export class RoutingService {
     const post = this.boardPostRepository.create({
       title: body.title,
       content: body.content,
+      postType,
       imageUrl: toStoredMediaRef(body.imageUrl) || null,
       images: toStoredMediaRefs(body.images),
       authorName: body.authorName || '기관 관리자',
@@ -2248,7 +2256,7 @@ export class RoutingService {
     }
 
     if (rawRefs.length > 0 && academy?.id) {
-      const sourceType = saved.targetClass ? 'NOTICE' : 'BOARD';
+      const sourceType = saved.postType === 'NOTICE' ? 'NOTICE' : 'BOARD';
       for (const ref of rawRefs) {
         const asset = this.mediaAssetRepository.create({
           academyId: academy.id,
@@ -2266,7 +2274,8 @@ export class RoutingService {
     }
 
     if (academy?.id) {
-      this.notifyRouteUpdated(academy.id, '새 알림장이 등록되었습니다.');
+      const alertMsg = saved.postType === 'NOTICE' ? '새 알림장이 등록되었습니다.' : '새 게시물이 등록되었습니다.';
+      this.notifyRouteUpdated(academy.id, alertMsg);
     }
     return this.hydratePostMedia(saved);
   }
@@ -2278,6 +2287,7 @@ export class RoutingService {
     images?: string[];
     visibility?: string;
     targetClass?: string;
+    postType?: string;
   }, userId?: number, userRole?: string) {
     const post = await this.boardPostRepository.findOne({ where: { id } });
     if (!post) throw new BadRequestException('게시글을 찾을 수 없습니다.');
@@ -2291,6 +2301,13 @@ export class RoutingService {
     if (body.images !== undefined) post.images = toStoredMediaRefs(body.images);
     if (body.visibility !== undefined) post.visibility = body.visibility;
     if (body.targetClass !== undefined) post.targetClass = body.targetClass;
+    if (body.postType !== undefined) {
+      post.postType = body.postType === 'NOTICE' ? 'NOTICE' : 'POST';
+      await this.mediaAssetRepository.update(
+        { postId: post.id },
+        { sourceType: post.postType === 'NOTICE' ? 'NOTICE' : 'BOARD' }
+      );
+    }
     const saved = (await this.boardPostRepository.save(post)) as unknown as BoardPost;
     return this.hydratePostMedia(saved);
   }

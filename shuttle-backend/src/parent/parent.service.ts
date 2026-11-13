@@ -17,6 +17,7 @@ import { PickupPoint } from '../entities/pickup-point.entity';
 import { BoardPost } from '../entities/board-post.entity';
 import { getStudentClassName } from '../utils/school.util';
 import { resolveMediaRef, resolveMediaRefs } from '../utils/s3.util';
+import { isNotificationEnabled, getUserNotificationSettings } from '../utils/notification.util';
 import { TeacherService } from '../teacher/teacher.service';
 
 @Injectable()
@@ -249,9 +250,9 @@ export class ParentService {
       });
     }
 
-    // 3. New Board Posts (새 알림장 글)
+    // 3. New Board Posts / Notices (새 알림장 / 새 게시물)
     const academyId = student?.academy?.id || user.academyId;
-    if (academyId && user.notifyBoardPost !== false && user.notificationSettings?.notifyBoardPost !== false) {
+    if (academyId) {
       const className = student ? getStudentClassName(student) : null;
       const postQb = this.boardPostRepository.createQueryBuilder('post')
         .where('post.academyId = :aid', { aid: academyId });
@@ -262,16 +263,23 @@ export class ParentService {
         postQb.andWhere('post.visibility = :vAll', { vAll: 'ALL' });
       }
 
-      const posts = await postQb.orderBy('post.createdAt', 'DESC').take(15).getMany();
+      const posts = await postQb.orderBy('post.createdAt', 'DESC').take(25).getMany();
       for (const p of posts) {
+        const isNotice = p.postType === 'NOTICE';
+        if (isNotice) {
+          if (!isNotificationEnabled(user, 'notice')) continue;
+        } else {
+          if (!isNotificationEnabled(user, 'post')) continue;
+        }
+
         const key = `p_${p.id}`;
         const preview = p.content ? (p.content.length > 50 ? p.content.slice(0, 50) + '...' : p.content) : p.title;
         items.push({
           id: p.id,
           key,
-          title: `[새 알림장] ${p.title}`,
+          title: isNotice ? `[새 알림장] ${p.title}` : `[새 게시물] ${p.title}`,
           message: preview,
-          type: 'BOARD',
+          type: isNotice ? 'NOTICE' : 'POST',
           isRead: readKeys.has(key),
           createdAt: p.createdAt,
         });
@@ -312,39 +320,54 @@ export class ParentService {
   async getNotificationSettings(email: string) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
-    const s = user.notificationSettings || {};
-    return {
-      all: s.all ?? true,
-      notifyShuttleOperation: s.notifyShuttleOperation ?? (user.notifyShuttleOperation !== false),
-      notifyBoardPost: s.notifyBoardPost ?? (user.notifyBoardPost !== false),
-      change_request: s.change_request ?? true,
-      chat: s.chat ?? true,
-      notice: s.notice ?? true,
-    };
+    return getUserNotificationSettings(user);
   }
 
   async updateNotificationSettings(email: string, settings: Record<string, boolean>) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
     const current = user.notificationSettings || {};
-    user.notificationSettings = { ...current, ...settings };
+    const updated = { ...current, ...settings };
+
+    // 기존 notifyBoardPost 설정 시 notifyNotice, notifyPost 둘 다에 반영
+    if (settings.notifyBoardPost !== undefined) {
+      user.notifyBoardPost = !!settings.notifyBoardPost;
+      if (settings.notifyNotice === undefined) {
+        user.notifyNotice = !!settings.notifyBoardPost;
+        updated.notifyNotice = !!settings.notifyBoardPost;
+        updated.notice = !!settings.notifyBoardPost;
+      }
+      if (settings.notifyPost === undefined) {
+        user.notifyPost = !!settings.notifyBoardPost;
+        updated.notifyPost = !!settings.notifyBoardPost;
+        updated.post = !!settings.notifyBoardPost;
+      }
+    }
+    if (settings.notifyNotice !== undefined) {
+      user.notifyNotice = !!settings.notifyNotice;
+      updated.notice = !!settings.notifyNotice;
+    }
+    if (settings.notice !== undefined) {
+      user.notifyNotice = !!settings.notice;
+      updated.notifyNotice = !!settings.notice;
+    }
+    if (settings.notifyPost !== undefined) {
+      user.notifyPost = !!settings.notifyPost;
+      updated.post = !!settings.notifyPost;
+    }
+    if (settings.post !== undefined) {
+      user.notifyPost = !!settings.post;
+      updated.notifyPost = !!settings.post;
+    }
     if (settings.notifyShuttleOperation !== undefined) {
       user.notifyShuttleOperation = !!settings.notifyShuttleOperation;
     }
-    if (settings.notifyBoardPost !== undefined) {
-      user.notifyBoardPost = !!settings.notifyBoardPost;
-    }
+
+    user.notificationSettings = updated;
     await this.userRepository.save(user);
     return {
       success: true,
-      settings: {
-        all: user.notificationSettings.all ?? true,
-        notifyShuttleOperation: user.notifyShuttleOperation !== false,
-        notifyBoardPost: user.notifyBoardPost !== false,
-        change_request: user.notificationSettings.change_request ?? true,
-        chat: user.notificationSettings.chat ?? true,
-        notice: user.notificationSettings.notice ?? true,
-      },
+      settings: getUserNotificationSettings(user),
     };
   }
 
