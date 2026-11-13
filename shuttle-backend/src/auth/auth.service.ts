@@ -250,14 +250,43 @@ export class AuthService {
     
     // 교수님 평가/테스트용 유치원 관리자 계정
     const isProfessorTestAccount = (cleanEmail === 'professor@takeme.com');
-    if (!user && (cleanEmail === 'kdu2224capstone@gmail.com' || cleanEmail === '2224kducapstone@gmail.com' || isProfessorTestAccount)) {
-      user = await this.usersRepository.findOne({
-        where: [
-          { email: 'kdu2224capstone@gmail.com' },
-          { email: '2224kducapstone@gmail.com' },
-          { role: UserRole.ACADEMY_ADMIN },
-        ],
-      });
+    const isTeacherTest = (cleanEmail === 'teacher@takeme.com' || cleanEmail === 'teacher_prof@takeme.com');
+    const isDriverTest = (cleanEmail === 'driver@takeme.com' || cleanEmail === 'driver_prof@takeme.com');
+    const isParentTest = (cleanEmail === 'parent@takeme.com' || cleanEmail === 'parent_prof@takeme.com');
+
+    if (!user) {
+      if (cleanEmail === 'kdu2224capstone@gmail.com' || cleanEmail === '2224kducapstone@gmail.com' || isProfessorTestAccount) {
+        user = await this.usersRepository.findOne({
+          where: [
+            { email: 'kdu2224capstone@gmail.com' },
+            { email: '2224kducapstone@gmail.com' },
+            { role: UserRole.ACADEMY_ADMIN },
+          ],
+        });
+      } else if (isTeacherTest) {
+        user = await this.usersRepository.findOne({
+          where: [
+            { email: 'teacher@takeme.com' },
+            { role: UserRole.TEACHER },
+            { role: UserRole.HOMEROOM_TEACHER },
+            { role: UserRole.SHUTTLE_TEACHER },
+          ],
+        });
+      } else if (isDriverTest) {
+        user = await this.usersRepository.findOne({
+          where: [
+            { email: 'driver@takeme.com' },
+            { role: UserRole.DRIVER },
+          ],
+        });
+      } else if (isParentTest) {
+        user = await this.usersRepository.findOne({
+          where: [
+            { email: 'parent@takeme.com' },
+            { role: UserRole.PARENT },
+          ],
+        });
+      }
     }
 
     if (!user) {
@@ -266,7 +295,7 @@ export class AuthService {
 
     // 1. 계정 잠김 확인
     if (user.isLocked) {
-      if (isProfessorTestAccount) {
+      if (isProfessorTestAccount || isTeacherTest || isDriverTest || isParentTest) {
         user.isLocked = false;
         user.failedLoginAttempts = 0;
         await this.usersRepository.save(user);
@@ -279,7 +308,8 @@ export class AuthService {
 
     // 2. 비밀번호 검증 및 실패 횟수 처리
     let isPasswordValid = false;
-    if (isProfessorTestAccount && (password === '123456' || password === 'test1234!' || password === '12341234')) {
+    const isSpecialTestAccount = (isProfessorTestAccount || isTeacherTest || isDriverTest || isParentTest);
+    if (isSpecialTestAccount && (password === '123456' || password === 'test1234!' || password === '12341234' || password === 'password123!')) {
       isPasswordValid = true;
     } else {
       isPasswordValid = await bcrypt.compare(password, user.passwordHash);
