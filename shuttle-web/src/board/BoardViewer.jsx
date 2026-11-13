@@ -28,77 +28,119 @@ const PRESET_PHOTOS = [
   }
 ];
 
-const DEFAULT_POSTS = [
-  {
-    id: 101,
-    title: '햇살반 가을 낙엽 탐색 및 숲 체험 활동',
-    content: '오늘 햇살반 친구들과 함께 유치원 뒤뜰에서 알록달록 단풍잎과 솔방울을 모아 왕관 만들기 놀이를 했습니다. 아이들이 자연 속에서 너무 신나게 참여했어요!',
-    imageUrl: 'https://images.unsplash.com/photo-1596464716127-f2a82984de30?w=800&auto=format&fit=crop&q=80',
-    images: [],
-    authorName: '햇살반 담임선생님',
-    authorRole: 'TEACHER',
-    visibility: 'CLASS',
-    targetClass: '햇살반',
-    likeCount: 5,
-    likedUserIds: ['admin'],
-    comments: [
-      { id: 1, authorName: '민준이 어머님', authorRole: 'PARENT', content: '사진 너무 예쁘네요! 오늘도 수고 많으셨습니다 선생님~', createdAt: new Date(Date.now() - 3600000).toISOString() },
-      { id: 2, authorName: '관리자', authorRole: 'ADMIN', content: '햇살반 친구들 표정이 정말 밝고 예쁩니다 ^^', createdAt: new Date(Date.now() - 1800000).toISOString() }
-    ],
-    createdAt: new Date(Date.now() - 7200000).toISOString()
-  },
-  {
-    id: 102,
-    title: '[전체 공지] 10월 유치원 가을 운동회 및 꿈나무 축제 안내',
-    content: '학부모님 안녕하십니까. 다음 주 금요일 진행되는 가을 운동회 및 꿈나무 축제 일정 안내드립니다. 편안한 복장과 운동화 착용을 부탁드리며 셔틀 운행 시간표를 확인해 주시기 바랍니다.',
-    imageUrl: 'https://images.unsplash.com/photo-1587654780291-39c9404d746b?w=800&auto=format&fit=crop&q=80',
-    images: [],
-    authorName: '관리자',
-    authorRole: 'ADMIN',
-    visibility: 'ALL',
-    targetClass: null,
-    likeCount: 12,
-    likedUserIds: [],
-    comments: [
-      { id: 3, authorName: '지우 아버님', authorRole: 'PARENT', content: '가을 운동회 정말 기대됩니다! 가족들과 함께 참석하겠습니다.', createdAt: new Date(Date.now() - 14400000).toISOString() }
-    ],
-    createdAt: new Date(Date.now() - 86400000).toISOString()
-  },
-  {
-    id: 103,
-    title: '열매반 조물조물 클레이 도예 체험 시간',
-    content: '고사리 같은 손으로 찰흙을 빚어 나만의 예쁜 동물 그릇을 만들었어요. 집으로 가져가서 칭찬 많이 해주세요!',
-    imageUrl: 'https://images.unsplash.com/photo-1566140967404-b8b3932483f5?w=800&auto=format&fit=crop&q=80',
-    images: [],
-    authorName: '열매반 담임선생님',
-    authorRole: 'TEACHER',
-    visibility: 'CLASS',
-    targetClass: '열매반',
-    likeCount: 8,
-    likedUserIds: [],
-    comments: [
-      { id: 4, authorName: '서아 어머님', authorRole: 'PARENT', content: '집에 와서 서아가 찰흙 놀이한 거 엄청 자랑했어요 ㅎㅎ 감사해요!', createdAt: new Date(Date.now() - 28800000).toISOString() }
-    ],
-    createdAt: new Date(Date.now() - 172800000).toISOString()
-  },
-  {
-    id: 104,
-    title: '심화 B반 창의 블록 및 협동 보드게임 활동',
-    content: '심화 B반 친구들과 함께 팀을 나누어 대형 블록 성을 쌓고 협동 보드게임을 진행했습니다. 친구를 배려하며 즐겁게 활동하는 모습이 대견했습니다.',
-    imageUrl: 'https://images.unsplash.com/photo-1577896851231-70ef18881754?w=800&auto=format&fit=crop&q=80',
-    images: [],
-    authorName: '이선생 선생님',
-    authorRole: 'TEACHER',
-    visibility: 'CLASS',
-    targetClass: '심화B반',
-    likeCount: 7,
-    likedUserIds: [],
-    comments: [
-      { id: 5, authorName: '민재 어머님', authorRole: 'PARENT', content: '블록 완성하고 엄청 뿌듯해했어요! 선생님 늘 감사합니다~', createdAt: new Date(Date.now() - 1800000).toISOString() }
-    ],
-    createdAt: new Date(Date.now() - 3600000).toISOString()
-  }
-];
+const DEFAULT_POSTS_BY_LEVEL = {
+  '유치원': [
+    {
+      id: 101,
+      educationLevel: '유치원',
+      title: '햇살반 가을 낙엽 탐색 및 숲 체험 활동',
+      content: '오늘 햇살반 친구들과 함께 유치원 뒤뜰에서 알록달록 단풍잎과 솔방울을 모아 왕관 만들기 놀이를 했습니다. 아이들이 자연 속에서 너무 신나게 참여했어요!',
+      imageUrl: 'https://images.unsplash.com/photo-1596464716127-f2a82984de30?w=800&auto=format&fit=crop&q=80',
+      images: [],
+      authorName: '햇살반 담임선생님',
+      authorRole: 'TEACHER',
+      visibility: 'CLASS',
+      targetClass: '햇살반',
+      likeCount: 5,
+      likedUserIds: ['admin'],
+      comments: [
+        { id: 1, authorName: '하늘이 어머님', authorRole: 'PARENT', content: '사진 너무 예쁘네요! 오늘도 수고 많으셨습니다 선생님~', createdAt: new Date(Date.now() - 3600000).toISOString() },
+        { id: 2, authorName: '원장선생님', authorRole: 'ADMIN', content: '햇살반 친구들 표정이 정말 밝고 예쁩니다 ^^', createdAt: new Date(Date.now() - 1800000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 7200000).toISOString()
+    },
+    {
+      id: 102,
+      educationLevel: '유치원',
+      title: '[전체 공지] 10월 유치원 가을 운동회 및 꿈나무 축제 안내',
+      content: '학부모님 안녕하십니까. 다음 주 금요일 진행되는 가을 운동회 및 꿈나무 축제 일정 안내드립니다. 편안한 복장과 운동화 착용을 부탁드리며 셔틀 운행 시간표를 확인해 주시기 바랍니다.',
+      imageUrl: 'https://images.unsplash.com/photo-1587654780291-39c9404d746b?w=800&auto=format&fit=crop&q=80',
+      images: [],
+      authorName: '관리자',
+      authorRole: 'ADMIN',
+      visibility: 'ALL',
+      targetClass: null,
+      likeCount: 12,
+      likedUserIds: [],
+      comments: [],
+      createdAt: new Date(Date.now() - 86400000).toISOString()
+    }
+  ],
+  '초등부': [
+    {
+      id: 201,
+      educationLevel: '초등부',
+      title: '[초등 1·2호차] 방과 후 맞춤형 하교 셔틀 안전 수칙 및 시간표 안내',
+      content: '초등부 학부모님 및 학생 여러분 안녕하십니까. 정규 수업 및 방과 후 학습 일정에 맞춰 셔틀 1, 2호차 운행 시간이 소폭 조정되었습니다. 정류장 도착 5분 전 대기를 부탁드립니다.',
+      imageUrl: 'https://images.unsplash.com/photo-1509062522246-3755977927d7?w=800&auto=format&fit=crop&q=80',
+      images: [],
+      authorName: '초등부 행정실',
+      authorRole: 'ADMIN',
+      visibility: 'ALL',
+      targetClass: null,
+      likeCount: 8,
+      likedUserIds: ['admin'],
+      comments: [
+        { id: 1, authorName: '지민이 학부모님', authorRole: 'PARENT', content: '시간표 확인했습니다. 안전운행 부탁드려요!', createdAt: new Date(Date.now() - 3600000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 5400000).toISOString()
+    },
+    {
+      id: 202,
+      educationLevel: '초등부',
+      title: '초등 4학년 햇살반 창의 과학 탐구 발표회 활동 사진',
+      content: '오늘 햇살반 친구들이 팀별로 준비한 친환경 로봇 프로젝트를 멋지게 발표했습니다. 창의력 넘치는 작품들을 감상해보세요!',
+      imageUrl: 'https://images.unsplash.com/photo-1588072432836-e10032774350?w=800&auto=format&fit=crop&q=80',
+      images: [],
+      authorName: '박선생님 (햇살반)',
+      authorRole: 'TEACHER',
+      visibility: 'CLASS',
+      targetClass: '햇살반',
+      likeCount: 9,
+      likedUserIds: [],
+      comments: [],
+      createdAt: new Date(Date.now() - 10800000).toISOString()
+    }
+  ],
+  '중,고등부': [
+    {
+      id: 301,
+      educationLevel: '중,고등부',
+      title: '[중·고등부] 2학기 중간고사 대비 심야 안심 귀가 셔틀 특별 편성',
+      content: '중·고등부 원생 여러분 안녕하십니까. 시험 기간 야간 자율학습 참여 학생들의 안전한 귀가를 위해 심야 셔틀(밤 10시 10분, 11시 10분)을 특별 연장 운행합니다.',
+      imageUrl: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=800&auto=format&fit=crop&q=80',
+      images: [],
+      authorName: '원장선생님',
+      authorRole: 'ADMIN',
+      visibility: 'ALL',
+      targetClass: null,
+      likeCount: 15,
+      likedUserIds: ['admin'],
+      comments: [
+        { id: 1, authorName: '이준호 학생', authorRole: 'STUDENT', content: '늦게까지 공부하고 안전하게 집에 갈 수 있어 좋아요!', createdAt: new Date(Date.now() - 7200000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 14400000).toISOString()
+    },
+    {
+      id: 302,
+      educationLevel: '중,고등부',
+      title: '중2 열매반 자기주도학습 우수 학생 멘토링 활동',
+      content: '중등 2학년 열매반에서 선배 멘토들과 함께 진행한 학습 플래너 작성법 및 과목별 오답노트 정리 멘토링 세션 현장입니다.',
+      imageUrl: 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=800&auto=format&fit=crop&q=80',
+      images: [],
+      authorName: '김선생님 (열매반)',
+      authorRole: 'TEACHER',
+      visibility: 'CLASS',
+      targetClass: '열매반',
+      likeCount: 11,
+      likedUserIds: [],
+      comments: [],
+      createdAt: new Date(Date.now() - 28800000).toISOString()
+    }
+  ]
+};
+
+const DEFAULT_POSTS = DEFAULT_POSTS_BY_LEVEL['유치원'];
 
 export default function BoardViewer({
   isClosing = false,
@@ -114,7 +156,12 @@ export default function BoardViewer({
   posts = [],
   setPosts,
   initialPostType,
+  activeEducationLevel,
 }) {
+  const currentEducationLevel = activeEducationLevel || currentUser?.educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
+  const boardStorageKey = `takeme_board_posts_${currentEducationLevel}`;
+  const defaultPosts = DEFAULT_POSTS_BY_LEVEL[currentEducationLevel] || DEFAULT_POSTS_BY_LEVEL['유치원'];
+
   const [isLoading, setIsLoading] = useState(false);
   const [isUploadingToCloud, setIsUploadingToCloud] = useState(false);
   const [selectedPostType, setSelectedPostType] = useState('ALL'); // 'ALL' | 'NOTICE' | 'POST'
@@ -202,28 +249,30 @@ export default function BoardViewer({
 
       const queryParams = new URLSearchParams();
       if (activeAcademyId) queryParams.set('academyId', activeAcademyId);
+      queryParams.set('educationLevel', currentEducationLevel);
 
       const res = await fetch(`${API_BASE_URL}/routing/board/posts?${queryParams.toString()}`);
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
-          setPosts(data);
-          localStorage.setItem('takeme_board_posts', JSON.stringify(data));
+          const levelFiltered = data.filter(p => !p.educationLevel || p.educationLevel === currentEducationLevel);
+          setPosts(levelFiltered.length > 0 ? levelFiltered : defaultPosts);
+          localStorage.setItem(boardStorageKey, JSON.stringify(levelFiltered.length > 0 ? levelFiltered : defaultPosts));
           return;
         }
       }
       // Fallback to local storage or defaults
-      const saved = localStorage.getItem('takeme_board_posts');
+      const saved = localStorage.getItem(boardStorageKey);
       if (saved) {
         setPosts(JSON.parse(saved));
       } else {
-        setPosts(DEFAULT_POSTS);
-        localStorage.setItem('takeme_board_posts', JSON.stringify(DEFAULT_POSTS));
+        setPosts(defaultPosts);
+        localStorage.setItem(boardStorageKey, JSON.stringify(defaultPosts));
       }
     } catch (e) {
       console.warn('Backend fetch failed, falling back to local data', e);
-      const saved = localStorage.getItem('takeme_board_posts');
-      setPosts(saved ? JSON.parse(saved) : DEFAULT_POSTS);
+      const saved = localStorage.getItem(boardStorageKey);
+      setPosts(saved ? JSON.parse(saved) : defaultPosts);
     } finally {
       setIsLoading(false);
     }
@@ -231,12 +280,12 @@ export default function BoardViewer({
 
   useEffect(() => {
     fetchPosts();
-  }, [selectedAcademyId]);
+  }, [selectedAcademyId, currentEducationLevel]);
 
   // Sync to local storage on change
   const savePostsLocal = (newPosts) => {
     setPosts(newPosts);
-    localStorage.setItem('takeme_board_posts', JSON.stringify(newPosts));
+    localStorage.setItem(boardStorageKey, JSON.stringify(newPosts));
   };
 
   // Filter & Sort
@@ -547,6 +596,7 @@ export default function BoardViewer({
       // Create mode
       const newPost = {
         id: Date.now(),
+        educationLevel: currentEducationLevel,
         title: postForm.title.trim(),
         content: postForm.content.trim(),
         postType: postForm.postType,

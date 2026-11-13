@@ -17,6 +17,7 @@ import { PickupPoint } from '../entities/pickup-point.entity';
 import { BoardPost } from '../entities/board-post.entity';
 import { BoardComment } from '../entities/board-comment.entity';
 import { AuditLog } from '../entities/audit-log.entity';
+import { YearlyZoneMapping } from '../entities/yearly-zone-mapping.entity';
 import { Attendance } from '../entities/attendance.entity';
 import { AttendanceSubmission } from '../entities/attendance-submission.entity';
 import { MediaAsset } from '../entities/media-asset.entity';
@@ -27,7 +28,7 @@ import { MediaAsset } from '../entities/media-asset.entity';
       Vehicle, Student, StudentSchedule, Academy, User,
       OperationLog, ParentMessage, ScheduleOverride,
       AcademyHoliday, Notification, PickupPoint,
-      BoardPost, BoardComment, AuditLog,
+      BoardPost, BoardComment, AuditLog, YearlyZoneMapping,
       Attendance, AttendanceSubmission, MediaAsset
     ]),
     HttpModule

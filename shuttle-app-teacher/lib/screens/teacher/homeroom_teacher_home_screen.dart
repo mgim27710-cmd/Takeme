@@ -5,6 +5,7 @@ import '../../services/socket_service.dart';
 import '../settings_screen.dart';
 import '../staff/teacher_board_view.dart';
 import '../chat/chat_room_list_screen.dart';
+import 'homeroom_students_view.dart';
 import 'homeroom_attendance_view.dart';
 import 'homeroom_change_requests_view.dart';
 import '../media/photo_gallery_screen.dart';
@@ -189,6 +190,23 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
     );
   }
 
+  String _getAppTitle() {
+    switch (_selectedTabIndex) {
+      case 0:
+        return '우리 반 원아 명단';
+      case 1:
+        return '학급 알림장·게시물';
+      case 2:
+        return '출석부 관리';
+      case 3:
+        return '통학 변동 현황';
+      case 4:
+        return '실시간 메신저';
+      default:
+        return '담임교사 홈';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = ApiService().currentUser;
@@ -323,13 +341,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
             Row(
               children: [
                 Text(
-                  _selectedTabIndex == 0
-                      ? '학급 알림장·게시물'
-                      : _selectedTabIndex == 1
-                          ? '출석부 관리'
-                          : _selectedTabIndex == 2
-                              ? '통학 변동 현황'
-                              : '실시간 메신저',
+                  _getAppTitle(),
                   style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF1E293B)),
                 ),
                 const SizedBox(width: 8),
@@ -392,6 +404,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
           setState(() => _selectedTabIndex = idx);
         },
         children: const [
+          HomeroomStudentsView(),
           TeacherBoardView(),
           HomeroomAttendanceView(),
           HomeroomChangeRequestsView(),
@@ -414,11 +427,12 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
             height: 64,
             child: Row(
               children: [
-                _buildTabItem(index: 0, icon: Icons.photo_library_outlined, label: '알림장·게시물'),
-                _buildTabItem(index: 1, icon: Icons.fact_check_outlined, label: '출석부'),
-                _buildTabItem(index: 2, icon: Icons.edit_calendar_outlined, label: '통학 변동'),
+                _buildTabItem(index: 0, icon: Icons.people_alt_outlined, label: '우리 반 원아'),
+                _buildTabItem(index: 1, icon: Icons.photo_library_outlined, label: '알림장·게시물'),
+                _buildTabItem(index: 2, icon: Icons.fact_check_outlined, label: '출석부'),
+                _buildTabItem(index: 3, icon: Icons.edit_calendar_outlined, label: '통학 변동'),
                 _buildTabItem(
-                  index: 3,
+                  index: 4,
                   icon: Icons.forum_outlined,
                   label: '메신저',
                   badgeCount: _unreadChatCount + _unreadNotificationCount,

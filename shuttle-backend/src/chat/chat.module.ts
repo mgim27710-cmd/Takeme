@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
@@ -10,7 +10,10 @@ import { User } from '../entities/user.entity';
 import { Student } from '../entities/student.entity';
 import { Vehicle } from '../entities/vehicle.entity';
 import { Academy } from '../entities/academy.entity';
+import { PickupPoint } from '../entities/pickup-point.entity';
+import { ParentMessage } from '../entities/parent-message.entity';
 import { Notification } from '../entities/notification.entity';
+import { RoutingModule } from '../routing/routing.module';
 import { ApprovalModule } from '../approval/approval.module';
 
 @Module({
@@ -23,9 +26,12 @@ import { ApprovalModule } from '../approval/approval.module';
       Student,
       Vehicle,
       Academy,
+      PickupPoint,
+      ParentMessage,
       Notification,
     ]),
-    ApprovalModule,
+    forwardRef(() => RoutingModule),
+    forwardRef(() => ApprovalModule),
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway],

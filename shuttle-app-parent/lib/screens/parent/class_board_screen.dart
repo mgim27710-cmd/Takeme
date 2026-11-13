@@ -4,12 +4,15 @@ import '../../services/api_service.dart';
 class ClassBoardScreen extends StatefulWidget {
   final String? childClassName;
   final bool isEmbeddedTab;
+  /// main 호환용 별칭 (isEmbeddedTab 과 같은 의미)
+  final bool isEmbedded;
   final String initialCategory;
 
   const ClassBoardScreen({
     super.key,
     this.childClassName,
     this.isEmbeddedTab = false,
+    this.isEmbedded = false,
     this.initialCategory = 'ALL',
   });
 
@@ -81,7 +84,7 @@ class _ClassBoardScreenState extends State<ClassBoardScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        automaticallyImplyLeading: !widget.isEmbeddedTab,
+        automaticallyImplyLeading: !(widget.isEmbeddedTab || widget.isEmbedded),
         title: Text(
           classLabel,
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF0F172A)),

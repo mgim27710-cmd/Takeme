@@ -66,15 +66,18 @@ class RouteDataModel {
       return double.tryParse(val.toString());
     }
 
-    final stopsList = rawStops.map((s) => RouteStop.fromJson(s as Map<String, dynamic>)).toList();
+    final stopsList = rawStops
+        .whereType<Map>()
+        .map((s) => RouteStop.fromJson(Map<String, dynamic>.from(s)))
+        .toList();
 
     return RouteDataModel(
       vehicleId: json['vehicleId'] is int
           ? json['vehicleId']
           : int.tryParse(json['vehicleId']?.toString() ?? ''),
-      academyName: academy?['name'],
-      academyLat: parseCoord(academy?['latitude']),
-      academyLng: parseCoord(academy?['longitude']),
+      academyName: academy?['name'] ?? json['academyName']?.toString(),
+      academyLat: parseCoord(academy?['latitude'] ?? json['academyLat']),
+      academyLng: parseCoord(academy?['longitude'] ?? json['academyLng']),
       stops: stopsList,
       routePoints: rawPoints
           .map((p) => p is Map<String, dynamic> ? p : <String, dynamic>{})

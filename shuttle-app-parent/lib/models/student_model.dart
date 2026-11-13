@@ -19,6 +19,7 @@ class StudentModel {
   final String? academyName;
   final String? vehicleName;
   final String? approvalStatus;
+  String? boardStatus;
 
   StudentModel({
     required this.id,
@@ -41,6 +42,7 @@ class StudentModel {
     this.academyName,
     this.vehicleName,
     this.approvalStatus,
+    this.boardStatus,
   });
 
   factory StudentModel.fromJson(Map<String, dynamic> json) {
@@ -71,6 +73,7 @@ class StudentModel {
       academyName: json['academyName'],
       vehicleName: json['vehicleName'],
       approvalStatus: json['approvalStatus'],
+      boardStatus: json['boardStatus']?.toString(),
     );
   }
 }

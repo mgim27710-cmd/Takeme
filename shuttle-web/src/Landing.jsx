@@ -11,7 +11,9 @@ export default function Landing() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [name, setName] = useState('');
   const [role, setRole] = useState('ACADEMY_ADMIN'); // 'ACADEMY_ADMIN' | 'TEACHER'
-  const [educationLevel, setEducationLevel] = useState('유치원'); // '유치원' | '초등부' | '중,고등부'
+  const [educationLevel, setEducationLevel] = useState(() => {
+    return localStorage.getItem('takeme_selected_education_level') || '유치원';
+  }); // '유치원' | '초등부' | '중,고등부'
   const [otpToken, setOtpToken] = useState('');
   const [qrCodeUrl, setQrCodeUrl] = useState('');
   const [userId, setUserId] = useState(null);
@@ -55,6 +57,16 @@ export default function Landing() {
 
   // Director Phone for Registration
   const [directorPhone, setDirectorPhone] = useState('');
+  const [businessNumber, setBusinessNumber] = useState('');
+
+  // 사업자 등록번호 10자리 자동 하이픈 포맷터 (000-00-00000)
+  const formatBusinessNumber = (value) => {
+    if (!value) return '';
+    const nums = value.replace(/\D/g, '').slice(0, 10);
+    if (nums.length <= 3) return nums;
+    if (nums.length <= 5) return `${nums.slice(0, 3)}-${nums.slice(3)}`;
+    return `${nums.slice(0, 3)}-${nums.slice(3, 5)}-${nums.slice(5, 10)}`;
+  };
 
   const navigate = useNavigate();
 
@@ -273,7 +285,7 @@ export default function Landing() {
     const res = await fetch(`${API_BASE_URL}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name, role, phone: directorPhone.trim() || undefined, educationLevel })
+      body: JSON.stringify({ email, password, name, role, phone: directorPhone.trim() || undefined, businessNumber: businessNumber.trim() || undefined, educationLevel })
     });
     const data = await res.json();
     if (res.ok) {
@@ -352,11 +364,36 @@ export default function Landing() {
         if (data.refreshToken) {
           localStorage.setItem('takeme_refresh_token', data.refreshToken);
         }
-        localStorage.setItem('takeme_user', JSON.stringify({
+        // 로그인한 계정에 저장된 정보를 토대로 교육 부문(초등부, 중·고등부, 유치원) 자동 결정
+        let targetLevel = data.user?.educationLevel;
+        if (!targetLevel || targetLevel === '전체') {
+          const userMeta = `${data.user?.academyName || ''} ${data.user?.name || ''} ${data.user?.email || ''}`.toLowerCase();
+          if (userMeta.includes('초등') || userMeta.includes('elem')) {
+            targetLevel = '초등부';
+          } else if (userMeta.includes('중등') || userMeta.includes('고등') || userMeta.includes('middle') || userMeta.includes('high')) {
+            targetLevel = '중,고등부';
+          } else {
+            targetLevel = '유치원';
+          }
+        }
+        
+        // 정규화
+        if (targetLevel.includes('초등')) {
+          targetLevel = '초등부';
+        } else if (targetLevel.includes('중') || targetLevel.includes('고')) {
+          targetLevel = '중,고등부';
+        } else if (targetLevel.includes('유치')) {
+          targetLevel = '유치원';
+        }
+
+        const updatedUser = {
           ...data.user,
+          educationLevel: targetLevel,
           accessToken: data.accessToken || null
-        }));
-        const targetLevel = data.user?.educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
+        };
+        localStorage.setItem('takeme_user', JSON.stringify(updatedUser));
+        localStorage.setItem('takeme_selected_education_level', targetLevel);
+
         if (targetLevel === '초등부') {
           navigate('/dashboard/elementary');
         } else if (targetLevel === '중,고등부') {
@@ -805,18 +842,33 @@ export default function Landing() {
             </div>
             
             {role === 'ACADEMY_ADMIN' && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">
-                  관리자 휴대폰 번호
-                </label>
-                <input 
-                  type="tel" 
-                  placeholder="010-1234-5678" 
-                  value={directorPhone} 
-                  onChange={e=>setDirectorPhone(e.target.value)} 
-                  className="form-input" 
-                />
-              </div>
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    관리자 휴대폰 번호
+                  </label>
+                  <input 
+                    type="tel" 
+                    placeholder="010-1234-5678" 
+                    value={directorPhone} 
+                    onChange={e=>setDirectorPhone(e.target.value)} 
+                    className="form-input" 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">
+                    사업자 등록번호 <span className="text-slate-400 font-normal">(선택)</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    placeholder="123-45-67890 (10자리)" 
+                    value={businessNumber} 
+                    onChange={e=>setBusinessNumber(formatBusinessNumber(e.target.value))} 
+                    maxLength={12}
+                    className="form-input tracking-wider" 
+                  />
+                </div>
+              </>
             )}
 
             {/* Password */}

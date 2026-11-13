@@ -47,7 +47,16 @@ export class Student {
   academy: Academy;
 
   @ManyToOne(() => Vehicle, { nullable: true, onDelete: 'SET NULL' })
-  assignedVehicle: Vehicle; // Auto-assigned
+  assignedVehicle: Vehicle | null; // 등원 차량
+
+  @ManyToOne(() => Vehicle, { nullable: true, onDelete: 'SET NULL' })
+  assignedDepartureVehicle: Vehicle | null; // 하원 차량
+
+  @Column({ type: 'boolean', default: false })
+  isNotRiding: boolean; // 미탑승 원아 여부 (도보/자차 등원)
+
+  @Column({ nullable: true })
+  dropoffLocation: string; // 하차지 (하원지)
 
   @Column({ type: 'text', nullable: true, transformer: encryptionTransformer })
   raw: any;

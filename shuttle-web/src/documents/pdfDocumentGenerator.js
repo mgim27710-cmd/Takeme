@@ -656,7 +656,7 @@ export function openPrintDocument(type, data = {}) {
         </div>
       </div>
     `;
-  } else {
+  } else if (type === 'consent') {
     // Student Bus Application & Consent Form ('consent')
     const stName = student ? (student.name || student.realName || '') : '';
     const raw = student ? (student.raw || {}) : {};
@@ -715,6 +715,341 @@ export function openPrintDocument(type, data = {}) {
           <div class="date-line">${autoDateKorean}</div>
           <div class="sign-names" style="margin-top: 35px;">
             보호자 성명: <span style="font-weight: bold; text-decoration: underline;">&nbsp;&nbsp;${parentName || '__________________'} &nbsp;&nbsp;</span> (자필 서명)
+          </div>
+        </div>
+      </div>
+    `;
+  } else if (type === 'consent-driver-location') {
+    const driverName = bus ? (bus.driverName && bus.driverName !== '미정' ? bus.driverName : '') : '';
+    const driverPhone = bus ? (bus.driverPhone || '') : '';
+    const busPlate = bus ? (bus.plateNumber || '') : '';
+    const busNameText = bus ? (bus.name || `${bus.busNumber}호차`) : '통학차량 전용';
+
+    title = `기사_위치정보수집이용동의서_${driverName || '운전자'}`;
+    bodyHtml = `
+      <div class="doc-container">
+        <div class="header-section">
+          <div class="title-wrap" style="width: 100%; text-align: center;">
+            <h1 style="font-size: 21px;">어린이통학버스 운전자 위치정보 수집·이용 동의서</h1>
+            <p class="sub-text">위치정보의 보호 및 이용 등에 관한 법률 제15조 및 도로교통법 제53조 준수</p>
+          </div>
+        </div>
+
+        <div style="margin: 15px 0 10px 0; font-size: 11px; color: #475569; line-height: 1.6;">
+          ${academyName}은(는) 「위치정보의 보호 및 이용 등에 관한 법률」 제15조(위치정보의 수집 등의 금지) 규정에 따라 통학차량 실시간 안전 관제 및 원아 안심 승하차 알림 서비스를 위해 운전자의 개인위치정보를 수집·이용하고자 하오니 아래 내용을 확인하시고 동의하여 주시기 바랍니다.
+        </div>
+
+        <table class="info-table" style="margin-top: 10px;">
+          <tr>
+            <th style="width: 18%;">운전자 성명</th>
+            <td style="width: 32%; font-weight: bold; font-size: 13px;">${driverName || '__________________'}</td>
+            <th style="width: 18%;">생년월일</th>
+            <td style="width: 32%;">______년 ___월 ___일</td>
+          </tr>
+          <tr>
+            <th>연 락 처</th>
+            <td style="font-family: monospace; font-weight: bold;">${driverPhone || '010-____-____'}</td>
+            <th>소속 기관</th>
+            <td style="font-weight: bold;">${academyName}</td>
+          </tr>
+          <tr>
+            <th>담당 차량 (호차)</th>
+            <td style="font-weight: bold; color: #2563eb;">${busNameText}</td>
+            <th>차량 등록번호</th>
+            <td style="font-weight: bold;">${busPlate || '예: 77가 1234'}</td>
+          </tr>
+        </table>
+
+        <div style="margin: 18px 0; padding: 14px 16px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 11px; line-height: 1.8; color: #334155;">
+          <h4 style="margin: 0 0 6px 0; font-size: 12px; color: #1e293b; font-weight: bold;">[위치정보 수집 및 이용에 관한 법정 고지]</h4>
+          <ol style="margin: 0; padding-left: 18px;">
+            <li><b>수집·이용 목적:</b> 어린이통학버스 실시간 이동 경로 및 운행 상태 관제, 실시간 도착 알림 서비스 제공, 차량 안전 사고 예방 및 긴급 구호 조치</li>
+            <li><b>수집하는 위치정보 항목:</b> 모바일 단말기(스마트폰 기사용 앱)의 실시간 GPS 위치 좌표(위도, 경도), 이동 속도, 운행 시각 및 궤적</li>
+            <li><b>위치정보의 보유 및 이용 기간:</b> 당일 운행 종료 및 용역/근로 계약 종료 시까지 (분쟁 해결 및 감사 증빙을 위해 최장 6개월 보관 후 복구 불가능하게 파기)</li>
+            <li><b>위치정보의 제3자 제공:</b> 실시간 통학버스 위치는 원생 보호자(학부모) 및 시설 관리자에게 '안심 승하차 관제' 목적으로만 한정 제공됩니다.</li>
+            <li><b>동의를 거부할 권리 및 불이익:</b> 운전자는 위치정보 수집·이용 동의를 거부할 권리가 있습니다. 단, 동의 거부 시 실시간 통학차량 안전 관제 시스템 이용 및 통학차량 운행 업무 수행에 제한이 따를 수 있습니다.</li>
+          </ol>
+        </div>
+
+        <div style="border: 1px solid #94a3b8; background: #ffffff; padding: 10px 14px; border-radius: 6px; text-align: center; font-size: 12px; font-weight: bold; margin-bottom: 25px;">
+          본인은 상기 위치정보의 수집·이용 및 제3자 제공에 관한 모든 내용을 충분히 이해하였으며 이에 동의합니다.<br>
+          <span style="font-size: 11px; font-weight: normal; color: #475569;">[ &nbsp; ] 위 위치정보 수집 및 이용에 동의함 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [ &nbsp; ] 동의하지 않음</span>
+        </div>
+
+        <div class="footer-sign" style="margin-top: 30px;">
+          <div class="date-line">${autoDateKorean}</div>
+          <div class="sign-names" style="margin-top: 30px;">
+            운전자(기사) 성명: <span style="font-weight: bold; text-decoration: underline;">&nbsp;&nbsp;${driverName || '__________________'} &nbsp;&nbsp;</span> (자필 서명)
+          </div>
+          <div style="margin-top: 15px; font-size: 13px; font-weight: bold; color: #1e293b;">
+            ${academyName} 귀중
+          </div>
+        </div>
+      </div>
+    `;
+  } else if (type === 'consent-privacy-student') {
+    const stName = student ? (student.realName || student.name || '') : '';
+    const parentName = student ? (student.raw?.['보호자 성함'] || student.raw?.['학부모성함'] || '') : '';
+    const parentPhone = student ? (student.raw?.['부모연락처'] || student.raw?.['보호자연락처'] || student.raw?.['보호자 연락처'] || '') : '';
+    const address = student ? (student.address || '') : '';
+    const schoolGrade = student ? `${student.raw?.['유치원명'] || student.raw?.['학교명'] || academyName} ${student.raw?.['반명'] ? `(${student.raw['반명']})` : ''}` : academyName;
+    const allergies = student ? (student.allergies || student.raw?.['알레르기'] || '특이사항 없음') : '특이사항 없음';
+
+    title = `원생_학부모_개인정보동의서_${stName || '원생'}`;
+    bodyHtml = `
+      <div class="doc-container">
+        <div class="header-section">
+          <div class="title-wrap" style="width: 100%; text-align: center;">
+            <h1 style="font-size: 21px;">원생 및 보호자 개인정보 수집·이용 및 제공 동의서</h1>
+            <p class="sub-text">개인정보보호법 제15조(수집·이용) 및 제17조(제3자 제공), 제23조(민감정보 처리) 준수</p>
+          </div>
+        </div>
+
+        <table class="info-table" style="margin-top: 15px;">
+          <tr>
+            <th style="width: 18%;">원 생 명</th>
+            <td style="width: 32%; font-weight: bold; font-size: 13px;">${stName || '__________________'}</td>
+            <th style="width: 18%;">소속 / 반명</th>
+            <td style="width: 32%; font-weight: bold;">${schoolGrade}</td>
+          </tr>
+          <tr>
+            <th>보호자 성명</th>
+            <td style="font-weight: bold;">${parentName || '__________________'}</td>
+            <th>보호자 연락처</th>
+            <td style="font-weight: bold; font-family: monospace;">${parentPhone || '010-____-____'}</td>
+          </tr>
+          <tr>
+            <th>탑승지 (주소)</th>
+            <td colspan="3" style="font-size: 11px;">${address || '________________________________________________________'}</td>
+          </tr>
+        </table>
+
+        <!-- 1. 기본 개인정보 수집 및 이용 -->
+        <div style="margin: 15px 0 10px 0; padding: 12px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 11px; line-height: 1.7;">
+          <h4 style="margin: 0 0 5px 0; font-size: 12px; color: #1e293b; font-weight: bold;">1. [필수] 개인정보 수집 및 이용 동의</h4>
+          <div>• <b>수집 항목:</b> 원생 성명, 생년월일, 성별, 주소(탑승지/하원지), 보호자 성명 및 휴대전화번호, 비상연락처</div>
+          <div>• <b>수집·이용 목적:</b> 통학차량 노선 배정, 탑승자 명부 작성, 승하차 실시간 알림, 비상상황 긴급 연락</div>
+          <div>• <b>보유 및 이용 기간:</b> 통학차량 서비스 이용 종료 및 원아 졸업/퇴원 시까지 (관계법령에 따른 보존 의무 기간 준수)</div>
+          <div style="margin-top: 6px; text-align: right; font-weight: bold; color: #1e40af;">
+            개인정보 수집 및 이용에 동의하십니까? &nbsp;&nbsp; [ &nbsp; ] 동의함 &nbsp;&nbsp;&nbsp; [ &nbsp; ] 동의하지 않음
+          </div>
+        </div>
+
+        <!-- 2. 민감정보(건강/알레르기) 처리 동의 -->
+        <div style="margin: 10px 0; padding: 12px; border: 1px solid #cbd5e1; background: #fffbeb; border-radius: 6px; font-size: 11px; line-height: 1.7;">
+          <h4 style="margin: 0 0 5px 0; font-size: 12px; color: #92400e; font-weight: bold;">2. [선택] 민감정보(건강 및 알레르기) 수집 및 이용 동의</h4>
+          <div>• <b>수집 항목:</b> 원생 지병, 알레르기 유발 식품/물질 (${allergies}), 특이 체질 및 응급처치 주의사항</div>
+          <div>• <b>수집 목적:</b> 차량 내 응급상황 발생 시 신속하고 적절한 응급처치 및 병원 후송 시 의료진 전달</div>
+          <div>• <b>보유 기간:</b> 통학차량 이용 기간 종료 시까지</div>
+          <div style="margin-top: 6px; text-align: right; font-weight: bold; color: #b45309;">
+            민감정보 수집 및 이용에 동의하십니까? &nbsp;&nbsp; [ &nbsp; ] 동의함 &nbsp;&nbsp;&nbsp; [ &nbsp; ] 동의하지 않음
+          </div>
+        </div>
+
+        <!-- 3. 개인정보 제3자 제공 동의 -->
+        <div style="margin: 10px 0 20px 0; padding: 12px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 11px; line-height: 1.7;">
+          <h4 style="margin: 0 0 5px 0; font-size: 12px; color: #1e293b; font-weight: bold;">3. [필수] 개인정보 제3자 제공 동의</h4>
+          <div>• <b>제공받는 자:</b> 통학차량 운전기사 및 동승인솔교사, 긴급구조기관(소방서·경찰서·의료기관)</div>
+          <div>• <b>제공 목적:</b> 안전 승하차 인솔, 결석·지각 확인, 긴급 환자 이송 및 사고 대응</div>
+          <div>• <b>제공 항목:</b> 원생 성명, 탑승지, 보호자 연락처, 긴급처치 정보</div>
+          <div style="margin-top: 6px; text-align: right; font-weight: bold; color: #1e40af;">
+            개인정보 제3자 제공에 동의하십니까? &nbsp;&nbsp; [ &nbsp; ] 동의함 &nbsp;&nbsp;&nbsp; [ &nbsp; ] 동의하지 않음
+          </div>
+        </div>
+
+        <div class="footer-sign" style="margin-top: 25px;">
+          본인은 만 14세 미만 아동(원생)의 법정대리인으로서 본 동의서의 내용을 확인하고 동의합니다.<br><br>
+          <div class="date-line">${autoDateKorean}</div>
+          <div class="sign-names" style="margin-top: 25px;">
+            법정대리인(보호자) 성명: <span style="font-weight: bold; text-decoration: underline;">&nbsp;&nbsp;${parentName || '__________________'} &nbsp;&nbsp;</span> (자필 서명)
+          </div>
+          <div style="margin-top: 15px; font-size: 13px; font-weight: bold; color: #1e293b;">
+            ${academyName} 귀중
+          </div>
+        </div>
+      </div>
+    `;
+  } else if (type === 'consent-privacy-staff') {
+    const driverName = bus ? (bus.driverName && bus.driverName !== '미정' ? bus.driverName : '') : '';
+    const companionName = bus ? (bus.teacherName && bus.teacherName !== '미정' ? bus.teacherName : '') : '';
+
+    title = `종사자_기사_교사_개인정보동의서`;
+    bodyHtml = `
+      <div class="doc-container">
+        <div class="header-section">
+          <div class="title-wrap" style="width: 100%; text-align: center;">
+            <h1 style="font-size: 21px;">통학차량 종사자(기사·교사) 개인정보 수집·이용 동의서</h1>
+            <p class="sub-text">개인정보보호법 및 도로교통법 제53조 준수 (어린이통학버스 운영자 법정 구비 서식)</p>
+          </div>
+        </div>
+
+        <table class="info-table" style="margin-top: 20px;">
+          <tr>
+            <th style="width: 20%;">직 구분</th>
+            <td style="width: 30%;">[ &nbsp; ] 운전기사 &nbsp;&nbsp; [ &nbsp; ] 동승인솔교사</td>
+            <th style="width: 20%;">성 명</th>
+            <td style="width: 30%; font-weight: bold;">${driverName || companionName || '__________________'}</td>
+          </tr>
+          <tr>
+            <th>생년월일</th>
+            <td>______년 ___월 ___일</td>
+            <th>연 락 처</th>
+            <td>010-____-____</td>
+          </tr>
+          <tr>
+            <th>주 소</th>
+            <td colspan="3">____________________________________________________________________</td>
+          </tr>
+          <tr>
+            <th>면허/자격 사항</th>
+            <td>[ &nbsp; ] 1종대형 &nbsp; [ &nbsp; ] 1종보통 &nbsp; [ &nbsp; ] 보육/정교사</td>
+            <th>안전교육이수일</th>
+            <td>20___년 ___월 ___일</td>
+          </tr>
+        </table>
+
+        <div style="margin: 25px 0; padding: 16px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 11px; line-height: 1.9; color: #334155;">
+          <h4 style="margin: 0 0 8px 0; font-size: 12px; color: #1e293b; font-weight: bold;">[종사자 개인정보 수집 및 법적 검증 고지]</h4>
+          <ol style="margin: 0; padding-left: 18px;">
+            <li><b>수집 목적:</b> 어린이통학버스 운전자 및 동승보호자의 법정 적격 심사(도로교통법 제53조), 관할 경찰서 및 교육청 신고 등록, 성범죄 및 아동학대 관련 범죄전력 조회 확인, 긴급 비상연락체계 구축</li>
+            <li><b>수집 항목:</b> 성명, 주민등록번호(고유식별정보 - 도로교통법 및 아동복지법에 따른 법령상 처리), 주소, 휴대전화번호, 운전면허정보, 통학버스 안전교육 이수증 사본</li>
+            <li><b>보유 및 이용 기간:</b> 고용/용역 계약 종료 후 3년간 보관 (근로기준법 및 도로교통법 의무 보존 규정 준수) 후 영구 파기</li>
+            <li><b>제3자 제공:</b> 도로교통법에 따른 관할 경찰서장(어린이통학버스 신고), 관할 교육지원청(학원/유치원 지도점검부서)에 한정 제출됩니다.</li>
+          </ol>
+        </div>
+
+        <div style="border: 1px solid #94a3b8; background: #ffffff; padding: 12px; border-radius: 6px; text-align: center; font-size: 12px; font-weight: bold; margin-bottom: 30px;">
+          본인은 상기 개인정보 및 고유식별정보의 수집·이용과 관할 관청 제출에 동의합니다.<br>
+          <span style="font-size: 11px; font-weight: normal; color: #475569;">[ &nbsp; ] 동의함 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [ &nbsp; ] 동의하지 않음</span>
+        </div>
+
+        <div class="footer-sign" style="margin-top: 40px;">
+          <div class="date-line">${autoDateKorean}</div>
+          <div class="sign-names" style="margin-top: 30px;">
+            종사자(기사·교사) 성명: <span style="font-weight: bold; text-decoration: underline;">&nbsp;&nbsp;${driverName || companionName || '__________________'} &nbsp;&nbsp;</span> (자필 서명)
+          </div>
+          <div style="margin-top: 15px; font-size: 13px; font-weight: bold; color: #1e293b;">
+            ${academyName} 귀중
+          </div>
+        </div>
+      </div>
+    `;
+  } else if (type === 'accounting-expense-report') {
+    const busNameText = bus ? `${bus.name || `${bus.busNumber}호차`}` : '전체 통학차량';
+    const plateText = bus ? (bus.plateNumber || '77가 1024') : '77가 1024';
+    const driverText = bus ? (bus.driverName && bus.driverName !== '미정' ? bus.driverName : '김철수') : '김철수';
+
+    title = `통학차량_운영비_및_유류비_정산서_${busNameText}`;
+    bodyHtml = `
+      <div class="doc-container">
+        <div class="header-section">
+          <div class="title-wrap">
+            <h1 style="font-size: 21px;">통학차량 운영비 및 유류비 정산서</h1>
+            <p class="sub-text">회계 세무 증빙 및 통학차량 운영비 지출결의 표준서식 [${busNameText}]</p>
+          </div>
+          <table class="approval-table">
+            <tr>
+              <th rowspan="2" class="v-header">결<br>재</th>
+              <th>담 당</th>
+              <th>출 납</th>
+              <th>기관장(원장)</th>
+            </tr>
+            <tr>
+              <td style="height: 48px;"></td>
+              <td></td>
+              <td></td>
+            </tr>
+          </table>
+        </div>
+
+        <table class="info-table" style="margin-top: 15px;">
+          <tr>
+            <th style="width: 18%;">정산 대상 차량</th>
+            <td style="width: 32%; font-weight: bold; color: #2563eb;">${busNameText} (${plateText})</td>
+            <th style="width: 18%;">운전자 (기사)</th>
+            <td style="width: 32%; font-weight: bold;">${driverText}</td>
+          </tr>
+          <tr>
+            <th>정 산 기 간</th>
+            <td style="font-weight: bold;">${year}년 ${month}월분 정산</td>
+            <th>소 속 기 관</th>
+            <td style="font-weight: bold;">${academyName}</td>
+          </tr>
+        </table>
+
+        <!-- 지출 내역 항목별 명세 -->
+        <table class="list-table" style="margin-top: 20px;">
+          <thead>
+            <tr>
+              <th style="width: 14%;">지출 일자</th>
+              <th style="width: 18%;">항 목</th>
+              <th style="width: 36%;">내 역 (주유소명 / 품명 / 구간)</th>
+              <th style="width: 16%;">금 액 (원)</th>
+              <th style="width: 16%;">증빙 첨부</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="text-align: center;">${year}-${String(month).padStart(2,'0')}-05</td>
+              <td style="text-align: center; font-weight: bold;">차량 유류비</td>
+              <td>GS칼텍스 마곡주유소 (경유 55L)</td>
+              <td style="text-align: right; font-weight: bold; font-family: monospace;">88,000</td>
+              <td style="text-align: center;">카드전표</td>
+            </tr>
+            <tr>
+              <td style="text-align: center;">${year}-${String(month).padStart(2,'0')}-12</td>
+              <td style="text-align: center; font-weight: bold;">차량 유류비</td>
+              <td>SK에너지 강서주유소 (경유 52L)</td>
+              <td style="text-align: right; font-weight: bold; font-family: monospace;">83,200</td>
+              <td style="text-align: center;">카드전표</td>
+            </tr>
+            <tr>
+              <td style="text-align: center;">${year}-${String(month).padStart(2,'0')}-18</td>
+              <td style="text-align: center; font-weight: bold;">정비 / 세차</td>
+              <td>차량 실내외 정밀 살균소독 및 자동세차</td>
+              <td style="text-align: right; font-weight: bold; font-family: monospace;">35,000</td>
+              <td style="text-align: center;">간이영수증</td>
+            </tr>
+            <tr>
+              <td style="text-align: center;">${year}-${String(month).padStart(2,'0')}-20</td>
+              <td style="text-align: center; font-weight: bold;">차량 유류비</td>
+              <td>S-OIL 발산주유소 (경유 56L)</td>
+              <td style="text-align: right; font-weight: bold; font-family: monospace;">89,600</td>
+              <td style="text-align: center;">카드전표</td>
+            </tr>
+            <tr>
+              <td style="text-align: center;">${year}-${String(month).padStart(2,'0')}-25</td>
+              <td style="text-align: center; font-weight: bold;">소모품 교체</td>
+              <td>엔진오일 보충 및 와이퍼 블레이드 교체</td>
+              <td style="text-align: right; font-weight: bold; font-family: monospace;">65,000</td>
+              <td style="text-align: center;">세금계산서</td>
+            </tr>
+            <tr>
+              <td style="text-align: center; color: #94a3b8;">-</td>
+              <td style="text-align: center; color: #94a3b8;">통행료 / 기타</td>
+              <td style="color: #94a3b8;">하이패스 고속도로 통행료 정산분</td>
+              <td style="text-align: right; color: #94a3b8; font-family: monospace;">12,500</td>
+              <td style="text-align: center; color: #94a3b8;">이용내역서</td>
+            </tr>
+            <tr style="background: #f1f5f9; font-weight: bold;">
+              <td colspan="3" style="text-align: center; font-size: 13px;">합 &nbsp;&nbsp;&nbsp;&nbsp; 계 (총 지출액)</td>
+              <td style="text-align: right; font-size: 14px; color: #dc2626; font-family: monospace;">373,300 원</td>
+              <td style="text-align: center; font-size: 11px;">영수증 6매</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- 영수증 부착 및 확인 박스 -->
+        <div style="margin-top: 20px; padding: 15px; border: 1px dashed #94a3b8; background: #fafafa; border-radius: 6px; text-align: center; color: #64748b; font-size: 11px;">
+          <b>[ 영수증 부착 및 확인 안내 ]</b><br>
+          신용카드 매출전표, 현금영수증, 세금계산서 원본을 본 정산서 뒷면에 부착하여 결재 바랍니다.<br>
+          위 통학차량 운영 지출 내역은 학원·유치원 회계 관리 규정에 따라 정당하게 집행되었음을 확인합니다.
+        </div>
+
+        <div class="footer-sign" style="margin-top: 35px;">
+          <div class="date-line">${autoDateKorean}</div>
+          <div class="sign-names" style="margin-top: 25px;">
+            정산 보고자(운전자/담당자): <span style="font-weight: bold; text-decoration: underline;">&nbsp;&nbsp;${driverText} &nbsp;&nbsp;</span> (자필 서명)
           </div>
         </div>
       </div>

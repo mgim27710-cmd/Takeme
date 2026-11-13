@@ -32,7 +32,14 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     @InjectRepository(Vehicle) private readonly vehicleRepository: Repository<Vehicle>,
     @InjectRepository(Student) private readonly studentRepository: Repository<Student>,
     @InjectRepository(User) private readonly userRepository: Repository<User>,
-  ) {}
+  ) {
+    this.routingService.registerRouteUpdateNotifier((academyId, message) => {
+      if (message) {
+        this.broadcastTeacherPush(message, academyId);
+      }
+      this.broadcastRouteUpdated(academyId);
+    });
+  }
 
   afterInit(server: Server) {
     this.routingService.registerRouteUpdateNotifier((academyId, msg) => {
@@ -86,7 +93,7 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       vehicleId,
       busNumber,
       isOperating,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
     if (this.server) {
       this.server.to(room).emit('vehicleOperatingStatus', payload);
@@ -121,6 +128,17 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     if (!this.server || !academyId) return;
     this.server.to(`academy_${academyId}`).emit('changeRequestCreated', data);
     this.server.to(`academy_${academyId}`).emit('notificationReceived', { type: 'APPROVAL_REQUEST', data });
+
+    const alertPayload = {
+      id: data.id,
+      category: data.type === 'ABSENCE' ? 'ABSENT' : data.type === 'ONE_TIME_BOARDING' ? 'SHUTTLE_REQUEST' : data.type === 'PICKUP' || data.type === 'INDIVIDUAL_DISMISSAL' ? 'PICKUP' : 'GENERAL',
+      title: `[신청 접수] ${data.studentName} ${data.typeKr} 신청`,
+      message: `${data.studentName} 원아의 ${data.typeKr} 신청이 접수되었습니다. (적용일: ${data.targetDate})`,
+      timestamp: new Date().toISOString(),
+      data,
+    };
+    this.server.to(`academy_${academyId}`).emit('directorAlert', alertPayload);
+    this.server.emit('globalDirectorAlert', alertPayload);
   }
 
   /**
@@ -140,10 +158,24 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     if (data.academyId) {
       this.server.to(`academy_${data.academyId}`).emit('changeRequestDecided', data.request);
       this.server.to(`academy_${data.academyId}`).emit('notificationReceived', { type: 'APPROVAL_RESULT', request: data.request });
+
+      const studentName = data.request?.student?.adminDisplayName || data.request?.student?.name || '원아';
+      const decisionKr = data.request?.decision === 'APPROVED' ? '승인' : '반려';
+      const alertPayload = {
+        id: data.request?.id,
+        category: 'PAYMENT_DECISION',
+        title: `[결재 ${decisionKr}] ${studentName} 신청 ${decisionKr}`,
+        message: `${studentName} 원아의 통학 신청이 최종 ${decisionKr}되었습니다.`,
+        timestamp: new Date().toISOString(),
+        data: data.request,
+      };
+      this.server.to(`academy_${data.academyId}`).emit('directorAlert', alertPayload);
+      this.server.emit('globalDirectorAlert', alertPayload);
     }
     if (data.vehicleId) {
       this.server.to(`vehicle_${data.vehicleId}`).emit('changeRequestDecided', data.request);
       this.server.to(`vehicle_${data.vehicleId}`).emit('routeNeedsRefresh', { vehicleId: data.vehicleId });
+      this.server.to(`vehicle_${data.vehicleId}`).emit('routeUpdated', { vehicleId: data.vehicleId });
       this.server.to(`vehicle_${data.vehicleId}`).emit('notificationReceived', { type: 'SCHEDULE_CHANGE', request: data.request });
     }
     if (data.parentUserId) {
@@ -168,6 +200,66 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.server.to(`academy_${academyId}`).emit('mediaDeleted', { id: mediaId });
   }
 
+  /** 경로/탑승지/유치원 변경 알림 (해당 기관 방에만 전송) */
+  broadcastRouteUpdated(academyId?: number) {
+    if (this.server && academyId) {
+      this.server.to(`academy_${academyId}`).emit('routeUpdated', {
+        academyId,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  /** 원장 웹에서 탑승지 추가/삭제 시 지도교사에게 푸시 알림 전송 (해당 기관 방에만 전송) */
+  broadcastTeacherPush(message: string, academyId?: number) {
+    if (this.server && academyId) {
+      this.server.to(`academy_${academyId}`).emit('teacherPush', {
+        message,
+        academyId,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  /** 지도교사가 탑승 완료 후 기사 앱에 "출발하셔도 됩니다" 신호 전송 (해당 차량 방에만 전송) */
+  broadcastDepartSignal(vehicleId: number, stopName?: string) {
+    const room = `vehicle_${vehicleId}`;
+    const payload = {
+      vehicleId,
+      stopName: stopName ?? null,
+      message: '출발하셔도 됩니다',
+      timestamp: new Date().toISOString(),
+    };
+    if (this.server) {
+      this.server.to(room).emit('driverDepartSignal', payload);
+    }
+  }
+
+  /** 원아 탑승/하차/결석 실시간 상태 브로드캐스트 (학부모 개인 방 + 차량 방에만 전송) */
+  broadcastChildBoardStatus(data: {
+    parentUserId?: number;
+    studentId: number;
+    studentName: string;
+    boardStatus: string;
+    vehicleId?: number;
+    timestamp?: string;
+  }) {
+    if (!this.server) return;
+    const payload = {
+      studentId: data.studentId,
+      studentName: data.studentName,
+      boardStatus: data.boardStatus,
+      vehicleId: data.vehicleId,
+      timestamp: data.timestamp || new Date().toISOString(),
+    };
+    if (data.parentUserId) {
+      this.server.to(`user_${data.parentUserId}`).emit('childBoardStatusChanged', payload);
+    }
+    if (data.vehicleId) {
+      this.server.to(`vehicle_${data.vehicleId}`).emit('childBoardStatusChanged', payload);
+    }
+  }
+
   @SubscribeMessage('joinVehicleRoom')
   async handleJoinVehicleRoom(
     @MessageBody() data: { vehicleId: number },
@@ -185,7 +277,7 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     client.emit('vehicleOperatingStatus', {
       vehicleId,
       isOperating: isOp,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   }
 
@@ -264,10 +356,29 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.broadcastOperationStatus(vehicleId, !!data.isOperating);
   }
 
-  // 기사 앱이 위치를 보내면 같은 차량 방 및 해당 유치원 방에만 전송 (전체 브로드캐스트 금지)
+  @SubscribeMessage('teacherReadyToDepart')
+  handleTeacherReadyToDepart(
+    @MessageBody() data: { vehicleId: number; stopName?: string },
+  ) {
+    const vehicleId = Number(data?.vehicleId);
+    if (!vehicleId) return;
+    this.broadcastDepartSignal(vehicleId, data?.stopName);
+  }
+
+  // 기사 앱이 위치 + 실제 도로 기준 남은 시간(ETA)을 보내면 차량 방 및 대시보드·학부모에게 실시간 전송
   @SubscribeMessage('driverLocationUpdate')
   async handleDriverLocationUpdate(
-    @MessageBody() data: { vehicleId: number; lat: number; lng: number },
+    @MessageBody()
+    data: {
+      vehicleId: number;
+      lat: number;
+      lng: number;
+      remainingSeconds?: number;
+      remainingMeters?: number;
+      nextStopName?: string;
+      nextStopEtaSeconds?: number;
+      speedKmh?: number;
+    },
     @ConnectedSocket() client: Socket,
   ) {
     const vehicleId = Number(data?.vehicleId);
@@ -289,6 +400,11 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       vehicleId,
       lat,
       lng,
+      remainingSeconds: data?.remainingSeconds ?? null,
+      remainingMeters: data?.remainingMeters ?? null,
+      nextStopName: data?.nextStopName ?? null,
+      nextStopEtaSeconds: data?.nextStopEtaSeconds ?? null,
+      speedKmh: data?.speedKmh ?? null,
       timestamp: new Date().toISOString(),
     };
 

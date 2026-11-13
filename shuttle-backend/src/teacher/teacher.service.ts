@@ -1,6 +1,6 @@
-import { Injectable, BadRequestException, ConflictException, ForbiddenException, Inject, forwardRef, Optional } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, ForbiddenException, NotFoundException, Inject, forwardRef, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, LessThanOrEqual, MoreThanOrEqual, In, Between } from 'typeorm';
 import { Student } from '../entities/student.entity';
 import { StudentSchedule } from '../entities/student-schedule.entity';
 import { Vehicle } from '../entities/vehicle.entity';
@@ -10,13 +10,16 @@ import { ParentMessage } from '../entities/parent-message.entity';
 import { OperationLog } from '../entities/operation-log.entity';
 import { ScheduleOverride, OverrideType } from '../entities/schedule-override.entity';
 import { AcademyHoliday } from '../entities/academy-holiday.entity';
-import { LessThanOrEqual, MoreThanOrEqual, Between } from 'typeorm';
+import { PickupPoint } from '../entities/pickup-point.entity';
+import { ChatMessage } from '../entities/chat-message.entity';
+import { ChatRoomMember } from '../entities/chat-room-member.entity';
 import { LocationGateway } from './location.gateway';
 import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE, kstDateString, isValidDateString } from '../utils/school.util';
 import { isNotificationEnabled } from '../utils/notification.util';
 import { Attendance, AttendanceStatus } from '../entities/attendance.entity';
 import { AttendanceSubmission } from '../entities/attendance-submission.entity';
 import { ChatService } from '../chat/chat.service';
+import { formatTeacherName } from '../utils/teacher.util';
 
 @Injectable()
 export class TeacherService {
@@ -33,6 +36,9 @@ export class TeacherService {
     @InjectRepository(Attendance) private attendanceRepository: Repository<Attendance>,
     @InjectRepository(AttendanceSubmission) private submissionRepository: Repository<AttendanceSubmission>,
     private readonly locationGateway: LocationGateway,
+    @Optional() @InjectRepository(PickupPoint) private pickupPointRepository?: Repository<PickupPoint>,
+    @Optional() @InjectRepository(ChatMessage) private chatMessageRepository?: Repository<ChatMessage>,
+    @Optional() @InjectRepository(ChatRoomMember) private chatRoomMemberRepository?: Repository<ChatRoomMember>,
     @Inject(forwardRef(() => ChatService))
     @Optional()
     private readonly chatService?: ChatService
@@ -154,7 +160,7 @@ export class TeacherService {
 
   /**
    * 로그인한 직원(지도교사 또는 기사)에게 배정된 차량 찾기.
-   * 기존에는 teacherUser 로만 찾아서 기사(DRIVER) 계정은 차량을 못 찾던 문제 수정.
+   * 테넌트 격리(Tenant Isolation)를 보장하며, 타 학원 차량이나 임의 1호차 자동 할당을 차단합니다.
    */
   private async findAssignedVehicle(userId: number, relations: any = {}) {
     let v =
@@ -164,18 +170,12 @@ export class TeacherService {
 
     const user = await this.userRepository.findOne({ where: { id: userId }, relations: { academy: true } });
     if (user?.academy) {
+      // 해당 학원의 배정 차량 탐색 (타 학원 차량 침범 금지)
       v = await this.vehicleRepository.findOne({ where: { academy: { id: user.academy.id } }, relations });
-      if (v) {
-        if (!v.driverUser && user.role === 'DRIVER') {
-          v.driverUser = user;
-          await this.vehicleRepository.save(v).catch(() => {});
-        }
-        return v;
-      }
+      if (v) return v;
     }
 
-    const allVehicles = await this.vehicleRepository.find({ relations, take: 1 });
-    return allVehicles[0] || null;
+    return null;
   }
 
   async getStudents(email: string) {
@@ -218,7 +218,50 @@ export class TeacherService {
     }
 
     const vehicle = await this.findAssignedVehicle(user.id);
-    if (!vehicle) return []; // No assigned vehicle
+    if (!vehicle) {
+      // 담임교사(HOMEROOM_TEACHER)이거나 차량 미배정 교사인 경우:
+      // 교사의 담당 학급(assignedClass) 원아들 또는 소속 유치원의 전체 원아 조회
+      const assignedClass = (user.assignedClass || '').trim();
+      let query = this.studentRepository.createQueryBuilder('student')
+        .leftJoinAndSelect('student.assignedVehicle', 'assignedVehicle')
+        .leftJoinAndSelect('student.assignedDepartureVehicle', 'assignedDepartureVehicle');
+      
+      if (user.academyId) {
+        query = query.andWhere('student.academyId = :academyId', { academyId: user.academyId });
+      }
+
+      const allStudents = await query.getMany();
+
+      // 담당 학급이 지정되어 있으면 해당 반 학생 우선 필터링, 없으면 전체 반 학생 반환
+      const classStudents = assignedClass
+        ? allStudents.filter(s => {
+            const rawObj = typeof s.raw === 'string' ? JSON.parse(s.raw || '{}') : (s.raw || {});
+            const sClass = (rawObj['반명'] || rawObj['반'] || '').toString().trim();
+            return sClass === assignedClass || !sClass;
+          })
+        : allStudents;
+
+      return (classStudents.length > 0 ? classStudents : allStudents).map(s => {
+        const rawObj = typeof s.raw === 'string' ? JSON.parse(s.raw || '{}') : (s.raw || {});
+        return {
+          id: s.id,
+          name: s.adminDisplayName || s.name,
+          address: s.address,
+          latitude: s.latitude,
+          longitude: s.longitude,
+          boarded: s.boardStatus === 'BOARDED',
+          absent: s.boardStatus === 'ABSENT',
+          expectedTime: rawObj['예상탑승시간'] || '15:30',
+          allergies: s.allergies || rawObj['알레르기'] || '',
+          teacherMemo: s.teacherMemo,
+          runNumber: s.runNumber || 1,
+          isOverride: false,
+          className: rawObj['반명'] || rawObj['반'] || user.assignedClass || '우리반',
+          parentPhone: rawObj['부모연락처'] || rawObj['보호자연락처'] || rawObj['연락처'] || '',
+          assignedVehicleName: s.assignedVehicle ? (s.assignedVehicle.busNumber || (s.assignedVehicle as any).plateNumber || '차량') : '차량 미배정'
+        };
+      });
+    }
 
     const students = await this.getTodayStudentsForVehicle(vehicle.id);
     
@@ -385,27 +428,96 @@ export class TeacherService {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
 
+    const resultList: any[] = [];
+    const seenTexts = new Set<string>();
+
+    // 1. ParentMessage 조회 (공지 및 직접 지정된 메시지)
     const messages = await this.messageRepository.find({
       relations: { student: true, receiverUser: true },
       order: { createdAt: 'DESC' }
     });
 
-    return messages
-      .filter(m => {
-        if (m.receiverUser) return m.receiverUser.id === user.id;
-        if (m.targetRoles && Array.isArray(m.targetRoles)) {
-          return m.targetRoles.includes('TEACHER') || m.targetRoles.includes('HOMEROOM_TEACHER') || m.targetRoles.includes('SHUTTLE_TEACHER') || m.targetRoles.includes('ALL');
+    for (const m of messages) {
+      const isTarget =
+        (m.receiverUser && m.receiverUser.id === user.id) ||
+        (m.targetRoles &&
+          Array.isArray(m.targetRoles) &&
+          (m.targetRoles.includes('TEACHER') ||
+            m.targetRoles.includes('HOMEROOM_TEACHER') ||
+            m.targetRoles.includes('SHUTTLE_TEACHER') ||
+            m.targetRoles.includes('ALL')));
+
+      if (isTarget) {
+        const dedupeKey = `${m.message}_${new Date(m.createdAt).getMinutes()}`;
+        seenTexts.add(dedupeKey);
+        resultList.push({
+          id: m.id,
+          message: m.message,
+          createdAt: m.createdAt,
+          isRead: m.isRead,
+          isPersonal:
+            (m.receiverUser && m.receiverUser.id === user.id) ||
+            m.message.includes('1:1') ||
+            m.message.includes('개인'),
+          type: (m.receiverUser && m.receiverUser.id === user.id) ? 'PERSONAL' : 'NOTICE',
+          student: m.student ? { id: m.student.id, name: m.student.adminDisplayName || m.student.name } : null,
+          receiverUser: m.receiverUser ? { id: m.receiverUser.id, name: m.receiverUser.name } : { id: user.id, name: user.name }
+        });
+      }
+    }
+
+    // 2. ChatMessage 조회 (원장님과의 1:1 대화방 및 단체 채팅방에서 원장님이 보낸 메시지)
+    if (this.chatRoomMemberRepository && this.chatMessageRepository) {
+      try {
+        const myMemberships = await this.chatRoomMemberRepository.find({
+          where: { user: { id: user.id } },
+          relations: { room: true },
+        });
+
+        const roomIds = myMemberships.map(m => m.room?.id).filter(Boolean);
+
+        if (roomIds.length > 0) {
+          const chatMsgs = await this.chatMessageRepository.find({
+            where: { room: { id: In(roomIds) } },
+            relations: { sender: true, room: true },
+            order: { createdAt: 'DESC' },
+            take: 50,
+          });
+
+          for (const cm of chatMsgs) {
+            // 본인이 보낸 것은 제외하고 상대방(원장님 등)이 보낸 것만 수신함에 추가
+            if (cm.sender && cm.sender.id !== user.id) {
+              const isDirect = cm.room?.type === 'DIRECT';
+              const prefix = isDirect ? '[원장님 1:1 개인 메세지]' : `[${cm.sender.name || '공지'}]`;
+              const displayMsg = cm.text.startsWith('[') ? cm.text : `${prefix} ${cm.text}`;
+
+              const dedupeKey = `${displayMsg}_${new Date(cm.createdAt).getMinutes()}`;
+              if (!seenTexts.has(dedupeKey)) {
+                seenTexts.add(dedupeKey);
+                resultList.push({
+                  id: `chat_${cm.id}`,
+                  message: displayMsg,
+                  createdAt: cm.createdAt,
+                  isRead: (cm.readBy || []).includes(user.id),
+                  isPersonal: isDirect,
+                  type: isDirect ? 'PERSONAL' : 'NOTICE',
+                  sender: { id: cm.sender.id, name: cm.sender.name, email: cm.sender.email },
+                  receiverUser: { id: user.id, name: user.name },
+                  student: null,
+                });
+              }
+            }
+          }
         }
-        return true;
-      })
-      .map(m => ({
-      id: m.id,
-      message: m.message,
-      createdAt: m.createdAt,
-      isRead: m.isRead,
-      student: m.student ? { id: m.student.id, name: m.student.adminDisplayName || m.student.name } : null,
-      receiverUser: m.receiverUser ? { id: m.receiverUser.id, name: m.receiverUser.name } : null
-    }));
+      } catch (chatQueryErr) {
+        console.warn('[TeacherService] ChatMessage inbox merge error:', chatQueryErr);
+      }
+    }
+
+    // 3. 최신 날짜 순 정렬
+    resultList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    return resultList;
   }
 
   async updateMemo(email: string, studentId: number, memo: string) {
@@ -443,6 +555,58 @@ export class TeacherService {
     return { success: true };
   }
 
+  /** 원아 탑승/하차/결석 시 학부모에게 실시간 소켓 및 알림 발송 */
+  private async notifyParentBoardStatus(
+    student: Student,
+    vehicle: Vehicle | null,
+    status: 'BOARDED' | 'WAITING' | 'ABSENT',
+    tagMethod: string = 'MANUAL'
+  ) {
+    const parent = student.parentUser;
+    const studentName = student.adminDisplayName || student.name;
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    let statusKr = '탑승 대기';
+    if (status === 'BOARDED') statusKr = '탑승 완료';
+    else if (status === 'ABSENT') statusKr = '미탑승/결석';
+
+    const message = `[통학 라이브] ${studentName} 원아가 ${vehicle ? vehicle.busNumber + '호차에 ' : ''}${statusKr}되었습니다. (${timeStr})`;
+
+    if (parent) {
+      try {
+        const noti = this.notificationRepository.create({
+          recipient: parent,
+          recipientRole: 'PARENT',
+          type: 'BOARD_STATUS',
+          message,
+        });
+        await this.notificationRepository.save(noti);
+      } catch (err) {
+        console.error('[notifyParentBoardStatus] notification save error:', err);
+      }
+
+      // 메신저 "TakeMe 알림"(개인 알림) 전송 - 수신 설정에서 꺼진 종류는 보내지 않음
+      if (status === 'BOARDED' && this.chatService) {
+        this.chatService.sendSystemNotificationToUser(
+          parent.id,
+          '셔틀 탑승 안내',
+          `${studentName} 원아가 ${vehicle ? vehicle.busNumber + '호차에 ' : ''}탑승 완료했습니다.`,
+          { type: 'shuttle' },
+        ).catch(() => {});
+      }
+    }
+
+    if (this.locationGateway) {
+      this.locationGateway.broadcastChildBoardStatus({
+        parentUserId: parent?.id,
+        studentId: student.id,
+        studentName,
+        boardStatus: status,
+        vehicleId: vehicle?.id,
+      });
+    }
+  }
+
   async boardStudent(email: string, studentId: number, reason?: string) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
@@ -461,36 +625,25 @@ export class TeacherService {
     await this.studentRepository.save(student);
 
     // 1. Create a Notification for the academy admin
-    let msg = `${vehicle.busNumber}호차 ${student.adminDisplayName || student.name} 원생 ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 탑승 완료`;
+    let msg = `${vehicle?.busNumber || '통학'}호차 ${student.adminDisplayName || student.name} 원생 ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 탑승 완료`;
     if (reason) {
       msg += ` (수동 탑승 사유: ${reason})`;
     }
-    const adminNoti = this.notificationRepository.create({
-      vehicle: vehicle,
-      message: msg
-    });
-    await this.notificationRepository.save(adminNoti);
+    if (vehicle) {
+      const adminNoti = this.notificationRepository.create({
+        vehicle: vehicle,
+        message: msg
+      });
+      await this.notificationRepository.save(adminNoti);
+    }
 
-    // 2. Ideally, send push notification to student's parent here
-    if (this.chatService && student.parentUser) {
-      this.chatService.sendSystemNotificationToUser(
-        student.parentUser.id,
-        '셔틀 탑승 안내 (QR)',
-        `${student.adminDisplayName || student.name} 학생이 셔틀버스에 탑승했습니다.`,
-        { type: 'shuttle' }
-      ).catch(() => {});
-    }
-    if (this.chatService && student.parentUser) {
-      await this.chatService.sendSystemNotificationToUser(
-        student.parentUser.id,
-        '셔틀 탑승 안내',
-        `${student.adminDisplayName || student.name} 원생이 ${vehicle.busNumber}호차에 탑승 완료했습니다.`,
-        { type: 'shuttle' }
-      ).catch(() => {});
-    }
+    // 2. 학부모 실시간 알림 및 소켓 브로드캐스트
+    await this.notifyParentBoardStatus(student, vehicle, 'BOARDED', 'MANUAL');
 
     // 3. Append to OperationLog
-    await this.appendBoardingLog(vehicle.id, student.id, student.adminDisplayName || student.name, 'MANUAL');
+    if (vehicle) {
+      await this.appendBoardingLog(vehicle.id, student.id, student.adminDisplayName || student.name, 'MANUAL');
+    }
 
     return { success: true, studentName: student.adminDisplayName || student.name };
   }
@@ -499,9 +652,9 @@ export class TeacherService {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
 
-    const student = await this.studentRepository.findOne({
+    const student = await this.studentRepository.findOne({ 
       where: { id: studentId },
-      relations: { parentUser: true },
+      relations: { parentUser: true }
     });
     if (!student) throw new BadRequestException('Student not found');
 
@@ -527,6 +680,9 @@ export class TeacherService {
       }
     }
 
+    // 학부모 실시간 알림 및 소켓 브로드캐스트
+    await this.notifyParentBoardStatus(student, vehicle, 'ABSENT', 'SYSTEM');
+
     return { success: true, studentName: student.adminDisplayName || student.name };
   }
 
@@ -539,7 +695,7 @@ export class TeacherService {
 
     const student = await this.studentRepository.findOne({ 
       where: { id: studentId },
-      relations: { assignedVehicle: true }
+      relations: { assignedVehicle: true, parentUser: true }
     });
     if (!student) throw new BadRequestException('Student not found');
 
@@ -559,6 +715,9 @@ export class TeacherService {
       `${student.adminDisplayName || student.name} 탑승 취소`,
       'MANUAL'
     );
+
+    // 학부모 실시간 알림 및 소켓 브로드캐스트
+    await this.notifyParentBoardStatus(student, vehicle, 'WAITING', 'MANUAL');
 
     return { success: true, studentName: student.adminDisplayName || student.name };
   }
@@ -753,7 +912,7 @@ export class TeacherService {
     return { success: true };
   }
 
-  async endOperation(email: string) {
+  async endOperation(email: string, interiorChecked?: boolean) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
     const vehicle = await this.findAssignedVehicle(user.id);
@@ -852,15 +1011,8 @@ export class TeacherService {
       message: `${student.adminDisplayName || student.name} 학생이 셔틀버스에 탑승했습니다. ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 탑승 완료 (QR)`
     }));
 
-    // 2. Ideally, send push notification to student's parent here
-    if (this.chatService && student.parentUser) {
-      this.chatService.sendSystemNotificationToUser(
-        student.parentUser.id,
-        '셔틀 탑승 안내 (QR)',
-        `${student.adminDisplayName || student.name} 학생이 셔틀버스에 탑승했습니다.`,
-        { type: 'shuttle' }
-      ).catch(() => {});
-    }
+    // 2. 학부모 실시간 알림 및 소켓 브로드캐스트
+    await this.notifyParentBoardStatus(student, vehicle, 'BOARDED', 'QR');
     
     // 3. Append to OperationLog
     await this.appendBoardingLog(vehicle.id, student.id, student.adminDisplayName || student.name, 'QR');
@@ -868,7 +1020,7 @@ export class TeacherService {
     return { success: true, studentName: student.adminDisplayName || student.name };
   }
 
-  async getStaffList() {
+  async getStaffList(email?: string) {
     const admin = await this.userRepository.findOne({ where: { role: UserRole.ACADEMY_ADMIN } });
     const vehicles = await this.vehicleRepository.find({ relations: { driverUser: true, teacherUser: true } });
     return {
@@ -894,7 +1046,7 @@ export class TeacherService {
     if (!user) throw new BadRequestException('User not found');
 
     const vehicle = await this.findAssignedVehicle(user.id);
-    if (!vehicle) throw new BadRequestException('Assigned vehicle not found');
+    // 담임교사 등 차량이 배정되지 않은 교사도 원장님 및 학부모에게 메시지 발송 허용
 
     let sentCount = 0;
     
@@ -1400,13 +1552,13 @@ export class TeacherService {
           date,
           status: item.status || AttendanceStatus.PRESENT,
           recordedBy: user,
-          recordedByName: user.name || '담임선생님',
+          recordedByName: user.name ? formatTeacherName(user.name) : '담임선생님',
           memo: item.memo || '',
         });
       } else {
         att.status = item.status || AttendanceStatus.PRESENT;
         att.recordedBy = user;
-        att.recordedByName = user.name || '담임선생님';
+        att.recordedByName = user.name ? formatTeacherName(user.name) : '담임선생님';
         if (item.memo !== undefined) att.memo = item.memo;
       }
 
@@ -1434,7 +1586,7 @@ export class TeacherService {
         className: assignedClass,
         date,
         teacher: user,
-        teacherName: user.name || '담임선생님',
+        teacherName: user.name ? formatTeacherName(user.name) : '담임선생님',
         totalCount,
         presentCount,
         absentCount,
@@ -1444,7 +1596,7 @@ export class TeacherService {
       });
     } else {
       submission.teacher = user;
-      submission.teacherName = user.name || '담임선생님';
+      submission.teacherName = user.name ? formatTeacherName(user.name) : '담임선생님';
       submission.totalCount = totalCount;
       submission.presentCount = presentCount;
       submission.absentCount = absentCount;
@@ -1459,7 +1611,7 @@ export class TeacherService {
       academyId,
       className: assignedClass,
       date,
-      teacherName: user.name || '담임선생님',
+      teacherName: user.name ? formatTeacherName(user.name) : '담임선생님',
       teacherEmail: user.email,
       submittedAt: savedSubmission.submittedAt,
       totalCount,
@@ -1644,4 +1796,69 @@ export class TeacherService {
 
     return { success: true };
   }
+
+  async readyToDepart(email: string, stopName?: string) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('User not found');
+    const vehicle = await this.findAssignedVehicle(user.id);
+    if (!vehicle) throw new BadRequestException('Assigned vehicle not found');
+
+    this.locationGateway?.broadcastDepartSignal(vehicle.id, stopName);
+    const label = stopName ? ` (${stopName})` : '';
+    await this.appendBoardingLog(vehicle.id, null, `지도교사 출발 가능 신호 발송${label}`, 'SYSTEM');
+    return { success: true, message: '기사님께 출발 신호를 전달했습니다.' };
+  }
+
+  async logDrivingEvent(email: string, type?: string, detail?: string) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('User not found');
+    const vehicle = await this.findAssignedVehicle(user.id);
+    if (!vehicle) return { success: false };
+
+    const text = detail && detail.trim().length > 0 ? detail.trim() : `안전운전 기록 (${type || 'EVENT'})`;
+    await this.appendBoardingLog(vehicle.id, null, `${text}`, 'SYSTEM');
+    return { success: true };
+  }
+
+  async getWalkInStudents(email: string) {
+    const user = await this.userRepository.findOne({ where: { email }, relations: { academy: true } });
+    if (!user) throw new BadRequestException('User not found');
+    const academyId = user.academy?.id;
+    if (!academyId) return [];
+
+    const walkIns = await this.studentRepository.find({
+      where: { academy: { id: academyId }, isNotRiding: true },
+      order: { name: 'ASC' }
+    });
+
+    return walkIns.map(s => ({
+      id: s.id,
+      name: s.adminDisplayName || s.name,
+      address: s.address,
+      allergies: s.allergies || '',
+    }));
+  }
+
+  async requestRide(email: string, studentId: number) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('User not found');
+    const vehicle = await this.findAssignedVehicle(user.id);
+    if (!vehicle) throw new BadRequestException('배정된 차량을 찾을 수 없습니다.');
+
+    const student = await this.studentRepository.findOne({ where: { id: studentId } });
+    if (!student) throw new NotFoundException('원아를 찾을 수 없습니다.');
+
+    const today = new Date().toISOString().split('T')[0];
+    const override = this.scheduleOverrideRepository.create({
+      student,
+      startDate: today,
+      endDate: today,
+      overrideType: OverrideType.CHANGE_LOCATION,
+      newVehicleId: vehicle.id,
+      reason: '지도교사 현장 추가 탑승 요청',
+    });
+    await this.scheduleOverrideRepository.save(override);
+    return { success: true };
+  }
+
 }

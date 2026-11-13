@@ -1,17 +1,17 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { RoutingModule } from './routing/routing.module';
 import { User } from './entities/user.entity';
 import { Academy } from './entities/academy.entity';
 import { Vehicle } from './entities/vehicle.entity';
 import { Student } from './entities/student.entity';
+import { StudentSchedule } from './entities/student-schedule.entity';
 import { ScheduleOverride } from './entities/schedule-override.entity';
 import { Notification } from './entities/notification.entity';
 import { OperationLog } from './entities/operation-log.entity';
 import { ParentMessage } from './entities/parent-message.entity';
-import { StudentSchedule } from './entities/student-schedule.entity';
 import { AcademyHoliday } from './entities/academy-holiday.entity';
 import { PickupPoint } from './entities/pickup-point.entity';
 import { ChatRoom } from './entities/chat-room.entity';
@@ -20,6 +20,7 @@ import { ChatMessage } from './entities/chat-message.entity';
 import { BoardPost } from './entities/board-post.entity';
 import { BoardComment } from './entities/board-comment.entity';
 import { AuditLog } from './entities/audit-log.entity';
+import { YearlyZoneMapping } from './entities/yearly-zone-mapping.entity';
 import { Attendance } from './entities/attendance.entity';
 import { AttendanceSubmission } from './entities/attendance-submission.entity';
 import { ParentModule } from './parent/parent.module';
@@ -42,10 +43,10 @@ import { MediaModule } from './media/media.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
-        host: config.get<string>('DB_HOST', 'database-1.cl0cmogqigis.ap-southeast-2.rds.amazonaws.com'),
-        port: parseInt(config.get<string>('DB_PORT', '5432'), 10),
-        username: config.get<string>('DB_USERNAME', 'postgres'),
-        password: config.get<string>('DB_PASSWORD', ''),
+        host: config.get<string>('DB_HOST', 'localhost'),
+        port: Number(config.get('DB_PORT', 5432)),
+        username: config.get<string>('DB_USERNAME') || config.get<string>('DB_USER', 'postgres'),
+        password: config.get<string>('DB_PASSWORD', 'takeme123'),
         database: config.get<string>('DB_NAME', 'postgres'),
         entities: [
           User,
@@ -66,6 +67,7 @@ import { MediaModule } from './media/media.module';
           BoardPost,
           BoardComment,
           AuditLog,
+          YearlyZoneMapping,
           Attendance,
           AttendanceSubmission,
           MediaAsset,

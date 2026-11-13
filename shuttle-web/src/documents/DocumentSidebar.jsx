@@ -15,8 +15,10 @@ export default function DocumentSidebar({
   academyName, 
   currentUser, 
   buses = [], 
-  students = [] 
+  students = [],
+  activeEducationLevel,
 }) {
+  const currentEducationLevel = activeEducationLevel || currentUser?.educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
   const [documents, setDocuments] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -81,14 +83,14 @@ export default function DocumentSidebar({
 
 
   const loadExpiry = () => {
-    const summary = getOverallExpirySummary(buses);
+    const summary = getOverallExpirySummary(buses, currentEducationLevel);
     setExpirySummary(summary);
   };
 
   const loadDocs = async () => {
     setIsLoading(true);
     try {
-      const docs = await getDocuments(academyId);
+      const docs = await getDocuments(academyId, currentEducationLevel);
       setDocuments(docs);
     } catch (err) {
       console.error(err);
@@ -111,7 +113,7 @@ export default function DocumentSidebar({
       window.removeEventListener('takeme_docs_changed', handleDocsChanged);
       window.removeEventListener('takeme_expiry_changed', handleExpiryChanged);
     };
-  }, [academyId, buses]);
+  }, [academyId, buses, currentEducationLevel]);
 
 
   const handleFileUpload = async (e) => {
@@ -126,6 +128,7 @@ export default function DocumentSidebar({
     try {
       await saveDocument({
         academyId,
+        educationLevel: currentEducationLevel,
         title: title.trim(),
         category: '행정서류',
         file,

@@ -25,7 +25,7 @@ async function bootstrap() {
   // 2. CORS 화이트리스트 적용
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      // 모바일 앱 요청(origin이 undefined/null) 및 승인된 웹 도메인 허용
+      // 모바일 앱 요청(origin이 undefined/null) 및 승인된 웹 도메인/로컬 IP 허용
       const allowedOrigins = [
         'https://52.63.245.203.sslip.io',
         'http://52.63.245.203.sslip.io',
@@ -34,10 +34,20 @@ async function bootstrap() {
         'http://52.63.245.203:3000',
         'http://localhost:5173',
         'http://localhost:3000',
+        'http://localhost:8081',
+        'http://localhost:8082',
+        'http://localhost:8083',
         'http://127.0.0.1:5173',
         'http://127.0.0.1:3000',
+        'http://127.0.0.1:8081',
+        'http://127.0.0.1:8082',
+        'http://127.0.0.1:8083',
       ];
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (
+        !origin ||
+        allowedOrigins.includes(origin) ||
+        /^http:\/\/(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/.test(origin)
+      ) {
         callback(null, true);
       } else {
         callback(null, false);

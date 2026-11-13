@@ -99,9 +99,14 @@ export class ParentController {
   }
 
   @Get('route')
-  async getRoute(@AuthEmail() email: string) {
+  async getRoute(
+    @AuthEmail() email: string,
+    @Query('studentId') studentId?: string,
+    @Query('direction') direction?: string
+  ) {
     if (!email) throw new BadRequestException('Email is required');
-    return this.parentService.getRoute(email);
+    const parsedStudentId = studentId ? parseInt(studentId, 10) : undefined;
+    return this.parentService.getRoute(email, parsedStudentId, direction);
   }
 
   @Get('route-path')

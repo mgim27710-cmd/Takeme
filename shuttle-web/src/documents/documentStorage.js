@@ -22,13 +22,15 @@ function openDB() {
   });
 }
 
-export async function saveDocument({ academyId, title, category, file, note = '', uploadedBy = '관리자' }) {
+export async function saveDocument({ academyId, educationLevel, title, category, file, note = '', uploadedBy = '관리자' }) {
   const db = await openDB();
   const id = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const currentEdu = educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
 
   const docRecord = {
     id,
     academyId: academyId || 'default',
+    educationLevel: currentEdu,
     title: title || file.name,
     category: category || '기타서류',
     fileName: file.name,
@@ -53,8 +55,9 @@ export async function saveDocument({ academyId, title, category, file, note = ''
   });
 }
 
-export async function getDocuments(academyId) {
+export async function getDocuments(academyId, educationLevel) {
   const db = await openDB();
+  const currentEdu = educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_NAME], 'readonly');
     const store = transaction.objectStore(STORE_NAME);
@@ -62,10 +65,17 @@ export async function getDocuments(academyId) {
 
     req.onsuccess = () => {
       const allDocs = req.result || [];
+      // 1. 교육 부문(educationLevel) 격리 필터
+      const eduFiltered = allDocs.filter(d => {
+        const docEdu = d.educationLevel || '유치원';
+        return docEdu === currentEdu;
+      });
+
+      // 2. 기관 ID(academyId) 필터
       if (!academyId || academyId === 'all') {
-        resolve(allDocs.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)));
+        resolve(eduFiltered.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)));
       } else {
-        const filtered = allDocs.filter(d => String(d.academyId) === String(academyId) || d.academyId === 'default');
+        const filtered = eduFiltered.filter(d => String(d.academyId) === String(academyId) || d.academyId === 'default');
         resolve(filtered.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)));
       }
     };
@@ -137,77 +147,21 @@ export function formatFileSize(bytes) {
 // 교육 · 보험 · 신고증명서 만료일 알림 관리 시스템
 // --------------------------------------------------------------------------
 
-const EXPIRY_STORAGE_KEY = 'takeme_legal_expiry_records';
-
-/**
- * 오늘 날짜 기준 N일 후의 YYYY-MM-DD 문자열을 반환하는 헬퍼
- */
-function getDateStringOffset(daysOffset) {
-  const d = new Date();
-  d.setDate(d.getDate() + daysOffset);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+export function getExpiryStorageKey(educationLevel) {
+  const currentEdu = educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
+  return `takeme_legal_expiry_records_${currentEdu}`;
 }
 
 /**
- * 초기 시드 데이터 생성 (사용자가 즉시 기능을 확인하고 테스트할 수 있도록 현실적인 샘플 제공)
+ * 모든 호차의 만료일 레코드를 불러옵니다. (학제별 격리)
  */
-function generateDefaultExpiryRecords() {
-  return {
-    // 1호차: 종합보험 만료 D-5 (긴급)
-    '1': {
-      busId: '1',
-      busName: '1호차',
-      insuranceExpiry: getDateStringOffset(5),       // D-5 (긴급)
-      inspectionExpiry: getDateStringOffset(180),   // D-180 (정상)
-      driverEduExpiry: getDateStringOffset(340),    // D-340 (정상)
-      companionEduExpiry: getDateStringOffset(120), // D-120 (정상)
-      updatedAt: new Date().toISOString(),
-    },
-    // 2호차: 정기안전점검 D-18 (주의)
-    '2': {
-      busId: '2',
-      busName: '2호차',
-      insuranceExpiry: getDateStringOffset(90),
-      inspectionExpiry: getDateStringOffset(18),     // D-18 (주의)
-      driverEduExpiry: getDateStringOffset(240),
-      companionEduExpiry: getDateStringOffset(200),
-      updatedAt: new Date().toISOString(),
-    },
-    // 3호차: 운전자 안전교육 D-25 (주의)
-    '3': {
-      busId: '3',
-      busName: '3호차',
-      insuranceExpiry: getDateStringOffset(150),
-      inspectionExpiry: getDateStringOffset(110),
-      driverEduExpiry: getDateStringOffset(25),     // D-25 (주의)
-      companionEduExpiry: getDateStringOffset(75),
-      updatedAt: new Date().toISOString(),
-    },
-    // 4호차: 동승보호자 안전교육 만료 2일 지남 (만료)
-    '4': {
-      busId: '4',
-      busName: '4호차',
-      insuranceExpiry: getDateStringOffset(120),
-      inspectionExpiry: getDateStringOffset(60),
-      driverEduExpiry: getDateStringOffset(180),
-      companionEduExpiry: getDateStringOffset(-2),   // 만료 (D+2 지남)
-      updatedAt: new Date().toISOString(),
-    },
-  };
-}
-
-/**
- * 모든 호차의 만료일 레코드를 불러옵니다.
- */
-export function getExpiryRecords() {
+export function getExpiryRecords(educationLevel) {
+  const key = getExpiryStorageKey(educationLevel);
   try {
-    const raw = localStorage.getItem(EXPIRY_STORAGE_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) {
       const defaults = generateDefaultExpiryRecords();
-      localStorage.setItem(EXPIRY_STORAGE_KEY, JSON.stringify(defaults));
+      localStorage.setItem(key, JSON.stringify(defaults));
       return defaults;
     }
     return JSON.parse(raw);
@@ -218,18 +172,19 @@ export function getExpiryRecords() {
 }
 
 /**
- * 특정 호차의 만료일 레코드를 저장합니다.
+ * 특정 호차의 만료일 레코드를 저장합니다. (학제별 격리)
  */
-export function saveExpiryRecord(busId, record) {
+export function saveExpiryRecord(busId, record, educationLevel) {
+  const key = getExpiryStorageKey(educationLevel);
   try {
-    const records = getExpiryRecords();
+    const records = getExpiryRecords(educationLevel);
     records[String(busId)] = {
       ...(records[String(busId)] || {}),
       ...record,
       busId: String(busId),
       updatedAt: new Date().toISOString(),
     };
-    localStorage.setItem(EXPIRY_STORAGE_KEY, JSON.stringify(records));
+    localStorage.setItem(key, JSON.stringify(records));
     window.dispatchEvent(new CustomEvent('takeme_expiry_changed'));
     return records[String(busId)];
   } catch (err) {
@@ -276,7 +231,8 @@ export function calculateDday(dateStr) {
       badge: '만료',
     };
   }
-  if (diffDays <= 7) {
+  // 1달 전(D-30 이하): 만료 임박 (urgent)
+  if (diffDays <= 30) {
     return {
       days: diffDays,
       status: 'urgent',
@@ -284,10 +240,11 @@ export function calculateDday(dateStr) {
       color: 'text-rose-700',
       bg: 'bg-rose-100',
       border: 'border-rose-300',
-      badge: '긴급 임박',
+      badge: '만료 임박 (1달 이내)',
     };
   }
-  if (diffDays <= 30) {
+  // 2달 전(D-60 이하): 주의 (warning)
+  if (diffDays <= 60) {
     return {
       days: diffDays,
       status: 'warning',
@@ -295,7 +252,7 @@ export function calculateDday(dateStr) {
       color: 'text-amber-700',
       bg: 'bg-amber-100',
       border: 'border-amber-300',
-      badge: '갱신 주의',
+      badge: '갱신 주의 (2달 이내)',
     };
   }
   return {
@@ -310,10 +267,10 @@ export function calculateDday(dateStr) {
 }
 
 /**
- * 전체 호차의 만료 현황을 종합 분석합니다.
+ * 전체 호차의 만료 현황을 종합 분석합니다. (학제별 격리)
  */
-export function getOverallExpirySummary(buses = []) {
-  const records = getExpiryRecords();
+export function getOverallExpirySummary(buses = [], educationLevel) {
+  const records = getExpiryRecords(educationLevel);
   const summary = {
     totalBuses: buses.length,
     urgentCount: 0,   // 만료 또는 D-7 이내
@@ -361,4 +318,192 @@ export function getOverallExpirySummary(buses = []) {
 
   return summary;
 }
+
+/**
+ * 2달 전부터 주의, 1달 전 만료 임박, 2주 전 매일/2달~2주 주 1회 알림 규칙 판별
+ * @param {string} dateStr 'YYYY-MM-DD'
+ */
+export function getExpiryNotificationSchedule(dateStr) {
+  const dday = calculateDday(dateStr);
+  if (dday.status === 'empty') {
+    return { shouldNotify: false, frequency: 'none', reason: '미등록', dday };
+  }
+
+  const days = dday.days;
+
+  // 1. 만료 후 또는 만료 2주 전(14일 이내): 매일 알림
+  if (days <= 14) {
+    return {
+      shouldNotify: true,
+      frequency: 'daily',
+      frequencyLabel: '매일 알림',
+      intervalDays: 1,
+      urgency: days < 0 ? 'expired' : 'urgent',
+      urgencyLabel: days < 0 ? '만료 경과' : '만료 임박 (2주 이내)',
+      dday,
+    };
+  }
+
+  // 2. 만료 2달 전부터 2주 전까지(15일 ~ 60일): 일주일에 1번 알림
+  if (days <= 60) {
+    return {
+      shouldNotify: true,
+      frequency: 'weekly',
+      frequencyLabel: '주 1회 알림',
+      intervalDays: 7,
+      urgency: days <= 30 ? 'urgent' : 'warning',
+      urgencyLabel: days <= 30 ? '만료 임박 (1달 이내)' : '주의 (2달 이내)',
+      dday,
+    };
+  }
+
+  // 3. 2달 초과(61일 이상): 정상 (알림 미발송)
+  return {
+    shouldNotify: false,
+    frequency: 'none',
+    frequencyLabel: '알림 없음 (정상)',
+    intervalDays: 0,
+    urgency: 'safe',
+    urgencyLabel: '정상',
+    dday,
+  };
+}
+
+const STAFF_NOTIFICATIONS_KEY = 'takeme_staff_notifications';
+
+/**
+ * 호차 정보를 바탕으로 기사 및 교사 앱으로 발송될 알림 메시지를 생성하고 동기화합니다.
+ * @param {Array} buses 호차 목록
+ * @returns {{ driverNotifications: Array, teacherNotifications: Array, allCount: number }}
+ */
+export function syncStaffExpiryNotifications(buses = [], educationLevel) {
+  const records = getExpiryRecords(educationLevel);
+  const driverNotifications = [];
+  const teacherNotifications = [];
+
+  buses.forEach((bus) => {
+    const busId = String(bus.id);
+    const busName = bus.name || bus.busNumber || `${busId}호차`;
+    const plate = bus.plateNumber || '차량번호 미등록';
+    const driverName = bus.driverName || '기사님';
+    const teacherName = bus.teacherName || '동승교사';
+    const busRecord = records[busId] || {};
+
+    const items = [
+      {
+        key: 'insuranceExpiry',
+        label: '자동차 종합보험',
+        targetRoles: ['driver', 'teacher'],
+        dateStr: busRecord.insuranceExpiry,
+      },
+      {
+        key: 'inspectionExpiry',
+        label: '정기안전검사/신고필증',
+        targetRoles: ['driver', 'teacher'],
+        dateStr: busRecord.inspectionExpiry,
+      },
+      {
+        key: 'driverEduExpiry',
+        label: '운전자 안전교육',
+        targetRoles: ['driver'],
+        dateStr: busRecord.driverEduExpiry,
+      },
+      {
+        key: 'companionEduExpiry',
+        label: '동승보호자 안전교육',
+        targetRoles: ['teacher'],
+        dateStr: busRecord.companionEduExpiry,
+      },
+    ];
+
+    items.forEach((item) => {
+      const schedule = getExpiryNotificationSchedule(item.dateStr);
+      if (!schedule.shouldNotify) return;
+
+      const dday = schedule.dday;
+      const days = dday.days;
+      let titlePrefix = '';
+      if (schedule.urgency === 'expired') {
+        titlePrefix = `[법정서류 만료 (+${Math.abs(days)}일)]`;
+      } else if (days <= 14) {
+        titlePrefix = `[긴급 매일알림 D-${days}]`;
+      } else if (days <= 30) {
+        titlePrefix = `[만료임박 주간알림 D-${days}]`;
+      } else {
+        titlePrefix = `[주의 주간알림 D-${days}]`;
+      }
+
+      const message = `${titlePrefix} ${busName}(${plate}) ${item.label} 만료일(${item.dateStr})이 ${dday.label}입니다. 서류 갱신 및 이수를 확인해주세요.`;
+
+      const notiObject = {
+        id: `noti_${busId}_${item.key}_${Date.now()}`,
+        busId,
+        busName,
+        plateNumber: plate,
+        itemKey: item.key,
+        itemLabel: item.label,
+        expiryDate: item.dateStr,
+        daysRemaining: days,
+        frequency: schedule.frequency,
+        frequencyLabel: schedule.frequencyLabel,
+        urgency: schedule.urgency,
+        urgencyLabel: schedule.urgencyLabel,
+        titlePrefix,
+        message,
+        createdAt: new Date().toISOString(),
+      };
+
+      if (item.targetRoles.includes('driver')) {
+        driverNotifications.push({
+          ...notiObject,
+          targetRole: 'driver',
+          targetName: driverName,
+        });
+      }
+      if (item.targetRoles.includes('teacher')) {
+        teacherNotifications.push({
+          ...notiObject,
+          targetRole: 'teacher',
+          targetName: teacherName,
+        });
+      }
+    });
+  });
+
+  const payload = {
+    updatedAt: new Date().toISOString(),
+    driverNotifications,
+    teacherNotifications,
+  };
+
+  try {
+    localStorage.setItem(STAFF_NOTIFICATIONS_KEY, JSON.stringify(payload));
+    window.dispatchEvent(new CustomEvent('takeme_staff_notifications_updated', { detail: payload }));
+  } catch (e) {
+    console.error('기사/교사 알림 저장 실패:', e);
+  }
+
+  return {
+    driverNotifications,
+    teacherNotifications,
+    allCount: driverNotifications.length + teacherNotifications.length,
+  };
+}
+
+/**
+ * 기사용/교사용으로 생성된 만료 알림 목록을 조회합니다.
+ */
+export function getStaffNotifications(role = 'all') {
+  try {
+    const raw = localStorage.getItem(STAFF_NOTIFICATIONS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (role === 'driver') return parsed.driverNotifications || [];
+    if (role === 'teacher') return parsed.teacherNotifications || [];
+    return [...(parsed.driverNotifications || []), ...(parsed.teacherNotifications || [])];
+  } catch (err) {
+    return [];
+  }
+}
+
 

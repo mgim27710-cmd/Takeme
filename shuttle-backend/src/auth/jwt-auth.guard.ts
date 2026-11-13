@@ -43,7 +43,7 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     // 1. Database User validation & Single Session / Lock check
-    const user = await this.usersRepository.findOne({ where: { id: payload.sub } });
+    const user = await this.usersRepository.findOne({ where: { id: payload.sub }, relations: { academy: true } });
     if (!user) {
       throw new UnauthorizedException('존재하지 않는 사용자입니다.');
     }
@@ -53,14 +53,17 @@ export class JwtAuthGuard implements CanActivate {
       throw new ForbiddenException('로그인 또는 인증번호 5회 실패로 계정이 잠겼습니다. 기관 관리자에게 잠금 해제를 요청해 주세요.');
     }
 
-    // 3. Single session (Concurrent login prevention) check (환경변수 ALLOW_MULTIPLE_SESSIONS 로 제어)
-    const allowMultipleSessions = process.env.ALLOW_MULTIPLE_SESSIONS === 'true';
+    // 3. Single session (Concurrent login prevention) check (ALLOW_MULTIPLE_SESSIONS 기본 허용으로 동시 접속 유지)
+    const allowMultipleSessions = process.env.ALLOW_MULTIPLE_SESSIONS !== 'false';
     if (!allowMultipleSessions && payload.sessionId && user.currentSessionToken && payload.sessionId !== user.currentSessionToken) {
       throw new UnauthorizedException('다른 기기 또는 브라우저에서 로그인되어 현재 접속이 종료되었습니다. 다시 로그인해 주세요.');
     }
 
     req.user = payload;
     req.dbUser = user;
+    if (user.academyId && !req.user.academyId) {
+      req.user.academyId = user.academyId;
+    }
 
     // 4. Role-based Access Control (RBAC)
     const roles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [
