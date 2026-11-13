@@ -10,9 +10,10 @@ import '../../models/route_model.dart';
 import '../../widgets/kakao_map_view.dart';
 import 'change_request_modal.dart';
 import 'my_requests_screen.dart';
+import 'notification_list_screen.dart';
 import 'class_board_screen.dart';
+import 'parent_chat_room_list_screen.dart';
 import '../settings_screen.dart';
-import '../chat/chat_room_list_screen.dart';
 
 class ParentHomeScreen extends StatefulWidget {
   const ParentHomeScreen({super.key});
@@ -22,8 +23,7 @@ class ParentHomeScreen extends StatefulWidget {
 }
 
 class _ParentHomeScreenState extends State<ParentHomeScreen> {
-  int _selectedTabIndex = 0; // 0: 홈, 1: 알림장·게시물, 2: 메신저, 3: 설정
-  late final PageController _pageController;
+  int _currentNavIndex = 0; // 0: 홈/셔틀, 1: 알림장, 2: 1:1 대화방
   String _activeTab = 'goto'; // 'goto' (등원) | 'gohome' (하원)
 
   // 다자녀(Multi-Child) 지원 상태
@@ -35,11 +35,6 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
 
   RouteDataModel? _routeData;
   int _unreadNotificationCount = 0;
-  int _unreadChatCount = 0;
-
-  // 기사 앱 실제 도로 경로 (서버 route-path)
-  List<dynamic>? _actualRoadPath;
-  int _progressIndex = 0;
   Timer? _notificationPollTimer;
   Map<String, dynamic>? _todaySchedule;
 
@@ -58,7 +53,6 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   @override
   void initState() {
     super.initState();
-    _pageController = PageController(initialPage: _selectedTabIndex);
     _loadAllData();
     _loadUnreadCount();
     _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
@@ -69,7 +63,6 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   @override
   void dispose() {
     _allergyController.dispose();
-    _pageController.dispose();
     _notificationPollTimer?.cancel();
     final vehicleId = _routeData?.vehicleId;
     if (vehicleId != null) {
@@ -83,12 +76,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
       final user = ApiService().currentUser;
       if (user == null) return;
       final count = await ApiService().getUnreadNotificationCount(user.email);
-      final chatCount = await ApiService().getChatTotalUnreadCount();
       if (mounted) {
-        setState(() {
-          _unreadNotificationCount = count;
-          _unreadChatCount = chatCount;
-        });
+        setState(() => _unreadNotificationCount = count);
       }
     } catch (e) {
       debugPrint('[ParentHomeScreen] _loadUnreadCount error: $e');
@@ -140,19 +129,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
 
       final route = results[0] as RouteDataModel?;
       final schedule = results[1] as Map<String, dynamic>?;
-      Map<String, dynamic>? routePathData;
-      try {
-        routePathData = await ApiService().getRoutePath();
-      } catch (_) {}
 
       if (mounted) {
         setState(() {
           _routeData = route;
           _todaySchedule = schedule;
-          if (routePathData != null) {
-            _actualRoadPath = routePathData['path'];
-            _progressIndex = routePathData['progressIndex'] ?? 0;
-          }
           if (_childInfo != null) {
             _allergyController.text = _childInfo!.allergies;
           }
@@ -164,17 +145,6 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
               SocketService().leaveVehicleRoom(_routeData!.vehicleId!);
             }
             SocketService().joinVehicleRoom(route!.vehicleId!);
-            SocketService().onRoutePathUpdated((data) {
-              if (mounted) {
-                setState(() {
-                  _actualRoadPath = data['path'];
-                  _progressIndex = data['progressIndex'] ?? 0;
-                });
-              }
-            });
-            SocketService().onRoomUpdated((_) {
-              if (mounted) _loadUnreadCount();
-            });
             SocketService().onLocationUpdated((data) {
               if (mounted && data['lat'] != null && data['lng'] != null) {
                 setState(() {
@@ -717,6 +687,60 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
             _loadUnreadCount();
           },
         ),
+        Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.center,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.notifications_none_rounded, color: Color(0xFF0F172A), size: 24),
+              tooltip: '알림',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const NotificationListScreen()),
+                ).then((_) {
+                  _loadUnreadCount();
+                  _loadAllData();
+                });
+              },
+            ),
+            if (_unreadNotificationCount > 0)
+              Positioned(
+                right: 6,
+                top: 8,
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEF4444),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                  alignment: Alignment.center,
+                  child: Text(
+                    _unreadNotificationCount > 9 ? '9+' : '$_unreadNotificationCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900,
+                      height: 1,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        IconButton(
+          icon: const Icon(Icons.settings_outlined, color: Color(0xFF475569)),
+          tooltip: '설정',
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const SettingsScreen()),
+            ).then((_) => _loadAllData());
+          },
+        ),
       ],
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1),
@@ -1191,8 +1215,6 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                       isGohome: _activeTab == 'gohome',
                       stops: _routeData?.stops ?? [],
                       routePoints: _routeData?.routePoints ?? [],
-                      actualRoadPath: _actualRoadPath,
-                      progressIndex: _progressIndex,
                       busLat: _busLat,
                       busLng: _busLng,
                       academyLat: _routeData?.academyLat,
@@ -1404,90 +1426,6 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     );
   }
 
-  Widget _buildBottomNavItem({
-    required int index,
-    required IconData icon,
-    required String label,
-    int badgeCount = 0,
-  }) {
-    final isSelected = _selectedTabIndex == index;
-    return Expanded(
-      child: InkWell(
-        onTap: () {
-          _pageController.animateToPage(
-            index,
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeInOut,
-          );
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFFF1F5F9) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  alignment: Alignment.center,
-                  children: [
-                    Icon(
-                      icon,
-                      size: 24,
-                      color: isSelected ? const Color(0xFF0F172A) : const Color(0xFF94A3B8),
-                    ),
-                    if (badgeCount > 0)
-                      Positioned(
-                        right: -7,
-                        bottom: -4,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEF4444),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
-                          ),
-                          constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-                          alignment: Alignment.center,
-                          child: Text(
-                            badgeCount > 9 ? '9+' : '$badgeCount',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 9,
-                              fontWeight: FontWeight.w900,
-                              height: 1,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.2),
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
-                  color: isSelected ? const Color(0xFF0F172A) : const Color(0xFF94A3B8),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-
   @override
   Widget build(BuildContext context) {
     final user = ApiService().currentUser;
@@ -1495,48 +1433,49 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
-      appBar: _selectedTabIndex == 0 ? _buildAppBar() : null,
-      body: PageView(
-        controller: _pageController,
-        onPageChanged: (idx) => setState(() => _selectedTabIndex = idx),
-        children: [
-          _isLoading
-              ? const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)))
-              : _buildHomeBody(isStudent, user),
-          ClassBoardScreen(childClassName: _childInfo?.className, isEmbeddedTab: true),
-          const ChatRoomListScreen(isEmbeddedTab: true),
-          const SettingsScreen(isEmbeddedTab: true),
-        ],
-      ),
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(
-            top: BorderSide(color: Color(0xFFE2E8F0), width: 1),
-          ),
-        ),
-        child: SafeArea(
-          top: false,
-          bottom: true,
-          left: true,
-          right: true,
-          child: SizedBox(
-            height: 64,
-            child: Row(
+      appBar: _currentNavIndex == 0 ? _buildAppBar() : null,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)))
+          : IndexedStack(
+              index: _currentNavIndex,
               children: [
-                _buildBottomNavItem(index: 0, icon: Icons.home_outlined, label: '홈'),
-                _buildBottomNavItem(index: 1, icon: Icons.article_outlined, label: '알림장·게시물'),
-                _buildBottomNavItem(
-                  index: 2,
-                  icon: Icons.forum_outlined,
-                  label: '메신저',
-                  badgeCount: _unreadChatCount + _unreadNotificationCount,
+                _buildHomeBody(isStudent, user),
+                ClassBoardScreen(
+                  childClassName: _childInfo?.className,
+                  isEmbedded: true,
                 ),
-                _buildBottomNavItem(index: 3, icon: Icons.settings_outlined, label: '설정'),
+                const ParentChatRoomListScreen(isEmbedded: true),
               ],
             ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentNavIndex,
+        onTap: (index) {
+          setState(() => _currentNavIndex = index);
+        },
+        type: BottomNavigationBarType.fixed,
+        backgroundColor: Colors.white,
+        selectedItemColor: const Color(0xFF2563EB),
+        unselectedItemColor: const Color(0xFF94A3B8),
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12),
+        elevation: 8,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.directions_bus_rounded),
+            activeIcon: Icon(Icons.directions_bus_rounded, color: Color(0xFF2563EB)),
+            label: '홈 / 셔틀',
           ),
-        ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.article_outlined),
+            activeIcon: Icon(Icons.article_rounded, color: Color(0xFF2563EB)),
+            label: '알림장',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.chat_bubble_outline_rounded),
+            activeIcon: Icon(Icons.chat_bubble_rounded, color: Color(0xFF2563EB)),
+            label: '1:1 메시지',
+          ),
+        ],
       ),
     );
   }

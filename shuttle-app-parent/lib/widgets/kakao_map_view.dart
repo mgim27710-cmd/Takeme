@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/route_model.dart';
 import 'kakao_map_view_stub.dart' if (dart.library.html) 'kakao_map_view_web.dart';
@@ -17,8 +15,6 @@ class KakaoMapView extends StatefulWidget {
   final String? academyName;
   final String? myChildName;
   final String? myChildAddress;
-  final List<dynamic>? actualRoadPath;
-  final int progressIndex;
   final double? myChildLat;
   final double? myChildLng;
   final bool isFullScreen;
@@ -37,8 +33,6 @@ class KakaoMapView extends StatefulWidget {
     this.academyName,
     this.myChildName,
     this.myChildAddress,
-    this.actualRoadPath,
-    this.progressIndex = 0,
     this.myChildLat,
     this.myChildLng,
     this.isFullScreen = false,
@@ -88,10 +82,6 @@ class _KakaoMapViewState extends State<KakaoMapView> {
         oldWidget.isGohome != widget.isGohome) {
       _updateMapData();
     }
-    if (oldWidget.actualRoadPath != widget.actualRoadPath ||
-        oldWidget.progressIndex != widget.progressIndex) {
-      _updateRoutePath();
-    }
   }
 
   void _runJs(String js) {
@@ -116,18 +106,6 @@ class _KakaoMapViewState extends State<KakaoMapView> {
     }
   }
 
-  void _updateRoutePath() {
-    final roadPath = widget.actualRoadPath;
-    if (roadPath != null && roadPath.isNotEmpty) {
-      final roadJson = jsonEncode(roadPath.map((p) => [
-        p['lat'] ?? p['latitude'],
-        p['lng'] ?? p['longitude'],
-      ]).where((p) => p[0] != null && p[1] != null).toList());
-      final js = 'if (window.updateRoutePath) { window.updateRoutePath($roadJson, ${widget.progressIndex}); }';
-      _controller?.runJavaScript(js);
-    }
-  }
-
   void _updateMapData() {
     final stopsJson = jsonEncode(widget.stops.map((s) => {
       'name': s.name,
@@ -142,11 +120,6 @@ class _KakaoMapViewState extends State<KakaoMapView> {
       p['longitude'] ?? p['lng'],
     ]).where((p) => p[0] != null && p[1] != null).toList());
 
-    final roadPathJson = jsonEncode((widget.actualRoadPath ?? []).map((p) => [
-      p['lat'] ?? p['latitude'],
-      p['lng'] ?? p['longitude'],
-    ]).where((p) => p[0] != null && p[1] != null).toList());
-
     final js = '''
       if (window.initData) {
         window.initData(
@@ -157,8 +130,6 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           "${widget.academyName ?? ''}", 
           ${widget.busLat ?? 'null'}, 
           ${widget.busLng ?? 'null'},
-          $roadPathJson,
-          ${widget.progressIndex},
           ${widget.isGohome},
           ${widget.myChildLat ?? 'null'},
           ${widget.myChildLng ?? 'null'}
@@ -197,8 +168,6 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           isGohome: widget.isGohome,
           stops: widget.stops,
           routePoints: widget.routePoints,
-          actualRoadPath: widget.actualRoadPath,
-          progressIndex: widget.progressIndex,
           busLat: widget.busLat,
           busLng: widget.busLng,
           academyLat: widget.academyLat,
@@ -239,7 +208,7 @@ class _KakaoMapViewState extends State<KakaoMapView> {
       autoInitScript = '''
         setTimeout(function() {
           if (window.initData) {
-            window.initData($stopsJson, $pointsJson, $acLat, $acLng, $acName, $bLat, $bLng, null, 0, ${widget.isGohome}, ${widget.myChildLat ?? 'null'}, ${widget.myChildLng ?? 'null'});
+            window.initData($stopsJson, $pointsJson, $acLat, $acLng, $acName, $bLat, $bLng, ${widget.isGohome}, ${widget.myChildLat ?? 'null'}, ${widget.myChildLng ?? 'null'});
           }
         }, 300);
       ''';
@@ -388,20 +357,7 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           }
         };
 
-        window.updateRoutePath = function(roadPath, progIdx) {
-          if (polyline) {
-            map.removeLayer(polyline);
-            polyline = null;
-          }
-          if (roadPath && roadPath.length) {
-            var active = roadPath.slice(progIdx || 0);
-            if (active.length) {
-              polyline = L.polyline(active, { color: '#2563eb', weight: 5, opacity: 0.85 }).addTo(map);
-            }
-          }
-        };
-
-        window.initData = function(stops, points, acLat, acLng, acName, bLat, bLng, roadPath, progIdx, isGohome, childLatArg, childLngArg) {
+        window.initData = function(stops, points, acLat, acLng, acName, bLat, bLng, isGohome, childLatArg, childLngArg) {
           var pts = [];
           var targetAcLat = (acLat && acLat > 30) ? acLat : 37.558274;
           var targetAcLng = (acLng && acLng > 120) ? acLng : 126.824116;
@@ -497,8 +453,7 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           var gotoRoadPoints = [[37.566762,126.826972],[37.566711,126.827658],[37.566691,126.827888],[37.56653,126.827866],[37.565986,126.827793],[37.564488,126.827594],[37.564377,126.827578],[37.56436,126.827766],[37.564349,126.827873],[37.564267,126.828741],[37.564246,126.82896],[37.56424,126.829017],[37.564128,126.830201],[37.56409,126.830599],[37.56407,126.83082],[37.564056,126.830968],[37.563992,126.831649],[37.563961,126.831977],[37.563868,126.832976],[37.56381,126.833452],[37.563727,126.833632],[37.563676,126.833721],[37.563625,126.833782],[37.563618,126.83379],[37.563541,126.83385],[37.563399,126.833934],[37.563156,126.833897],[37.562493,126.833798],[37.561417,126.833639],[37.561255,126.833616],[37.561268,126.833487],[37.561278,126.83338],[37.56135,126.832654],[37.561477,126.831351],[37.561537,126.830743],[37.561569,126.830411],[37.56157,126.830392],[37.561583,126.83026],[37.561594,126.830142],[37.561599,126.830092],[37.561647,126.829585],[37.561751,126.828481],[37.561789,126.828061],[37.561831,126.827654],[37.561849,126.827453],[37.561857,126.827385],[37.561875,126.827194],[37.561895,126.826978],[37.561904,126.826883],[37.562013,126.825652],[37.561049,126.825501],[37.560333,126.825389],[37.562013,126.825652],[37.561904,126.826883],[37.561895,126.826978],[37.561875,126.827194],[37.561725,126.82717],[37.561303,126.827104],[37.560882,126.827038],[37.560713,126.827011],[37.560271,126.826942],[37.560007,126.826905],[37.55991,126.826889],[37.55978,126.826863],[37.559612,126.826845],[37.559456,126.826825],[37.55939,126.82682],[37.559172,126.826798],[37.558931,126.826773],[37.558205,126.826686],[37.558048,126.826667],[37.558071,126.826439],[37.558124,126.825877],[37.558171,126.825768],[37.5582,126.825406],[37.558223,126.825267],[37.558238,126.825244],[37.558246,126.825216],[37.558245,126.825186],[37.558237,126.825159],[37.558245,126.824988],[37.558303,126.824447],[37.558368,126.823784],[37.55838,126.823692],[37.558393,126.82364],[37.558418,126.823625],[37.558437,126.8236],[37.55845,126.823569],[37.558454,126.823535],[37.558449,126.8235],[37.558434,126.823468],[37.558413,126.823445],[37.558387,126.823431],[37.558358,126.82343],[37.558331,126.823439],[37.558308,126.82346],[37.558291,126.823489],[37.558284,126.823518],[37.558283,126.823548],[37.558289,126.823577],[37.5583,126.823603],[37.558317,126.823624],[37.55832,126.823671],[37.558309,126.823772],[37.558274,126.824116]];
           var gohomeRoadPoints = [[37.558274,126.824116],[37.558242,126.82443],[37.558181,126.824979],[37.558175,126.825029],[37.558156,126.825121],[37.558136,126.825135],[37.55812,126.825157],[37.558111,126.825185],[37.558111,126.825216],[37.55812,126.825245],[37.558136,126.825269],[37.558137,126.825393],[37.558109,126.825764],[37.558124,126.825877],[37.558071,126.826439],[37.558048,126.826667],[37.558205,126.826686],[37.558931,126.826773],[37.559172,126.826798],[37.55939,126.82682],[37.559456,126.826825],[37.559612,126.826845],[37.55978,126.826863],[37.55991,126.826889],[37.560007,126.826905],[37.560271,126.826942],[37.560713,126.827011],[37.560882,126.827038],[37.561303,126.827104],[37.561725,126.82717],[37.561875,126.827194],[37.561895,126.826978],[37.561904,126.826883],[37.562013,126.825652],[37.561049,126.825501],[37.560333,126.825389],[37.562013,126.825652],[37.561904,126.826883],[37.561895,126.826978],[37.561875,126.827194],[37.561857,126.827385],[37.561849,126.827453],[37.561831,126.827654],[37.561789,126.828061],[37.561751,126.828481],[37.561647,126.829585],[37.561599,126.830092],[37.561594,126.830142],[37.561583,126.83026],[37.56157,126.830392],[37.561569,126.830411],[37.561537,126.830743],[37.561477,126.831351],[37.56135,126.832654],[37.561278,126.83338],[37.561268,126.833487],[37.561255,126.833616],[37.561417,126.833639],[37.562493,126.833798],[37.563156,126.833897],[37.563399,126.833934],[37.563653,126.833994],[37.563775,126.83401],[37.563784,126.833865],[37.563788,126.833807],[37.56381,126.833452],[37.563868,126.832976],[37.563961,126.831977],[37.563992,126.831649],[37.564056,126.830968],[37.56407,126.83082],[37.56409,126.830599],[37.564128,126.830201],[37.56424,126.829017],[37.564246,126.82896],[37.564267,126.828741],[37.564349,126.827873],[37.56436,126.827766],[37.564377,126.827578],[37.564488,126.827594],[37.565986,126.827793],[37.56653,126.827866],[37.566691,126.827888],[37.566711,126.827658],[37.566762,126.826972]];
 
-          // 서버가 준 실제 도로 경로가 있으면 우선 사용, 없으면 기존 방식
-          var navPoints = (roadPath && roadPath.length) ? roadPath.slice(progIdx || 0) : (isGohome ? gohomeRoadPoints : ((points && points.length > 5) ? points : gotoRoadPoints));
+          var navPoints = isGohome ? gohomeRoadPoints : ((points && points.length > 5) ? points : gotoRoadPoints);
 
           if (navPoints && navPoints.length > 1) {
             // 네비게이션 경로 테두리선 (기사 앱 네비게이션 기반 굵은 안내선)
@@ -511,7 +466,7 @@ class _KakaoMapViewState extends State<KakaoMapView> {
             }).addTo(map);
 
             // 네비게이션 경로 주행선 (기사 앱 로열 블루)
-            polyline = L.polyline(navPoints, {
+            L.polyline(navPoints, {
               color: '#3b82f6',
               weight: 5,
               opacity: 1.0,
@@ -550,8 +505,6 @@ class _KakaoMapViewState extends State<KakaoMapView> {
 
   @override
   Widget build(BuildContext context) {
-    final viewPadding = MediaQuery.viewPaddingOf(context);
-
     return Stack(
       children: [
         // Map Container
@@ -570,8 +523,8 @@ class _KakaoMapViewState extends State<KakaoMapView> {
 
         // Controls Overlay
         Positioned(
-          top: 12 + (widget.isFullScreen ? viewPadding.top : 0),
-          right: 12 + (widget.isFullScreen ? viewPadding.right : 0),
+          top: 12,
+          right: 12,
           child: Column(
             children: [
               // Fullscreen Toggle
@@ -732,12 +685,10 @@ class _KakaoMapViewState extends State<KakaoMapView> {
   }
 }
 
-class KakaoMapFullscreenPage extends StatefulWidget {
+class KakaoMapFullscreenPage extends StatelessWidget {
   final bool isGohome;
   final List<RouteStop> stops;
   final List<Map<String, dynamic>> routePoints;
-  final List<dynamic>? actualRoadPath;
-  final int progressIndex;
   final double? busLat;
   final double? busLng;
   final double? academyLat;
@@ -751,8 +702,6 @@ class KakaoMapFullscreenPage extends StatefulWidget {
     this.isGohome = false,
     required this.stops,
     required this.routePoints,
-    this.actualRoadPath,
-    this.progressIndex = 0,
     this.busLat,
     this.busLng,
     this.academyLat,
@@ -763,48 +712,8 @@ class KakaoMapFullscreenPage extends StatefulWidget {
   });
 
   @override
-  State<KakaoMapFullscreenPage> createState() => _KakaoMapFullscreenPageState();
-}
-
-class _KakaoMapFullscreenPageState extends State<KakaoMapFullscreenPage> {
-  bool _isCardDismissed = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _checkCardDismissed();
-  }
-
-  Future<void> _checkCardDismissed() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final dismissedDate = prefs.getString('hide_child_stop_card_date');
-      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-      if (dismissedDate == today && mounted) {
-        setState(() {
-          _isCardDismissed = true;
-        });
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _dismissCardForToday() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-      await prefs.setString('hide_child_stop_card_date', today);
-    } catch (_) {}
-    if (mounted) {
-      setState(() {
-        _isCardDismissed = true;
-      });
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final myStop = widget.stops.cast<RouteStop?>().firstWhere((s) => s?.isMyChild == true, orElse: () => null);
-    final viewPadding = MediaQuery.viewPaddingOf(context);
+    final myStop = stops.cast<RouteStop?>().firstWhere((s) => s?.isMyChild == true, orElse: () => null);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -813,12 +722,12 @@ class _KakaoMapFullscreenPageState extends State<KakaoMapFullscreenPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              widget.academyName ?? '유치원 통학차량 실시간 지도',
+              academyName ?? '유치원 통학차량 실시간 지도',
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
             ),
-            if (widget.myChildName != null)
+            if (myChildName != null)
               Text(
-                '${widget.myChildName} 원아 탑승 노선',
+                '$myChildName 원아 탑승 노선',
                 style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
               ),
           ],
@@ -842,112 +751,91 @@ class _KakaoMapFullscreenPageState extends State<KakaoMapFullscreenPage> {
           // Fullscreen Map View
           Positioned.fill(
             child: KakaoMapView(
-              stops: widget.stops,
-              routePoints: widget.routePoints,
-              actualRoadPath: widget.actualRoadPath,
-              progressIndex: widget.progressIndex,
-              busLat: widget.busLat,
-              busLng: widget.busLng,
-              academyLat: widget.academyLat,
-              academyLng: widget.academyLng,
-              academyName: widget.academyName,
-              myChildName: widget.myChildName,
-              myChildAddress: widget.myChildAddress,
+              stops: stops,
+              routePoints: routePoints,
+              busLat: busLat,
+              busLng: busLng,
+              academyLat: academyLat,
+              academyLng: academyLng,
+              academyName: academyName,
+              myChildName: myChildName,
+              myChildAddress: myChildAddress,
               isFullScreen: true,
-              isGohome: widget.isGohome,
+              isGohome: isGohome,
             ),
           ),
 
-          // Bottom Info Card ("우리 아이 탑승 장소" / "탑승지 설정됨")
-          if (!_isCardDismissed)
-            Positioned(
-              left: 16 + viewPadding.left,
-              right: 16 + viewPadding.right,
-              bottom: 24 + viewPadding.bottom,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.12),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
+          // Bottom Info Card
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 24,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF5F3FF),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFDDD6FE)),
                     ),
-                  ],
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF5F3FF),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFFDDD6FE)),
-                      ),
-                      child: const Icon(Icons.stars_rounded, color: Color(0xFF7C3AED), size: 26),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            children: [
-                              const Text(
-                                '우리 아이 탑승 장소',
-                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFF7C3AED)),
+                    child: const Icon(Icons.stars_rounded, color: Color(0xFF7C3AED), size: 26),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            const Text(
+                              '우리 아이 탑승 장소',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFF7C3AED)),
+                            ),
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFEFF6FF),
+                                borderRadius: BorderRadius.circular(6),
                               ),
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFEFF6FF),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  '총 ${widget.stops.length}개 정류장',
-                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
-                                ),
+                              child: Text(
+                                '총 ${stops.length}개 정류장',
+                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
                               ),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            myStop?.address ?? widget.myChildAddress ?? (myStop?.name ?? '탑승지 설정됨'),
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF1E293B)),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // Close button (X) to dismiss for today
-                    InkWell(
-                      onTap: _dismissCardForToday,
-                      borderRadius: BorderRadius.circular(20),
-                      child: Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFF1F5F9),
-                          shape: BoxShape.circle,
+                            ),
+                          ],
                         ),
-                        child: const Icon(
-                          Icons.close,
-                          size: 16,
-                          color: Color(0xFF64748B),
+                        const SizedBox(height: 2),
+                        Text(
+                          myStop?.address ?? myChildAddress ?? (myStop?.name ?? '탑승지 설정됨'),
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF1E293B)),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
+          ),
         ],
       ),
     );
