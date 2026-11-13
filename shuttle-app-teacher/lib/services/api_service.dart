@@ -508,11 +508,12 @@ class ApiService {
   }
 
   // ==================== BOARD APIs ====================
-  Future<List<Map<String, dynamic>>> getBoardPosts({int? academyId, String? search}) async {
+  Future<List<Map<String, dynamic>>> getBoardPosts({int? academyId, String? search, String? postType}) async {
     try {
       final qp = <String, String>{};
       if (academyId != null) qp['academyId'] = academyId.toString();
       if (search != null && search.isNotEmpty) qp['search'] = search;
+      if (postType != null && postType.isNotEmpty) qp['postType'] = postType;
       final uri = Uri.parse('${AppConfig.apiHost}/routing/board/posts').replace(queryParameters: qp.isEmpty ? null : qp);
       final res = await getWithAuth(uri);
       if (res.statusCode == 200) {
@@ -555,6 +556,7 @@ class ApiService {
     required String content,
     String visibility = 'ALL',
     String? targetClass,
+    String? postType,
     String? imageUrl,
     List<String>? images,
     required String authorName,
@@ -568,6 +570,7 @@ class ApiService {
         'content': content,
         'visibility': visibility,
         'targetClass': targetClass,
+        'postType': postType ?? 'POST',
         'imageUrl': imageUrl,
         'images': images ?? (imageUrl != null ? [imageUrl] : []),
         'authorName': authorName,
@@ -623,6 +626,7 @@ class ApiService {
     String? content,
     String? visibility,
     String? targetClass,
+    String? postType,
     List<String>? images,
   }) async {
     try {
@@ -632,6 +636,7 @@ class ApiService {
       if (content != null) body['content'] = content;
       if (visibility != null) body['visibility'] = visibility;
       if (targetClass != null) body['targetClass'] = targetClass;
+      if (postType != null) body['postType'] = postType;
       if (images != null) body['images'] = images;
       final res = await putWithAuth(url, body);
       final data = jsonDecode(utf8.decode(res.bodyBytes));

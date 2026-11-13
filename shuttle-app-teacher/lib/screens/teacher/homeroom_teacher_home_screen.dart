@@ -326,7 +326,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
                     children: [
                       Text(
                         _selectedTabIndex == 0
-                            ? '학급 알림장'
+                            ? '학급 알림장·게시물'
                             : _selectedTabIndex == 1
                                 ? '출석부 관리'
                                 : _selectedTabIndex == 2
@@ -417,7 +417,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
             height: 64,
             child: Row(
               children: [
-                _buildTabItem(index: 0, icon: Icons.photo_library_outlined, label: '알림장'),
+                _buildTabItem(index: 0, icon: Icons.photo_library_outlined, label: '알림장·게시물'),
                 _buildTabItem(index: 1, icon: Icons.fact_check_outlined, label: '출석부'),
                 _buildTabItem(index: 2, icon: Icons.edit_calendar_outlined, label: '통학 변동'),
                 _buildTabItem(index: 3, icon: Icons.forum_outlined, label: '메신저', badgeCount: _unreadChatCount),

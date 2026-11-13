@@ -17,6 +17,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
   bool _isLoading = true;
   String _searchKeyword = '';
   String _selectedClassFilter = 'ALL';
+  String _selectedPostTypeFilter = 'ALL'; // 'ALL', 'NOTICE', 'POST'
   final _searchController = TextEditingController();
 
   final List<String> _classList = const [
@@ -46,6 +47,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
     final posts = await ApiService().getBoardPosts(
       academyId: user?.academyId,
       search: _searchKeyword.isNotEmpty ? _searchKeyword : null,
+      postType: _selectedPostTypeFilter == 'ALL' ? null : _selectedPostTypeFilter,
     );
     if (mounted) {
       setState(() {
@@ -57,13 +59,17 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
 
   List<Map<String, dynamic>> get _filteredPosts {
     final user = ApiService().currentUser;
+    var list = _posts;
+    if (_selectedPostTypeFilter != 'ALL') {
+      list = list.where((p) => (p['postType'] ?? 'POST') == _selectedPostTypeFilter).toList();
+    }
     if (user?.role == 'HOMEROOM_TEACHER') {
-      return _posts;
+      return list;
     }
     if (_selectedClassFilter == 'ALL') {
-      return _posts;
+      return list;
     }
-    return _posts.where((p) {
+    return list.where((p) {
       if (p['visibility'] == 'ALL') return true;
       final target = p['targetClass']?.toString() ?? '';
       return target == _selectedClassFilter;
@@ -121,6 +127,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
         currentUser.assignedClass != '미배정';
     final titleCtrl = TextEditingController();
     final contentCtrl = TextEditingController();
+    String? selectedCategory;
     String visibility = isHomeroom ? 'CLASS' : 'ALL';
     String selectedClass = hasClass ? currentUser.assignedClass! : '햇살반';
     final List<XFile> pickedImages = [];
@@ -152,9 +159,13 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        '알림장 / 게시글 작성',
-                        style: TextStyle(
+                      Text(
+                        selectedCategory == 'NOTICE'
+                            ? '알림장 작성'
+                            : selectedCategory == 'POST'
+                                ? '게시물 작성'
+                                : '알림장 / 게시글 작성',
+                        style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
                           color: Color(0xFF0F172A),
@@ -165,6 +176,91 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                         onPressed: () => Navigator.pop(ctx),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Category Selector (NOTICE vs POST)
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setModalState(() => selectedCategory = 'NOTICE'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: selectedCategory == 'NOTICE' ? const Color(0xFFEA580C) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                boxShadow: selectedCategory == 'NOTICE'
+                                    ? [BoxShadow(color: const Color(0xFFEA580C).withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2))]
+                                    : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.campaign_outlined,
+                                    size: 16,
+                                    color: selectedCategory == 'NOTICE' ? Colors.white : const Color(0xFF64748B),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '알림장',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: selectedCategory == 'NOTICE' ? Colors.white : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setModalState(() => selectedCategory = 'POST'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: selectedCategory == 'POST' ? const Color(0xFF2563EB) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                boxShadow: selectedCategory == 'POST'
+                                    ? [BoxShadow(color: const Color(0xFF2563EB).withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2))]
+                                    : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.article_outlined,
+                                    size: 16,
+                                    color: selectedCategory == 'POST' ? Colors.white : const Color(0xFF64748B),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '게시물',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: selectedCategory == 'POST' ? Colors.white : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 14),
 
@@ -344,6 +440,12 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             final title = titleCtrl.text.trim();
                             final content = contentCtrl.text.trim();
 
+                            if (selectedCategory == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('카테고리(알림장 또는 게시물)를 선택해주세요.')),
+                              );
+                              return;
+                            }
                             if (title.isEmpty) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(content: Text('제목을 입력해주세요.')),
@@ -385,6 +487,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                               content: content,
                               visibility: visibility,
                               targetClass: visibility == 'CLASS' ? selectedClass : null,
+                              postType: selectedCategory,
                               imageUrl: uploadedCloudUrls.isNotEmpty ? uploadedCloudUrls.first : null,
                               images: uploadedCloudUrls,
                               authorName: authorName,
@@ -400,11 +503,14 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             if (!mounted) return;
                             if (res['success'] == true) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('알림장 및 게시글이 등록되었습니다. 학부모 및 관리자 웹과 실시간 공유됩니다.'),
-                                  backgroundColor: Color(0xFF10B981),
+                                SnackBar(
+                                  content: Text('${selectedCategory == 'NOTICE' ? '알림장' : '게시물'}이 등록되었습니다. 학부모 및 관리자 웹과 실시간 공유됩니다.'),
+                                  backgroundColor: const Color(0xFF10B981),
                                 ),
                               );
+                              setState(() {
+                                _selectedPostTypeFilter = selectedCategory!;
+                              });
                               _loadPosts();
                             } else {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -416,7 +522,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             }
                           },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2563EB),
+                      backgroundColor: selectedCategory == 'NOTICE' ? const Color(0xFFEA580C) : const Color(0xFF2563EB),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
@@ -426,12 +532,16 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             children: [
                               SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
                               SizedBox(width: 10),
-                              Text('게시글 업로드 중...', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                              Text('등록 중...', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                             ],
                           )
-                        : const Text(
-                            '게시글 등록하기',
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                        : Text(
+                            selectedCategory == 'NOTICE'
+                                ? '알림장 등록하기'
+                                : selectedCategory == 'POST'
+                                    ? '게시물 등록하기'
+                                    : '등록하기',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
                           ),
                   ),
                 ],
@@ -447,6 +557,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
     final postId = post['id'] as int;
     final titleCtrl = TextEditingController(text: post['title']?.toString() ?? '');
     final contentCtrl = TextEditingController(text: post['content']?.toString() ?? '');
+    String selectedCategory = post['postType'] == 'NOTICE' ? 'NOTICE' : 'POST';
     String visibility = post['visibility']?.toString() ?? 'ALL';
     String selectedClass = post['targetClass']?.toString() ?? '햇살반';
     final existingImages = List<String>.from((post['images'] as List?)?.map((e) => e.toString()) ??
@@ -480,9 +591,9 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        '게시글 수정',
-                        style: TextStyle(
+                      Text(
+                        selectedCategory == 'NOTICE' ? '알림장 수정' : '게시물 수정',
+                        style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
                           color: Color(0xFF0F172A),
@@ -493,6 +604,91 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                         onPressed: () => Navigator.pop(ctx),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Category Selector (NOTICE vs POST)
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setModalState(() => selectedCategory = 'NOTICE'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: selectedCategory == 'NOTICE' ? const Color(0xFFEA580C) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                boxShadow: selectedCategory == 'NOTICE'
+                                    ? [BoxShadow(color: const Color(0xFFEA580C).withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2))]
+                                    : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.campaign_outlined,
+                                    size: 16,
+                                    color: selectedCategory == 'NOTICE' ? Colors.white : const Color(0xFF64748B),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '알림장',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: selectedCategory == 'NOTICE' ? Colors.white : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setModalState(() => selectedCategory = 'POST'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: selectedCategory == 'POST' ? const Color(0xFF2563EB) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                boxShadow: selectedCategory == 'POST'
+                                    ? [BoxShadow(color: const Color(0xFF2563EB).withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2))]
+                                    : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.article_outlined,
+                                    size: 16,
+                                    color: selectedCategory == 'POST' ? Colors.white : const Color(0xFF64748B),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '게시물',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: selectedCategory == 'POST' ? Colors.white : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 14),
 
@@ -742,6 +938,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                               content: content,
                               visibility: visibility,
                               targetClass: visibility == 'CLASS' ? selectedClass : null,
+                              postType: selectedCategory,
                               images: allImages,
                             );
 
@@ -752,7 +949,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
 
                             if (res['success'] == true) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('게시글이 수정되었습니다.')),
+                                SnackBar(content: Text('${selectedCategory == 'NOTICE' ? '알림장' : '게시물'}이 수정되었습니다.')),
                               );
                               _loadPosts();
                             } else {
@@ -762,7 +959,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             }
                           },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2563EB),
+                      backgroundColor: selectedCategory == 'NOTICE' ? const Color(0xFFEA580C) : const Color(0xFF2563EB),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1014,6 +1211,58 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   ),
                 ],
               ),
+              // Category Filter Chips: 전체 · 알림장 · 게시물
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  ChoiceChip(
+                    label: const Text('전체'),
+                    selected: _selectedPostTypeFilter == 'ALL',
+                    onSelected: (_) {
+                      setState(() => _selectedPostTypeFilter = 'ALL');
+                      _loadPosts();
+                    },
+                    selectedColor: const Color(0xFF0F172A),
+                    labelStyle: TextStyle(
+                      color: _selectedPostTypeFilter == 'ALL' ? Colors.white : const Color(0xFF475569),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  ChoiceChip(
+                    avatar: Icon(Icons.campaign, size: 14, color: _selectedPostTypeFilter == 'NOTICE' ? Colors.white : const Color(0xFFEA580C)),
+                    label: const Text('알림장'),
+                    selected: _selectedPostTypeFilter == 'NOTICE',
+                    onSelected: (_) {
+                      setState(() => _selectedPostTypeFilter = 'NOTICE');
+                      _loadPosts();
+                    },
+                    selectedColor: const Color(0xFFEA580C),
+                    labelStyle: TextStyle(
+                      color: _selectedPostTypeFilter == 'NOTICE' ? Colors.white : const Color(0xFFEA580C),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  ChoiceChip(
+                    avatar: Icon(Icons.article, size: 14, color: _selectedPostTypeFilter == 'POST' ? Colors.white : const Color(0xFF2563EB)),
+                    label: const Text('게시물'),
+                    selected: _selectedPostTypeFilter == 'POST',
+                    onSelected: (_) {
+                      setState(() => _selectedPostTypeFilter = 'POST');
+                      _loadPosts();
+                    },
+                    selectedColor: const Color(0xFF2563EB),
+                    labelStyle: TextStyle(
+                      color: _selectedPostTypeFilter == 'POST' ? Colors.white : const Color(0xFF2563EB),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
               // Filter Chips (Hidden for Homeroom Teacher since they only see their assigned class)
               if (user?.role != 'HOMEROOM_TEACHER') ...[
                 const SizedBox(height: 8),
@@ -1124,6 +1373,26 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E293B)),
                                                   ),
                                                   const SizedBox(width: 6),
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: post['postType'] == 'NOTICE' ? const Color(0xFFFFF7ED) : const Color(0xFFEFF6FF),
+                                                      borderRadius: BorderRadius.circular(4),
+                                                      border: Border.all(
+                                                        color: post['postType'] == 'NOTICE' ? const Color(0xFFFDBA74) : const Color(0xFFBFDBFE),
+                                                        width: 0.8,
+                                                      ),
+                                                    ),
+                                                    child: Text(
+                                                      post['postType'] == 'NOTICE' ? '알림장' : '게시물',
+                                                      style: TextStyle(
+                                                        fontSize: 10,
+                                                        fontWeight: FontWeight.bold,
+                                                        color: post['postType'] == 'NOTICE' ? const Color(0xFFEA580C) : const Color(0xFF2563EB),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 4),
                                                   Container(
                                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                     decoration: BoxDecoration(
