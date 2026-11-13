@@ -11,7 +11,8 @@ import '../../widgets/kakao_map_view.dart';
 import 'change_request_modal.dart';
 import 'my_requests_screen.dart';
 import 'notification_list_screen.dart';
-import 'class_board_screen.dart';
+import 'daily_notice_screen.dart';
+import 'board_community_screen.dart';
 import 'parent_chat_room_list_screen.dart';
 import '../settings_screen.dart';
 
@@ -23,7 +24,7 @@ class ParentHomeScreen extends StatefulWidget {
 }
 
 class _ParentHomeScreenState extends State<ParentHomeScreen> {
-  int _currentNavIndex = 0; // 0: 홈/셔틀, 1: 알림장, 2: 1:1 대화방
+  int _currentNavIndex = 0; // 0: 홈/셔틀, 1: 알림장, 2: 원 게시판, 3: 대화방
   String _activeTab = 'goto'; // 'goto' (등원) | 'gohome' (하원)
 
   // 다자녀(Multi-Child) 지원 상태
@@ -1440,10 +1441,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
               index: _currentNavIndex,
               children: [
                 _buildHomeBody(isStudent, user),
-                ClassBoardScreen(
+                DailyNoticeScreen(
                   childClassName: _childInfo?.className,
                   isEmbedded: true,
                 ),
+                const BoardCommunityScreen(isEmbedded: true),
                 const ParentChatRoomListScreen(isEmbedded: true),
               ],
             ),
@@ -1456,8 +1458,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
         backgroundColor: Colors.white,
         selectedItemColor: const Color(0xFF2563EB),
         unselectedItemColor: const Color(0xFF94A3B8),
-        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12),
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+        unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 11),
         elevation: 8,
         items: const [
           BottomNavigationBarItem(
@@ -1466,14 +1468,19 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
             label: '홈 / 셔틀',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.article_outlined),
-            activeIcon: Icon(Icons.article_rounded, color: Color(0xFF2563EB)),
+            icon: Icon(Icons.menu_book_outlined),
+            activeIcon: Icon(Icons.menu_book_rounded, color: Color(0xFF2563EB)),
             label: '알림장',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.dashboard_outlined),
+            activeIcon: Icon(Icons.dashboard_rounded, color: Color(0xFF2563EB)),
+            label: '게시판',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.chat_bubble_outline_rounded),
             activeIcon: Icon(Icons.chat_bubble_rounded, color: Color(0xFF2563EB)),
-            label: '1:1 메시지',
+            label: '대화방',
           ),
         ],
       ),
