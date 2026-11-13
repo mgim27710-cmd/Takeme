@@ -2014,6 +2014,11 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       alert('사용자 계정 정보가 확인되지 않습니다. 다시 로그인해주세요.');
       return;
     }
+    // 슈퍼 관리자(SUPER_ADMIN)는 OTP 검증 절차 없이 즉시 엑셀 다운로드 실행
+    if (currentUser.role === 'SUPER_ADMIN') {
+      handleExportMasterExcel();
+      return;
+    }
     setOtpCode('');
     setOtpError('');
     setIsOtpModalOpen(true);
@@ -2022,6 +2027,15 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   // OTP 인증 검증 후 실제 엑셀 파일 생성 실행
   const handleVerifyOtpAndExport = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
+
+    // 슈퍼 관리자(SUPER_ADMIN)인 경우 모달에서 즉시 승인 및 다운로드
+    if (currentUser && currentUser.role === 'SUPER_ADMIN') {
+      setIsOtpModalOpen(false);
+      setOtpCode('');
+      await handleExportMasterExcel();
+      return;
+    }
+
     if (!otpCode || otpCode.trim().length !== 6) {
       setOtpError('Google OTP 6자리 번호를 정확히 입력해주세요.');
       return;
