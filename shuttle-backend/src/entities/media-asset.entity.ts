@@ -59,16 +59,16 @@ export class MediaAsset {
   @JoinColumn({ name: 'vehicleId' })
   vehicle?: Vehicle | null;
 
-  @Column({ length: 100, nullable: true })
+  @Column({ type: 'varchar', length: 100, nullable: true })
   className: string | null;
 
   @Column({ length: 500 })
   storageKey: string;
 
-  @Column({ length: 255, nullable: true })
+  @Column({ type: 'varchar', length: 255, nullable: true })
   filename: string | null;
 
-  @Column({ length: 100, nullable: true })
+  @Column({ type: 'varchar', length: 100, nullable: true })
   mimeType: string | null;
 
   @Column({ type: 'int', default: 0 })
