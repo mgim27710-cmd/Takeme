@@ -337,9 +337,13 @@ class ApiService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getClassBoardPosts(String email) async {
+  Future<List<Map<String, dynamic>>> getClassBoardPosts(String email, {String? postType}) async {
     try {
-      final url = Uri.parse('${AppConfig.apiHost}/parent/class-board?email=${Uri.encodeComponent(email)}');
+      final qp = <String, String>{'email': email};
+      if (postType != null && postType.isNotEmpty && postType != 'ALL') {
+        qp['postType'] = postType;
+      }
+      final url = Uri.parse('${AppConfig.apiHost}/parent/class-board').replace(queryParameters: qp);
       final res = await getWithAuth(url);
       if (res.statusCode == 200) {
         final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;

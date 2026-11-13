@@ -853,7 +853,7 @@ export class ParentService {
     return { success: true, message: '비밀번호가 성공적으로 변경되었습니다.' };
   }
 
-  async getClassBoard(email: string) {
+  async getClassBoard(email: string, postType?: string) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) return [];
 
@@ -881,6 +881,10 @@ export class ParentService {
       qb.andWhere('post.visibility = :vAll', { vAll: 'ALL' });
     }
 
+    if (postType && postType !== 'ALL') {
+      qb.andWhere('post.postType = :postType', { postType });
+    }
+
     qb.orderBy('post.createdAt', 'DESC')
       .addOrderBy('comment.createdAt', 'ASC');
 
@@ -903,6 +907,7 @@ export class ParentService {
         id: p.id,
         title: p.title,
         content: p.content,
+        postType: p.postType || 'POST',
         imageUrl: resolvedImageUrl,
         images: resolvedImages,
         createdAt: p.createdAt,

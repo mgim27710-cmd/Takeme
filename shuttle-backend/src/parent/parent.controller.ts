@@ -65,10 +65,11 @@ export class ParentController {
   async getClassBoard(
     @AuthEmail() authEmail: string,
     @Query('email') queryEmail?: string,
+    @Query('postType') postType?: string,
   ) {
     const email = authEmail || queryEmail;
     if (!email) throw new BadRequestException('이메일이 필요합니다.');
-    return this.parentService.getClassBoard(email);
+    return this.parentService.getClassBoard(email, postType);
   }
 
   @Post('notifications/read-all')

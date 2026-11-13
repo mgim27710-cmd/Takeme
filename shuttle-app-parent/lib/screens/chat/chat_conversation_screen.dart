@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
+import '../parent/class_board_screen.dart';
 
 class ChatConversationScreen extends StatefulWidget {
   final int roomId;
@@ -240,50 +241,117 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                 ),
                 const SizedBox(width: 10),
                 Flexible(
-                  child: Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.04),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text(
-                              'TakeMe 시스템 알림',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFF2563EB),
+                  child: InkWell(
+                    onTap: () {
+                      if (text.contains('알림장')) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const ClassBoardScreen(initialCategory: 'NOTICE'),
+                          ),
+                        );
+                      } else if (text.contains('게시물') || text.contains('게시글') || text.contains('활동 사진')) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const ClassBoardScreen(initialCategory: 'POST'),
+                          ),
+                        );
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.04),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                text.contains('알림장')
+                                    ? 'TakeMe 알림장 알림'
+                                    : text.contains('게시물') || text.contains('게시글')
+                                        ? 'TakeMe 게시물 알림'
+                                        : 'TakeMe 시스템 알림',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: text.contains('알림장') ? const Color(0xFFEA580C) : const Color(0xFF2563EB),
+                                ),
+                              ),
+                              Text(
+                                timeStr,
+                                style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            text,
+                            style: const TextStyle(
+                              fontSize: 13.5,
+                              color: Color(0xFF1E293B),
+                              height: 1.45,
+                            ),
+                          ),
+                          if (text.contains('알림장')) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFF7ED),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFFFDBA74)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.campaign, size: 14, color: Color(0xFFEA580C)),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    '알림장 보기 >',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFEA580C)),
+                                  ),
+                                ],
                               ),
                             ),
-                            Text(
-                              timeStr,
-                              style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+                          ] else if (text.contains('게시물') || text.contains('게시글') || text.contains('활동 사진')) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFEFF6FF),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFFBFDBFE)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.article, size: 14, color: Color(0xFF2563EB)),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    '게시물 보기 >',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          text,
-                          style: const TextStyle(
-                            fontSize: 13.5,
-                            color: Color(0xFF1E293B),
-                            height: 1.45,
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
