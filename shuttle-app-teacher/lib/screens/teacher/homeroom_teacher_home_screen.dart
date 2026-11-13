@@ -7,7 +7,6 @@ import '../staff/teacher_board_view.dart';
 import '../chat/chat_room_list_screen.dart';
 import 'homeroom_attendance_view.dart';
 import 'homeroom_change_requests_view.dart';
-import 'teacher_notification_screen.dart';
 import '../media/photo_gallery_screen.dart';
 
 class HomeroomTeacherHomeScreen extends StatefulWidget {
@@ -61,21 +60,22 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
   }
 
   Widget _buildNotificationButton() {
+    final totalUnread = _unreadNotificationCount + _unreadChatCount;
     return Stack(
       clipBehavior: Clip.none,
       alignment: Alignment.center,
       children: [
         IconButton(
-          icon: const Icon(Icons.notifications, color: Color(0xFF0F172A), size: 24),
-          tooltip: '알림',
+          icon: const Icon(Icons.forum_outlined, color: Color(0xFF0F172A), size: 24),
+          tooltip: '메신저 & 알림',
           onPressed: () {
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => const TeacherNotificationScreen()),
+              MaterialPageRoute(builder: (_) => const ChatRoomListScreen()),
             ).then((_) => _loadUnreadCount());
           },
         ),
-        if (_unreadNotificationCount > 0)
+        if (totalUnread > 0)
           Positioned(
             right: 4,
             bottom: 4,
@@ -90,7 +90,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
                 constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
                 alignment: Alignment.center,
                 child: Text(
-                  _unreadNotificationCount > 9 ? '9+' : '$_unreadNotificationCount',
+                  totalUnread > 9 ? '9+' : '$totalUnread',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 10,
@@ -316,78 +316,76 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
-      appBar: _selectedTabIndex == 4
-          ? null
-          : AppBar(
-              title: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        _selectedTabIndex == 0
-                            ? '학급 알림장·게시물'
-                            : _selectedTabIndex == 1
-                                ? '출석부 관리'
-                                : _selectedTabIndex == 2
-                                    ? '통학 변동 현황'
-                                    : '실시간 메신저',
-                        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF1E293B)),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFEFF6FF),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: const Color(0xFFBFDBFE)),
-                        ),
-                        child: Text(
-                          '$assignedClass 담임',
-                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '$teacherName 담임선생님',
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
-                  ),
-                ],
-              ),
-              backgroundColor: Colors.white,
-              elevation: 0,
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.cloud_outlined, color: Color(0xFF475569)),
-                  tooltip: '사진 보관함',
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => PhotoGalleryScreen(
-                          initialClassName: user.assignedClass,
-                        ),
-                      ),
-                    );
-                  },
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  _selectedTabIndex == 0
+                      ? '학급 알림장·게시물'
+                      : _selectedTabIndex == 1
+                          ? '출석부 관리'
+                          : _selectedTabIndex == 2
+                              ? '통학 변동 현황'
+                              : '실시간 메신저',
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF1E293B)),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.settings_outlined, color: Color(0xFF475569)),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                    );
-                  },
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFBFDBFE)),
+                  ),
+                  child: Text(
+                    '$assignedClass 담임',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+                  ),
                 ),
               ],
-              bottom: PreferredSize(
-                preferredSize: const Size.fromHeight(1),
-                child: Container(color: const Color(0xFFF1F5F9), height: 1),
-              ),
             ),
+            const SizedBox(height: 2),
+            Text(
+              '$teacherName 담임선생님',
+              style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.cloud_outlined, color: Color(0xFF475569)),
+            tooltip: '사진 보관함',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => PhotoGalleryScreen(
+                    initialClassName: user.assignedClass,
+                  ),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined, color: Color(0xFF475569)),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              );
+            },
+          ),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(color: const Color(0xFFF1F5F9), height: 1),
+        ),
+      ),
       body: PageView(
         controller: _pageController,
         onPageChanged: (idx) {
@@ -398,7 +396,6 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
           HomeroomAttendanceView(),
           HomeroomChangeRequestsView(),
           ChatRoomListScreen(isEmbeddedTab: true),
-          TeacherNotificationScreen(isEmbeddedTab: true),
         ],
       ),
       bottomNavigationBar: Container(
@@ -420,8 +417,12 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
                 _buildTabItem(index: 0, icon: Icons.photo_library_outlined, label: '알림장·게시물'),
                 _buildTabItem(index: 1, icon: Icons.fact_check_outlined, label: '출석부'),
                 _buildTabItem(index: 2, icon: Icons.edit_calendar_outlined, label: '통학 변동'),
-                _buildTabItem(index: 3, icon: Icons.forum_outlined, label: '메신저', badgeCount: _unreadChatCount),
-                _buildTabItem(index: 4, icon: Icons.notifications_outlined, label: '알림', badgeCount: _unreadNotificationCount),
+                _buildTabItem(
+                  index: 3,
+                  icon: Icons.forum_outlined,
+                  label: '메신저',
+                  badgeCount: _unreadChatCount + _unreadNotificationCount,
+                ),
               ],
             ),
           ),

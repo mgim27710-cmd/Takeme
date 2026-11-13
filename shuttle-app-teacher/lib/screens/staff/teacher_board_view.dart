@@ -6,7 +6,8 @@ import '../../models/user_model.dart';
 import '../../services/api_service.dart';
 
 class TeacherBoardView extends StatefulWidget {
-  const TeacherBoardView({super.key});
+  final String? initialCategory;
+  const TeacherBoardView({super.key, this.initialCategory});
 
   @override
   State<TeacherBoardView> createState() => _TeacherBoardViewState();
@@ -32,6 +33,9 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialCategory != null) {
+      _selectedPostTypeFilter = widget.initialCategory!;
+    }
     _loadPosts();
   }
 

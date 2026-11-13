@@ -9,7 +9,6 @@ import '../../models/route_model.dart';
 import '../../widgets/kakao_map_view.dart';
 import 'change_request_modal.dart';
 import 'my_requests_screen.dart';
-import 'notification_list_screen.dart';
 import 'class_board_screen.dart';
 import '../settings_screen.dart';
 import '../chat/chat_room_list_screen.dart';
@@ -828,7 +827,6 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
           _buildHomeContent(),
           ClassBoardScreen(childClassName: _childInfo?.className, isEmbeddedTab: true),
           const ChatRoomListScreen(isEmbeddedTab: true),
-          const NotificationListScreen(isEmbeddedTab: true),
           const SettingsScreen(isEmbeddedTab: true),
         ],
       ),
@@ -849,10 +847,14 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
             child: Row(
               children: [
                 _buildBottomNavItem(index: 0, icon: Icons.home_outlined, label: '홈'),
-                _buildBottomNavItem(index: 1, icon: Icons.article_outlined, label: '알림장'),
-                _buildBottomNavItem(index: 2, icon: Icons.forum_outlined, label: '메신저', badgeCount: _unreadChatCount),
-                _buildBottomNavItem(index: 3, icon: Icons.notifications_outlined, label: '알림', badgeCount: _unreadNotificationCount),
-                _buildBottomNavItem(index: 4, icon: Icons.settings_outlined, label: '설정'),
+                _buildBottomNavItem(index: 1, icon: Icons.article_outlined, label: '알림장·게시물'),
+                _buildBottomNavItem(
+                  index: 2,
+                  icon: Icons.forum_outlined,
+                  label: '메신저',
+                  badgeCount: _unreadChatCount + _unreadNotificationCount,
+                ),
+                _buildBottomNavItem(index: 3, icon: Icons.settings_outlined, label: '설정'),
               ],
             ),
           ),

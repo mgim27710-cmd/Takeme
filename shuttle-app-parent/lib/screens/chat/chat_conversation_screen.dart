@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
 import '../parent/class_board_screen.dart';
+import '../parent/my_requests_screen.dart';
 
 class ChatConversationScreen extends StatefulWidget {
   final int roomId;
@@ -257,6 +258,13 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                             builder: (_) => const ClassBoardScreen(initialCategory: 'POST'),
                           ),
                         );
+                      } else if (text.contains('통학') || text.contains('변동') || text.contains('결석') || text.contains('신청')) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const MyRequestsScreen(),
+                          ),
+                        );
                       }
                     },
                     borderRadius: BorderRadius.circular(16),
@@ -285,11 +293,17 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                                     ? 'TakeMe 알림장 알림'
                                     : text.contains('게시물') || text.contains('게시글')
                                         ? 'TakeMe 게시물 알림'
-                                        : 'TakeMe 시스템 알림',
+                                        : text.contains('통학') || text.contains('변동') || text.contains('신청')
+                                            ? 'TakeMe 통학 변동 알림'
+                                            : 'TakeMe 시스템 알림',
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w800,
-                                  color: text.contains('알림장') ? const Color(0xFFEA580C) : const Color(0xFF2563EB),
+                                  color: text.contains('알림장')
+                                      ? const Color(0xFFEA580C)
+                                      : text.contains('통학') || text.contains('변동')
+                                          ? const Color(0xFF0D9488)
+                                          : const Color(0xFF2563EB),
                                 ),
                               ),
                               Text(
@@ -345,6 +359,27 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                                   Text(
                                     '게시물 보기 >',
                                     style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ] else if (text.contains('통학') || text.contains('변동') || text.contains('결석') || text.contains('신청')) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF0FDFA),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFF99F6E4)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.edit_calendar, size: 14, color: Color(0xFF0D9488)),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    '통학 변동 내역 보기 >',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
                                   ),
                                 ],
                               ),
