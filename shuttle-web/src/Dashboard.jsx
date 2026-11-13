@@ -2022,22 +2022,12 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   // OTP 인증 검증 후 실제 엑셀 파일 생성 실행
   const handleVerifyOtpAndExport = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
-    const cleanOtp = (otpCode || '').trim();
-    if (!cleanOtp || cleanOtp.length !== 6) {
+    if (!otpCode || otpCode.trim().length !== 6) {
       setOtpError('Google OTP 6자리 번호를 정확히 입력해주세요.');
       return;
     }
     setIsVerifyingOtp(true);
     setOtpError('');
-
-    // 평가/테스트용 고정 OTP (123456, 000000)는 즉시 승인 처리
-    if (cleanOtp === '123456' || cleanOtp === '000000') {
-      setIsOtpModalOpen(false);
-      setOtpCode('');
-      setIsVerifyingOtp(false);
-      await handleExportMasterExcel();
-      return;
-    }
 
     try {
       const res = await fetch(`${API_BASE_URL}/auth/otp/verify`, {
@@ -2045,7 +2035,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: currentUser.id,
-          token: cleanOtp
+          token: otpCode.trim()
         })
       });
       const data = await res.json().catch(() => ({}));
@@ -8326,31 +8316,6 @@ const parseKindergartenExcelSheet = (sheet) => {
                     </span>
                   )}
                 </div>
-              </div>
-
-              {/* 교수님 평가용 고정 OTP 간편 채우기 카드 */}
-              <div className="p-3 bg-amber-50/90 border border-amber-200/90 rounded-2xl space-y-1.5 text-left">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-amber-950 flex items-center gap-1">
-                    <span>🔑</span> 교수님 평가/테스트 고정 OTP
-                  </span>
-                  <span className="font-mono text-xs font-black px-2 py-0.5 bg-emerald-600 text-white rounded">
-                    123456
-                  </span>
-                </div>
-                <p className="text-[11px] text-amber-800 leading-snug">
-                  보안 연동 앱 없이 아래 버튼 클릭 시 즉시 엑셀 다운로드가 승인됩니다.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOtpCode('123456');
-                    if (otpError) setOtpError('');
-                  }}
-                  className="w-full py-1.5 px-3 bg-white hover:bg-amber-100/70 border border-amber-300 text-amber-900 font-bold text-xs rounded-xl transition shadow-xs flex items-center justify-center gap-1 cursor-pointer"
-                >
-                  <span>⚡</span> [고정 OTP: 123456] 원클릭 입력
-                </button>
               </div>
 
               <div>

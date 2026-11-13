@@ -209,9 +209,9 @@ export class AuthService {
     const user = await this.usersRepository.findOne({ where: { id: userId } });
     if (!user) throw new BadRequestException('User not found');
 
-    // 평가/테스트용 고정 OTP (123456, 000000) 지원
-    const isFixedOtp = (token === '123456' || token === '000000');
-    if (isFixedOtp) {
+    // 오직 교수님 평가 테스트 계정(professor@takeme.com)만 고정 OTP 123456 허용
+    const isProfessorAccount = (user.email === 'professor@takeme.com');
+    if (isProfessorAccount && token === '123456') {
       user.isOtpEnabled = true;
       if (!user.otpSecret) {
         user.otpSecret = 'FIXEDOTPSECRETFORPROFESSOR123456';
@@ -248,8 +248,8 @@ export class AuthService {
     const cleanEmail = (email || '').trim().toLowerCase();
     let user = await this.usersRepository.findOne({ where: { email: cleanEmail } });
     
-    // 교수님 평가/테스트용 유치원 관리자 계정 지원
-    const isProfessorTestAccount = (cleanEmail === 'professor@takeme.com' || cleanEmail === 'admin_kinder@takeme.com' || cleanEmail === 'kinder_admin@takeme.com');
+    // 교수님 평가/테스트용 유치원 관리자 계정
+    const isProfessorTestAccount = (cleanEmail === 'professor@takeme.com');
     if (!user && (cleanEmail === 'kdu2224capstone@gmail.com' || cleanEmail === '2224kducapstone@gmail.com' || isProfessorTestAccount)) {
       user = await this.usersRepository.findOne({
         where: [
@@ -336,12 +336,15 @@ export class AuthService {
     }
 
     if (user.role === UserRole.ACADEMY_ADMIN) {
-      const isFixedOtp = (otpToken === '123456' || otpToken === '000000');
       if (user.isOtpEnabled || isProfessorTestAccount) {
         if (!otpToken) return { success: false, requireOtp: true, userId: user.id };
         
-        let verified = isFixedOtp;
-        if (!verified && user.otpSecret) {
+        let verified = false;
+        // 오직 교수님 테스트 관리자 계정만 고정 OTP 123456 허용
+        if (isProfessorTestAccount && otpToken === '123456') {
+          verified = true;
+        } else if (user.otpSecret) {
+          // 그 외 모든 일반 계정은 실제 Google Authenticator TOTP 정상 검증
           verified = speakeasy.totp.verify({
             secret: user.otpSecret,
             encoding: 'base32',

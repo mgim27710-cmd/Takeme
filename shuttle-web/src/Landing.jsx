@@ -415,31 +415,6 @@ export default function Landing() {
 
         {mode === 'login' && (
           <form onSubmit={handleLogin} className="space-y-4">
-            {/* 교수님 평가/테스트용 유치원 관리자 간편 로그인 배너 */}
-            <div className="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 rounded-xl space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-blue-900 flex items-center gap-1.5">
-                  <span className="text-base">🎓</span> 교수님 평가/테스트 전용
-                </span>
-                <span className="text-[10px] font-extrabold px-2 py-0.5 bg-blue-600 text-white rounded-full shadow-sm">
-                  고정 OTP 123456
-                </span>
-              </div>
-              <p className="text-[11px] text-blue-800/90 leading-tight">
-                유치원 관리자(원장님) 계정과 고정 OTP로 즉시 로그인하여 모든 기능을 테스트하실 수 있습니다.
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail('professor@takeme.com');
-                  setPassword('123456');
-                }}
-                className="w-full py-1.5 px-3 bg-white hover:bg-blue-100/60 border border-blue-300 text-blue-700 font-bold text-xs rounded-lg transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <span>⚡</span> [교수님 테스트 계정] 자동 채우기 (professor@takeme.com)
-              </button>
-            </div>
-
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">이메일</label>
               <input type="email" placeholder="user@example.com" value={email} onChange={e=>setEmail(e.target.value)} className="form-input" required />
@@ -644,54 +619,22 @@ export default function Landing() {
 
         {mode === 'otp' && (
           <form onSubmit={handleLogin} className="space-y-4">
-            <div className="p-3 bg-amber-50 border border-amber-200/90 rounded-xl space-y-2 text-left">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-amber-950 flex items-center gap-1">
-                  <span>🔑</span> 평가/테스트 고정 OTP
-                </span>
-                <span className="font-mono text-xs font-black px-2 py-0.5 bg-blue-600 text-white rounded">
-                  123456
-                </span>
-              </div>
-              <p className="text-[11px] text-amber-800 leading-snug">
-                Google Authenticator 앱 연동 없이도 위 고정 번호로 즉시 인증됩니다.
-              </p>
-              <button
-                type="button"
-                onClick={() => setOtpToken('123456')}
-                className="w-full py-1.5 px-3 bg-white hover:bg-amber-100/70 border border-amber-300 text-amber-900 font-bold text-xs rounded-lg transition-all shadow-xs flex items-center justify-center gap-1 cursor-pointer"
-              >
-                <span>⚡</span> [고정 OTP: 123456] 원클릭 입력
-              </button>
-            </div>
-            <p className="text-xs text-center text-slate-500">Google OTP 앱 또는 위의 고정 6자리 코드를 입력해주세요.</p>
-            <input type="text" placeholder="6자리 OTP 번호" maxLength={6} value={otpToken} onChange={e=>setOtpToken(e.target.value)} className="form-input text-center text-2xl tracking-widest font-mono font-bold" required />
-            <button type="submit" className="btn-primary w-full py-3 font-bold shadow-md shadow-blue-500/20">인증하기</button>
-            <button type="button" onClick={() => setMode('login')} className="w-full text-slate-500 text-xs mt-2 hover:underline">← 로그인 화면으로 돌아가기</button>
+            <p className="text-sm text-center text-slate-600 mb-4">Google OTP 앱을 열고 6자리 코드를 입력해주세요.</p>
+            <input type="text" placeholder="6자리 OTP 번호" maxLength={6} value={otpToken} onChange={e=>setOtpToken(e.target.value)} className="form-input text-center text-2xl tracking-widest font-mono" required />
+            <button type="submit" className="btn-primary w-full py-3 font-bold">인증하기</button>
+            <button type="button" onClick={() => setMode('login')} className="w-full text-slate-500 text-sm mt-2">뒤로가기</button>
           </form>
         )}
 
         {mode === 'otp-setup' && (
           <form onSubmit={handleOtpSetup} className="space-y-4">
             <h3 className="font-bold text-center text-slate-800">Google OTP 2단계 보안 연동</h3>
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl space-y-2 text-left">
-              <p className="text-xs text-blue-900 font-bold">
-                💡 테스트 팁: 고정 OTP <span className="font-mono text-blue-700 bg-white px-1.5 py-0.5 rounded border border-blue-300">123456</span>으로 즉시 완료 가능합니다.
-              </p>
-              <button
-                type="button"
-                onClick={() => setOtpToken('123456')}
-                className="w-full py-1.5 bg-white hover:bg-blue-100/60 border border-blue-300 text-blue-700 font-bold text-xs rounded-lg transition shadow-xs cursor-pointer"
-              >
-                [테스트 OTP: 123456] 채우기
-              </button>
+            <p className="text-xs text-slate-500 text-center">아래 QR코드를 Google Authenticator 앱에서 스캔하세요.</p>
+            <div className="flex justify-center my-4">
+              {qrCodeUrl && <img src={qrCodeUrl} alt="OTP QR Code" className="w-48 h-48 border rounded-xl shadow-sm" />}
             </div>
-            <p className="text-xs text-slate-500 text-center">QR코드를 앱에서 스캔하거나 번호를 입력하세요.</p>
-            <div className="flex justify-center my-3">
-              {qrCodeUrl && <img src={qrCodeUrl} alt="OTP QR Code" className="w-40 h-40 border rounded-xl shadow-sm" />}
-            </div>
-            <input type="text" placeholder="앱에 표시된 6자리 번호" maxLength={6} value={otpToken} onChange={e=>setOtpToken(e.target.value)} className="form-input text-center tracking-widest font-mono text-xl font-bold" required />
-            <button type="submit" className="btn-primary w-full py-3 font-bold shadow-md shadow-blue-500/20">연동 완료하기</button>
+            <input type="text" placeholder="앱에 표시된 6자리 번호" maxLength={6} value={otpToken} onChange={e=>setOtpToken(e.target.value)} className="form-input text-center tracking-widest font-mono text-xl" required />
+            <button type="submit" className="btn-primary w-full py-3 font-bold">연동 완료하기</button>
           </form>
         )}
 
