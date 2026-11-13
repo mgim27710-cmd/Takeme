@@ -1,14 +1,31 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_naver_map/flutter_naver_map.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'services/api_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/driver/driver_home_screen.dart';
+import 'widgets/nav_map_view.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('ko_KR', null);
   await ApiService().init();
+  if (naverMapClientId.isNotEmpty && !kIsWeb) {
+    try {
+      await FlutterNaverMap().init(
+        clientId: naverMapClientId,
+        onAuthFailed: (e) {
+          debugPrint('[naver_map] 인증 실패, 이전 지도로 전환: $e');
+          naverMapAvailable.value = false;
+        },
+      );
+      naverMapAvailable.value = true;
+    } catch (e) {
+      debugPrint('[naver_map] 초기화 실패, 이전 지도로 전환: $e');
+    }
+  }
   runApp(const TakeMeDriverApp());
 }
 

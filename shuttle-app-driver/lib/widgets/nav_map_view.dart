@@ -1,25 +1,79 @@
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 
 import 'nav_map_controller.dart';
+import 'nav_map_view_naver.dart';
 
 export 'nav_map_controller.dart';
 
+/// secrets.json (--dart-define-from-file) 에서 받는 네이버 지도 Client ID
+const String naverMapClientId = String.fromEnvironment('NAVER_MAP_CLIENT_ID');
+
+/// 네이버 지도 SDK 초기화/인증 성공 여부 (main.dart 에서 초기화 후 갱신, 인증 실패 시 false 로 바뀌어 이전 지도로 복귀)
+final ValueNotifier<bool> naverMapAvailable = ValueNotifier<bool>(false);
+
+/// 지도 선택 순서: NAVER_MAP_CLIENT_ID 가 있으면 네이버 지도 → 없으면 브이월드(VWORLD_KEY) → 그것도 없으면 OpenStreetMap
+bool get _useNaver => naverMapClientId.isNotEmpty && !kIsWeb;
+
 const String _vworldKey = String.fromEnvironment('VWORLD_KEY', defaultValue: '09C4DAB2-0E44-4794-88FA-2483B1177D28');
 
-class NavMapView extends StatefulWidget {
+class NavMapView extends StatelessWidget {
   final NavMapController controller;
 
   const NavMapView({super.key, required this.controller});
 
   @override
-  State<NavMapView> createState() => _NavMapViewState();
+  Widget build(BuildContext context) {
+    if (!_useNaver) {
+      return _withLabel(FlutterMapNavView(controller: controller), _vworldKey.isNotEmpty ? 'VWORLD' : 'OSM');
+    }
+    return ValueListenableBuilder<bool>(
+      valueListenable: naverMapAvailable,
+      builder: (context, ok, _) => ok
+          ? _withLabel(NaverNavMapView(controller: controller), 'NAVER')
+          : _withLabel(FlutterMapNavView(controller: controller), _vworldKey.isNotEmpty ? 'VWORLD' : 'OSM'),
+    );
+  }
+
+  /// 디버그 모드에서만 어떤 지도를 쓰는지 구석에 작게 표시
+  Widget _withLabel(Widget map, String name) {
+    if (!kDebugMode) return map;
+    return Stack(
+      children: [
+        Positioned.fill(child: map),
+        Positioned(
+          top: 4,
+          right: 4,
+          child: IgnorePointer(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text('지도: $name', style: const TextStyle(color: Colors.white, fontSize: 10)),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
-class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateMixin {
+class FlutterMapNavView extends StatefulWidget {
+  final NavMapController controller;
+
+  const FlutterMapNavView({super.key, required this.controller});
+
+  @override
+  State<FlutterMapNavView> createState() => _FlutterMapNavViewState();
+}
+
+class _FlutterMapNavViewState extends State<FlutterMapNavView> with SingleTickerProviderStateMixin {
   late final MapController _mapController;
   late final Ticker _ticker;
   Duration? _lastTick;
@@ -117,7 +171,7 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
   }
 
   @override
-  void didUpdateWidget(covariant NavMapView oldWidget) {
+  void didUpdateWidget(covariant FlutterMapNavView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
       (oldWidget.controller as NavMapControllerImpl).removeListener(_onControllerUpdated);
