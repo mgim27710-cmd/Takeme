@@ -1,3 +1,4 @@
+import '../../widgets/load_error_view.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -31,6 +32,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
   final ScrollController _scrollController = ScrollController();
   List<Map<String, dynamic>> _messages = [];
   bool _isLoading = true;
+  String? _loadError; // 메시지 불러오기 실패 이유 (null 이면 정상)
   bool _isSending = false;
   int? _currentUserId;
 
@@ -93,15 +95,39 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
     return int.tryParse(v.toString()) ?? 0;
   }
 
-  Future<void> _loadMessages() async {
-    final list = await ApiService().getChatMessages(widget.roomId);
-    if (mounted) {
+  /// userInitiated: 사용자가 직접 새로고침/다시 시도한 경우
+  Future<void> _loadMessages({bool userInitiated = false}) async {
+    if (_messages.isEmpty && mounted) {
       setState(() {
-        _messages = list;
-        _isLoading = false;
+        _isLoading = true;
+        _loadError = null;
       });
-      _scrollToBottom();
-      ApiService().markChatRoomAsRead(widget.roomId);
+    }
+    try {
+      final list = await ApiService().getChatMessages(widget.roomId, throwOnError: true);
+      if (mounted) {
+        setState(() {
+          _messages = list;
+          _isLoading = false;
+          _loadError = null;
+        });
+        _scrollToBottom();
+        // 메시지를 실제로 불러왔을 때만 읽음 처리 (못 본 메시지를 읽은 것으로 처리하지 않는다)
+        ApiService().markChatRoomAsRead(widget.roomId);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      final message = friendlyError(e);
+      setState(() {
+        _isLoading = false;
+        // 이미 보이는 메시지가 없을 때만 오류 화면, 있으면 그대로 두고 안내만 한다
+        if (_messages.isEmpty) _loadError = message;
+      });
+      if (_messages.isNotEmpty && userInitiated) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('메시지를 새로 불러오지 못했습니다. $message')),
+        );
+      }
     }
   }
 
@@ -585,7 +611,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: Color(0xFF64748B)),
-            onPressed: _loadMessages,
+            onPressed: () => _loadMessages(userInitiated: true),
           ),
         ],
         bottom: PreferredSize(
@@ -601,6 +627,12 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
             Expanded(
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)))
+                  : (_loadError != null && _messages.isEmpty)
+                      ? LoadErrorView(
+                          title: '메시지를 불러오지 못했습니다.',
+                          message: _loadError!,
+                          onRetry: () => _loadMessages(userInitiated: true),
+                        )
                   : _messages.isEmpty
                       ? Center(
                           child: Column(

@@ -905,19 +905,21 @@ class ApiService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getChatMessages(int roomId, {String? email, int? userId}) async {
+  Future<List<Map<String, dynamic>>> getChatMessages(int roomId, {String? email, int? userId, bool throwOnError = false}) async {
     try {
       final queryParams = <String, String>{'roomId': roomId.toString()};
       if (email != null) queryParams['email'] = email;
       if (userId != null) queryParams['userId'] = userId.toString();
       final uri = Uri.parse('${AppConfig.apiHost}/chat/messages').replace(queryParameters: queryParams);
       final res = await getWithAuth(uri).timeout(const Duration(seconds: 6));
+      if (throwOnError) throwIfServerError(res);
       if (res.statusCode == 200) {
         final List<dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
         return data.whereType<Map<String, dynamic>>().toList();
       }
       return [];
     } catch (e) {
+      if (throwOnError) rethrow;
       debugPrint('[ApiService] getChatMessages error: $e');
       return [];
     }

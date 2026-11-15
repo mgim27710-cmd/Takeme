@@ -1,3 +1,4 @@
+import '../../widgets/load_error_view.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -29,6 +30,7 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
 
   List<ChatMessageModel> _messages = [];
   bool _isLoading = true;
+  String? _loadError; // 메시지 불러오기 실패 이유 (null 이면 정상)
   bool _isSending = false;
   Timer? _pollingTimer;
   String? _myEmail;
@@ -66,13 +68,32 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
 
   Future<void> _loadMessages({bool initial = false}) async {
     if (initial) {
-      setState(() => _isLoading = true);
+      setState(() {
+        _isLoading = true;
+        _loadError = null;
+      });
     }
-    final rawList = await ApiService().getChatMessages(
-      widget.roomId,
-      email: _myEmail,
-      userId: ApiService().currentUser?.id,
-    );
+    final List<Map<String, dynamic>> rawList;
+    try {
+      rawList = await ApiService().getChatMessages(
+        widget.roomId,
+        email: _myEmail,
+        userId: ApiService().currentUser?.id,
+        throwOnError: true,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      // 이미 보이는 메시지가 없을 때만 오류 화면 (주기적 갱신 실패는 보이는 대화를 그대로 둔다)
+      if (_messages.isEmpty) {
+        setState(() {
+          _isLoading = false;
+          _loadError = friendlyError(e);
+        });
+      } else if (initial) {
+        setState(() => _isLoading = false);
+      }
+      return;
+    }
 
     if (!mounted) return;
 
@@ -83,6 +104,7 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
     setState(() {
       _messages = parsed;
       _isLoading = false;
+      _loadError = null;
     });
 
     if (hasNewMessages || initial) {
@@ -250,6 +272,12 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
             Expanded(
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator())
+                  : (_loadError != null && _messages.isEmpty)
+                      ? LoadErrorView(
+                          title: '메시지를 불러오지 못했습니다.',
+                          message: _loadError!,
+                          onRetry: () => _loadMessages(initial: true),
+                        )
                   : _messages.isEmpty
                       ? _buildEmptyState()
                       : ListView.builder(
