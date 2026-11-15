@@ -44,50 +44,6 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> {
   List<ChatContact> _contacts = [];
   bool _isLoadingContacts = false;
 
-  /// DB 연결 실패 시 사용할 기본 예시 명단
-  static const List<ChatContact> _fallbackContacts = [
-    ChatContact(
-      userId: 80,
-      name: '김하늘 선생님',
-      roleTitle: '햇살반 담임교사',
-      category: '담임·교사',
-      description: '원아 생활, 알림장, 출결 및 원내 지도 상담',
-      icon: Icons.face_rounded,
-      themeColor: Color(0xFF2563EB),
-      bgColor: Color(0xFFEFF6FF),
-    ),
-    ChatContact(
-      userId: 68,
-      name: '김고윤 원장님',
-      roleTitle: '유치원 원장',
-      category: '원장·행정',
-      description: '유치원 전반 운영, 원비, 행정 및 학사 일정 문의',
-      icon: Icons.account_balance_rounded,
-      themeColor: Color(0xFF059669),
-      bgColor: Color(0xFFECFDF5),
-    ),
-    ChatContact(
-      userId: 88,
-      name: '윤찬영 기사님',
-      roleTitle: '1호차 셔틀 운전기사',
-      category: '통학차량',
-      description: '통학버스 승하차 장소 및 실시간 운행/탑승 상담',
-      icon: Icons.directions_bus_rounded,
-      themeColor: Color(0xFFD97706),
-      bgColor: Color(0xFFFFFBEB),
-    ),
-    ChatContact(
-      userId: 330,
-      name: '김민규 학부모님',
-      roleTitle: '김도윤 학부모',
-      category: '학부모',
-      description: '원아 친구 학부모님과 1:1 소통 및 육아/원 생활 정보 공유',
-      icon: Icons.family_restroom_rounded,
-      themeColor: Color(0xFF8B5CF6),
-      bgColor: Color(0xFFF5F3FF),
-    ),
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -173,14 +129,14 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> {
 
       if (mounted) {
         setState(() {
-          _contacts = fetched.isNotEmpty ? fetched : _fallbackContacts;
+          _contacts = fetched; // 연결 실패/명단 없음이면 빈 목록 (가짜 예시 명단을 보여주지 않는다)
           _isLoadingContacts = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _contacts = _fallbackContacts;
+          _contacts = [];
           _isLoadingContacts = false;
         });
       }
@@ -790,7 +746,7 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> {
     final displayName = room.getDisplayName(_myEmail);
     final opponentName = other?.name ?? displayName;
     final opponentRole = other?.role == 'HOMEROOM_TEACHER'
-        ? '햇살반 담임교사'
+        ? ((other?.assignedClass ?? '').isNotEmpty ? '${other!.assignedClass} 담임교사' : '담임교사')
         : other?.role == 'ACADEMY_ADMIN'
             ? '유치원 원장'
             : (other?.role == 'DRIVER' ? '통학버스 기사' : (other?.role == 'PARENT' ? '원아 학부모' : '교직원'));
