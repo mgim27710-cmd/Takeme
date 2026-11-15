@@ -323,6 +323,25 @@ class ApiService {
     };
   }
 
+  /// 기관 인증코드로 그 기관에 등록된 반 목록을 조회한다 (가입 화면용)
+  Future<Map<String, dynamic>> verifyAuthCode(String authCode) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/auth/verify-auth-code');
+      final res = await http.post(url, headers: _headers(), body: jsonEncode({'authCode': authCode.trim()}));
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return {
+          'success': true,
+          'academyName': data['academyName'],
+          'classes': (data['classes'] as List? ?? []).map((e) => e.toString()).toList(),
+        };
+      }
+      return {'success': false, 'message': data['message']?.toString() ?? '유효하지 않은 인증코드입니다.'};
+    } catch (e) {
+      return {'success': false, 'message': friendlyError(e)};
+    }
+  }
+
   Future<Map<String, dynamic>> deleteAccount(String email) async {
     final url = Uri.parse('${AppConfig.apiHost}/auth/account?email=${Uri.encodeComponent(email)}');
     final res = await http.delete(url, headers: _headers());

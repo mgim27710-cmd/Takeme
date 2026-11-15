@@ -1,4 +1,5 @@
 import { normalizePhone, maskPhone, sendSmsNotification } from '../utils/sms.util';
+import { getStudentClassName } from '../utils/school.util';
 import { formatTeacherName, cleanTeacherBaseName } from '../utils/teacher.util';
 import { Injectable, BadRequestException, UnauthorizedException, HttpException, HttpStatus, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -180,22 +181,13 @@ export class AuthService {
       where: { academy: { id: academy.id } }
     });
 
-    const classSet = new Set();
+    // 이 기관 원아에 실제로 등록된 반 이름만 돌려준다 (등록된 반이 없으면 빈 목록: 가짜 기본 반을 만들지 않는다)
+    const classSet = new Set<string>();
     students.forEach(st => {
-      let raw = st.raw;
-      if (typeof raw === 'string') {
-        try { raw = JSON.parse(raw); } catch (e) { raw = {}; }
-      }
-      const cls = raw?.['반명'] || raw?.반명 || raw?.['반'] || raw?.반;
-      if (cls && typeof cls === 'string' && cls.trim()) {
-        classSet.add(cls.trim());
-      }
+      const cls = getStudentClassName(st);
+      if (cls) classSet.add(cls);
     });
-
-    const classes = Array.from(classSet);
-    if (classes.length === 0) {
-      classes.push('햇살반', '열매반', '풀잎반', '새싹반');
-    }
+    const classes = Array.from(classSet).sort((a, b) => a.localeCompare(b, 'ko'));
 
     return {
       success: true,

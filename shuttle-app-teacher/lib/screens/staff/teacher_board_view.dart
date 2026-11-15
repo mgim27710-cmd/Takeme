@@ -21,14 +21,15 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
   String _selectedPostTypeFilter = 'ALL'; // 'ALL', 'NOTICE', 'POST'
   final _searchController = TextEditingController();
 
-  final List<String> _classList = const [
-    'ALL',
-    '햇살반',
-    '열매반',
-    '풀잎반',
-    '새싹반',
-    '심화B반',
-  ];
+  /// 반 필터 칩: 코드에 고정된 반 이름 대신, 불러온 글에 실제로 등장하는 반으로 구성한다
+  List<String> get _classList {
+    final classes = <String>{};
+    for (final p in _posts) {
+      final c = p['targetClass']?.toString().trim() ?? '';
+      if (c.isNotEmpty) classes.add(c);
+    }
+    return ['ALL', ...(classes.toList()..sort())];
+  }
 
   @override
   void initState() {
