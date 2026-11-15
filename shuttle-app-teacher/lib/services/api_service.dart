@@ -516,15 +516,21 @@ class ApiService {
   // ----------------------------------------------------
   // TEACHER & DRIVER
   // ----------------------------------------------------
-  Future<List<StudentModel>> getTeacherStudents(String email) async {
+  /// 담당 원아 목록 원본(JSON). 한 번의 요청으로 원아 모델과 보호자 연락처를 모두 만들 수 있게 한다.
+  Future<List<Map<String, dynamic>>> getTeacherStudentsJson(String email) async {
     final url = Uri.parse('${AppConfig.apiHost}/teacher/students?email=${Uri.encodeComponent(email)}');
     final res = await getWithAuth(url);
     throwIfServerError(res);
     if (res.statusCode == 200) {
       final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
-      return list.map((item) => StudentModel.fromJson(item as Map<String, dynamic>)).toList();
+      return list.whereType<Map<String, dynamic>>().toList();
     }
     return [];
+  }
+
+  Future<List<StudentModel>> getTeacherStudents(String email) async {
+    final list = await getTeacherStudentsJson(email);
+    return list.map((item) => StudentModel.fromJson(item)).toList();
   }
 
   Future<Map<String, dynamic>?> getTeacherVehicle(String email) async {

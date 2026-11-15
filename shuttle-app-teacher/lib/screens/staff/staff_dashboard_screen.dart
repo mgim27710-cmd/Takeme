@@ -100,12 +100,12 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     SocketService().connect(ApiService().token);
 
     final dynamic vehicle;
-    final List<StudentModel> students;
+    final List<Map<String, dynamic>> studentsJson; // 원아 목록 원본 (모델 + 보호자 연락처를 한 번의 요청으로)
     final RouteDataModel? route;
     final Map<String, dynamic>? routePathData;
     try {
       vehicle = await ApiService().getTeacherVehicle(user.email);
-      students = await ApiService().getTeacherStudents(user.email);
+      studentsJson = await ApiService().getTeacherStudentsJson(user.email);
       route = await ApiService().getTeacherRoute(user.email);
       routePathData = await ApiService().getRoutePath();
     } catch (e) {
@@ -122,23 +122,17 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
       return;
     }
 
-    // Fetch parentPhone and escort status
-    try {
-      final studentsUrl = Uri.parse('${AppConfig.apiHost}/teacher/students?email=${Uri.encodeComponent(user.email)}');
-      final sRes = await ApiService().getWithAuth(studentsUrl);
-      if (sRes.statusCode == 200) {
-        final list = jsonDecode(utf8.decode(sRes.bodyBytes)) as List<dynamic>;
-        for (final item in list) {
-          if (item is Map<String, dynamic>) {
-            final sid = item['id'] is int ? item['id'] as int : int.tryParse(item['id']?.toString() ?? '');
-            final phone = item['parentPhone']?.toString() ?? '';
-            if (sid != null && phone.isNotEmpty) {
-              _parentPhones[sid] = phone;
-            }
-          }
-        }
+    // 원아 모델과 보호자 연락처를 같은 응답에서 만든다 (같은 목록을 두 번 요청하지 않는다)
+    final students = studentsJson.map((item) => StudentModel.fromJson(item)).toList();
+    for (final item in studentsJson) {
+      final sid = item['id'] is int ? item['id'] as int : int.tryParse(item['id']?.toString() ?? '');
+      final phone = item['parentPhone']?.toString() ?? '';
+      if (sid != null && phone.isNotEmpty) {
+        _parentPhones[sid] = phone;
       }
-    } catch (_) {}
+    }
+
+    // 동승 확인(escort) 상태
 
     try {
       final escortUrl = Uri.parse('${AppConfig.apiHost}/teacher/escort/status');
