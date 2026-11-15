@@ -15,8 +15,8 @@ import '../../widgets/nav_map_view.dart';
 import '../settings_screen.dart';
 import '../login_screen.dart';
 import '../../services/api_service.dart';
+import '../../services/socket_service.dart';
 import 'operation_log_screen.dart';
-import 'driver_notification_screen.dart';
 import '../chat/chat_room_list_screen.dart';
 
 /// 기사 전용 화면 (팀 앱과 같은 크기·글꼴)
@@ -66,13 +66,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
   io_client.Socket? _escortSocket;
   String? _changeBannerText;
   Timer? _changeBannerTimer;
-  int _unreadNotificationCount = 0;
+  int _unreadMessengerCount = 0; // 메신저 안 읽은 수 (TakeMe 알림 포함)
   Timer? _notificationPollTimer;
 
   Future<void> _loadUnreadCount() async {
     try {
-      final count = await ApiService().getDriverUnreadCount();
-      if (mounted) setState(() => _unreadNotificationCount = count);
+      final count = await ApiService().getChatTotalUnreadCount();
+      if (mounted) setState(() => _unreadMessengerCount = count);
     } catch (_) {}
   }
 
@@ -96,6 +96,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     _nav = DriverNavigator(_map)..init();
     _initEscortSocket();
     _loadUnreadCount();
+    SocketService().connect(ApiService().token); // 이미 연결돼 있으면 그대로 둔다 (리스너를 등록하려면 소켓이 먼저 필요)
+    SocketService().onRoomUpdated((_) {
+      if (mounted) _loadUnreadCount();
+    });
     _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) => _loadUnreadCount());
     _ticker = Timer.periodic(const Duration(seconds: 2), (_) {
       if (!mounted) return;
@@ -582,16 +586,16 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                       alignment: Alignment.center,
                       children: [
                         IconButton(
-                          icon: const Icon(Icons.notifications, color: Color(0xFF0F172A), size: 24),
-                          tooltip: '알림',
+                          icon: const Icon(Icons.forum_outlined, color: Color(0xFF0F172A), size: 24),
+                          tooltip: '메신저 (알림 포함)',
                           onPressed: () {
                             Navigator.push(
                               context,
-                              MaterialPageRoute(builder: (_) => const DriverNotificationScreen()),
+                              MaterialPageRoute(builder: (_) => const ChatRoomListScreen()),
                             ).then((_) => _loadUnreadCount());
                           },
                         ),
-                        if (_unreadNotificationCount > 0)
+                        if (_unreadMessengerCount > 0)
                           Positioned(
                             right: 4,
                             bottom: 4,
@@ -606,7 +610,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                                 constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
                                 alignment: Alignment.center,
                                 child: Text(
-                                  _unreadNotificationCount > 9 ? '9+' : '$_unreadNotificationCount',
+                                  _unreadMessengerCount > 9 ? '9+' : '$_unreadMessengerCount',
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 10,
@@ -619,16 +623,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                             ),
                           ),
                       ],
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.forum_outlined, color: Color(0xFF0F172A), size: 22),
-                      tooltip: '메신저',
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (_) => const ChatRoomListScreen()),
-                        ).then((_) => _loadUnreadCount());
-                      },
                     ),
                     _menu(),
                   ],

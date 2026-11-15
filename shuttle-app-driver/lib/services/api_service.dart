@@ -315,16 +315,6 @@ class ApiService {
     return [];
   }
 
-  Future<int> getDriverUnreadCount() async {
-    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications/unread-count');
-    final res = await getWithAuth(url);
-    if (res.statusCode == 200) {
-      final data = jsonDecode(utf8.decode(res.bodyBytes));
-      return (data['count'] as num?)?.toInt() ?? 0;
-    }
-    return 0;
-  }
-
   Future<bool> markDriverNotificationRead({int? id, String? key}) async {
     final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications/read');
     final body = <String, dynamic>{};
