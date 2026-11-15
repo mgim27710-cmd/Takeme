@@ -529,7 +529,7 @@ class DriverNavigator extends ChangeNotifier {
         await previewRoutes();
       }
     } catch (e) {
-      loadError = '정보를 불러오지 못했습니다: $e';
+      loadError = '정보를 불러오지 못했습니다. ${friendlyError(e)}';
       notifyListeners();
     }
   }
@@ -570,7 +570,7 @@ class DriverNavigator extends ChangeNotifier {
         }
         if (vehicleId != null) SocketService().joinVehicleRoom(vehicleId!);
       } catch (e) {
-        loadError = '정보를 불러오지 못했습니다: $e';
+        loadError = '정보를 불러오지 못했습니다. ${friendlyError(e)}';
       }
     }
     loading = false;
@@ -1103,7 +1103,10 @@ class DriverNavigator extends ChangeNotifier {
     if (serverLive) {
       try {
         await _post('/teacher/end-operation', {'interiorChecked': interiorChecked});
-      } catch (_) {}
+      } catch (e) {
+        // 화면상으로는 운행이 끝나지만 서버에는 아직 운행 중으로 남을 수 있다 -> 반드시 알린다
+        actionError = '운행 종료가 서버에 전달되지 않았습니다. ${friendlyError(e)} 연결 후 다시 운행 종료를 눌러 주세요.';
+      }
       if (vehicleId != null) SocketService().sendOperationStatus(vehicleId: vehicleId!, isOperating: false);
     }
     _resetDriving();

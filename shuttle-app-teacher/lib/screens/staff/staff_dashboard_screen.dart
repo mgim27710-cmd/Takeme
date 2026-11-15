@@ -99,10 +99,28 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
 
     SocketService().connect(ApiService().token);
 
-    final vehicle = await ApiService().getTeacherVehicle(user.email);
-    final students = await ApiService().getTeacherStudents(user.email);
-    final route = await ApiService().getTeacherRoute(user.email);
-    final routePathData = await ApiService().getRoutePath();
+    final dynamic vehicle;
+    final List<StudentModel> students;
+    final RouteDataModel? route;
+    final Map<String, dynamic>? routePathData;
+    try {
+      vehicle = await ApiService().getTeacherVehicle(user.email);
+      students = await ApiService().getTeacherStudents(user.email);
+      route = await ApiService().getTeacherRoute(user.email);
+      routePathData = await ApiService().getRoutePath();
+    } catch (e) {
+      // 불러오기에 실패하면 로딩 화면에서 멈추지 않고 이유와 다시 시도를 알려준다
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('정보를 불러오지 못했습니다. ${friendlyError(e)}'),
+            action: SnackBarAction(label: '다시 시도', onPressed: _loadAllData),
+          ),
+        );
+      }
+      return;
+    }
 
     // Fetch parentPhone and escort status
     try {
