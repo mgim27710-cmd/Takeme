@@ -866,10 +866,11 @@ class ApiService {
   }
 
   // ==================== CHAT APIs ====================
-  Future<List<Map<String, dynamic>>> getChatRooms(String email) async {
+  Future<List<Map<String, dynamic>>> getChatRooms(String email, {bool throwOnError = false}) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/chat/rooms?email=${Uri.encodeComponent(email)}');
       final res = await getWithAuth(url).timeout(const Duration(seconds: 6));
+      if (throwOnError) throwIfServerError(res);
       if (res.statusCode == 200) {
         final List<dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
         return data.whereType<Map<String, dynamic>>().toList();
@@ -877,14 +878,16 @@ class ApiService {
       return [];
     } catch (e) {
       debugPrint('[ApiService] getChatRooms error: $e');
+      if (throwOnError) rethrow;
       return [];
     }
   }
 
-  Future<Map<String, List<Map<String, dynamic>>>> getChatUsers(String email) async {
+  Future<Map<String, List<Map<String, dynamic>>>> getChatUsers(String email, {bool throwOnError = false}) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/chat/users?email=${Uri.encodeComponent(email)}');
       final res = await getWithAuth(url).timeout(const Duration(seconds: 6));
+      if (throwOnError) throwIfServerError(res);
       if (res.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
         return {
@@ -897,6 +900,7 @@ class ApiService {
       return {'drivers': [], 'teachers': [], 'admins': [], 'parents': []};
     } catch (e) {
       debugPrint('[ApiService] getChatUsers error: $e');
+      if (throwOnError) rethrow;
       return {'drivers': [], 'teachers': [], 'admins': [], 'parents': []};
     }
   }

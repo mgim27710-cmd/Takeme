@@ -39,6 +39,8 @@ class ParentChatRoomListScreen extends StatefulWidget {
 class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> {
   List<ChatRoomModel> _rooms = [];
   bool _isLoading = true;
+  String? _loadError; // 채팅방 목록 불러오기 실패 이유 (null 이면 정상)
+  String? _contactsError; // 대화 상대 목록 불러오기 실패 이유
   String? _myEmail;
 
   List<ChatContact> _contacts = [];
@@ -54,9 +56,12 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> {
 
   
   Future<void> _loadContacts() async {
-    setState(() => _isLoadingContacts = true);
+    setState(() {
+      _isLoadingContacts = true;
+      _contactsError = null;
+    });
     try {
-      final res = await ApiService().getChatUsers(_myEmail ?? 'parent@takeme.com');
+      final res = await ApiService().getChatUsers(_myEmail ?? 'parent@takeme.com', throwOnError: true);
       final List<ChatContact> fetched = [];
 
       // 1. 원장님 및 행정실 (DB admins)
@@ -138,6 +143,7 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> {
         setState(() {
           _contacts = [];
           _isLoadingContacts = false;
+          _contactsError = friendlyError(e);
         });
       }
     }
@@ -145,18 +151,34 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> {
 
   Future<void> _loadRooms() async {
     setState(() => _isLoading = true);
-    final rawList = await ApiService().getChatRooms(_myEmail ?? 'parent@takeme.com');
-    if (!mounted) return;
+    try {
+      final rawList = await ApiService().getChatRooms(_myEmail ?? 'parent@takeme.com', throwOnError: true);
+      if (!mounted) return;
 
-    final parsed = rawList
-        .map((r) => ChatRoomModel.fromJson(r))
-        .where((r) => r.type != 'PAYMENT_SYSTEM')
-        .toList();
+      final parsed = rawList
+          .map((r) => ChatRoomModel.fromJson(r))
+          .where((r) => r.type != 'PAYMENT_SYSTEM')
+          .toList();
 
-    setState(() {
-      _rooms = parsed;
-      _isLoading = false;
-    });
+      setState(() {
+        _rooms = parsed;
+        _isLoading = false;
+        _loadError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      final message = friendlyError(e);
+      setState(() {
+        _isLoading = false;
+        // 이미 보이는 목록이 없을 때만 오류 화면, 목록이 있으면 그대로 두고 안내만 한다
+        if (_rooms.isEmpty) _loadError = message;
+      });
+      if (_rooms.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('대화 목록을 새로 불러오지 못했습니다. $message')),
+        );
+      }
+    }
   }
 
   Future<void> _openDirectRoom({
@@ -371,6 +393,35 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> {
                               ],
                             ),
                           )
+                        : (_contactsError != null && _contacts.isEmpty)
+                            ? Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.cloud_off_rounded, size: 40, color: Color(0xFFCBD5E1)),
+                                    const SizedBox(height: 10),
+                                    const Text(
+                                      '대화 상대를 불러오지 못했습니다.',
+                                      style: TextStyle(color: Color(0xFF64748B), fontSize: 14, fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      _contactsError!,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    OutlinedButton.icon(
+                                      onPressed: () async {
+                                        await _loadContacts();
+                                        setModalState(() {});
+                                      },
+                                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                                      label: const Text('다시 시도'),
+                                    ),
+                                  ],
+                                ),
+                              )
                         : filteredContacts.isEmpty
                             ? const Center(
                                 child: Text(
@@ -706,7 +757,35 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> {
                   ),
                   const SizedBox(height: 12),
 
-                  if (_rooms.isEmpty)
+                  if (_loadError != null && _rooms.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 40),
+                      alignment: Alignment.center,
+                      child: Column(
+                        children: [
+                          const Icon(Icons.cloud_off_rounded, size: 44, color: Color(0xFFCBD5E1)),
+                          const SizedBox(height: 10),
+                          const Text(
+                            '대화 목록을 불러오지 못했습니다.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Color(0xFF64748B), fontSize: 14, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _loadError!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                          ),
+                          const SizedBox(height: 14),
+                          OutlinedButton.icon(
+                            onPressed: _loadRooms,
+                            icon: const Icon(Icons.refresh_rounded, size: 18),
+                            label: const Text('다시 시도'),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (_rooms.isEmpty)
                     Container(
                       padding: const EdgeInsets.symmetric(vertical: 40),
                       alignment: Alignment.center,

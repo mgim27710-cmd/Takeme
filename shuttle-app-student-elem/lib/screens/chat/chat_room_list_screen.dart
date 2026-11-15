@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../../models/user_model.dart';
 import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
+import '../../widgets/load_error_view.dart';
 import 'chat_conversation_screen.dart';
 import 'new_chat_dialog.dart';
 
@@ -26,6 +27,7 @@ class ChatRoomListScreen extends StatefulWidget {
 class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
   List<Map<String, dynamic>> _rooms = [];
   bool _isLoading = true;
+  String? _loadError; // 채팅방 목록 불러오기 실패 이유 (null 이면 정상)
 
   @override
   void initState() {
@@ -36,14 +38,31 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
     });
   }
 
-  Future<void> _loadRooms({bool showLoading = true}) async {
+  /// userInitiated: 사용자가 직접 새로고침(당겨서 새로고침/다시 시도)한 경우
+  Future<void> _loadRooms({bool showLoading = true, bool userInitiated = false}) async {
     if (showLoading) setState(() => _isLoading = true);
-    final rooms = await ApiService().getChatRooms();
-    if (mounted) {
+    try {
+      final rooms = await ApiService().getChatRooms(throwOnError: true);
+      if (mounted) {
+        setState(() {
+          _rooms = rooms;
+          _isLoading = false;
+          _loadError = null;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      final message = friendlyError(e);
       setState(() {
-        _rooms = rooms;
         _isLoading = false;
+        // 이미 보이는 목록이 없을 때만 오류 화면, 목록이 있으면 그대로 두고 안내만 한다
+        if (_rooms.isEmpty) _loadError = message;
       });
+      if (_rooms.isNotEmpty && (userInitiated || showLoading)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('대화 목록을 새로 불러오지 못했습니다. $message')),
+        );
+      }
     }
   }
 
@@ -299,11 +318,17 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
   @override
   Widget build(BuildContext context) {
     final body = RefreshIndicator(
-      onRefresh: () => _loadRooms(showLoading: false),
+      onRefresh: () => _loadRooms(showLoading: false, userInitiated: true),
       color: const Color(0xFF2563EB),
       child: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)))
-          : _rooms.isEmpty
+          : (_loadError != null && _rooms.isEmpty)
+              ? LoadErrorView(
+                  title: '대화 목록을 불러오지 못했습니다.',
+                  message: _loadError!,
+                  onRetry: () => _loadRooms(userInitiated: true),
+                )
+              : _rooms.isEmpty
               ? Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,

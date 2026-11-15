@@ -905,10 +905,11 @@ class ApiService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getChatRooms() async {
+  Future<List<Map<String, dynamic>>> getChatRooms({bool throwOnError = false}) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/chat/rooms');
       final res = await getWithAuth(url);
+      if (throwOnError) throwIfServerError(res);
       if (res.statusCode == 200) {
         final data = jsonDecode(utf8.decode(res.bodyBytes));
         if (data is List) {
@@ -916,6 +917,7 @@ class ApiService {
         }
       }
     } catch (e) {
+      if (throwOnError) rethrow;
       debugPrint('[ApiService] getChatRooms error: $e');
     }
     return [];
