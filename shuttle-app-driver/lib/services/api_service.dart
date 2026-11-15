@@ -215,28 +215,29 @@ class ApiService {
       res = await http.post(url, headers: headers, body: encodedBody).timeout(const Duration(seconds: 7));
     } catch (e) {
       lastError = e;
-      print('[ApiService] Primary host (${AppConfig.apiHost}) failed: $e');
+      debugPrint('[ApiService] Primary host (${AppConfig.apiHost}) failed: $e');
     }
 
-    // 모바일 환경에서 1차 실패 또는 502/503 에러 발생 시 fallback host (http://52.63.245.203:3000) 자동 재시도
-    if (res == null || res.statusCode >= 500) {
+    // 1차 실패 또는 5xx 시 암호화되지 않은 대체 주소(http)로 재시도 -> 로그인 정보가 평문으로 가므로 개발(디버그)일 때만 허용
+    if (AppConfig.canUseHttpFallback && (res == null || res.statusCode >= 500)) {
       try {
         final fallbackUrl = Uri.parse('${AppConfig.fallbackApiHost}/auth/login');
-        print('[ApiService] Attempting fallback host: $fallbackUrl');
+        debugPrint('[ApiService] Attempting fallback host: $fallbackUrl');
         final fallbackRes = await http.post(fallbackUrl, headers: headers, body: encodedBody).timeout(const Duration(seconds: 7));
         if (fallbackRes.statusCode < 500) {
           res = fallbackRes;
           AppConfig.useFallback();
-          print('[ApiService] Fallback successful! Active host switched to: ${AppConfig.apiHost}');
+          debugPrint('[ApiService] Fallback successful! Active host switched to: ${AppConfig.apiHost}');
         }
       } catch (e) {
         lastError ??= e;
-        print('[ApiService] Fallback host failed: $e');
+        debugPrint('[ApiService] Fallback host failed: $e');
       }
     }
 
     if (res == null) {
-      throw Exception('서버에 연결할 수 없습니다. ($lastError)');
+      debugPrint('[ApiService] 서버 연결 실패: $lastError');
+      throw Exception('서버에 연결할 수 없습니다. 인터넷 연결을 확인하고 잠시 후 다시 시도해 주세요.');
     }
 
     final data = jsonDecode(utf8.decode(res.bodyBytes));
