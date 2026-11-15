@@ -416,10 +416,11 @@ class ApiService {
     return [];
   }
 
-  Future<RouteDataModel?> getParentRoute(String email) async {
+  Future<RouteDataModel?> getParentRoute(String email, {bool throwOnError = false}) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/parent/route?email=${Uri.encodeComponent(email)}');
       final res = await getWithAuth(url).timeout(const Duration(seconds: 6));
+      if (throwOnError) throwIfServerError(res);
       if (res.statusCode == 200) {
         final decoded = jsonDecode(utf8.decode(res.bodyBytes));
         if (decoded is Map<String, dynamic>) {
@@ -427,15 +428,17 @@ class ApiService {
         }
       }
     } catch (e) {
+      if (throwOnError) rethrow;
       debugPrint('[ApiService] getParentRoute error: $e');
     }
     return null;
   }
 
-  Future<StudentModel?> getMyChild(String email) async {
+  Future<StudentModel?> getMyChild(String email, {bool throwOnError = false}) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/parent/my-child?email=${Uri.encodeComponent(email)}');
       final res = await getWithAuth(url).timeout(const Duration(seconds: 6));
+      if (throwOnError) throwIfServerError(res);
       if (res.statusCode == 200) {
         final data = jsonDecode(utf8.decode(res.bodyBytes));
         if (data != null && data is Map<String, dynamic>) {
@@ -443,23 +446,27 @@ class ApiService {
         }
       }
     } catch (e) {
+      if (throwOnError) rethrow;
       debugPrint('[ApiService] getMyChild error: $e');
     }
     return null;
   }
 
-  Future<List<StudentModel>> getMyChildren(String email) async {
+  Future<List<StudentModel>> getMyChildren(String email, {bool throwOnError = false}) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/parent/my-children?email=${Uri.encodeComponent(email)}');
       final res = await getWithAuth(url);
+      if (throwOnError) throwIfServerError(res);
       if (res.statusCode == 200) {
         final list = jsonDecode(utf8.decode(res.bodyBytes));
         if (list is List) {
           return list.map((e) => StudentModel.fromJson(e as Map<String, dynamic>)).toList();
         }
       }
-    } catch (_) {}
-    final single = await getMyChild(email);
+    } catch (_) {
+      if (throwOnError) rethrow;
+    }
+    final single = await getMyChild(email, throwOnError: throwOnError);
     return single != null ? [single] : [];
   }
 
@@ -580,10 +587,11 @@ class ApiService {
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
   }
 
-  Future<Map<String, dynamic>?> getTodaySchedule(String email) async {
+  Future<Map<String, dynamic>?> getTodaySchedule(String email, {bool throwOnError = false}) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/parent/today-schedule?email=${Uri.encodeComponent(email)}');
       final res = await getWithAuth(url).timeout(const Duration(seconds: 6));
+      if (throwOnError) throwIfServerError(res);
       if (res.statusCode == 200) {
         final decoded = jsonDecode(utf8.decode(res.bodyBytes));
         if (decoded is Map<String, dynamic>) {
@@ -591,6 +599,7 @@ class ApiService {
         }
       }
     } catch (e) {
+      if (throwOnError) rethrow;
       debugPrint('[ApiService] getTodaySchedule error: $e');
     }
     return null;
