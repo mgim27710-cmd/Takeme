@@ -15,6 +15,7 @@ import { ChatGateway } from './chat.gateway';
 import { RoutingService } from '../routing/routing.service';
 import { ApprovalService } from '../approval/approval.service';
 import { formatTeacherName } from '../utils/teacher.util';
+import { getStudentClassName, isSameClass } from '../utils/school.util';
 import { isNotificationEnabled } from '../utils/notification.util';
 
 /** 개인 알림방 이름 (NOTIFICATION_SYSTEM 타입, 사용자 1명 전용) */
@@ -46,6 +47,11 @@ export class ChatService {
     this.routingService.registerSystemNotificationHandler(
       (academyId: number | null, category: string, title: string, content: string, extra?: any) => {
         return this.sendSystemNotification(academyId, category as any, title, content, extra);
+      }
+    );
+    this.routingService.registerStudentNotificationHandler(
+      (studentId: number, title: string, content: string, roles: any[], options?: any) => {
+        return this.notifyStudentRelated(studentId, title, content, roles as any, options);
       }
     );
   }
@@ -334,6 +340,88 @@ export class ChatService {
     return { success: true };
   }
 
+  // ============================================================
+  // 관련자에게만 보내는 개인 알림 (기관 공지 채널로 보내지 않는다)
+  // ============================================================
+
+  /** 같은 기관 관리자(원장)들의 사용자 ID */
+  async getAcademyAdminIds(academyId?: number | null): Promise<number[]> {
+    if (!academyId) return [];
+    const ids = new Set<number>();
+    const admins = await this.userRepo.find({ where: { academyId, role: UserRole.ACADEMY_ADMIN } });
+    admins.forEach(a => ids.add(a.id));
+    const academy = await this.academyRepo.findOne({ where: { id: academyId }, relations: { owner: true } });
+    if (academy?.owner?.id) ids.add(academy.owner.id);
+    return Array.from(ids);
+  }
+
+  /**
+   * 원아와 연결된 사람들의 사용자 ID
+   * - PARENT: 그 원아의 학부모 / HOMEROOM: 그 원아 반의 담임 / VEHICLE: 배정된 차량의 지도교사·기사 / ADMIN: 그 기관 관리자
+   * 원아 이름이 들어가는 알림은 반드시 이 함수로 대상자를 정한다.
+   */
+  async getStudentRelatedUserIds(
+    studentId: number,
+    roles: Array<'PARENT' | 'HOMEROOM' | 'VEHICLE' | 'ADMIN'>,
+  ): Promise<number[]> {
+    const student = await this.studentRepo.findOne({
+      where: { id: studentId },
+      relations: {
+        parentUser: true,
+        studentUser: true,
+        academy: true,
+        assignedVehicle: { driverUser: true, teacherUser: true },
+      },
+    });
+    if (!student) return [];
+    const ids = new Set<number>();
+
+    if (roles.includes('PARENT')) {
+      if (student.parentUser?.id) ids.add(student.parentUser.id);
+      if (student.studentUser?.id) ids.add(student.studentUser.id);
+    }
+    if (roles.includes('VEHICLE')) {
+      const v = student.assignedVehicle;
+      if (v?.driverUser?.id) ids.add(v.driverUser.id);
+      if (v?.teacherUser?.id) ids.add(v.teacherUser.id);
+    }
+    if (roles.includes('HOMEROOM') && student.academy?.id) {
+      const cls = getStudentClassName(student);
+      if (cls) {
+        const teachers = await this.userRepo.find({
+          where: { academyId: student.academy.id, role: UserRole.HOMEROOM_TEACHER },
+        });
+        teachers.filter(t => isSameClass(t.assignedClass, cls)).forEach(t => ids.add(t.id));
+      }
+    }
+    if (roles.includes('ADMIN')) {
+      (await this.getAcademyAdminIds(student.academy?.id)).forEach(id => ids.add(id));
+    }
+    return Array.from(ids);
+  }
+
+  /** 원아와 연결된 사람들에게만 개인 알림("TakeMe 알림")을 보낸다 */
+  async notifyStudentRelated(
+    studentId: number,
+    title: string,
+    message: string,
+    roles: Array<'PARENT' | 'HOMEROOM' | 'VEHICLE' | 'ADMIN'>,
+    options?: { type?: 'change_request' | 'shuttle' | 'escort' | string; metadata?: any; excludeUserIds?: number[] },
+  ) {
+    try {
+      const exclude = new Set(options?.excludeUserIds || []);
+      const ids = (await this.getStudentRelatedUserIds(studentId, roles)).filter(id => !exclude.has(id));
+      if (ids.length === 0) return [];
+      return await this.sendSystemNotificationToUsers(ids, title, message, {
+        type: options?.type,
+        metadata: options?.metadata,
+      });
+    } catch (err) {
+      console.error('[ChatService] notifyStudentRelated error:', err);
+      return [];
+    }
+  }
+
   async sendSystemNotification(
     academyId: number | null,
     category: 'ABSENT' | 'SHUTTLE_REQUEST' | 'PICKUP' | 'PAYMENT_REQUEST' | 'PAYMENT_DECISION' | 'GENERAL',
@@ -341,6 +429,12 @@ export class ChatService {
     content: string,
     extraData?: any,
   ) {
+    // 공지사항 채널은 기관 전체 공지(행사·휴원·규정 변경 등) 전용이다.
+    // 결석·결재·운행 같은 개별 소식은 관련자에게만 개인 알림으로 보낸다(notifyStudentRelated 등).
+    if (category !== 'GENERAL') {
+      console.warn(`[ChatService] 공지사항 채널에는 개별 업무 알림(${category})을 보내지 않습니다. 개인 알림을 사용하세요.`);
+      return;
+    }
     try {
       let notiRoom = await this.roomRepo.findOne({
         where: {
@@ -1021,21 +1115,30 @@ export class ChatService {
       await this.parentMessageRepo.save(parentMsg).catch(() => {});
     }
 
-    // 공지사항 채널에 결재 신청 알림 전송 (원장 및 전 교직원이 확인 가능)
-    await this.sendSystemNotification(
-      targetAcademyId || null,
-      'PAYMENT_REQUEST',
-      '신규 결재 신청',
-      `[신규 결재 신청] ${requester.name || requester.email}님이 ${studentName} 원아의 [${payload.busNumber}] 탑승 결재를 신청하였습니다. (탑승지: ${payload.boardingLocation})`,
-      {
-        messageId: saved.id,
-        roomId: targetRoom.id,
-        studentName,
-        busNumber: payload.busNumber,
-        requesterName: requester.name || requester.email,
-        boardingLocation: payload.boardingLocation,
+    // 결재 신청 알림: 공지사항 채널이 아니라 결재자(해당 차량 지도교사 + 기관 관리자)에게만 개인 알림
+    try {
+      const approverIds = new Set<number>();
+      if (payload.vehicleId) {
+        const targetVehicle = await this.vehicleRepo.findOne({
+          where: { id: Number(payload.vehicleId) },
+          relations: { teacherUser: true },
+        });
+        if (targetVehicle?.teacherUser?.id) approverIds.add(targetVehicle.teacherUser.id);
       }
-    );
+      (await this.getAcademyAdminIds(targetAcademyId || null)).forEach(id => approverIds.add(id));
+      approverIds.delete(requester.id);
+      await this.sendSystemNotificationToUsers(
+        Array.from(approverIds),
+        '신규 결재 신청',
+        `[신규 결재 신청] ${requester.name || requester.email}님이 ${studentName} 원아의 [${payload.busNumber}] 탑승 결재를 신청하였습니다. (탑승지: ${payload.boardingLocation})`,
+        {
+          type: 'change_request',
+          metadata: { type: 'change_request', messageId: saved.id, roomId: targetRoom.id },
+        },
+      );
+    } catch (notiErr) {
+      console.error('[ChatService] 결재 신청 개인 알림 오류:', notiErr);
+    }
 
     const fullMessage = await this.messageRepo.findOne({
       where: { id: saved.id },
@@ -1276,21 +1379,13 @@ export class ChatService {
       const notifyTitle = '결재 승인 완료 알림';
       const notifyText = `[결재 승인 완료] ${payload.studentName} 원아의 [${vehicle.busNumber}] ${isTodayOnly ? '당일 임시' : '정규'} 탑승 결재가 ${formatTeacherName(decider.name)} 지도교사에 의해 최종 승인 완료되었습니다. (탑승지: ${finalBoardingLocation})`;
 
-      await this.sendSystemNotification(
-        targetAcadId || null,
-        'PAYMENT_DECISION',
-        notifyTitle,
-        notifyText,
-        {
-          messageId: message.id,
-          roomId: message.room.id,
-          studentName: payload.studentName,
-          decision,
-          decidedBy: formatTeacherName(decider.name),
-          busNumber: vehicle.busNumber,
-          boardingLocation: finalBoardingLocation,
-        }
-      );
+      // 결재 결과: 공지사항 채널이 아니라 신청자에게만 개인 알림 (학부모에게는 아래 pushParentNotification 이 따로 안내)
+      if (message.sender?.id && message.sender.id !== decider.id) {
+        await this.sendSystemNotificationToUser(message.sender.id, notifyTitle, notifyText, {
+          type: 'change_request',
+          metadata: { type: 'change_request', messageId: message.id, roomId: message.room.id },
+        }).catch(() => {});
+      }
 
       // 6. Automatically push notification to parent
       try {
@@ -1319,19 +1414,17 @@ export class ChatService {
       await this.broadcastToRoom(message.room.id, savedReject);
 
       const targetAcadId = payload.vehicleId ? (await this.vehicleRepo.findOne({ where: { id: payload.vehicleId } }))?.academy?.id : decider.academyId;
-      await this.sendSystemNotification(
-        targetAcadId || null,
-        'PAYMENT_DECISION',
-        '결재 반려 알림',
-        `[결재 반려] ${payload.studentName} 원아의 탑승 요청이 ${formatTeacherName(decider.name)} 지도교사에 의해 반려되었습니다.`,
-        {
-          messageId: message.id,
-          roomId: message.room.id,
-          studentName: payload.studentName,
-          decision: 'REJECTED',
-          decidedBy: formatTeacherName(decider.name),
-        }
-      );
+      // 결재 결과: 공지사항 채널이 아니라 신청자와 그 원아의 학부모에게만 개인 알림
+      const rejectText = `[결재 반려] ${payload.studentName} 원아의 탑승 요청이 ${formatTeacherName(decider.name)} 지도교사에 의해 반려되었습니다.`;
+      const rejectTargets = new Set<number>();
+      if (message.sender?.id && message.sender.id !== decider.id) rejectTargets.add(message.sender.id);
+      if (payload.studentId) {
+        (await this.getStudentRelatedUserIds(Number(payload.studentId), ['PARENT'])).forEach(id => rejectTargets.add(id));
+      }
+      await this.sendSystemNotificationToUsers(Array.from(rejectTargets), '결재 반려 알림', rejectText, {
+        type: 'change_request',
+        metadata: { type: 'change_request', messageId: message.id, roomId: message.room.id },
+      }).catch(() => {});
     }
 
     return message;

@@ -315,12 +315,14 @@ export class ApprovalService {
     await this.notificationRepo.save(noti);
 
     const notiCategory = type === ChangeRequestType.ABSENCE ? 'ABSENT' : type === ChangeRequestType.ONE_TIME_BOARDING ? 'SHUTTLE_REQUEST' : type === ChangeRequestType.PICKUP || type === ChangeRequestType.INDIVIDUAL_DISMISSAL ? 'PICKUP' : 'GENERAL';
-    this.notifySystemNotification(
-      academyId,
-      notiCategory as any,
+    // 신청 접수 알림: 공지사항 채널이 아니라 처리할 관리자와(결석이면) 그 원아의 담임·차량 관계자에게만 개인 알림
+    void notiCategory;
+    this.chatService?.notifyStudentRelated(
+      student.id,
       `[신청 접수] ${student.adminDisplayName || student.name} ${typeKr} 신청`,
       `${student.adminDisplayName || student.name} 원아의 ${typeKr} 신청이 접수되었습니다. (적용일: ${targetDate})`,
-      { approvalRequestId: saved.id, studentId: student.id, type, targetDate }
+      type === ChangeRequestType.ABSENCE ? ['ADMIN', 'HOMEROOM', 'VEHICLE'] : ['ADMIN'],
+      { type: 'change_request', excludeUserIds: [callingUser?.id].filter(Boolean) as number[] },
     );
 
     // 소켓 브로드캐스트 (해당 유치원 관리자 방)
@@ -639,13 +641,7 @@ export class ApprovalService {
       }
     }
 
-    this.notifySystemNotification(
-      academyId,
-      'PAYMENT_DECISION',
-      `[결재 ${decisionKr}] ${student.adminDisplayName || student.name} ${typeKr} ${decisionKr}`,
-      `${student.adminDisplayName || student.name} 원아의 ${typeKr} 신청이 최종 ${decisionKr}되었습니다.${decision === ApprovalStatus.REJECTED ? ` (사유: ${rejectionReason})` : ''}`,
-      { approvalRequestId: req.id, studentId: student.id, decision, type: req.type }
-    );
+    // (신청 결과는 위에서 신청 학부모와 차량 기사에게 개인 알림으로 이미 전달했다. 공지사항 채널로는 보내지 않는다.)
 
     // 소켓 브로드캐스트
     if (this.locationGateway && academyId) {
@@ -1005,18 +1001,15 @@ export class ApprovalService {
       const notiTitle = '원아 결석 신청 안내';
       const notiContent = `[결석 신청] ${student.name} (${student.className || '반 미배정'}) - ${dateText}${data.reason ? ` (${data.reason})` : ''}`;
 
-      await this.notifySystemNotification(
-        (student.academy?.id || callingUser.academyId || null),
-        'ABSENT',
+      // 결석 신청: 공지사항 채널이 아니라 그 원아의 학부모·담임·차량 지도교사/기사에게만 개인 알림
+      await this.chatService?.notifyStudentRelated(
+        student.id,
         notiTitle,
         notiContent,
+        ['PARENT', 'HOMEROOM', 'VEHICLE'],
         {
-          studentId: student.id,
-          studentName: student.name,
-          className: student.className,
-          startDate: data.startDate,
-          endDate: data.endDate,
-          reason: data.reason,
+          type: 'change_request',
+          metadata: { type: 'change_request', studentId: student.id, startDate: data.startDate, endDate: data.endDate },
         },
       );
     } catch (notiErr) {

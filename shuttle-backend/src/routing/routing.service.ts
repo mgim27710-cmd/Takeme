@@ -302,6 +302,19 @@ export class RoutingService {
     this.systemNotificationHandler = fn;
   }
 
+  private studentNotificationHandler?: (studentId: number, title: string, content: string, roles: string[], options?: any) => Promise<any>;
+
+  public registerStudentNotificationHandler(fn: (studentId: number, title: string, content: string, roles: string[], options?: any) => Promise<any>) {
+    this.studentNotificationHandler = fn;
+  }
+
+  /** 원아와 연결된 사람(학부모·담임·차량 지도교사/기사·관리자)에게만 개인 알림 */
+  public notifyStudentRelated(studentId: number, title: string, content: string, roles: Array<'PARENT' | 'HOMEROOM' | 'VEHICLE' | 'ADMIN'>, options?: any) {
+    try {
+      void this.studentNotificationHandler?.(studentId, title, content, roles, options);
+    } catch {}
+  }
+
   public notifySystemNotification(academyId: number | null, category: string, title: string, content: string, extra?: any) {
     try {
       this.systemNotificationHandler?.(academyId, category, title, content, extra);
@@ -3382,30 +3395,30 @@ export class RoutingService {
     student.boardStatus = boardStatus;
     await this.studentRepository.save(student);
 
-    const acadId = student.academy?.id || null;
+    // 원아 이름이 들어가는 알림은 그 원아와 연결된 사람에게만 보낸다 (기관 전체 공지 채널로 보내지 않는다)
     if (boardStatus === 'ABSENT') {
-      this.notifySystemNotification(
-        acadId,
-        'ABSENT',
+      this.notifyStudentRelated(
+        student.id,
         '원생 결석 알림',
         `${student.name} 학생(원아)이(가) 오늘 결석 처리되었습니다.`,
-        { studentId: student.id, studentName: student.name }
+        ['PARENT', 'HOMEROOM', 'VEHICLE'],
+        { type: 'shuttle' },
       );
     } else if (boardStatus === 'SELF_PICKUP') {
-      this.notifySystemNotification(
-        acadId,
-        'PICKUP',
+      this.notifyStudentRelated(
+        student.id,
         '개별 픽업 알림',
         `${student.name} 학생(원아)의 하원 방법이 보호자 직접 픽업으로 변경되었습니다.`,
-        { studentId: student.id, studentName: student.name }
+        ['PARENT', 'HOMEROOM', 'VEHICLE'],
+        { type: 'shuttle' },
       );
     } else if (boardStatus === 'WAITING' && prevStatus && prevStatus !== 'WAITING') {
-      this.notifySystemNotification(
-        acadId,
-        'SHUTTLE_REQUEST',
+      this.notifyStudentRelated(
+        student.id,
         '셔틀 탑승 희망 알림',
         `${student.name} 학생(원아)이(가) 셔틀 탑승을 희망하여 탑승 대기로 변경되었습니다.`,
-        { studentId: student.id, studentName: student.name }
+        ['HOMEROOM', 'VEHICLE'],
+        { type: 'shuttle' },
       );
     }
 

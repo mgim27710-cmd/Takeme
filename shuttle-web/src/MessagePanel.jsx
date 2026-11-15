@@ -1281,7 +1281,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   });
 
   const isCurrentRoomPaymentSystem = activeRoom?.type === 'PAYMENT_SYSTEM' || activeRoom?.name === '결재 전용 채널';
-  const isCurrentRoomNotificationSystem = activeRoom?.type === 'NOTIFICATION_SYSTEM' || activeRoom?.name === '실시간 알림 채널';
+  const isCurrentRoomNotificationSystem = activeRoom?.type === 'NOTIFICATION_SYSTEM' || activeRoom?.name === '실시간 알림 채널' || activeRoom?.name === '공지사항';
+  // 개인 알림방("TakeMe 알림")은 아무도 답장할 수 없고, 공지사항(기관 전체 공지)은 기관 관리자만 글을 쓸 수 있다.
+  const isPersonalNotificationRoom = isCurrentRoomNotificationSystem && activeRoom?.name === 'TakeMe 알림';
+  const canWriteNotice = myUser.role === 'ACADEMY_ADMIN' || myUser.role === 'SUPER_ADMIN';
+  const isNoticeReadOnly = isCurrentRoomNotificationSystem && (isPersonalNotificationRoom || !canWriteNotice);
 
   const activeOtherUser = (activeRoom?.members || [])
     .map((m) => m.user)
@@ -1623,7 +1627,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     : 'bg-indigo-500'
                                 }`}></span>
                                 <span className="text-xs font-black text-slate-800">
-                                  {payload.title || (payload.category === 'PAYMENT_DECISION' ? '결재 완료 안내' : '실시간 알림')}
+                                  {payload.title || (payload.category === 'PAYMENT_DECISION' ? '결재 완료 안내' : (msg.sender ? '공지' : 'TakeMe 알림'))}
                                 </span>
                                 <span className={`text-[10px] font-extrabold px-2 py-0.2 rounded-full border ${
                                   payload.category === 'PAYMENT_DECISION' && (payload.title?.includes('반려') || payload.decision === 'REJECTED')
@@ -2113,10 +2117,14 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             </div>
 
             {/* Input Bar */}
-            {isCurrentRoomNotificationSystem ? (
+            {isNoticeReadOnly ? (
               <div className="p-4 bg-slate-50 border-t border-slate-200 text-center text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>공지사항입니다. (지도교사/학부모 결재 승인 완료 및 출결 변동 알림 자동 수신 전용)</span>
+                <span>
+                  {isPersonalNotificationRoom
+                    ? 'TakeMe 알림입니다. 나와 관련된 알림만 표시되며 답장할 수 없습니다.'
+                    : '공지사항입니다. 기관 공지는 원장님만 작성할 수 있습니다.'}
+                </span>
               </div>
             ) : (
               <div className="p-4 bg-white border-t border-slate-200 flex items-end gap-2 shadow-sm relative">
@@ -2173,7 +2181,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   </div>
                 )}
 
-                {/* [+] Button */}
+                {/* [+] Button (공지사항에서는 결재/결석 서식이 맞지 않아 숨김) */}
+                {!isCurrentRoomNotificationSystem && (
                 <button
                   type="button"
                   onClick={() => setShowPlusMenu(prev => !prev)}
@@ -2186,6 +2195,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 >
                   +
                 </button>
+                )}
 
                 {/* Preset Phrases Button */}
                 <button
