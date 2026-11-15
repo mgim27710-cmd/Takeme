@@ -147,6 +147,10 @@ class ChatRoomModel {
 
   /// 상대방 호칭/표시 이름
   String getDisplayName(String? myEmail) {
+    // 알림 방은 항상 방 이름으로 표시 (예전 이름 "실시간 알림 채널" 은 "공지사항" 으로)
+    if (type == 'NOTIFICATION_SYSTEM') {
+      return name == '실시간 알림 채널' ? '공지사항' : name;
+    }
     if (type == 'PAYMENT_SYSTEM') {
       return name;
     }

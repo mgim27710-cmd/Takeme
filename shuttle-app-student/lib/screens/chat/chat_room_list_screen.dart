@@ -6,6 +6,14 @@ import '../../services/socket_service.dart';
 import 'chat_conversation_screen.dart';
 import 'new_chat_dialog.dart';
 
+
+/// 기관 공지 채널의 예전 이름("실시간 알림 채널")을 "공지사항"으로 표시한다.
+String? _normalizeRoomName(dynamic name) {
+  final n = name?.toString();
+  if (n == '실시간 알림 채널') return '공지사항';
+  return n;
+}
+
 class ChatRoomListScreen extends StatefulWidget {
   final bool isEmbeddedTab;
 
@@ -48,7 +56,7 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
       final room = result['room'] as Map<String, dynamic>;
       final targetUser = result['targetUser'] as Map<String, dynamic>?;
       final roomId = room['id'] as int;
-      final title = room['displayName'] ?? targetUser?['name'] ?? room['name'] ?? '대화방';
+      final title = room['displayName'] ?? targetUser?['name'] ?? _normalizeRoomName(room['name']) ?? '대화방';
 
       await Navigator.push(
         context,
@@ -66,7 +74,7 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
 
   void _enterRoom(Map<String, dynamic> room) async {
     final roomId = room['id'] as int;
-    final title = room['displayName'] ?? room['name'] ?? '대화방';
+    final title = room['displayName'] ?? _normalizeRoomName(room['name']) ?? '대화방';
     final targetUser = room['targetUser'] as Map<String, dynamic>?;
 
     await Navigator.push(
@@ -100,7 +108,7 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
   }
 
   Widget _buildRoomItem(Map<String, dynamic> room) {
-    final displayName = room['displayName'] ?? room['name'] ?? '대화방';
+    final displayName = room['displayName'] ?? _normalizeRoomName(room['name']) ?? '대화방';
     final latestMsg = room['latestMessage'] as Map<String, dynamic>?;
     final latestText = latestMsg?['text']?.toString() ?? '대화 내용이 없습니다.';
     final timeStr = _formatRoomTime(latestMsg?['createdAt'] ?? room['updatedAt'] ?? room['createdAt']);

@@ -109,7 +109,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
+          0, // reverse 목록: 0 = 맨 아래(가장 최근 메시지)
           duration: const Duration(milliseconds: 250),
           curve: Curves.easeOut,
         );
@@ -218,7 +218,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
         msg['messageType'] == 'SYSTEM' ||
         widget.isSystem ||
         widget.title == 'TakeMe 알림' ||
-        widget.room?['type'] == 'SYSTEM' ||
+        widget.room?['type'] == 'SYSTEM' || widget.room?['type'] == 'NOTIFICATION_SYSTEM' ||
         widget.room?['name'] == 'TakeMe 알림';
 
     return Column(
@@ -594,7 +594,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
         ),
       ),
       body: SafeArea(
-        maintainBottomViewPadding: true,
+        top: false, // 상단은 AppBar 가 처리
         child: Column(
           children: [
             // Message List
@@ -626,9 +626,11 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                         )
                       : ListView.builder(
                           controller: _scrollController,
+                          reverse: true, // 아래에서 위로 쌓임: 최신 메시지가 입력창 바로 위
                           padding: const EdgeInsets.symmetric(vertical: 10),
                           itemCount: _messages.length,
-                          itemBuilder: (ctx, idx) {
+                          itemBuilder: (ctx, i) {
+                            final idx = _messages.length - 1 - i; // 화면 위치(i) -> 시간순 인덱스
                             final msg = _messages[idx];
                             final prevMsg = idx > 0 ? _messages[idx - 1] : null;
                             final showDate = (idx == 0) || !_isSameDay(prevMsg?['createdAt'], msg['createdAt']);
@@ -668,7 +670,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                   12,
                   8,
                   12,
-                  8 + MediaQuery.of(context).viewInsets.bottom,
+                  8,
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
