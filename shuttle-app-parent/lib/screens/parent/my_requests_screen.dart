@@ -1,3 +1,4 @@
+import '../../widgets/load_error_view.dart';
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 
@@ -10,6 +11,7 @@ class MyRequestsScreen extends StatefulWidget {
 
 class _MyRequestsScreenState extends State<MyRequestsScreen> {
   bool _isLoading = true;
+  String? _loadError; // 불러오기 실패 이유 (null 이면 정상)
   List<Map<String, dynamic>> _requests = [];
 
   @override
@@ -19,13 +21,24 @@ class _MyRequestsScreenState extends State<MyRequestsScreen> {
   }
 
   Future<void> _loadRequests() async {
-    setState(() => _isLoading = true);
-    final list = await ApiService().getMyChangeRequests();
-    if (!mounted) return;
     setState(() {
-      _requests = list;
-      _isLoading = false;
+      _isLoading = true;
+      _loadError = null;
     });
+    try {
+      final list = await ApiService().getMyChangeRequests();
+      if (!mounted) return;
+      setState(() {
+        _requests = list;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadError = friendlyError(e);
+        _isLoading = false;
+      });
+    }
   }
 
   Color _getStatusBg(String status) {
@@ -88,7 +101,9 @@ class _MyRequestsScreenState extends State<MyRequestsScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _requests.isEmpty
+          : _loadError != null
+              ? LoadErrorView(title: '신청 내역을 불러오지 못했습니다.', message: _loadError!, onRetry: _loadRequests)
+              : _requests.isEmpty
               ? Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,

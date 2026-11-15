@@ -9,6 +9,37 @@ import '../models/student_model.dart';
 import '../models/notification_model.dart';
 import '../models/route_model.dart';
 
+/// 서버가 응답은 했지만 처리하지 못한 경우(5xx) 등, 사용자에게 보여줄 수 있는 오류
+class ApiException implements Exception {
+  final int? statusCode;
+  final String message;
+  ApiException(this.message, [this.statusCode]);
+
+  @override
+  String toString() => message;
+}
+
+/// 예외를 사용자가 이해할 수 있는 한 줄 안내로 바꾼다 (기술적인 오류 문구를 그대로 보여주지 않는다)
+String friendlyError(Object e) {
+  if (e is ApiException) return e.message;
+  final t = e.toString();
+  if (t.contains('SocketException') ||
+      t.contains('ClientException') ||
+      t.contains('TimeoutException') ||
+      t.contains('HandshakeException') ||
+      t.contains('Failed host lookup')) {
+    return '인터넷 연결을 확인해 주세요.';
+  }
+  return '잠시 후 다시 시도해 주세요.';
+}
+
+/// 5xx(서버 오류)는 "데이터 없음"과 구분되도록 예외로 알린다. 4xx 는 호출한 쪽이 데이터 없음 등으로 판단한다.
+void throwIfServerError(http.Response res) {
+  if (res.statusCode >= 500) {
+    throw ApiException('서버에 문제가 있어 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.', res.statusCode);
+  }
+}
+
 class ApiService {
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
@@ -294,14 +325,13 @@ class ApiService {
   // PARENT & STUDENT
   // ----------------------------------------------------
   Future<List<NotificationModel>> getNotifications(String email) async {
-    try {
-      final url = Uri.parse('${AppConfig.apiHost}/parent/notifications?email=${Uri.encodeComponent(email)}');
-      final res = await getWithAuth(url);
-      if (res.statusCode == 200) {
-        final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
-        return list.map((item) => NotificationModel.fromJson(item as Map<String, dynamic>)).toList();
-      }
-    } catch (_) {}
+    final url = Uri.parse('${AppConfig.apiHost}/parent/notifications?email=${Uri.encodeComponent(email)}');
+    final res = await getWithAuth(url);
+    throwIfServerError(res);
+    if (res.statusCode == 200) {
+      final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
+      return list.map((item) => NotificationModel.fromJson(item as Map<String, dynamic>)).toList();
+    }
     return [];
   }
 
@@ -372,14 +402,13 @@ class ApiService {
   }
 
   Future<List<Map<String, dynamic>>> getClassBoardPosts(String email) async {
-    try {
-      final url = Uri.parse('${AppConfig.apiHost}/parent/class-board?email=${Uri.encodeComponent(email)}');
-      final res = await getWithAuth(url);
-      if (res.statusCode == 200) {
-        final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
-        return list.map((e) => e as Map<String, dynamic>).toList();
-      }
-    } catch (_) {}
+    final url = Uri.parse('${AppConfig.apiHost}/parent/class-board?email=${Uri.encodeComponent(email)}');
+    final res = await getWithAuth(url);
+    throwIfServerError(res);
+    if (res.statusCode == 200) {
+      final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
+      return list.map((e) => e as Map<String, dynamic>).toList();
+    }
     return [];
   }
 
@@ -462,16 +491,15 @@ class ApiService {
   }
 
   Future<List<Map<String, dynamic>>> getMyChangeRequests() async {
-    try {
-      final url = Uri.parse('${AppConfig.apiHost}/approval/my');
-      final res = await getWithAuth(url);
-      if (res.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(res.bodyBytes));
-        if (data is List) {
-          return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-        }
+    final url = Uri.parse('${AppConfig.apiHost}/approval/my');
+    final res = await getWithAuth(url);
+    throwIfServerError(res);
+    if (res.statusCode == 200) {
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      if (data is List) {
+        return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
       }
-    } catch (_) {}
+    }
     return [];
   }
 
