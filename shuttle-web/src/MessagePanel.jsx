@@ -1153,8 +1153,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     if (room.type === 'PAYMENT_SYSTEM' || room.name === '결재 전용 채널' || room.name === '결제 시스템 방') {
       return '결재 전용 채널';
     }
-    if (room.type === 'NOTIFICATION_SYSTEM' || room.name === '실시간 알림 채널') {
-      return '실시간 알림 채널';
+    if (room.type === 'NOTIFICATION_SYSTEM' || room.name === '실시간 알림 채널' || room.name === '공지사항' || room.name === '공지사항') {
+      return room.name === 'TakeMe 알림' ? 'TakeMe 알림' : '공지사항';
     }
     if (room.name && room.name !== '1:1 대화' && !room.name.includes('(')) {
       return room.name;
@@ -1217,7 +1217,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         if (r.type === 'PAYMENT_SYSTEM') {
           return false; // Hide payment system channel
         } else if (r.type === 'NOTIFICATION_SYSTEM') {
-          // 개인 알림방(TakeMe 알림) 1개 + 기관 공지 채널(실시간 알림 채널) 1개만 표시
+          // 개인 알림방(TakeMe 알림) 1개 + 기관 공지 채널(공지사항) 1개만 표시
           const key = r.name === 'TakeMe 알림' ? 'PERSONAL' : 'ACADEMY';
           if (seenSpecial.has(key)) return false;
           seenSpecial.add(key);
@@ -1357,7 +1357,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             filteredRooms.map((room) => {
               const isSelected = activeRoom && activeRoom.id === room.id;
               const isPaymentSystem = room.type === 'PAYMENT_SYSTEM' || room.name === '결재 전용 채널' || room.name === '결제 시스템 방';
-              const isNotificationSystem = room.type === 'NOTIFICATION_SYSTEM' || room.name === '실시간 알림 채널';
+              const isNotificationSystem = room.type === 'NOTIFICATION_SYSTEM' || room.name === '실시간 알림 채널' || room.name === '공지사항';
               const title = getRoomTitle(room);
               const isGroup = (room.members || []).length > 2 || room.type === 'GROUP';
               const lastText = isPaymentSystem
@@ -1475,7 +1475,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                       </span>
                     ) : isCurrentRoomNotificationSystem ? (
                       <span className="text-[11px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
-                        실시간 알림 채널
+                        공지사항
                       </span>
                     ) : (
                       <span className="text-xs text-slate-400 font-bold">
@@ -2116,7 +2116,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             {isCurrentRoomNotificationSystem ? (
               <div className="p-4 bg-slate-50 border-t border-slate-200 text-center text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>실시간 알림 채널입니다. (지도교사/학부모 결재 승인 완료 및 출결 변동 알림 자동 수신 전용)</span>
+                <span>공지사항입니다. (지도교사/학부모 결재 승인 완료 및 출결 변동 알림 자동 수신 전용)</span>
               </div>
             ) : (
               <div className="p-4 bg-white border-t border-slate-200 flex items-end gap-2 shadow-sm relative">

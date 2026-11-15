@@ -123,6 +123,18 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
     );
   }
 
+  /// 공개 범위 선택지. '나의 반'은 담임(반이 배정된 경우)만 고를 수 있다.
+  List<(String, String)> _visibilityOptions(bool canUseMyClass) => [
+        if (canUseMyClass) ('CLASS', '나의 반'),
+        ('ALL', '전체 공개'),
+      ];
+
+  bool get _canUseMyClass {
+    final u = ApiService().currentUser;
+    final cls = u?.assignedClass;
+    return u?.role == 'HOMEROOM_TEACHER' && cls != null && cls.isNotEmpty && cls != '미배정';
+  }
+
   void _showCreatePostModal() {
     final currentUser = ApiService().currentUser;
     final isHomeroom = currentUser?.role == 'HOMEROOM_TEACHER';
@@ -132,8 +144,9 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
     final titleCtrl = TextEditingController();
     final contentCtrl = TextEditingController();
     String? selectedCategory;
-    String visibility = isHomeroom ? 'CLASS' : 'ALL';
-    String selectedClass = hasClass ? currentUser.assignedClass! : '햇살반';
+    final canUseMyClass = isHomeroom && hasClass;
+    String visibility = canUseMyClass ? 'CLASS' : 'ALL';
+    final String selectedClass = hasClass ? currentUser.assignedClass! : '';
     final List<XFile> pickedImages = [];
     bool isUploading = false;
 
@@ -268,51 +281,27 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   ),
                   const SizedBox(height: 14),
 
-                  // Visibility & Target Class Selector
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          initialValue: visibility,
-                          decoration: InputDecoration(
-                            labelText: '공개 범위',
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          items: const [
-                            DropdownMenuItem(value: 'ALL', child: Text('전체 공개')),
-                            DropdownMenuItem(value: 'CLASS', child: Text('특정 반 전용')),
-                          ],
-                          onChanged: (val) {
-                            if (val != null) {
-                              setModalState(() => visibility = val);
-                            }
-                          },
-                        ),
-                      ),
-                      if (visibility == 'CLASS') ...[
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            initialValue: selectedClass,
-                            decoration: InputDecoration(
-                              labelText: '대상 학급',
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                            ),
-                            items: _classList
-                                .where((c) => c != 'ALL')
-                                .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                                .toList(),
-                            onChanged: (val) {
-                              if (val != null) {
-                                setModalState(() => selectedClass = val);
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                    ],
+                  // 공개 범위: 나의 반 / 전체 공개 (반 이름을 고르지 않는다)
+                  DropdownButtonFormField<String>(
+                    initialValue: _visibilityOptions(canUseMyClass).any((o) => o.$1 == visibility)
+                        ? visibility
+                        : 'ALL',
+                    decoration: InputDecoration(
+                      labelText: '공개 범위',
+                      helperText: visibility == 'CLASS'
+                          ? '내가 맡은 반 학부모에게만 보입니다.'
+                          : '우리 기관의 모든 학부모에게 보입니다.',
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    items: _visibilityOptions(canUseMyClass)
+                        .map((o) => DropdownMenuItem(value: o.$1, child: Text(o.$2)))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setModalState(() => visibility = val);
+                      }
+                    },
                   ),
                   const SizedBox(height: 12),
 
@@ -562,8 +551,10 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
     final titleCtrl = TextEditingController(text: post['title']?.toString() ?? '');
     final contentCtrl = TextEditingController(text: post['content']?.toString() ?? '');
     String selectedCategory = post['postType'] == 'NOTICE' ? 'NOTICE' : 'POST';
-    String visibility = post['visibility']?.toString() ?? 'ALL';
-    String selectedClass = post['targetClass']?.toString() ?? '햇살반';
+    final canUseMyClass = _canUseMyClass;
+    String visibility = post['visibility']?.toString() == 'CLASS' ? 'CLASS' : 'ALL';
+    // '나의 반'은 서버가 담임의 반으로 고정한다. 화면에서는 반을 고르지 않는다.
+    final String selectedClass = post['targetClass']?.toString() ?? ApiService().currentUser?.assignedClass ?? '';
     final existingImages = List<String>.from((post['images'] as List?)?.map((e) => e.toString()) ??
         (post['imageUrl'] != null ? [post['imageUrl'].toString()] : []));
     final List<XFile> newlyPickedImages = [];
@@ -696,51 +687,27 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   ),
                   const SizedBox(height: 14),
 
-                  // Visibility & Target Class Selector
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          initialValue: visibility,
-                          decoration: InputDecoration(
-                            labelText: '공개 범위',
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          items: const [
-                            DropdownMenuItem(value: 'ALL', child: Text('전체 공개')),
-                            DropdownMenuItem(value: 'CLASS', child: Text('특정 반 전용')),
-                          ],
-                          onChanged: (val) {
-                            if (val != null) {
-                              setModalState(() => visibility = val);
-                            }
-                          },
-                        ),
-                      ),
-                      if (visibility == 'CLASS') ...[
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _classList.contains(selectedClass) ? selectedClass : '햇살반',
-                            decoration: InputDecoration(
-                              labelText: '대상 학급',
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                            ),
-                            items: _classList
-                                .where((c) => c != 'ALL')
-                                .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                                .toList(),
-                            onChanged: (val) {
-                              if (val != null) {
-                                setModalState(() => selectedClass = val);
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                    ],
+                  // 공개 범위: 나의 반 / 전체 공개 (반 이름을 고르지 않는다)
+                  DropdownButtonFormField<String>(
+                    initialValue: _visibilityOptions(canUseMyClass).any((o) => o.$1 == visibility)
+                        ? visibility
+                        : 'ALL',
+                    decoration: InputDecoration(
+                      labelText: '공개 범위',
+                      helperText: visibility == 'CLASS'
+                          ? '내가 맡은 반 학부모에게만 보입니다.'
+                          : '우리 기관의 모든 학부모에게 보입니다.',
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    items: _visibilityOptions(canUseMyClass)
+                        .map((o) => DropdownMenuItem(value: o.$1, child: Text(o.$2)))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setModalState(() => visibility = val);
+                      }
+                    },
                   ),
                   const SizedBox(height: 12),
 
@@ -1441,7 +1408,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                               borderRadius: BorderRadius.circular(8),
                                             ),
                                             child: Text(
-                                              post['targetClass'] ?? (post['visibility'] == 'ALL' ? '전체 공개' : '반공개'),
+                                              post['visibility'] == 'CLASS' ? '나의 반' : '전체 공개',
                                               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
                                             ),
                                           ),

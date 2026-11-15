@@ -20,7 +20,10 @@ import { isNotificationEnabled } from '../utils/notification.util';
 /** 개인 알림방 이름 (NOTIFICATION_SYSTEM 타입, 사용자 1명 전용) */
 export const PERSONAL_NOTI_ROOM_NAME = 'TakeMe 알림';
 /** 기관 공지 채널 이름 (NOTIFICATION_SYSTEM 타입, 기관 전체 공유) */
-export const ACADEMY_NOTI_ROOM_NAME = '실시간 알림 채널';
+export const ACADEMY_NOTI_ROOM_NAME = '공지사항';
+/** 예전 이름 (이미 만들어진 방은 접근할 때 새 이름으로 바꾼다) */
+export const LEGACY_ACADEMY_NOTI_ROOM_NAME = '실시간 알림 채널';
+const ACADEMY_NOTI_ROOM_NAMES = [ACADEMY_NOTI_ROOM_NAME, LEGACY_ACADEMY_NOTI_ROOM_NAME];
 
 @Injectable()
 export class ChatService {
@@ -211,7 +214,7 @@ export class ChatService {
 
   /**
    * 사용자의 개인 알림방("TakeMe 알림", NOTIFICATION_SYSTEM) 조회 또는 생성.
-   * 기관 공지 채널(실시간 알림 채널)과는 이름과 참여자(1명)로 구분한다.
+   * 기관 공지 채널(공지사항)과는 이름과 참여자(1명)로 구분한다.
    */
   async getOrCreateNotificationRoom(userId: number): Promise<ChatRoom> {
     const existingMember = await this.memberRepo.findOne({
@@ -342,15 +345,20 @@ export class ChatService {
       let notiRoom = await this.roomRepo.findOne({
         where: {
           type: ChatRoomType.NOTIFICATION_SYSTEM,
-          name: ACADEMY_NOTI_ROOM_NAME,
+          name: In(ACADEMY_NOTI_ROOM_NAMES),
           ...(academyId ? { academyId } : {}),
         },
         relations: { members: { user: true } },
       });
 
+      if (notiRoom && notiRoom.name !== ACADEMY_NOTI_ROOM_NAME) {
+        await this.roomRepo.update(notiRoom.id, { name: ACADEMY_NOTI_ROOM_NAME });
+        notiRoom.name = ACADEMY_NOTI_ROOM_NAME;
+      }
+
       if (!notiRoom) {
         notiRoom = this.roomRepo.create({
-          name: '실시간 알림 채널',
+          name: ACADEMY_NOTI_ROOM_NAME,
           type: ChatRoomType.NOTIFICATION_SYSTEM,
           academyId: academyId || null,
         });
@@ -428,19 +436,24 @@ export class ChatService {
 
     const targetAcademyId = user.academyId || null;
 
-    // Ensure '실시간 알림 채널' exists and user is member
+    // Ensure '공지사항' exists and user is member
     let notiSystemRoom = await this.roomRepo.findOne({
       where: {
         type: ChatRoomType.NOTIFICATION_SYSTEM,
-        name: ACADEMY_NOTI_ROOM_NAME,
+        name: In(ACADEMY_NOTI_ROOM_NAMES),
         ...(targetAcademyId ? { academyId: targetAcademyId } : {}),
       },
       relations: { members: { user: true } },
     });
 
+    if (notiSystemRoom && notiSystemRoom.name !== ACADEMY_NOTI_ROOM_NAME) {
+      await this.roomRepo.update(notiSystemRoom.id, { name: ACADEMY_NOTI_ROOM_NAME });
+      notiSystemRoom.name = ACADEMY_NOTI_ROOM_NAME;
+    }
+
     if (!notiSystemRoom) {
       notiSystemRoom = this.roomRepo.create({
-        name: '실시간 알림 채널',
+        name: ACADEMY_NOTI_ROOM_NAME,
         type: ChatRoomType.NOTIFICATION_SYSTEM,
         academyId: targetAcademyId,
       });
@@ -509,7 +522,7 @@ export class ChatService {
         continue;
       }
       if (room.type === ChatRoomType.NOTIFICATION_SYSTEM) {
-        // 개인 알림방(TakeMe 알림) 1개 + 기관 공지 채널(실시간 알림 채널) 1개만 유지
+        // 개인 알림방(TakeMe 알림) 1개 + 기관 공지 채널(공지사항) 1개만 유지
         const key = room.name === PERSONAL_NOTI_ROOM_NAME ? 'PERSONAL' : 'ACADEMY';
         if (seenSpecialTypes.has(key)) continue;
         seenSpecialTypes.add(key);
@@ -518,7 +531,7 @@ export class ChatService {
       deduplicatedRooms.push(room);
     }
 
-    // 실시간 알림 채널 최상단 고정, 나머지 최신 메시지 순 정렬
+    // 공지사항 채널 최상단 고정, 나머지 최신 메시지 순 정렬
     deduplicatedRooms.sort((a: any, b: any) => {
       const aPin = a.type === ChatRoomType.NOTIFICATION_SYSTEM;
       const bPin = b.type === ChatRoomType.NOTIFICATION_SYSTEM;
@@ -1008,7 +1021,7 @@ export class ChatService {
       await this.parentMessageRepo.save(parentMsg).catch(() => {});
     }
 
-    // 실시간 알림 채널에 결재 신청 알림 전송 (원장 및 전 교직원이 확인 가능)
+    // 공지사항 채널에 결재 신청 알림 전송 (원장 및 전 교직원이 확인 가능)
     await this.sendSystemNotification(
       targetAcademyId || null,
       'PAYMENT_REQUEST',

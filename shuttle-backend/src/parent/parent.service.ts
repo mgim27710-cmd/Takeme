@@ -16,6 +16,7 @@ import { PickupPoint } from '../entities/pickup-point.entity';
 
 import { BoardPost } from '../entities/board-post.entity';
 import { getStudentClassName } from '../utils/school.util';
+import { applyBoardVisibility, getLinkedClassNames } from '../utils/board-visibility.util';
 import { resolveMediaRef, resolveMediaRefs } from '../utils/s3.util';
 import { isNotificationEnabled, getUserNotificationSettings } from '../utils/notification.util';
 import { TeacherService } from '../teacher/teacher.service';
@@ -253,15 +254,15 @@ export class ParentService {
     // 3. New Board Posts / Notices (새 알림장 / 새 게시물)
     const academyId = student?.academy?.id || user.academyId;
     if (academyId) {
-      const className = student ? getStudentClassName(student) : null;
+      const classNames = await getLinkedClassNames(this.studentRepository, user.id);
+      if (classNames.length === 0 && student) {
+        const own = getStudentClassName(student);
+        if (own) classNames.push(own);
+      }
       const postQb = this.boardPostRepository.createQueryBuilder('post')
         .where('post.academyId = :aid', { aid: academyId });
 
-      if (className) {
-        postQb.andWhere('(post.visibility = :vAll OR post.targetClass = :tc)', { vAll: 'ALL', tc: className });
-      } else {
-        postQb.andWhere('post.visibility = :vAll', { vAll: 'ALL' });
-      }
+      applyBoardVisibility(postQb, classNames);
 
       const posts = await postQb.orderBy('post.createdAt', 'DESC').take(25).getMany();
       for (const p of posts) {
@@ -908,17 +909,18 @@ export class ParentService {
     const academyId = student.academy?.id || user.academyId;
     if (!academyId) return [];
 
-    const className = getStudentClassName(student);
+    // 다자녀: 내 아이들이 속한 모든 반의 글 + 전체 공개 (반이 없으면 전체 공개만)
+    const classNames = await getLinkedClassNames(this.studentRepository, user.id);
+    if (classNames.length === 0) {
+      const own = getStudentClassName(student);
+      if (own) classNames.push(own);
+    }
 
     const qb = this.boardPostRepository.createQueryBuilder('post')
       .leftJoinAndSelect('post.comments', 'comment')
       .where('post.academyId = :aid', { aid: academyId });
 
-    if (className) {
-      qb.andWhere('(post.visibility = :vAll OR post.targetClass = :tc OR post.className = :tc)', { vAll: 'ALL', tc: className });
-    } else {
-      qb.andWhere('post.visibility = :vAll', { vAll: 'ALL' });
-    }
+    applyBoardVisibility(qb, classNames);
 
     if (postType && postType !== 'ALL') {
       qb.andWhere('post.postType = :postType', { postType });

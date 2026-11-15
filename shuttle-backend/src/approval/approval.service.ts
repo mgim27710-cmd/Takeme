@@ -904,7 +904,7 @@ export class ApprovalService {
 
     const saved = await this.holidayRepo.save(holiday);
 
-    // 행사/휴업일 등록 시 실시간 알림 채널에 알림 메시지 발송 및 소켓 브로드캐스트
+    // 행사/휴업일 등록 시 공지사항 채널에 알림 메시지 발송 및 소켓 브로드캐스트
     try {
       const typeLabel =
         saved.type === CalendarEventType.ACADEMY_HOLIDAY || saved.type === CalendarEventType.CLASS_HOLIDAY

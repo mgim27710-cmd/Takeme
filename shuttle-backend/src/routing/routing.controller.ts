@@ -398,8 +398,8 @@ export class RoutingController {
   }
 
   @Get('board/posts/:id')
-  async getBoardPostById(@Param('id') id: string) {
-    return this.routingService.getBoardPostById(Number(id));
+  async getBoardPostById(@Param('id') id: string, @AuthUser() user?: JwtPayload) {
+    return this.routingService.getBoardPostById(Number(id), user);
   }
 
   @Post('board/posts')

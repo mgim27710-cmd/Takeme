@@ -31,6 +31,7 @@ import {
   toStoredMediaRefs,
   uploadToS3,
 } from '../utils/s3.util';
+import { applyBoardVisibility, canViewBoardPost, getLinkedClassNames } from '../utils/board-visibility.util';
 import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE, kstDateString, isValidDateString } from '../utils/school.util';
 import { Attendance, AttendanceStatus } from '../entities/attendance.entity';
 import { AttendanceSubmission } from '../entities/attendance-submission.entity';
@@ -3111,8 +3112,12 @@ export class RoutingService {
         if (!hasAssignedClass(assignedClass)) {
           qb.andWhere('1 = 0');
         } else {
-          qb.andWhere('(post.visibility = :vAll OR post.targetClass = :tc)', { vAll: 'ALL', tc: assignedClass });
+          // 담임: 전체 공개 + 내 반 글
+          applyBoardVisibility(qb, [assignedClass]);
         }
+      } else if (callingUser && (callingUser.role === UserRole.PARENT || callingUser.role === UserRole.STUDENT)) {
+        // 학부모/학생: 전체 공개 + 내 아이(본인) 반 글 (반이 없으면 전체 공개만)
+        applyBoardVisibility(qb, await getLinkedClassNames(this.studentRepository, callingUser.id));
       }
     }
 
@@ -3148,12 +3153,31 @@ export class RoutingService {
     } as BoardPost;
   }
 
-  async getBoardPostById(id: number) {
+  /** 글을 볼 수 있는 사용자인지 서버에서 검사 (다른 기관 / 다른 반 글 차단) */
+  private async assertCanViewPost(post: BoardPost, viewer?: { sub?: number; role?: string; academyId?: number | null }) {
+    if (!viewer || !viewer.sub || viewer.role === 'SUPER_ADMIN') return;
+    const user = await this.userRepository.findOne({ where: { id: viewer.sub } });
+    if (!user) throw new ForbiddenException('권한이 없습니다.');
+    const postAcademyId = post.academy?.id;
+    const userAcademyId = viewer.academyId ?? user.academyId;
+    if (postAcademyId && userAcademyId && Number(postAcademyId) !== Number(userAcademyId)) {
+      throw new ForbiddenException('다른 기관의 글은 볼 수 없습니다.');
+    }
+    if (user.role === UserRole.PARENT || user.role === UserRole.STUDENT) {
+      const classes = await getLinkedClassNames(this.studentRepository, user.id);
+      if (!canViewBoardPost(post, classes)) throw new ForbiddenException('다른 반 글은 볼 수 없습니다.');
+    } else if ((user.role as string) === 'HOMEROOM_TEACHER') {
+      if (!canViewBoardPost(post, [user.assignedClass])) throw new ForbiddenException('다른 반 글은 볼 수 없습니다.');
+    }
+  }
+
+  async getBoardPostById(id: number, viewer?: { sub?: number; role?: string; academyId?: number | null }) {
     const post = await this.boardPostRepository.findOne({
       where: { id },
-      relations: { comments: true }
+      relations: { comments: true, academy: true }
     });
     if (!post) throw new BadRequestException('게시글을 찾을 수 없습니다.');
+    await this.assertCanViewPost(post, viewer);
     if (post.authorUserId) {
       const author = await this.userRepository.findOne({ where: { id: post.authorUserId } });
       if (author?.role) {
@@ -3179,6 +3203,8 @@ export class RoutingService {
     let targetClass = body.targetClass || null;
     let authorRole = body.authorRole || 'ADMIN';
     const postType = body.postType === 'NOTICE' ? 'NOTICE' : 'POST';
+    // 공개 범위는 '전체 공개(ALL)' 또는 '나의 반/특정 반(CLASS)' 두 가지만 허용
+    const visibility = body.visibility === 'CLASS' ? 'CLASS' : 'ALL';
 
     if (userId) {
       const callingUser = await this.userRepository.findOne({ where: { id: userId } });
@@ -3186,9 +3212,13 @@ export class RoutingService {
         if (!hasAssignedClass(callingUser.assignedClass)) {
           throw new BadRequestException('관리자에게 반 배정을 요청하세요.');
         }
+        // 담임은 '나의 반'이면 항상 자기 반으로 저장 (다른 반을 지정할 수 없다)
         targetClass = callingUser.assignedClass;
         authorRole = 'HOMEROOM_TEACHER';
       }
+    }
+    if (visibility === 'CLASS' && !targetClass) {
+      throw new BadRequestException('나의 반 공개는 반 정보가 필요합니다. 관리자에게 반 배정을 요청하세요.');
     }
 
     const post = this.boardPostRepository.create({
@@ -3200,7 +3230,7 @@ export class RoutingService {
       authorName: body.authorName || '기관 관리자',
       authorRole,
       authorUserId: userId || null,
-      visibility: body.visibility || 'ALL',
+      visibility,
       targetClass,
       className: targetClass,
       academy: academy || undefined,
@@ -3261,8 +3291,19 @@ export class RoutingService {
     if (body.content !== undefined) post.content = body.content;
     if (body.imageUrl !== undefined) (post as any).imageUrl = toStoredMediaRef(body.imageUrl) || null;
     if (body.images !== undefined) post.images = toStoredMediaRefs(body.images);
-    if (body.visibility !== undefined) post.visibility = body.visibility;
+    if (body.visibility !== undefined) post.visibility = body.visibility === 'CLASS' ? 'CLASS' : 'ALL';
     if (body.targetClass !== undefined) post.targetClass = body.targetClass;
+    if (userId) {
+      // 담임이 수정할 때 '나의 반'은 항상 자기 반으로 고정 (다른 반으로 바꿀 수 없다)
+      const editor = await this.userRepository.findOne({ where: { id: userId } });
+      if (editor && (editor.role as string) === 'HOMEROOM_TEACHER' && hasAssignedClass(editor.assignedClass)) {
+        post.targetClass = editor.assignedClass;
+        post.className = editor.assignedClass;
+      }
+    }
+    if (post.visibility === 'CLASS' && !post.targetClass) {
+      throw new BadRequestException('나의 반 공개는 반 정보가 필요합니다.');
+    }
     if (body.postType !== undefined) {
       post.postType = body.postType === 'NOTICE' ? 'NOTICE' : 'POST';
       await this.mediaAssetRepository.update(
