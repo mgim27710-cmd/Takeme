@@ -803,7 +803,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
       crossAxisAlignment: CrossAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 제한속도 표지판 (어린이 보호구역 시 30 + 노란/빨간 강조)
+        // 제한속도 표지판: 실제 도로 제한속도 정보가 없으므로 어린이 보호구역(30)일 때만 표시
+        if (_nav.inSchoolZone)
         Container(
           width: 58,
           height: 58,
