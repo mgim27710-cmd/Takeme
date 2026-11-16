@@ -452,8 +452,13 @@ export class AuthService {
         while (await this.academyRepository.findOne({ where: { authCode } })) {
           authCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         }
+        const userMeta = `${user.name || ''} ${user.email || ''}`.toLowerCase();
+        let defaultSuffix = '유치원';
+        if (userMeta.includes('초등') || userMeta.includes('elem')) defaultSuffix = '초등학교';
+        else if (userMeta.includes('중등') || userMeta.includes('고등') || userMeta.includes('middle') || userMeta.includes('high')) defaultSuffix = '중·고등학교';
+
         academy = this.academyRepository.create({
-          name: user.name ? `${user.name} 유치원` : '신규 유치원',
+          name: user.name ? `${user.name} ${defaultSuffix}` : `신규 ${defaultSuffix}`,
           owner: user,
           authCode,
           businessNumber: data.businessNumber || null,
@@ -520,6 +525,14 @@ export class AuthService {
       sessionId,
     });
 
+    const combinedMeta = `${academyName || ''} ${user.name || ''} ${user.email || ''}`.toLowerCase();
+    let detectedEduLevel = '유치원';
+    if (combinedMeta.includes('초등') || combinedMeta.includes('elem')) {
+      detectedEduLevel = '초등부';
+    } else if (combinedMeta.includes('중등') || combinedMeta.includes('고등') || combinedMeta.includes('middle') || combinedMeta.includes('high')) {
+      detectedEduLevel = '중,고등부';
+    }
+
     return {
       success: true,
       accessToken,
@@ -531,7 +544,8 @@ export class AuthService {
         name: user.name,
         assignedClass: user.assignedClass || null,
         academyId,
-        academyName
+        academyName,
+        educationLevel: detectedEduLevel
       }
     };
   }
@@ -680,8 +694,14 @@ export class AuthService {
         while (await this.academyRepository.findOne({ where: { authCode } })) {
           authCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         }
+        const edu = (data.educationLevel || '').trim().toLowerCase();
+        const userMeta = `${name || ''} ${email || ''}`.toLowerCase();
+        let defaultSuffix = '유치원';
+        if (edu.includes('초등') || userMeta.includes('초등') || userMeta.includes('elem')) defaultSuffix = '초등학교';
+        else if (edu.includes('중') || edu.includes('고') || userMeta.includes('중등') || userMeta.includes('고등') || userMeta.includes('middle') || userMeta.includes('high')) defaultSuffix = '중·고등학교';
+
         const academy = this.academyRepository.create({
-          name: name ? `${name} 유치원` : '신규 유치원',
+          name: name ? `${name} ${defaultSuffix}` : `신규 ${defaultSuffix}`,
           owner: savedUser,
           authCode,
           vehicleCount: 0,

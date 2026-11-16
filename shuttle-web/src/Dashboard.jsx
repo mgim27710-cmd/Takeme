@@ -1455,8 +1455,8 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const getAcademyLevel = (acad) => {
     if (acad?.educationLevel) return acad.educationLevel;
     const name = acad?.name || '';
-    if (name.includes('초등') || name.includes('초교') || name.includes('Elementary')) return '초등부';
     if (name.includes('중등') || name.includes('고등') || name.includes('중학교') || name.includes('고등학교') || name.includes('Middle') || name.includes('High')) return '중,고등부';
+    if (name.includes('초등') || name.includes('초교') || name.includes('Elementary')) return '초등부';
     if (name.includes('유치원') || name.includes('어린이집') || name.includes('Kinder')) return '유치원';
     return '유치원';
   };
@@ -1482,7 +1482,14 @@ export default function Dashboard({ initialEducationLevel } = {}) {
 
   // 교육 부문(activeEducationLevel) 변경 시 해당 부문의 기관으로 자동 스위칭 및 데이터 완전 격리
   useEffect(() => {
-    if (!isSuperAdmin) return;
+    if (!isSuperAdmin) {
+      if (currentUser?.academyId && selectedAcademyId !== currentUser.academyId) {
+        setSelectedAcademyId(currentUser.academyId);
+        localStorage.setItem('takeme_selected_academy_id', String(currentUser.academyId));
+        loadInitialState(currentUser.academyId);
+      }
+      return;
+    }
     if (allAcademies.length === 0) return;
 
     const matched = allAcademies.filter(ac => getAcademyLevel(ac) === activeEducationLevel);
@@ -2611,7 +2618,9 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     if (!isAuthenticated) return;
     try {
       setIsInitializing(true);
-      const targetAcademyId = overrideAcademyId !== undefined ? overrideAcademyId : (selectedAcademyId || currentUser.academyId);
+      const targetAcademyId = (!isSuperAdmin && currentUser?.academyId)
+        ? currentUser.academyId
+        : (overrideAcademyId !== undefined ? overrideAcademyId : (selectedAcademyId || currentUser?.academyId));
       const eduQuery = activeEducationLevel ? `&educationLevel=${encodeURIComponent(activeEducationLevel)}` : '';
       const url = targetAcademyId 
         ? `${API_BASE_URL}/routing/initial-state?academyId=${targetAcademyId}${eduQuery}`
