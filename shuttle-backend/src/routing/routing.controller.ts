@@ -442,14 +442,15 @@ export class RoutingController {
     @Query('visibility') visibility?: string,
     @Query('targetClass') targetClass?: string,
     @Query('search') search?: string,
+    @Query('postType') postType?: string,
   ) {
     const { academyId, userId } = this.resolveAcademyContext(req, academyIdHeader || academyIdQuery, userIdHeader);
-    return this.routingService.getBoardPosts({ academyId, userId, visibility, targetClass, search });
+    return this.routingService.getBoardPosts({ academyId, userId, visibility, targetClass, search, postType });
   }
 
   @Get('board/posts/:id')
-  async getBoardPostById(@Param('id') id: string) {
-    return this.routingService.getBoardPostById(Number(id));
+  async getBoardPostById(@Param('id') id: string, @AuthUser() user?: JwtPayload) {
+    return this.routingService.getBoardPostById(Number(id), user);
   }
 
   @Post('board/posts')

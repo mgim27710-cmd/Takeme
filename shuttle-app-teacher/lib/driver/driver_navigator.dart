@@ -250,7 +250,7 @@ class DriverNavigator extends ChangeNotifier {
         }
         if (vehicleId != null) SocketService().joinVehicleRoom(vehicleId!);
       } catch (e) {
-        loadError = '정보를 불러오지 못했습니다: $e';
+        loadError = '정보를 불러오지 못했습니다. ${friendlyError(e)}';
       }
     }
     loading = false;

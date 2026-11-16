@@ -12,6 +12,7 @@ class HomeroomStudentsView extends StatefulWidget {
 class _HomeroomStudentsViewState extends State<HomeroomStudentsView> {
   bool _isLoading = true;
   List<StudentModel> _students = [];
+  String? _loadError; // 불러오기 실패 이유 (null 이면 정상)
   String _searchQuery = '';
   String _filterStatus = 'ALL'; // 'ALL' | 'WAITING' | 'BOARDED' | 'ABSENT'
   final TextEditingController _memoController = TextEditingController();
@@ -29,9 +30,16 @@ class _HomeroomStudentsViewState extends State<HomeroomStudentsView> {
   }
 
   Future<void> _loadStudents() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
     final user = ApiService().currentUser;
-    if (user != null) {
+    if (user == null) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
+    try {
       final list = await ApiService().getTeacherStudents(user.email);
       if (mounted) {
         setState(() {
@@ -39,8 +47,14 @@ class _HomeroomStudentsViewState extends State<HomeroomStudentsView> {
           _isLoading = false;
         });
       }
-    } else {
-      if (mounted) setState(() => _isLoading = false);
+    } catch (e) {
+      // 네트워크/서버 오류: 로딩 표시가 끝나지 않거나 "원아 없음"으로 보이지 않게 이유와 다시 시도를 보여준다
+      if (mounted) {
+        setState(() {
+          _loadError = friendlyError(e);
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -205,7 +219,36 @@ class _HomeroomStudentsViewState extends State<HomeroomStudentsView> {
 
           // 3. Student Card List
           Expanded(
-            child: filteredList.isEmpty
+            child: _loadError != null
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.cloud_off_rounded, size: 48, color: Color(0xFFCBD5E1)),
+                          const SizedBox(height: 12),
+                          const Text(
+                            '원아 명단을 불러오지 못했습니다.',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _loadError!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                          ),
+                          const SizedBox(height: 14),
+                          OutlinedButton.icon(
+                            onPressed: _loadStudents,
+                            icon: const Icon(Icons.refresh_rounded, size: 18),
+                            label: const Text('다시 시도'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : filteredList.isEmpty
                 ? Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,

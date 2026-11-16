@@ -17,6 +17,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _otpController = TextEditingController();
+  final _passwordFocusNode = FocusNode();
 
   bool _isLoading = false;
   bool _obscurePassword = true;
@@ -26,6 +27,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _otpController.dispose();
+    _passwordFocusNode.dispose();
     super.dispose();
   }
 
@@ -579,6 +581,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   TextField(
                     controller: _emailController,
                     keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.next,
+                    autofillHints: const [AutofillHints.username, AutofillHints.email],
+                    onSubmitted: (_) => _passwordFocusNode.requestFocus(),
                     autocorrect: false,
                     decoration: InputDecoration(
                       hintText: 'example@email.com',
@@ -610,7 +615,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 6),
                   TextField(
                     controller: _passwordController,
+                    focusNode: _passwordFocusNode,
                     obscureText: _obscurePassword,
+                    textInputAction: TextInputAction.done,
+                    autofillHints: const [AutofillHints.password],
+                    onSubmitted: (_) {
+                      if (!_isLoading) _handleLogin();
+                    },
                     decoration: InputDecoration(
                       hintText: '비밀번호를 입력하세요',
                       hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14),

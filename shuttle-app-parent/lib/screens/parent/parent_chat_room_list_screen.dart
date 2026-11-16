@@ -40,54 +40,12 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
   late TabController _tabController;
   List<ChatRoomModel> _rooms = [];
   bool _isLoading = true;
+  String? _loadError; // 채팅방 목록 불러오기 실패 이유 (null 이면 정상)
+  String? _contactsError; // 대화 상대 목록 불러오기 실패 이유
   String? _myEmail;
 
   List<ChatContact> _contacts = [];
-
-  /// DB 연결 실패 시 사용할 기본 예시 명단
-  static const List<ChatContact> _fallbackContacts = [
-    ChatContact(
-      userId: 80,
-      name: '김하늘 선생님',
-      roleTitle: '햇살반 담임교사',
-      category: '담임·교사',
-      description: '원아 생활, 알림장, 출결 및 원내 지도 상담',
-      icon: Icons.face_rounded,
-      themeColor: Color(0xFF2563EB),
-      bgColor: Color(0xFFEFF6FF),
-    ),
-    ChatContact(
-      userId: 68,
-      name: '김고윤 원장님',
-      roleTitle: '유치원 원장',
-      category: '원장·행정',
-      description: '유치원 전반 운영, 원비, 행정 및 학사 일정 문의',
-      icon: Icons.account_balance_rounded,
-      themeColor: Color(0xFF059669),
-      bgColor: Color(0xFFECFDF5),
-    ),
-    ChatContact(
-      userId: 88,
-      name: '윤찬영 기사님',
-      roleTitle: '1호차 셔틀 운전기사',
-      category: '통학차량',
-      description: '통학버스 승하차 장소 및 실시간 운행/탑승 상담',
-      icon: Icons.directions_bus_rounded,
-      themeColor: Color(0xFFD97706),
-      bgColor: Color(0xFFFFFBEB),
-    ),
-    ChatContact(
-      userId: 330,
-      name: '김민규 학부모님',
-      roleTitle: '김도윤 학부모',
-      category: '학부모',
-      description: '원아 친구 학부모님과 소통 및 육아 정보 공유',
-      icon: Icons.family_restroom_rounded,
-      themeColor: Color(0xFF8B5CF6),
-      bgColor: Color(0xFFF5F3FF),
-    ),
-  ];
-
+  bool _isLoadingContacts = false;
   @override
   void initState() {
     super.initState();
@@ -104,8 +62,12 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
   }
 
   Future<void> _loadContacts() async {
+    setState(() {
+      _isLoadingContacts = true;
+      _contactsError = null;
+    });
     try {
-      final res = await ApiService().getChatUsers(_myEmail ?? 'parent@takeme.com');
+      final res = await ApiService().getChatUsers(_myEmail ?? 'parent@takeme.com', throwOnError: true);
       final List<ChatContact> fetched = [];
 
       // 1. 원장님 및 행정실
@@ -178,13 +140,16 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
 
       if (mounted) {
         setState(() {
-          _contacts = fetched.isNotEmpty ? fetched : _fallbackContacts;
+          _contacts = fetched;
+          _isLoadingContacts = false;
         });
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         setState(() {
-          _contacts = _fallbackContacts;
+          _contacts = [];
+          _isLoadingContacts = false;
+          _contactsError = friendlyError(e);
         });
       }
     }
@@ -192,18 +157,34 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
 
   Future<void> _loadRooms() async {
     setState(() => _isLoading = true);
-    final rawList = await ApiService().getChatRooms(_myEmail ?? 'parent@takeme.com');
-    if (!mounted) return;
+    try {
+      final rawList = await ApiService().getChatRooms(_myEmail ?? 'parent@takeme.com', throwOnError: true);
+      if (!mounted) return;
 
-    final parsed = rawList
-        .map((r) => ChatRoomModel.fromJson(r))
-        .where((r) => r.type != 'PAYMENT_SYSTEM')
-        .toList();
+      final parsed = rawList
+          .map((r) => ChatRoomModel.fromJson(r))
+          .where((r) => r.type != 'PAYMENT_SYSTEM')
+          .toList();
 
-    setState(() {
-      _rooms = parsed;
-      _isLoading = false;
-    });
+      setState(() {
+        _rooms = parsed;
+        _isLoading = false;
+        _loadError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      final message = friendlyError(e);
+      setState(() {
+        _isLoading = false;
+        // 이미 보이는 목록이 없을 때만 오류 화면, 목록이 있으면 그대로 두고 안내만 한다
+        if (_rooms.isEmpty) _loadError = message;
+      });
+      if (_rooms.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('대화 목록을 새로 불러오지 못했습니다. $message')),
+        );
+      }
+    }
   }
 
   List<ChatRoomModel> get _directRooms =>
@@ -395,9 +376,63 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
                   const Divider(height: 20, thickness: 1, color: Color(0xFFF1F5F9)),
                   // 목록
                   Expanded(
+<<<<<<< HEAD
                     child: filteredContacts.isEmpty
                         ? const Center(child: Text('해당 조건의 대화 상대가 없습니다.', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)))
                         : ListView.separated(
+=======
+                    child: _isLoadingContacts && _contacts.isEmpty
+                        ? const Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                CircularProgressIndicator(),
+                                SizedBox(height: 12),
+                                Text(
+                                  '교직원, 학부모 및 기사님 명단을 불러오는 중입니다...',
+                                  style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
+                                ),
+                              ],
+                            ),
+                          )
+                        : (_contactsError != null && _contacts.isEmpty)
+                            ? Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.cloud_off_rounded, size: 40, color: Color(0xFFCBD5E1)),
+                                    const SizedBox(height: 10),
+                                    const Text(
+                                      '대화 상대를 불러오지 못했습니다.',
+                                      style: TextStyle(color: Color(0xFF64748B), fontSize: 14, fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      _contactsError!,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    OutlinedButton.icon(
+                                      onPressed: () async {
+                                        await _loadContacts();
+                                        setModalState(() {});
+                                      },
+                                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                                      label: const Text('다시 시도'),
+                                    ),
+                                  ],
+                                ),
+                              )
+                        : filteredContacts.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  '검색된 담당자가 없습니다.',
+                                  style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+                                ),
+                              )
+                            : ListView.separated(
+>>>>>>> origin/feature/driver-teacher-parent-polish
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                             itemCount: filteredContacts.length,
                             separatorBuilder: (_, __) => const SizedBox(height: 8),
@@ -633,9 +668,228 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+<<<<<<< HEAD
                   const Icon(Icons.person_rounded, size: 18),
                   const SizedBox(width: 6),
                   Text('1:1 대화 (${_directRooms.length})'),
+=======
+                  // 상단 배너 카드
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF2563EB).withValues(alpha: 0.2),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.2),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.forum_rounded, color: Colors.white, size: 26),
+                        ),
+                        const SizedBox(width: 14),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '선생님 · 학부모 1:1 안심 대화',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                '원아의 출결, 투약, 하원 변경 등 신속한 상담이 가능합니다.',
+                                style: TextStyle(
+                                  color: Color(0xFFDBEAFE),
+                                  fontSize: 12,
+                                  height: 1.3,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // 채팅할 사람 선택 카드 (빠른 상담 연결 대신 배치된 메인 액션 카드)
+                  InkWell(
+                    onTap: _showContactPicker,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFBFDBFE), width: 1.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF2563EB).withValues(alpha: 0.06),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFEFF6FF),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.person_search_rounded, color: Color(0xFF2563EB), size: 24),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: const [
+                                Text(
+                                  '채팅할 사람 선택하기',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF0F172A),
+                                  ),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  '선생님, 원장님, 학부모님, 기사님과 1:1 대화 시작',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2563EB),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Row(
+                              children: [
+                                Text(
+                                  '선택',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                SizedBox(width: 4),
+                                Icon(Icons.arrow_forward_ios_rounded, color: Colors.white, size: 10),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // 참여 중인 대화방 섹션 헤더
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        '참여 중인 대화방',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF334155),
+                        ),
+                      ),
+                      Text(
+                        '총 ${_rooms.length}개',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  if (_loadError != null && _rooms.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 40),
+                      alignment: Alignment.center,
+                      child: Column(
+                        children: [
+                          const Icon(Icons.cloud_off_rounded, size: 44, color: Color(0xFFCBD5E1)),
+                          const SizedBox(height: 10),
+                          const Text(
+                            '대화 목록을 불러오지 못했습니다.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Color(0xFF64748B), fontSize: 14, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _loadError!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                          ),
+                          const SizedBox(height: 14),
+                          OutlinedButton.icon(
+                            onPressed: _loadRooms,
+                            icon: const Icon(Icons.refresh_rounded, size: 18),
+                            label: const Text('다시 시도'),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (_rooms.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 40),
+                      alignment: Alignment.center,
+                      child: Column(
+                        children: [
+                          const Icon(Icons.chat_bubble_outline_rounded, size: 44, color: Color(0xFFCBD5E1)),
+                          const SizedBox(height: 10),
+                          const Text(
+                            '현재 진행 중인 대화방이 없습니다.\n위의 [채팅할 사람 선택하기]를 눌러 1:1 대화를 시작해보세요!',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13, height: 1.4),
+                          ),
+                          const SizedBox(height: 14),
+                          OutlinedButton.icon(
+                            onPressed: _showContactPicker,
+                            icon: const Icon(Icons.person_add_rounded, size: 16),
+                            label: const Text('채팅 상대 선택'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF2563EB),
+                              side: const BorderSide(color: Color(0xFF93C5FD)),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    ..._rooms.map((room) => _buildRoomCard(room)),
+>>>>>>> origin/feature/driver-teacher-parent-polish
                 ],
               ),
             ),
@@ -735,6 +989,7 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
     );
   }
 
+<<<<<<< HEAD
   /// 그룹 채팅 탭
   Widget _buildGroupRoomsTab() {
     return RefreshIndicator(
@@ -788,6 +1043,17 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
               ],
             ),
           ),
+=======
+  Widget _buildRoomCard(ChatRoomModel room) {
+    final other = room.getOtherMember(_myEmail);
+    final displayName = room.getDisplayName(_myEmail);
+    final opponentName = other?.name ?? displayName;
+    final opponentRole = other?.role == 'HOMEROOM_TEACHER'
+        ? ((other?.assignedClass ?? '').isNotEmpty ? '${other!.assignedClass} 담임교사' : '담임교사')
+        : other?.role == 'ACADEMY_ADMIN'
+            ? '유치원 원장'
+            : (other?.role == 'DRIVER' ? '통학버스 기사' : (other?.role == 'PARENT' ? '원아 학부모' : '교직원'));
+>>>>>>> origin/feature/driver-teacher-parent-polish
 
           const SizedBox(height: 14),
 

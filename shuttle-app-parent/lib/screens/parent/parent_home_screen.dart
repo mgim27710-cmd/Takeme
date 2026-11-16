@@ -43,6 +43,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   double? _busLng;
   DateTime? _lastBusUpdate;
   bool _isLoading = true;
+  String? _loadError; // 홈 데이터 일부 불러오기 실패 이유 (null 이면 정상)
   bool _isScanning = false;
   bool _isModalOpen = false;
 
@@ -103,14 +104,15 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
         debugPrint('[ParentHomeScreen] Socket connect error: $e');
       }
 
-      // 1. 다자녀 목록 조회
+      // 불러오기에 실패한 이유 (하나라도 실패하면 화면 위에 안내를 보여준다)
+      String? loadProblem;
+
+      // 1. 다자녀 목록 조회 (실패하면 "아이가 없음"으로 보이지 않게 이유를 기록)
       List<StudentModel> childrenList = [];
       try {
-        childrenList = await ApiService().getMyChildren(user.email);
-      } catch (_) {}
-      if (childrenList.isEmpty) {
-        final single = await ApiService().getMyChild(user.email);
-        if (single != null) childrenList = [single];
+        childrenList = await ApiService().getMyChildren(user.email, throwOnError: true);
+      } catch (e) {
+        loadProblem = friendlyError(e);
       }
 
       _children = childrenList;
@@ -120,11 +122,20 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
 
       // 2. 현재 선택된 자녀의 노선 및 오늘 일정 병렬 로드 (다자녀 studentId 및 등/하원 모드 연동)
       final currentChildId = _childInfo?.id;
-      final results = await Future.wait([
-        ApiService().getParentRoute(user.email, studentId: currentChildId, direction: _activeTab),
-        ApiService().getTodaySchedule(user.email),
+      final results = await Future.wait<Object?>([
+        ApiService()
+            .getParentRoute(user.email, studentId: currentChildId, direction: _activeTab, throwOnError: true)
+            .catchError((Object e) {
+          loadProblem ??= friendlyError(e);
+          return null;
+        }),
+        ApiService().getTodaySchedule(user.email, throwOnError: true).catchError((Object e) {
+          loadProblem ??= friendlyError(e);
+          return null;
+        }),
       ]).timeout(const Duration(seconds: 8), onTimeout: () {
         debugPrint('[ParentHomeScreen] _loadAllData timed out after 8s');
+        loadProblem ??= '응답이 늦어 일부 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
         return [null, null];
       });
 
@@ -135,6 +146,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
         setState(() {
           _routeData = route;
           _todaySchedule = schedule;
+          _loadError = loadProblem;
           if (_childInfo != null) {
             _allergyController.text = _childInfo!.allergies;
           }
@@ -215,6 +227,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
       }
     } catch (e) {
       debugPrint('[ParentHomeScreen] _loadAllData error: $e');
+      if (mounted) setState(() => _loadError = friendlyError(e));
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -1164,6 +1177,45 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     );
   }
 
+  /// 홈 데이터 중 일부를 불러오지 못했을 때 화면 위에 보여주는 안내 (이유 + 다시 시도)
+  Widget _buildLoadErrorBanner() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7ED),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFFED7AA)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_rounded, color: Color(0xFFEA580C), size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '일부 정보를 불러오지 못했습니다',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF9A3412)),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _loadError ?? '',
+                  style: const TextStyle(fontSize: 12, color: Color(0xFFC2410C)),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: _loadAllData,
+            child: const Text('다시 시도', style: TextStyle(fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildHomeBody(bool isStudent, dynamic user) {
     return RefreshIndicator(
       onRefresh: _loadAllData,
@@ -1176,6 +1228,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (_loadError != null) _buildLoadErrorBanner(),
+
                 // 1. 다자녀 스위처 (형제/자매가 있을 때)
                 if (!isStudent) _buildMultiChildSelector(),
 

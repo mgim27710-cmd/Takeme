@@ -402,6 +402,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       const msgRoomId = newMsg.room?.id || newMsg.roomId;
 
       if (currentActive && Number(currentActive.id) === Number(msgRoomId)) {
+        markRoomAsRead(msgRoomId);
         setMessages((prev) => {
           if (prev.some((m) => m.id === newMsg.id)) {
             // Update existing message if payload status changed
@@ -443,25 +444,30 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       fetchRooms();
     };
 
-    const handleMessagesRead = ({ roomId, userId, messageIds }) => {
+    const handleMessagesRead = (data) => {
       const currentActive = activeRoomRef.current;
-      if (currentActive && Number(currentActive.id) === Number(roomId)) {
+      const targetRoomId = data?.roomId;
+      if (currentActive && Number(currentActive.id) === Number(targetRoomId)) {
+        const { userId, messageIds } = data || {};
         setMessages((prev) =>
           prev.map((m) => {
             if (!messageIds || messageIds.includes(m.id)) {
               const readList = (m.readBy || []).map(Number);
-              if (!readList.includes(Number(userId))) {
+              if (userId && !readList.includes(Number(userId))) {
                 readList.push(Number(userId));
-                const currentUnread = m.unreadCount !== undefined ? Math.max(0, m.unreadCount - 1) : undefined;
-                return {
-                  ...m,
-                  readBy: readList,
-                  unreadCount: currentUnread,
-                };
               }
+              const currentUnread = m.unreadCount !== undefined ? Math.max(0, m.unreadCount - 1) : 0;
+              return {
+                ...m,
+                readBy: readList,
+                unreadCount: currentUnread,
+              };
             }
             return m;
           })
+        );
+      }
+    };
         );
       }
     };
@@ -494,6 +500,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       scrollToBottom();
     }
 
+    markRoomAsRead(activeRoom.id);
     fetchMessages(activeRoom.id);
 
     return () => {
@@ -561,6 +568,18 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       }
     } catch (e) {
       console.error('Failed to load chat rooms', e);
+    }
+  };
+
+  const markRoomAsRead = async (roomId) => {
+    if (!roomId) return;
+    try {
+      await fetch(`${API_BASE_URL}/chat/rooms/${roomId}/read`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+    } catch (e) {
+      console.error('Failed to mark room as read', e);
     }
   };
 
@@ -1413,23 +1432,24 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   };
 
   const getRoleBadge = (role) => {
-    switch (role) {
+    switch (role?.toUpperCase?.() || role) {
       case 'DRIVER':
         return <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-1.5 py-0.5 rounded">기사</span>;
-      case 'TEACHER':
       case 'HOMEROOM_TEACHER':
+        return <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded">담임교사</span>;
       case 'SHUTTLE_TEACHER':
+        return <span className="bg-sky-100 text-sky-700 text-[10px] font-bold px-1.5 py-0.5 rounded">지도교사</span>;
+      case 'TEACHER':
         return <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-1.5 py-0.5 rounded">교사</span>;
       case 'PARENT':
         return <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-1.5 py-0.5 rounded">학부모</span>;
       case 'STUDENT':
         return <span className="bg-indigo-100 text-indigo-800 text-[10px] font-bold px-1.5 py-0.5 rounded">학생</span>;
       case 'ACADEMY_ADMIN':
-        return <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded">관리자</span>;
       case 'SUPER_ADMIN':
-        return <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold px-1.5 py-0.5 rounded">통합관리</span>;
+        return <span className="bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded">기관 관리자</span>;
       default:
-        return null;
+        return <span className="bg-slate-100 text-slate-600 text-[10px] font-medium px-1.5 py-0.5 rounded">알 수 없음</span>;
     }
   };
 
@@ -1438,8 +1458,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     if (room.type === 'PAYMENT_SYSTEM' || room.name === '결재 전용 채널' || room.name === '결제 시스템 방') {
       return '결재 전용 채널';
     }
-    if (room.type === 'NOTIFICATION_SYSTEM' || room.name === '실시간 알림 채널') {
-      return '실시간 알림 채널';
+    if (room.type === 'NOTIFICATION_SYSTEM' || room.name === '실시간 알림 채널' || room.name === '공지사항' || room.name === '공지사항') {
+      return room.name === 'TakeMe 알림' ? 'TakeMe 알림' : '공지사항';
     }
     if (room.name && room.name !== '1:1 대화' && !room.name.includes('(')) {
       return room.name;
@@ -1502,8 +1522,10 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         if (r.type === 'PAYMENT_SYSTEM') {
           return false; // Hide payment system channel
         } else if (r.type === 'NOTIFICATION_SYSTEM') {
-          if (seenSpecial.has('NOTIFICATION_SYSTEM')) return false;
-          seenSpecial.add('NOTIFICATION_SYSTEM');
+          // 개인 알림방(TakeMe 알림) 1개 + 기관 공지 채널(공지사항) 1개만 표시
+          const key = r.name === 'TakeMe 알림' ? 'PERSONAL' : 'ACADEMY';
+          if (seenSpecial.has(key)) return false;
+          seenSpecial.add(key);
         }
         const title = getRoomTitle(r).toLowerCase();
         const lastText = (r.latestMessage?.text || '').toLowerCase();
@@ -1512,8 +1534,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       })
       .sort((a, b) => {
 
-        if (a.type === 'NOTIFICATION_SYSTEM' && b.type !== 'NOTIFICATION_SYSTEM') return -1;
-        if (b.type === 'NOTIFICATION_SYSTEM' && a.type !== 'NOTIFICATION_SYSTEM') return 1;
+        const aPin = a.type === 'NOTIFICATION_SYSTEM';
+        const bPin = b.type === 'NOTIFICATION_SYSTEM';
+        if (aPin && bPin) return a.name === 'TakeMe 알림' ? -1 : 1; // 내 알림 -> 기관 공지
+        if (aPin) return -1;
+        if (bPin) return 1;
         // Rooms with unread messages or recent updates float to top
         const unreadA = (a.unreadCount || 0) > 0 ? 1 : 0;
         const unreadB = (b.unreadCount || 0) > 0 ? 1 : 0;
@@ -1522,7 +1547,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         const tB = b.latestMessage ? new Date(b.latestMessage.createdAt).getTime() : new Date(b.updatedAt || b.createdAt).getTime();
         return tB - tA;
       });
-  }, [rooms, searchRoomQuery]);
+  }, [rooms, searchRoomQuery, currentEducationLevel]);
 
   // Filter users inside New Chat modal
   const filterUserList = (list) => {
@@ -1561,7 +1586,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   });
 
   const isCurrentRoomPaymentSystem = activeRoom?.type === 'PAYMENT_SYSTEM' || activeRoom?.name === '결재 전용 채널';
-  const isCurrentRoomNotificationSystem = activeRoom?.type === 'NOTIFICATION_SYSTEM' || activeRoom?.name === '실시간 알림 채널';
+  const isCurrentRoomNotificationSystem = activeRoom?.type === 'NOTIFICATION_SYSTEM' || activeRoom?.name === '실시간 알림 채널' || activeRoom?.name === '공지사항';
+  // 개인 알림방("TakeMe 알림")은 아무도 답장할 수 없고, 공지사항(기관 전체 공지)은 기관 관리자만 글을 쓸 수 있다.
+  const isPersonalNotificationRoom = isCurrentRoomNotificationSystem && activeRoom?.name === 'TakeMe 알림';
+  const canWriteNotice = myUser.role === 'ACADEMY_ADMIN' || myUser.role === 'SUPER_ADMIN';
+  const isNoticeReadOnly = isCurrentRoomNotificationSystem && (isPersonalNotificationRoom || !canWriteNotice);
 
   const activeOtherUser = (activeRoom?.members || [])
     .map((m) => m.user)
@@ -1637,7 +1666,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             filteredRooms.map((room) => {
               const isSelected = activeRoom && activeRoom.id === room.id;
               const isPaymentSystem = room.type === 'PAYMENT_SYSTEM' || room.name === '결재 전용 채널' || room.name === '결제 시스템 방';
-              const isNotificationSystem = room.type === 'NOTIFICATION_SYSTEM' || room.name === '실시간 알림 채널';
+              const isNotificationSystem = room.type === 'NOTIFICATION_SYSTEM' || room.name === '실시간 알림 채널' || room.name === '공지사항';
               const title = getRoomTitle(room);
               const isGroup = (room.members || []).length > 2 || room.type === 'GROUP';
               const lastText = isPaymentSystem
@@ -1661,8 +1690,14 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   }`}
                 >
                   {/* Room Avatar */}
-                  <div className="relative">
-                    {isPaymentSystem ? (
+                  <div className="relative flex-shrink-0">
+                    {isSystemAlert ? (
+                      <div className="w-11 h-11 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-bold text-sm shadow-xs flex-shrink-0 relative">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                        </svg>
+                      </div>
+                    ) : isPaymentSystem ? (
                       <div className="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-xs flex-shrink-0">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
@@ -1682,6 +1717,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                       <div className="w-11 h-11 rounded-2xl bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-sm shadow-2xs flex-shrink-0">
                         {otherUser?.name?.[0] || title[0] || '대'}
                       </div>
+                    )}
+                    {room.unreadCount > 0 && (
+                      <span className="absolute -bottom-1 -right-1 bg-red-500 text-white text-[10px] font-black min-w-5 h-5 px-1 rounded-full flex items-center justify-center border-2 border-white shadow-2xs">
+                        {room.unreadCount > 9 ? '9+' : room.unreadCount}
+                      </span>
                     )}
                   </div>
 
@@ -1744,7 +1784,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                       </span>
                     ) : isCurrentRoomNotificationSystem ? (
                       <span className="text-[11px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
-                        실시간 알림 채널
+                        공지사항
                       </span>
                     ) : (
                       <span className="text-xs text-slate-400 font-bold">
@@ -1928,7 +1968,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     : 'bg-indigo-500'
                                 }`}></span>
                                 <span className="text-xs font-black text-slate-800">
-                                  {payload.title || (payload.category === 'PAYMENT_DECISION' ? '결재 완료 안내' : '실시간 알림')}
+                                  {payload.title || (payload.category === 'PAYMENT_DECISION' ? '결재 완료 안내' : (msg.sender ? '공지' : 'TakeMe 알림'))}
                                 </span>
                                 <span className={`text-[10px] font-extrabold px-2 py-0.2 rounded-full border ${
                                   payload.category === 'PAYMENT_DECISION' && (payload.title?.includes('반려') || payload.decision === 'REJECTED')
@@ -2606,10 +2646,14 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             </div>
 
             {/* Input Bar */}
-            {isCurrentRoomNotificationSystem ? (
+            {isNoticeReadOnly ? (
               <div className="p-4 bg-slate-50 border-t border-slate-200 text-center text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>실시간 알림 채널입니다. (차량선생님/학부모 결재 승인 완료 및 출결 변동 알림 자동 수신 전용)</span>
+                <span>
+                  {isPersonalNotificationRoom
+                    ? 'TakeMe 알림입니다. 나와 관련된 알림만 표시되며 답장할 수 없습니다.'
+                    : '공지사항입니다. 기관 공지는 원장님만 작성할 수 있습니다. (차량선생님/학부모 결재 승인 및 출결 변동 알림 자동 수신)'}
+                </span>
               </div>
             ) : (
               <div className="p-4 bg-white border-t border-slate-200 flex items-end gap-2 shadow-sm relative">
@@ -2736,7 +2780,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   </div>
                 )}
 
-                {/* [+] Button */}
+                {/* [+] Button (공지사항에서는 결재/결석 서식이 맞지 않아 숨김) */}
+                {!isCurrentRoomNotificationSystem && (
                 <button
                   type="button"
                   onClick={() => setShowPlusMenu(prev => !prev)}
@@ -2749,6 +2794,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 >
                   +
                 </button>
+                )}
 
                 {/* Preset Phrases Button */}
                 <button

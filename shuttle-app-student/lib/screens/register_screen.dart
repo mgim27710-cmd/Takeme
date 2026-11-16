@@ -10,8 +10,6 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   String _selectedRole = 'PARENT';
-  String _selectedClass = '햇살반';
-  final List<String> _classList = const ['햇살반', '열매반', '풀잎반', '새싹반', '심화B반'];
   final _authCodeController = TextEditingController();
   final _nameController = TextEditingController();
   final _parentNameController = TextEditingController();
@@ -138,7 +136,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       authCode: _authCodeController.text.trim(),
       role: _selectedRole,
       allergies: _selectedRole == 'PARENT' ? _allergiesController.text.trim() : null,
-      assignedClass: _selectedRole == 'HOMEROOM_TEACHER' ? _selectedClass : null,
     );
 
     setState(() => _isLoading = false);
@@ -267,26 +264,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   const SizedBox(height: 6),
                   _buildTextField(_authCodeController, '예: TAKEME123'),
                   const SizedBox(height: 16),
-
-                  // Homeroom class selector if HOMEROOM_TEACHER
-                  if (_selectedRole == 'HOMEROOM_TEACHER') ...[
-                    const Text('담당 학급 선택', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF334155))),
-                    const SizedBox(height: 6),
-                    DropdownButtonFormField<String>(
-                      initialValue: _selectedClass,
-                      decoration: InputDecoration(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        filled: true,
-                        fillColor: Colors.white,
-                      ),
-                      items: _classList.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                      onChanged: (val) {
-                        if (val != null) setState(() => _selectedClass = val);
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                  ],
 
                   // Name Field
                   Text(

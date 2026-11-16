@@ -15,6 +15,16 @@ import { ChatGateway } from './chat.gateway';
 import { RoutingService } from '../routing/routing.service';
 import { ApprovalService } from '../approval/approval.service';
 import { formatTeacherName } from '../utils/teacher.util';
+import { getStudentClassName, isSameClass } from '../utils/school.util';
+import { isNotificationEnabled } from '../utils/notification.util';
+
+/** 개인 알림방 이름 (NOTIFICATION_SYSTEM 타입, 사용자 1명 전용) */
+export const PERSONAL_NOTI_ROOM_NAME = 'TakeMe 알림';
+/** 기관 공지 채널 이름 (NOTIFICATION_SYSTEM 타입, 기관 전체 공유) */
+export const ACADEMY_NOTI_ROOM_NAME = '공지사항';
+/** 예전 이름 (이미 만들어진 방은 접근할 때 새 이름으로 바꾼다) */
+export const LEGACY_ACADEMY_NOTI_ROOM_NAME = '실시간 알림 채널';
+const ACADEMY_NOTI_ROOM_NAMES = [ACADEMY_NOTI_ROOM_NAME, LEGACY_ACADEMY_NOTI_ROOM_NAME];
 
 @Injectable()
 export class ChatService {
@@ -37,6 +47,11 @@ export class ChatService {
     this.routingService.registerSystemNotificationHandler(
       (academyId: number | null, category: string, title: string, content: string, extra?: any) => {
         return this.sendSystemNotification(academyId, category as any, title, content, extra);
+      }
+    );
+    this.routingService.registerStudentNotificationHandler(
+      (studentId: number, title: string, content: string, roles: any[], options?: any) => {
+        return this.notifyStudentRelated(studentId, title, content, roles as any, options);
       }
     );
   }
@@ -181,6 +196,238 @@ export class ChatService {
     return { drivers, teachers, parents, students: studentsList, admins };
   }
 
+  /** 대화방 참여자 목록을 조회해서 해당 방 참여자에게만 메시지 전송 */
+  private async broadcastToRoom(roomId: number, message: any) {
+    const room = await this.roomRepo.findOne({ where: { id: roomId }, relations: { members: { user: true } } });
+    const ids = (room?.members || []).map(m => m.user?.id).filter(Boolean) as number[];
+    const memberCount = ids.length || 2;
+    const msgWithCounts = {
+      ...message,
+      memberCount,
+      unreadCount: message.unreadCount !== undefined ? message.unreadCount : Math.max(0, memberCount - 1),
+    };
+    this.chatGateway.broadcastMessageToRoom(roomId, msgWithCounts, ids);
+  }
+
+  /** WebSocket 메시지 전송용: 사용자 ID 기준 (참여자 검증 포함) */
+  async sendMessage(roomId: number, senderId: number, text: string) {
+    const sender = await this.userRepo.findOne({ where: { id: senderId } });
+    if (!sender) throw new BadRequestException('사용자를 찾을 수 없습니다.');
+    return this.sendMessageAndBroadcast(roomId, sender.email, text);
+  }
+
+  /** 대화방 참여 여부 확인 */
+  async isUserRoomMember(roomId: number, userId: number): Promise<boolean> {
+    const member = await this.memberRepo.findOne({
+      where: { room: { id: roomId }, user: { id: userId } },
+    });
+    return !!member;
+  }
+
+  /**
+   * 사용자의 개인 알림방("TakeMe 알림", NOTIFICATION_SYSTEM) 조회 또는 생성.
+   * 기관 공지 채널(공지사항)과는 이름과 참여자(1명)로 구분한다.
+   */
+  async getOrCreateNotificationRoom(userId: number): Promise<ChatRoom> {
+    const existingMember = await this.memberRepo.findOne({
+      where: {
+        user: { id: userId },
+        room: { type: ChatRoomType.NOTIFICATION_SYSTEM, name: PERSONAL_NOTI_ROOM_NAME },
+      },
+      relations: { room: true },
+    });
+    if (existingMember?.room) return existingMember.room;
+
+    const newRoom = this.roomRepo.create({
+      name: PERSONAL_NOTI_ROOM_NAME,
+      type: ChatRoomType.NOTIFICATION_SYSTEM,
+    });
+    const savedRoom = await this.roomRepo.save(newRoom);
+    await this.memberRepo.save(this.memberRepo.create({ room: savedRoom, user: { id: userId } }));
+    return savedRoom;
+  }
+
+  /**
+   * 개인 알림 발송 (메신저 "TakeMe 알림" 방으로 전송)
+   * - 알림 수신 설정(isNotificationEnabled)에서 꺼진 종류는 발송하지 않음
+   */
+  async sendSystemNotificationToUser(
+    userId: number,
+    title: string,
+    message: string,
+    options?: {
+      type?: 'change_request' | 'chat' | 'notice' | 'escort' | 'shuttle' | 'board' | string;
+      metadata?: any;
+      actionUrl?: string;
+    },
+  ) {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) return null;
+
+    if (options?.type && !isNotificationEnabled(user, options.type as any)) {
+      return null;
+    }
+
+    const room = await this.getOrCreateNotificationRoom(userId);
+    const chatMsg = this.messageRepo.create({
+      room,
+      sender: undefined,
+      text: `[${title}]\n${message}`,
+      type: 'TEXT',
+      payload: {
+        isSystemAlert: true,
+        senderLabel: PERSONAL_NOTI_ROOM_NAME,
+        category: options?.type,
+        title,
+        content: message,
+        ...(options?.metadata || { type: options?.type, actionUrl: options?.actionUrl }),
+      },
+      readBy: [],
+    });
+    const saved = await this.messageRepo.save(chatMsg);
+    await this.roomRepo.update(room.id, { updatedAt: new Date() });
+
+    if (this.chatGateway?.server) {
+      this.chatGateway.broadcastMessageToRoom(room.id, saved, [userId]);
+      this.chatGateway.server.to(`user_${userId}`).emit('roomUpdated', { roomId: room.id });
+      this.chatGateway.server.to(`user_${userId}`).emit('notificationReceived', {
+        type: options?.type || 'SYSTEM',
+        title,
+        message,
+        roomId: room.id,
+        createdAt: saved.createdAt,
+      });
+    }
+    return saved;
+  }
+
+  /** 여러 사용자에게 개인 알림 발송 */
+  async sendSystemNotificationToUsers(
+    userIds: number[],
+    title: string,
+    message: string,
+    options?: {
+      type?: 'change_request' | 'chat' | 'notice' | 'escort' | 'shuttle' | 'board' | string;
+      metadata?: any;
+      actionUrl?: string;
+    },
+  ) {
+    const uniqueIds = Array.from(new Set(userIds.filter(Boolean)));
+    const results = [];
+    for (const uid of uniqueIds) {
+      const res = await this.sendSystemNotificationToUser(uid, title, message, options);
+      if (res) results.push(res);
+    }
+    return results;
+  }
+
+  /** 대화방 읽음 처리 */
+  async markRoomAsRead(roomId: number, userId: number) {
+    if (!(await this.isUserRoomMember(roomId, userId))) {
+      throw new ForbiddenException('대화방 참여자만 읽음 처리할 수 있습니다.');
+    }
+    const messages = await this.messageRepo.find({
+      where: { room: { id: roomId } },
+      relations: { sender: true },
+    });
+    for (const m of messages) {
+      const readByList = (m.readBy || []).map(Number);
+      if (!readByList.includes(userId) && (!m.sender || m.sender.id !== userId)) {
+        readByList.push(userId);
+        m.readBy = readByList;
+        await this.messageRepo.save(m);
+      }
+    }
+    await this.memberRepo.update(
+      { room: { id: roomId }, user: { id: userId } },
+      { lastReadAt: new Date() },
+    ).catch(() => {});
+    this.chatGateway.broadcastReadStatus(roomId, userId);
+    return { success: true };
+  }
+
+  // ============================================================
+  // 관련자에게만 보내는 개인 알림 (기관 공지 채널로 보내지 않는다)
+  // ============================================================
+
+  /** 같은 기관 관리자(원장)들의 사용자 ID */
+  async getAcademyAdminIds(academyId?: number | null): Promise<number[]> {
+    if (!academyId) return [];
+    const ids = new Set<number>();
+    const admins = await this.userRepo.find({ where: { academyId, role: UserRole.ACADEMY_ADMIN } });
+    admins.forEach(a => ids.add(a.id));
+    const academy = await this.academyRepo.findOne({ where: { id: academyId }, relations: { owner: true } });
+    if (academy?.owner?.id) ids.add(academy.owner.id);
+    return Array.from(ids);
+  }
+
+  /**
+   * 원아와 연결된 사람들의 사용자 ID
+   * - PARENT: 그 원아의 학부모 / HOMEROOM: 그 원아 반의 담임 / VEHICLE: 배정된 차량의 지도교사·기사 / ADMIN: 그 기관 관리자
+   * 원아 이름이 들어가는 알림은 반드시 이 함수로 대상자를 정한다.
+   */
+  async getStudentRelatedUserIds(
+    studentId: number,
+    roles: Array<'PARENT' | 'HOMEROOM' | 'VEHICLE' | 'ADMIN'>,
+  ): Promise<number[]> {
+    const student = await this.studentRepo.findOne({
+      where: { id: studentId },
+      relations: {
+        parentUser: true,
+        studentUser: true,
+        academy: true,
+        assignedVehicle: { driverUser: true, teacherUser: true },
+      },
+    });
+    if (!student) return [];
+    const ids = new Set<number>();
+
+    if (roles.includes('PARENT')) {
+      if (student.parentUser?.id) ids.add(student.parentUser.id);
+      if (student.studentUser?.id) ids.add(student.studentUser.id);
+    }
+    if (roles.includes('VEHICLE')) {
+      const v = student.assignedVehicle;
+      if (v?.driverUser?.id) ids.add(v.driverUser.id);
+      if (v?.teacherUser?.id) ids.add(v.teacherUser.id);
+    }
+    if (roles.includes('HOMEROOM') && student.academy?.id) {
+      const cls = getStudentClassName(student);
+      if (cls) {
+        const teachers = await this.userRepo.find({
+          where: { academyId: student.academy.id, role: UserRole.HOMEROOM_TEACHER },
+        });
+        teachers.filter(t => isSameClass(t.assignedClass, cls)).forEach(t => ids.add(t.id));
+      }
+    }
+    if (roles.includes('ADMIN')) {
+      (await this.getAcademyAdminIds(student.academy?.id)).forEach(id => ids.add(id));
+    }
+    return Array.from(ids);
+  }
+
+  /** 원아와 연결된 사람들에게만 개인 알림("TakeMe 알림")을 보낸다 */
+  async notifyStudentRelated(
+    studentId: number,
+    title: string,
+    message: string,
+    roles: Array<'PARENT' | 'HOMEROOM' | 'VEHICLE' | 'ADMIN'>,
+    options?: { type?: 'change_request' | 'shuttle' | 'escort' | string; metadata?: any; excludeUserIds?: number[] },
+  ) {
+    try {
+      const exclude = new Set(options?.excludeUserIds || []);
+      const ids = (await this.getStudentRelatedUserIds(studentId, roles)).filter(id => !exclude.has(id));
+      if (ids.length === 0) return [];
+      return await this.sendSystemNotificationToUsers(ids, title, message, {
+        type: options?.type,
+        metadata: options?.metadata,
+      });
+    } catch (err) {
+      console.error('[ChatService] notifyStudentRelated error:', err);
+      return [];
+    }
+  }
+
   async sendSystemNotification(
     academyId: number | null,
     category: 'ABSENT' | 'SHUTTLE_REQUEST' | 'PICKUP' | 'PAYMENT_REQUEST' | 'PAYMENT_DECISION' | 'GENERAL',
@@ -188,18 +435,30 @@ export class ChatService {
     content: string,
     extraData?: any,
   ) {
+    // 공지사항 채널은 기관 전체 공지(행사·휴원·규정 변경 등) 전용이다.
+    // 결석·결재·운행 같은 개별 소식은 관련자에게만 개인 알림으로 보낸다(notifyStudentRelated 등).
+    if (category !== 'GENERAL') {
+      console.warn(`[ChatService] 공지사항 채널에는 개별 업무 알림(${category})을 보내지 않습니다. 개인 알림을 사용하세요.`);
+      return;
+    }
     try {
       let notiRoom = await this.roomRepo.findOne({
         where: {
           type: ChatRoomType.NOTIFICATION_SYSTEM,
+          name: In(ACADEMY_NOTI_ROOM_NAMES),
           ...(academyId ? { academyId } : {}),
         },
         relations: { members: { user: true } },
       });
 
+      if (notiRoom && notiRoom.name !== ACADEMY_NOTI_ROOM_NAME) {
+        await this.roomRepo.update(notiRoom.id, { name: ACADEMY_NOTI_ROOM_NAME });
+        notiRoom.name = ACADEMY_NOTI_ROOM_NAME;
+      }
+
       if (!notiRoom) {
         notiRoom = this.roomRepo.create({
-          name: '실시간 알림 채널',
+          name: ACADEMY_NOTI_ROOM_NAME,
           type: ChatRoomType.NOTIFICATION_SYSTEM,
           academyId: academyId || null,
         });
@@ -237,8 +496,9 @@ export class ChatService {
       const saved = await this.messageRepo.save(message);
       await this.roomRepo.update(notiRoom.id, { updatedAt: new Date() });
 
-      this.chatGateway.broadcastMessageToRoom(notiRoom.id, saved);
-      this.chatGateway.server?.emit('roomUpdated', { roomId: notiRoom.id });
+      this.chatGateway.broadcastMessageToRoom(notiRoom.id, saved, (notiRoom.members || []).map(m => m.user?.id).filter(Boolean) as number[]);
+      this.chatGateway.server?.to(`chat_${notiRoom.id}`).emit('roomUpdated', { roomId: notiRoom.id });
+      if (academyId) this.chatGateway.server?.to(`academy_${academyId}`).emit('roomUpdated', { roomId: notiRoom.id });
 
       const alertPayload = {
         id: saved.id,
@@ -256,7 +516,11 @@ export class ChatService {
           data: alertPayload,
         });
       }
-      this.chatGateway?.server?.emit('globalDirectorAlert', alertPayload);
+      // 전체 전송 대신 통합 관리자 개인 방으로만 전달
+      const superAdmins = await this.userRepo.find({ where: { role: UserRole.SUPER_ADMIN } });
+      for (const sa of superAdmins) {
+        this.chatGateway?.server?.to(`user_${sa.id}`).emit('globalDirectorAlert', alertPayload);
+      }
 
       return saved;
     } catch (err) {
@@ -272,18 +536,24 @@ export class ChatService {
 
     const targetAcademyId = user.academyId || null;
 
-    // Ensure '실시간 알림 채널' exists and user is member
+    // Ensure '공지사항' exists and user is member
     let notiSystemRoom = await this.roomRepo.findOne({
       where: {
         type: ChatRoomType.NOTIFICATION_SYSTEM,
+        name: In(ACADEMY_NOTI_ROOM_NAMES),
         ...(targetAcademyId ? { academyId: targetAcademyId } : {}),
       },
       relations: { members: { user: true } },
     });
 
+    if (notiSystemRoom && notiSystemRoom.name !== ACADEMY_NOTI_ROOM_NAME) {
+      await this.roomRepo.update(notiSystemRoom.id, { name: ACADEMY_NOTI_ROOM_NAME });
+      notiSystemRoom.name = ACADEMY_NOTI_ROOM_NAME;
+    }
+
     if (!notiSystemRoom) {
       notiSystemRoom = this.roomRepo.create({
-        name: '실시간 알림 채널',
+        name: ACADEMY_NOTI_ROOM_NAME,
         type: ChatRoomType.NOTIFICATION_SYSTEM,
         academyId: targetAcademyId,
       });
@@ -298,6 +568,9 @@ export class ChatService {
       });
       await this.memberRepo.save(notiMember);
     }
+
+    // 개인 알림방 보장 ("TakeMe 알림")
+    await this.getOrCreateNotificationRoom(userId);
 
     // Fetch all rooms the user is a member of
     const query = this.roomRepo.createQueryBuilder('room')
@@ -399,17 +672,22 @@ export class ChatService {
         continue;
       }
       if (room.type === ChatRoomType.NOTIFICATION_SYSTEM) {
-        if (seenSpecialTypes.has(ChatRoomType.NOTIFICATION_SYSTEM)) continue;
-        seenSpecialTypes.add(ChatRoomType.NOTIFICATION_SYSTEM);
-        room.name = '실시간 알림 채널';
+        // 개인 알림방(TakeMe 알림) 1개 + 기관 공지 채널(공지사항) 1개만 유지
+        const key = room.name === PERSONAL_NOTI_ROOM_NAME ? 'PERSONAL' : 'ACADEMY';
+        if (seenSpecialTypes.has(key)) continue;
+        seenSpecialTypes.add(key);
+        room.name = key === 'PERSONAL' ? PERSONAL_NOTI_ROOM_NAME : ACADEMY_NOTI_ROOM_NAME;
       }
       deduplicatedRooms.push(room);
     }
 
-    // 실시간 알림 채널 최상단 고정, 나머지 최신 메시지 순 정렬
+    // 공지사항 채널 최상단 고정, 나머지 최신 메시지 순 정렬
     deduplicatedRooms.sort((a: any, b: any) => {
-      if (a.type === ChatRoomType.NOTIFICATION_SYSTEM && b.type !== ChatRoomType.NOTIFICATION_SYSTEM) return -1;
-      if (b.type === ChatRoomType.NOTIFICATION_SYSTEM && a.type !== ChatRoomType.NOTIFICATION_SYSTEM) return 1;
+      const aPin = a.type === ChatRoomType.NOTIFICATION_SYSTEM;
+      const bPin = b.type === ChatRoomType.NOTIFICATION_SYSTEM;
+      if (aPin && bPin) return a.name === PERSONAL_NOTI_ROOM_NAME ? -1 : 1; // 내 알림 -> 기관 공지
+      if (aPin) return -1;
+      if (bPin) return 1;
       const timeA = a.latestMessage ? new Date(a.latestMessage.createdAt).getTime() : new Date(a.updatedAt || a.createdAt).getTime();
       const timeB = b.latestMessage ? new Date(b.latestMessage.createdAt).getTime() : new Date(b.updatedAt || b.createdAt).getTime();
       return timeB - timeA;
@@ -419,6 +697,13 @@ export class ChatService {
   }
 
   async getMessages(roomId: number, currentUserId?: number) {
+    if (currentUserId) {
+      const isMember = await this.isUserRoomMember(roomId, currentUserId);
+      if (!isMember) {
+        throw new ForbiddenException('대화방 참여자만 메시지를 조회할 수 있습니다.');
+      }
+    }
+
     const room = await this.roomRepo.findOne({
       where: { id: roomId },
       relations: { members: { user: true } },
@@ -447,11 +732,16 @@ export class ChatService {
       }
       if (toUpdate.length > 0) {
         await this.messageRepo.save(toUpdate);
+        await this.memberRepo.update(
+          { room: { id: roomId }, user: { id: currentUserId } },
+          { lastReadAt: new Date() }
+        ).catch(() => {});
         this.chatGateway.server?.to(`chat_${roomId}`).emit('messagesRead', {
           roomId,
           userId: currentUserId,
           messageIds: updatedIds,
         });
+        this.chatGateway.broadcastReadStatus(roomId, currentUserId);
         this.chatGateway.server?.emit('roomUpdated', { roomId });
       }
     }
@@ -565,7 +855,9 @@ export class ChatService {
     }));
     await this.memberRepo.save(members);
 
-    this.chatGateway?.server?.emit('roomUpdated', { roomId: savedRoom.id });
+    for (const uid of userIds) {
+      this.chatGateway?.server?.to(`user_${uid}`).emit('roomUpdated', { roomId: savedRoom.id });
+    }
 
     return this.roomRepo.findOne({
       where: { id: savedRoom.id },
@@ -577,10 +869,19 @@ export class ChatService {
     const user = await this.userRepo.findOne({ where: { email: senderEmail } });
     if (!user) throw new BadRequestException('사용자를 찾을 수 없습니다.');
 
+    if (!(await this.isUserRoomMember(roomId, user.id))) {
+      throw new ForbiddenException('대화방 참여자만 메시지를 보낼 수 있습니다.');
+    }
     const room = await this.roomRepo.findOne({
       where: { id: roomId },
       relations: { members: { user: true } },
     });
+    if (room?.type === ChatRoomType.NOTIFICATION_SYSTEM) {
+      const isAdmin = user.role === UserRole.ACADEMY_ADMIN || user.role === UserRole.SUPER_ADMIN;
+      if (room.name === PERSONAL_NOTI_ROOM_NAME || !isAdmin) {
+        throw new ForbiddenException('알림 채널에는 답장을 보낼 수 없습니다.');
+      }
+    }
     const memberCount = room?.members?.length && room.members.length > 0 ? room.members.length : 2;
     const initialUnreadCount = Math.max(0, memberCount - 1);
 
@@ -607,7 +908,8 @@ export class ChatService {
         memberCount,
         unreadCount: initialUnreadCount,
       };
-      this.chatGateway.broadcastMessageToRoom(roomId, payloadMessage);
+      const memberIds = (room?.members || []).map(m => m.user?.id).filter(Boolean) as number[];
+      this.chatGateway.broadcastMessageToRoom(roomId, payloadMessage, memberIds);
     }
 
     // [교사/기사 앱 수신함 즉시 동기화]
@@ -960,21 +1262,30 @@ export class ChatService {
       await this.parentMessageRepo.save(parentMsg).catch(() => {});
     }
 
-    // 실시간 알림 채널에 결재 신청 알림 전송 (원장 및 전 교직원이 확인 가능)
-    await this.sendSystemNotification(
-      targetAcademyId || null,
-      'PAYMENT_REQUEST',
-      '신규 결재 신청',
-      `[신규 결재 신청] ${requester.name || requester.email}님이 ${studentName} 원아의 [${payload.busNumber}] 탑승 결재를 신청하였습니다. (탑승지: ${payload.boardingLocation})`,
-      {
-        messageId: saved.id,
-        roomId: targetRoom.id,
-        studentName,
-        busNumber: payload.busNumber,
-        requesterName: requester.name || requester.email,
-        boardingLocation: payload.boardingLocation,
+    // 결재 신청 알림: 공지사항 채널이 아니라 결재자(해당 차량 지도교사 + 기관 관리자)에게만 개인 알림
+    try {
+      const approverIds = new Set<number>();
+      if (payload.vehicleId) {
+        const targetVehicle = await this.vehicleRepo.findOne({
+          where: { id: Number(payload.vehicleId) },
+          relations: { teacherUser: true },
+        });
+        if (targetVehicle?.teacherUser?.id) approverIds.add(targetVehicle.teacherUser.id);
       }
-    );
+      (await this.getAcademyAdminIds(targetAcademyId || null)).forEach(id => approverIds.add(id));
+      approverIds.delete(requester.id);
+      await this.sendSystemNotificationToUsers(
+        Array.from(approverIds),
+        '신규 결재 신청',
+        `[신규 결재 신청] ${requester.name || requester.email}님이 ${studentName} 원아의 [${payload.busNumber}] 탑승 결재를 신청하였습니다. (탑승지: ${payload.boardingLocation})`,
+        {
+          type: 'change_request',
+          metadata: { type: 'change_request', messageId: saved.id, roomId: targetRoom.id },
+        },
+      );
+    } catch (notiErr) {
+      console.error('[ChatService] 결재 신청 개인 알림 오류:', notiErr);
+    }
 
     const fullMessage = await this.messageRepo.findOne({
       where: { id: saved.id },
@@ -982,16 +1293,7 @@ export class ChatService {
     });
 
     if (fullMessage) {
-      const roomWithMembers = await this.roomRepo.findOne({
-        where: { id: targetRoom.id },
-        relations: { members: true },
-      });
-      const memberCount = roomWithMembers?.members?.length || 2;
-      this.chatGateway.broadcastMessageToRoom(targetRoom.id, {
-        ...fullMessage,
-        memberCount,
-        unreadCount: Math.max(0, memberCount - 1),
-      });
+      await this.broadcastToRoom(targetRoom.id, fullMessage);
     }
 
     return fullMessage;
@@ -1234,27 +1536,19 @@ export class ChatService {
       });
       const savedConf = await this.messageRepo.save(confirmationMsg);
 
-      this.chatGateway.broadcastMessageToRoom(message.room.id, message);
-      this.chatGateway.broadcastMessageToRoom(message.room.id, savedConf);
+      await this.broadcastToRoom(message.room.id, message);
+      await this.broadcastToRoom(message.room.id, savedConf);
 
       const notifyTitle = '결재 승인 완료 알림';
       const notifyText = `[결재 승인 완료] ${payload.studentName} 원아의 [${vehicle.busNumber}] ${isTodayOnly ? '당일 임시' : '정규'} 탑승 결재가 ${formatTeacherName(decider.name)} 차량선생님에 의해 최종 승인 완료되었습니다. (탑승지: ${finalBoardingLocation})`;
 
-      await this.sendSystemNotification(
-        targetAcadId || null,
-        'PAYMENT_DECISION',
-        notifyTitle,
-        notifyText,
-        {
-          messageId: message.id,
-          roomId: message.room.id,
-          studentName: payload.studentName,
-          decision,
-          decidedBy: formatTeacherName(decider.name),
-          busNumber: vehicle.busNumber,
-          boardingLocation: finalBoardingLocation,
-        }
-      );
+      // 결재 결과: 공지사항 채널이 아니라 신청자에게만 개인 알림 (학부모에게는 아래 pushParentNotification 이 따로 안내)
+      if (message.sender?.id && message.sender.id !== decider.id) {
+        await this.sendSystemNotificationToUser(message.sender.id, notifyTitle, notifyText, {
+          type: 'change_request',
+          metadata: { type: 'change_request', messageId: message.id, roomId: message.room.id },
+        }).catch(() => {});
+      }
 
       // 6. Automatically push notification to parent
       try {
@@ -1279,23 +1573,21 @@ export class ChatService {
       });
       const savedReject = await this.messageRepo.save(rejectMsg);
 
-      this.chatGateway.broadcastMessageToRoom(message.room.id, message);
-      this.chatGateway.broadcastMessageToRoom(message.room.id, savedReject);
+      await this.broadcastToRoom(message.room.id, message);
+      await this.broadcastToRoom(message.room.id, savedReject);
 
       const targetAcadId = payload.vehicleId ? (await this.vehicleRepo.findOne({ where: { id: payload.vehicleId } }))?.academy?.id : decider.academyId;
-      await this.sendSystemNotification(
-        targetAcadId || null,
-        'PAYMENT_DECISION',
-        '결재 반려 알림',
-        `[결재 반려] ${payload.studentName} 원아의 탑승 요청이 ${formatTeacherName(decider.name)} 차량선생님에 의해 반려되었습니다.`,
-        {
-          messageId: message.id,
-          roomId: message.room.id,
-          studentName: payload.studentName,
-          decision: 'REJECTED',
-          decidedBy: formatTeacherName(decider.name),
-        }
-      );
+      // 결재 결과: 공지사항 채널이 아니라 신청자와 그 원아의 학부모에게만 개인 알림
+      const rejectText = `[결재 반려] ${payload.studentName} 원아의 탑승 요청이 ${formatTeacherName(decider.name)} 차량선생님에 의해 반려되었습니다.`;
+      const rejectTargets = new Set<number>();
+      if (message.sender?.id && message.sender.id !== decider.id) rejectTargets.add(message.sender.id);
+      if (payload.studentId) {
+        (await this.getStudentRelatedUserIds(Number(payload.studentId), ['PARENT'])).forEach(id => rejectTargets.add(id));
+      }
+      await this.sendSystemNotificationToUsers(Array.from(rejectTargets), '결재 반려 알림', rejectText, {
+        type: 'change_request',
+        metadata: { type: 'change_request', messageId: message.id, roomId: message.room.id },
+      }).catch(() => {});
     }
 
     return message;
@@ -1384,8 +1676,8 @@ export class ChatService {
     });
     const savedNotify = await this.messageRepo.save(notifyMsg);
 
-    this.chatGateway.broadcastMessageToRoom(message.room.id, message);
-    this.chatGateway.broadcastMessageToRoom(message.room.id, savedNotify);
+    await this.broadcastToRoom(message.room.id, message);
+    await this.broadcastToRoom(message.room.id, savedNotify);
 
     return { success: true, message };
   }
@@ -1457,7 +1749,7 @@ export class ChatService {
 
     // 4. Broadcast updated message
     if (message.room) {
-      this.chatGateway.broadcastMessageToRoom(message.room.id, message);
+      await this.broadcastToRoom(message.room.id, message);
     }
 
     return {

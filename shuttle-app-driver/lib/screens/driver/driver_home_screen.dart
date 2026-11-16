@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -14,8 +15,9 @@ import '../../widgets/nav_map_view.dart';
 import '../settings_screen.dart';
 import '../login_screen.dart';
 import '../../services/api_service.dart';
+import '../../services/socket_service.dart';
 import 'operation_log_screen.dart';
-import 'driver_notification_screen.dart';
+import '../chat/chat_room_list_screen.dart';
 
 /// 기사 전용 화면 (팀 앱과 같은 크기·글꼴)
 /// - 1단계(운행 준비): 전체 지도 + 하단 준비 패널('경로 탐색' 버튼)
@@ -64,13 +66,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
   io_client.Socket? _escortSocket;
   String? _changeBannerText;
   Timer? _changeBannerTimer;
-  int _unreadNotificationCount = 0;
+  int _unreadMessengerCount = 0; // 메신저 안 읽은 수 (TakeMe 알림 포함)
   Timer? _notificationPollTimer;
 
   Future<void> _loadUnreadCount() async {
     try {
-      final count = await ApiService().getDriverUnreadCount();
-      if (mounted) setState(() => _unreadNotificationCount = count);
+      final count = await ApiService().getChatTotalUnreadCount();
+      if (mounted) setState(() => _unreadMessengerCount = count);
     } catch (_) {}
   }
 
@@ -94,6 +96,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     _nav = DriverNavigator(_map)..init();
     _initEscortSocket();
     _loadUnreadCount();
+    SocketService().connect(ApiService().token); // 이미 연결돼 있으면 그대로 둔다 (리스너를 등록하려면 소켓이 먼저 필요)
+    SocketService().onRoomUpdated((_) {
+      if (mounted) _loadUnreadCount();
+    });
     _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) => _loadUnreadCount());
     _ticker = Timer.periodic(const Duration(seconds: 2), (_) {
       if (!mounted) return;
@@ -496,6 +502,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
         }
       case 'offroute':
         _nav.simulateOffRoute();
+      case 'wrong_turn':
+        _nav.simulateWrongTurn();
       case 'switch':
         await _nav.selectMode(_nav.mode.other);
       case 'send':
@@ -578,16 +586,16 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                       alignment: Alignment.center,
                       children: [
                         IconButton(
-                          icon: const Icon(Icons.notifications, color: Color(0xFF0F172A), size: 24),
-                          tooltip: '알림',
+                          icon: const Icon(Icons.forum_outlined, color: Color(0xFF0F172A), size: 24),
+                          tooltip: '메신저 (알림 포함)',
                           onPressed: () {
                             Navigator.push(
                               context,
-                              MaterialPageRoute(builder: (_) => const DriverNotificationScreen()),
+                              MaterialPageRoute(builder: (_) => const ChatRoomListScreen()),
                             ).then((_) => _loadUnreadCount());
                           },
                         ),
-                        if (_unreadNotificationCount > 0)
+                        if (_unreadMessengerCount > 0)
                           Positioned(
                             right: 4,
                             bottom: 4,
@@ -602,7 +610,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                                 constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
                                 alignment: Alignment.center,
                                 child: Text(
-                                  _unreadNotificationCount > 9 ? '9+' : '$_unreadNotificationCount',
+                                  _unreadMessengerCount > 9 ? '9+' : '$_unreadMessengerCount',
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 10,
@@ -789,7 +797,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
       crossAxisAlignment: CrossAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 제한속도 표지판 (어린이 보호구역 시 30 + 노란/빨간 강조)
+        // 제한속도 표지판: 실제 도로 제한속도 정보가 없으므로 어린이 보호구역(30)일 때만 표시
+        if (_nav.inSchoolZone)
         Container(
           width: 58,
           height: 58,
@@ -927,7 +936,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     } else {
       items.add(_menuItem('sim', _nav.simulating ? Icons.pause : Icons.play_arrow,
           _nav.simulating ? '시뮬레이션 멈추기' : '주행 시뮬레이션 시작'));
-      if (_nav.simulating) items.add(_menuItem('offroute', Icons.alt_route, '경로 이탈 테스트'));
+      if (_nav.simulating) {
+        items.add(_menuItem('offroute', Icons.alt_route, '경로 이탈 테스트'));
+        items.add(_menuItem('wrong_turn', Icons.turn_sharp_right, '교차로 반대 방향 오진입 테스트'));
+      }
       items.add(_menuItem('switch', Icons.swap_horiz, '${_nav.mode.other.title}로 바꾸기'));
       if (_nav.serverLive) {
         items.add(_menuItem('send', _nav.simSendToServer ? Icons.check_box : Icons.check_box_outline_blank,
@@ -1181,6 +1193,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                 color: selected ? _C.blue : _C.slate600,
               ),
             ),
+            if ((kDebugMode || _nav.testMode) && plan.provider != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                '[길찾기: ${plan.provider == 'kakao' ? '카카오' : plan.provider == 'naver' ? '네이버' : '폴백'}]',
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: selected ? _C.blue : _C.slate500),
+              ),
+            ],
           ],
         );
       case PlanStatus.idle:
@@ -1410,6 +1429,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                               fontWeight: FontWeight.w600,
                             ),
                           ),
+                          if ((kDebugMode || _nav.testMode) && _nav.currentProvider != null) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              '[길찾기: ${_nav.currentProvider == 'kakao' ? '카카오' : _nav.currentProvider == 'naver' ? '네이버' : '폴백'}]',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
                         ],
                       ),
               ),

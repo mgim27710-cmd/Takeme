@@ -1,3 +1,4 @@
+import '../../widgets/load_error_view.dart';
 import 'package:flutter/material.dart';
 import '../../models/notification_model.dart';
 import '../../services/api_service.dart';
@@ -13,6 +14,7 @@ class StudentNotificationListScreen extends StatefulWidget {
 class _StudentNotificationListScreenState extends State<StudentNotificationListScreen> {
   List<NotificationModel> _notifications = [];
   bool _isLoading = true;
+  String? _loadError; // 불러오기 실패 이유 (null 이면 정상)
 
   @override
   void initState() {
@@ -27,12 +29,23 @@ class _StudentNotificationListScreenState extends State<StudentNotificationListS
       return;
     }
 
-    final list = await ApiService().getNotifications(user.email);
-    if (mounted) {
-      setState(() {
-        _notifications = list;
-        _isLoading = false;
-      });
+    try {
+      final list = await ApiService().getNotifications(user.email);
+      if (mounted) {
+        setState(() {
+          _notifications = list;
+          _isLoading = false;
+          _loadError = null;
+        });
+      }
+    } catch (e) {
+      // 네트워크/서버 오류를 '비어 있음'으로 보여주지 않고 이유와 다시 시도를 알려준다
+      if (mounted) {
+        setState(() {
+          _loadError = friendlyError(e);
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -311,7 +324,9 @@ class _StudentNotificationListScreenState extends State<StudentNotificationListS
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)))
-          : RefreshIndicator(
+          : _loadError != null
+              ? LoadErrorView(title: '알림을 불러오지 못했습니다.', message: _loadError!, onRetry: _loadNotifications)
+              : RefreshIndicator(
               onRefresh: _loadNotifications,
               child: _notifications.isEmpty
                   ? Center(

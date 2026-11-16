@@ -17,6 +17,7 @@ import { API_BASE_URL } from './config';
 import TeacherDashboard from './TeacherDashboard';
 import ClassManager from './classes/ClassManager';
 import AuthViewer from './auth/AuthViewer';
+import PhotoGalleryManager from './PhotoGalleryManager';
 import { formatTeacherName, cleanTeacherBaseName } from './utils/teacherUtil';
 
 
@@ -4562,6 +4563,18 @@ const parseKindergartenExcelSheet = (sheet) => {
         </button>
 
         <button 
+        <button 
+          onClick={() => handleTabChange('photos')} 
+          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 mb-1 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'photos' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
+          title="사진 보관함 (클라우드)"
+        >
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 00-9.78 2.096A4.001 4.001 0 003 15z" />
+          </svg>
+          <span className="text-[11px] font-bold tracking-tight">클라우드</span>
+        </button>
+
+        <button 
           onClick={() => handleTabChange('settings')} 
           className={`w-20 py-2.5 px-1 rounded-xl transition-all mt-auto shrink-0 mb-1 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'settings' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
           title="환경설정"
@@ -4575,7 +4588,7 @@ const parseKindergartenExcelSheet = (sheet) => {
       </div>
 
       {/* Sidebar Content Panel */}
-      <div className={`bg-white shadow-lg z-10 flex flex-col w-[400px] shrink-0 break-keep ${activeTab === 'messages' ? 'hidden' : ''}`}>
+      <div className={`bg-white shadow-lg z-10 flex flex-col w-[400px] shrink-0 break-keep ${activeTab === 'messages' || activeTab === 'photos' ? 'hidden' : ''}`}>
 
         {(activeTab === 'status' || activeTab === 'buses') && (
           <div className="p-6 h-full flex flex-col overflow-y-auto break-keep">
@@ -6523,6 +6536,17 @@ const parseKindergartenExcelSheet = (sheet) => {
             setIsCreatingPost={setIsCreatingBoardPost}
             posts={boardPosts}
             setPosts={setBoardPosts}
+          />
+        )}
+
+        {activeTab === 'photos' && (
+          <PhotoGalleryManager 
+            selectedAcademyId={selectedAcademyId}
+            currentUser={currentUser}
+            socket={socketRef.current}
+            buses={buses}
+            availableClasses={availableClasses}
+            onClose={() => handleTabChange('status')}
           />
         )}
 

@@ -22,6 +22,7 @@ import { Attendance } from '../entities/attendance.entity';
 import { AttendanceSubmission } from '../entities/attendance-submission.entity';
 import { CloudDocument } from '../entities/cloud-document.entity';
 import { LegalExpiry } from '../entities/legal-expiry.entity';
+import { MediaAsset } from '../entities/media-asset.entity';
 
 @Module({
   imports: [
@@ -31,7 +32,7 @@ import { LegalExpiry } from '../entities/legal-expiry.entity';
       AcademyHoliday, Notification, PickupPoint,
       BoardPost, BoardComment, AuditLog, YearlyZoneMapping,
       Attendance, AttendanceSubmission,
-      CloudDocument, LegalExpiry,
+      CloudDocument, LegalExpiry, MediaAsset,
     ]),
     HttpModule
   ],

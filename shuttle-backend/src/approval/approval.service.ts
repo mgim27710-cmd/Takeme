@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   Inject,
   forwardRef,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
@@ -24,12 +25,14 @@ import { Notification } from '../entities/notification.entity';
 import { AcademyHoliday, CalendarEventType } from '../entities/academy-holiday.entity';
 import { StudentSchedule } from '../entities/student-schedule.entity';
 import { LocationGateway } from '../teacher/location.gateway';
+import { ChatService } from '../chat/chat.service';
 import {
   getStudentClassName,
   isSameClass,
   kstDateString,
   isValidDateString,
 } from '../utils/school.util';
+import { isNotificationEnabled } from '../utils/notification.util';
 
 function typeToKorean(type: ChangeRequestType | string): string {
   switch (type) {
@@ -97,6 +100,9 @@ export class ApprovalService {
     private readonly scheduleRepo: Repository<StudentSchedule>,
     @Inject(forwardRef(() => LocationGateway))
     private readonly locationGateway: LocationGateway,
+    @Inject(forwardRef(() => ChatService))
+    @Optional()
+    private readonly chatService?: ChatService,
   ) {}
 
   private static systemNotificationHandler: ((
@@ -317,12 +323,14 @@ export class ApprovalService {
     await this.notificationRepo.save(noti);
 
     const notiCategory = type === ChangeRequestType.ABSENCE ? 'ABSENT' : type === ChangeRequestType.ONE_TIME_BOARDING ? 'SHUTTLE_REQUEST' : type === ChangeRequestType.PICKUP || type === ChangeRequestType.INDIVIDUAL_DISMISSAL ? 'PICKUP' : 'GENERAL';
-    this.notifySystemNotification(
-      academyId,
-      notiCategory as any,
+    // 신청 접수 알림: 공지사항 채널이 아니라 처리할 관리자와(결석이면) 그 원아의 담임·차량 관계자에게만 개인 알림
+    void notiCategory;
+    this.chatService?.notifyStudentRelated(
+      student.id,
       `[신청 접수] ${student.adminDisplayName || student.name} ${typeKr} 신청`,
       `${student.adminDisplayName || student.name} 원아의 ${typeKr} 신청이 접수되었습니다. (적용일: ${targetDate})`,
-      { approvalRequestId: saved.id, studentId: student.id, type, targetDate }
+      type === ChangeRequestType.ABSENCE ? ['ADMIN', 'HOMEROOM', 'VEHICLE'] : ['ADMIN'],
+      { type: 'change_request', excludeUserIds: [callingUser?.id].filter(Boolean) as number[] },
     );
 
     // 소켓 브로드캐스트 (해당 유치원 관리자 방)
@@ -336,6 +344,27 @@ export class ApprovalService {
         isCapacityExceeded,
         candidateVehicles,
       });
+    }
+
+    if (this.chatService && academyId) {
+      const studentClass = getStudentClassName(student) || undefined;
+      const whereConditions: any[] = [{ academy: { id: academyId }, role: UserRole.ACADEMY_ADMIN }];
+      if (studentClass) {
+        whereConditions.push({ academy: { id: academyId }, assignedClass: studentClass, role: UserRole.HOMEROOM_TEACHER });
+      }
+      this.userRepo.find({
+        where: whereConditions,
+      }).then((users) => {
+        const ids = users.map((u) => u.id);
+        if (ids.length > 0) {
+          this.chatService?.sendSystemNotificationToUsers(
+            ids,
+            '통학 변동 신청 접수',
+            `[신규 신청] ${student.adminDisplayName || student.name} 원아의 ${typeKr} 신청이 접수되었습니다. (적용일: ${targetDate})`,
+            { type: 'change_request' }
+          ).catch(() => {});
+        }
+      }).catch(() => {});
     }
 
     return {
@@ -574,9 +603,9 @@ export class ApprovalService {
     const decisionKr = decision === ApprovalStatus.APPROVED ? '승인' : '반려';
     const message = `[신청 ${decisionKr}] ${student.adminDisplayName || student.name} 원아의 ${typeKr} 신청이 ${decisionKr}되었습니다.${decision === ApprovalStatus.REJECTED ? ` (사유: ${rejectionReason})` : ''}`;
 
-    // 1. 신청 학부모에게 알림
+    // 1. 신청 학부모에게 알림 (설정 확인)
     const parentUser = student.parentUser || req.requester;
-    if (parentUser) {
+    if (parentUser && isNotificationEnabled(parentUser, 'change_request')) {
       const noti = this.notificationRepo.create({
         recipient: parentUser,
         recipientRole: 'PARENT',
@@ -585,27 +614,42 @@ export class ApprovalService {
         message,
       });
       await this.notificationRepo.save(noti);
+
+      if (this.chatService) {
+        this.chatService.sendSystemNotificationToUser(
+          parentUser.id,
+          `통학 변동 신청 ${decisionKr}`,
+          message,
+          { type: 'change_request' }
+        ).catch(() => {});
+      }
     }
 
-    // 2. 차량 기사 및 차량선생님 알림 (승인인 경우)
+    // 2. 차량 기사 및 차량선생님 알림 (승인인 경우, 기사 알림 수신 설정 확인)
     const affectedVehicle = req.targetVehicle || student.assignedVehicle;
     if (decision === ApprovalStatus.APPROVED && affectedVehicle) {
-      const vNoti = this.notificationRepo.create({
-        vehicle: affectedVehicle,
-        type: 'SCHEDULE_CHANGE',
-        approvalRequest: req,
-        message: `[운행 변동] ${student.adminDisplayName || student.name} (${targetDate} ${typeKr})`,
-      });
-      await this.notificationRepo.save(vNoti);
+      const driver = affectedVehicle.driverUser;
+      if (!driver || isNotificationEnabled(driver, 'change_request')) {
+        const vNoti = this.notificationRepo.create({
+          vehicle: affectedVehicle,
+          type: 'SCHEDULE_CHANGE',
+          approvalRequest: req,
+          message: `[운행 변동] ${student.adminDisplayName || student.name} (${targetDate} ${typeKr})`,
+        });
+        await this.notificationRepo.save(vNoti);
+
+        if (this.chatService && driver) {
+          this.chatService.sendSystemNotificationToUser(
+            driver.id,
+            '운행 변동 안내',
+            `[운행 변동] ${student.adminDisplayName || student.name} (${targetDate} ${typeKr})`,
+            { type: 'change_request' }
+          ).catch(() => {});
+        }
+      }
     }
 
-    this.notifySystemNotification(
-      academyId,
-      'PAYMENT_DECISION',
-      `[결재 ${decisionKr}] ${student.adminDisplayName || student.name} ${typeKr} ${decisionKr}`,
-      `${student.adminDisplayName || student.name} 원아의 ${typeKr} 신청이 최종 ${decisionKr}되었습니다.${decision === ApprovalStatus.REJECTED ? ` (사유: ${rejectionReason})` : ''}`,
-      { approvalRequestId: req.id, studentId: student.id, decision, type: req.type }
-    );
+    // (신청 결과는 위에서 신청 학부모와 차량 기사에게 개인 알림으로 이미 전달했다. 공지사항 채널로는 보내지 않는다.)
 
     // 소켓 브로드캐스트
     if (this.locationGateway && academyId) {
@@ -883,7 +927,7 @@ export class ApprovalService {
 
     const saved = await this.holidayRepo.save(holiday);
 
-    // 행사/휴업일 등록 시 실시간 알림 채널에 알림 메시지 발송 및 소켓 브로드캐스트
+    // 행사/휴업일 등록 시 공지사항 채널에 알림 메시지 발송 및 소켓 브로드캐스트
     try {
       const typeLabel =
         saved.type === CalendarEventType.ACADEMY_HOLIDAY || saved.type === CalendarEventType.CLASS_HOLIDAY
@@ -984,18 +1028,15 @@ export class ApprovalService {
       const notiTitle = '원아 결석 신청 안내';
       const notiContent = `[결석 신청] ${student.name} (${student.className || '반 미배정'}) - ${dateText}${data.reason ? ` (${data.reason})` : ''}`;
 
-      await this.notifySystemNotification(
-        (student.academy?.id || callingUser.academyId || null),
-        'ABSENT',
+      // 결석 신청: 공지사항 채널이 아니라 그 원아의 학부모·담임·차량 지도교사/기사에게만 개인 알림
+      await this.chatService?.notifyStudentRelated(
+        student.id,
         notiTitle,
         notiContent,
+        ['PARENT', 'HOMEROOM', 'VEHICLE'],
         {
-          studentId: student.id,
-          studentName: student.name,
-          className: student.className,
-          startDate: data.startDate,
-          endDate: data.endDate,
-          reason: data.reason,
+          type: 'change_request',
+          metadata: { type: 'change_request', studentId: student.id, startDate: data.startDate, endDate: data.endDate },
         },
       );
     } catch (notiErr) {

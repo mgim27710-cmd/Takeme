@@ -2,10 +2,12 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import '../../models/user_model.dart';
 import '../../services/api_service.dart';
 
 class TeacherBoardView extends StatefulWidget {
-  const TeacherBoardView({super.key});
+  final String? initialCategory;
+  const TeacherBoardView({super.key, this.initialCategory});
 
   @override
   State<TeacherBoardView> createState() => _TeacherBoardViewState();
@@ -16,20 +18,25 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
   bool _isLoading = true;
   String _searchKeyword = '';
   String _selectedClassFilter = 'ALL';
+  String _selectedPostTypeFilter = 'ALL'; // 'ALL', 'NOTICE', 'POST'
   final _searchController = TextEditingController();
 
-  final List<String> _classList = const [
-    'ALL',
-    '햇살반',
-    '열매반',
-    '풀잎반',
-    '새싹반',
-    '심화B반',
-  ];
+  /// 반 필터 칩: 코드에 고정된 반 이름 대신, 불러온 글에 실제로 등장하는 반으로 구성한다
+  List<String> get _classList {
+    final classes = <String>{};
+    for (final p in _posts) {
+      final c = p['targetClass']?.toString().trim() ?? '';
+      if (c.isNotEmpty) classes.add(c);
+    }
+    return ['ALL', ...(classes.toList()..sort())];
+  }
 
   @override
   void initState() {
     super.initState();
+    if (widget.initialCategory != null) {
+      _selectedPostTypeFilter = widget.initialCategory!;
+    }
     _loadPosts();
   }
 
@@ -45,6 +52,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
     final posts = await ApiService().getBoardPosts(
       academyId: user?.academyId,
       search: _searchKeyword.isNotEmpty ? _searchKeyword : null,
+      postType: _selectedPostTypeFilter == 'ALL' ? null : _selectedPostTypeFilter,
     );
     if (mounted) {
       setState(() {
@@ -56,13 +64,17 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
 
   List<Map<String, dynamic>> get _filteredPosts {
     final user = ApiService().currentUser;
+    var list = _posts;
+    if (_selectedPostTypeFilter != 'ALL') {
+      list = list.where((p) => (p['postType'] ?? 'POST') == _selectedPostTypeFilter).toList();
+    }
     if (user?.role == 'HOMEROOM_TEACHER') {
-      return _posts;
+      return list;
     }
     if (_selectedClassFilter == 'ALL') {
-      return _posts;
+      return list;
     }
-    return _posts.where((p) {
+    return list.where((p) {
       if (p['visibility'] == 'ALL') return true;
       final target = p['targetClass']?.toString() ?? '';
       return target == _selectedClassFilter;
@@ -112,6 +124,18 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
     );
   }
 
+  /// 공개 범위 선택지. '나의 반'은 담임(반이 배정된 경우)만 고를 수 있다.
+  List<(String, String)> _visibilityOptions(bool canUseMyClass) => [
+        if (canUseMyClass) ('CLASS', '나의 반'),
+        ('ALL', '전체 공개'),
+      ];
+
+  bool get _canUseMyClass {
+    final u = ApiService().currentUser;
+    final cls = u?.assignedClass;
+    return u?.role == 'HOMEROOM_TEACHER' && cls != null && cls.isNotEmpty && cls != '미배정';
+  }
+
   void _showCreatePostModal() {
     final currentUser = ApiService().currentUser;
     final isHomeroom = currentUser?.role == 'HOMEROOM_TEACHER';
@@ -120,8 +144,10 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
         currentUser.assignedClass != '미배정';
     final titleCtrl = TextEditingController();
     final contentCtrl = TextEditingController();
-    String visibility = isHomeroom ? 'CLASS' : 'ALL';
-    String selectedClass = hasClass ? currentUser.assignedClass! : '햇살반';
+    String? selectedCategory;
+    final canUseMyClass = isHomeroom && hasClass;
+    String visibility = canUseMyClass ? 'CLASS' : 'ALL';
+    final String selectedClass = hasClass ? currentUser.assignedClass! : '';
     final List<XFile> pickedImages = [];
     bool isUploading = false;
 
@@ -151,9 +177,13 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        '알림장 / 게시글 작성',
-                        style: TextStyle(
+                      Text(
+                        selectedCategory == 'NOTICE'
+                            ? '알림장 작성'
+                            : selectedCategory == 'POST'
+                                ? '게시물 작성'
+                                : '알림장 / 게시글 작성',
+                        style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
                           color: Color(0xFF0F172A),
@@ -165,53 +195,114 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 12),
 
-                  // Visibility & Target Class Selector
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          initialValue: visibility,
-                          decoration: InputDecoration(
-                            labelText: '공개 범위',
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          items: const [
-                            DropdownMenuItem(value: 'ALL', child: Text('전체 공개')),
-                            DropdownMenuItem(value: 'CLASS', child: Text('특정 반 전용')),
-                          ],
-                          onChanged: (val) {
-                            if (val != null) {
-                              setModalState(() => visibility = val);
-                            }
-                          },
-                        ),
-                      ),
-                      if (visibility == 'CLASS') ...[
-                        const SizedBox(width: 10),
+                  // Category Selector (NOTICE vs POST)
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
                         Expanded(
-                          child: DropdownButtonFormField<String>(
-                            initialValue: selectedClass,
-                            decoration: InputDecoration(
-                              labelText: '대상 학급',
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          child: GestureDetector(
+                            onTap: () => setModalState(() => selectedCategory = 'NOTICE'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: selectedCategory == 'NOTICE' ? const Color(0xFFEA580C) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                boxShadow: selectedCategory == 'NOTICE'
+                                    ? [BoxShadow(color: const Color(0xFFEA580C).withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2))]
+                                    : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.campaign_outlined,
+                                    size: 16,
+                                    color: selectedCategory == 'NOTICE' ? Colors.white : const Color(0xFF64748B),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '알림장',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: selectedCategory == 'NOTICE' ? Colors.white : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                            items: _classList
-                                .where((c) => c != 'ALL')
-                                .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                                .toList(),
-                            onChanged: (val) {
-                              if (val != null) {
-                                setModalState(() => selectedClass = val);
-                              }
-                            },
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setModalState(() => selectedCategory = 'POST'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: selectedCategory == 'POST' ? const Color(0xFF2563EB) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                boxShadow: selectedCategory == 'POST'
+                                    ? [BoxShadow(color: const Color(0xFF2563EB).withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2))]
+                                    : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.article_outlined,
+                                    size: 16,
+                                    color: selectedCategory == 'POST' ? Colors.white : const Color(0xFF64748B),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '게시물',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: selectedCategory == 'POST' ? Colors.white : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ],
-                    ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // 공개 범위: 나의 반 / 전체 공개 (반 이름을 고르지 않는다)
+                  DropdownButtonFormField<String>(
+                    initialValue: _visibilityOptions(canUseMyClass).any((o) => o.$1 == visibility)
+                        ? visibility
+                        : 'ALL',
+                    decoration: InputDecoration(
+                      labelText: '공개 범위',
+                      helperText: visibility == 'CLASS'
+                          ? '내가 맡은 반 학부모에게만 보입니다.'
+                          : '우리 기관의 모든 학부모에게 보입니다.',
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    items: _visibilityOptions(canUseMyClass)
+                        .map((o) => DropdownMenuItem(value: o.$1, child: Text(o.$2)))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setModalState(() => visibility = val);
+                      }
+                    },
                   ),
                   const SizedBox(height: 12),
 
@@ -343,6 +434,12 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             final title = titleCtrl.text.trim();
                             final content = contentCtrl.text.trim();
 
+                            if (selectedCategory == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('카테고리(알림장 또는 게시물)를 선택해주세요.')),
+                              );
+                              return;
+                            }
                             if (title.isEmpty) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(content: Text('제목을 입력해주세요.')),
@@ -384,6 +481,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                               content: content,
                               visibility: visibility,
                               targetClass: visibility == 'CLASS' ? selectedClass : null,
+                              postType: selectedCategory,
                               imageUrl: uploadedCloudUrls.isNotEmpty ? uploadedCloudUrls.first : null,
                               images: uploadedCloudUrls,
                               authorName: authorName,
@@ -399,11 +497,14 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             if (!mounted) return;
                             if (res['success'] == true) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('알림장 및 게시글이 등록되었습니다. 학부모 및 관리자 웹과 실시간 공유됩니다.'),
-                                  backgroundColor: Color(0xFF10B981),
+                                SnackBar(
+                                  content: Text('${selectedCategory == 'NOTICE' ? '알림장' : '게시물'}이 등록되었습니다. 학부모 및 관리자 웹과 실시간 공유됩니다.'),
+                                  backgroundColor: const Color(0xFF10B981),
                                 ),
                               );
+                              setState(() {
+                                _selectedPostTypeFilter = selectedCategory!;
+                              });
                               _loadPosts();
                             } else {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -415,7 +516,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             }
                           },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2563EB),
+                      backgroundColor: selectedCategory == 'NOTICE' ? const Color(0xFFEA580C) : const Color(0xFF2563EB),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
@@ -425,12 +526,16 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             children: [
                               SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
                               SizedBox(width: 10),
-                              Text('게시글 업로드 중...', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                              Text('등록 중...', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                             ],
                           )
-                        : const Text(
-                            '게시글 등록하기',
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                        : Text(
+                            selectedCategory == 'NOTICE'
+                                ? '알림장 등록하기'
+                                : selectedCategory == 'POST'
+                                    ? '게시물 등록하기'
+                                    : '등록하기',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
                           ),
                   ),
                 ],
@@ -446,8 +551,11 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
     final postId = post['id'] as int;
     final titleCtrl = TextEditingController(text: post['title']?.toString() ?? '');
     final contentCtrl = TextEditingController(text: post['content']?.toString() ?? '');
-    String visibility = post['visibility']?.toString() ?? 'ALL';
-    String selectedClass = post['targetClass']?.toString() ?? '햇살반';
+    String selectedCategory = post['postType'] == 'NOTICE' ? 'NOTICE' : 'POST';
+    final canUseMyClass = _canUseMyClass;
+    String visibility = post['visibility']?.toString() == 'CLASS' ? 'CLASS' : 'ALL';
+    // '나의 반'은 서버가 담임의 반으로 고정한다. 화면에서는 반을 고르지 않는다.
+    final String selectedClass = post['targetClass']?.toString() ?? ApiService().currentUser?.assignedClass ?? '';
     final existingImages = List<String>.from((post['images'] as List?)?.map((e) => e.toString()) ??
         (post['imageUrl'] != null ? [post['imageUrl'].toString()] : []));
     final List<XFile> newlyPickedImages = [];
@@ -479,9 +587,9 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        '게시글 수정',
-                        style: TextStyle(
+                      Text(
+                        selectedCategory == 'NOTICE' ? '알림장 수정' : '게시물 수정',
+                        style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
                           color: Color(0xFF0F172A),
@@ -493,53 +601,114 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 12),
 
-                  // Visibility & Target Class Selector
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          initialValue: visibility,
-                          decoration: InputDecoration(
-                            labelText: '공개 범위',
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          items: const [
-                            DropdownMenuItem(value: 'ALL', child: Text('전체 공개')),
-                            DropdownMenuItem(value: 'CLASS', child: Text('특정 반 전용')),
-                          ],
-                          onChanged: (val) {
-                            if (val != null) {
-                              setModalState(() => visibility = val);
-                            }
-                          },
-                        ),
-                      ),
-                      if (visibility == 'CLASS') ...[
-                        const SizedBox(width: 10),
+                  // Category Selector (NOTICE vs POST)
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
                         Expanded(
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _classList.contains(selectedClass) ? selectedClass : '햇살반',
-                            decoration: InputDecoration(
-                              labelText: '대상 학급',
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          child: GestureDetector(
+                            onTap: () => setModalState(() => selectedCategory = 'NOTICE'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: selectedCategory == 'NOTICE' ? const Color(0xFFEA580C) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                boxShadow: selectedCategory == 'NOTICE'
+                                    ? [BoxShadow(color: const Color(0xFFEA580C).withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2))]
+                                    : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.campaign_outlined,
+                                    size: 16,
+                                    color: selectedCategory == 'NOTICE' ? Colors.white : const Color(0xFF64748B),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '알림장',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: selectedCategory == 'NOTICE' ? Colors.white : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                            items: _classList
-                                .where((c) => c != 'ALL')
-                                .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                                .toList(),
-                            onChanged: (val) {
-                              if (val != null) {
-                                setModalState(() => selectedClass = val);
-                              }
-                            },
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setModalState(() => selectedCategory = 'POST'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: selectedCategory == 'POST' ? const Color(0xFF2563EB) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                boxShadow: selectedCategory == 'POST'
+                                    ? [BoxShadow(color: const Color(0xFF2563EB).withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2))]
+                                    : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.article_outlined,
+                                    size: 16,
+                                    color: selectedCategory == 'POST' ? Colors.white : const Color(0xFF64748B),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '게시물',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: selectedCategory == 'POST' ? Colors.white : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ],
-                    ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // 공개 범위: 나의 반 / 전체 공개 (반 이름을 고르지 않는다)
+                  DropdownButtonFormField<String>(
+                    initialValue: _visibilityOptions(canUseMyClass).any((o) => o.$1 == visibility)
+                        ? visibility
+                        : 'ALL',
+                    decoration: InputDecoration(
+                      labelText: '공개 범위',
+                      helperText: visibility == 'CLASS'
+                          ? '내가 맡은 반 학부모에게만 보입니다.'
+                          : '우리 기관의 모든 학부모에게 보입니다.',
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    items: _visibilityOptions(canUseMyClass)
+                        .map((o) => DropdownMenuItem(value: o.$1, child: Text(o.$2)))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setModalState(() => visibility = val);
+                      }
+                    },
                   ),
                   const SizedBox(height: 12),
 
@@ -741,6 +910,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                               content: content,
                               visibility: visibility,
                               targetClass: visibility == 'CLASS' ? selectedClass : null,
+                              postType: selectedCategory,
                               images: allImages,
                             );
 
@@ -751,7 +921,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
 
                             if (res['success'] == true) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('게시글이 수정되었습니다.')),
+                                SnackBar(content: Text('${selectedCategory == 'NOTICE' ? '알림장' : '게시물'}이 수정되었습니다.')),
                               );
                               _loadPosts();
                             } else {
@@ -761,7 +931,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             }
                           },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2563EB),
+                      backgroundColor: selectedCategory == 'NOTICE' ? const Color(0xFFEA580C) : const Color(0xFF2563EB),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1013,6 +1183,58 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   ),
                 ],
               ),
+              // Category Filter Chips: 전체 · 알림장 · 게시물
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  ChoiceChip(
+                    label: const Text('전체'),
+                    selected: _selectedPostTypeFilter == 'ALL',
+                    onSelected: (_) {
+                      setState(() => _selectedPostTypeFilter = 'ALL');
+                      _loadPosts();
+                    },
+                    selectedColor: const Color(0xFF0F172A),
+                    labelStyle: TextStyle(
+                      color: _selectedPostTypeFilter == 'ALL' ? Colors.white : const Color(0xFF475569),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  ChoiceChip(
+                    avatar: Icon(Icons.campaign, size: 14, color: _selectedPostTypeFilter == 'NOTICE' ? Colors.white : const Color(0xFFEA580C)),
+                    label: const Text('알림장'),
+                    selected: _selectedPostTypeFilter == 'NOTICE',
+                    onSelected: (_) {
+                      setState(() => _selectedPostTypeFilter = 'NOTICE');
+                      _loadPosts();
+                    },
+                    selectedColor: const Color(0xFFEA580C),
+                    labelStyle: TextStyle(
+                      color: _selectedPostTypeFilter == 'NOTICE' ? Colors.white : const Color(0xFFEA580C),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  ChoiceChip(
+                    avatar: Icon(Icons.article, size: 14, color: _selectedPostTypeFilter == 'POST' ? Colors.white : const Color(0xFF2563EB)),
+                    label: const Text('게시물'),
+                    selected: _selectedPostTypeFilter == 'POST',
+                    onSelected: (_) {
+                      setState(() => _selectedPostTypeFilter = 'POST');
+                      _loadPosts();
+                    },
+                    selectedColor: const Color(0xFF2563EB),
+                    labelStyle: TextStyle(
+                      color: _selectedPostTypeFilter == 'POST' ? Colors.white : const Color(0xFF2563EB),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
               // Filter Chips (Hidden for Homeroom Teacher since they only see their assigned class)
               if (user?.role != 'HOMEROOM_TEACHER') ...[
                 const SizedBox(height: 8),
@@ -1126,15 +1348,33 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                                   Container(
                                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                     decoration: BoxDecoration(
+                                                      color: post['postType'] == 'NOTICE' ? const Color(0xFFFFF7ED) : const Color(0xFFEFF6FF),
+                                                      borderRadius: BorderRadius.circular(4),
+                                                      border: Border.all(
+                                                        color: post['postType'] == 'NOTICE' ? const Color(0xFFFDBA74) : const Color(0xFFBFDBFE),
+                                                        width: 0.8,
+                                                      ),
+                                                    ),
+                                                    child: Text(
+                                                      post['postType'] == 'NOTICE' ? '알림장' : '게시물',
+                                                      style: TextStyle(
+                                                        fontSize: 10,
+                                                        fontWeight: FontWeight.bold,
+                                                        color: post['postType'] == 'NOTICE' ? const Color(0xFFEA580C) : const Color(0xFF2563EB),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                    decoration: BoxDecoration(
                                                       color: post['authorRole'] == 'ADMIN' || post['authorRole'] == 'ACADEMY_ADMIN'
                                                           ? const Color(0xFFEFF6FF)
                                                           : const Color(0xFFF0FDF4),
                                                       borderRadius: BorderRadius.circular(4),
                                                     ),
                                                     child: Text(
-                                                      post['authorRole'] == 'ADMIN' || post['authorRole'] == 'ACADEMY_ADMIN'
-                                                          ? '기관 관리자'
-                                                          : (post['authorRole'] == 'HOMEROOM_TEACHER' ? '담임교사' : '차량선생님'),
+                                                      UserModel.getRoleKorean(post['authorRole']),
                                                       style: TextStyle(
                                                         fontSize: 10,
                                                         fontWeight: FontWeight.bold,
@@ -1169,7 +1409,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                               borderRadius: BorderRadius.circular(8),
                                             ),
                                             child: Text(
-                                              post['targetClass'] ?? (post['visibility'] == 'ALL' ? '전체 공개' : '반공개'),
+                                              post['visibility'] == 'CLASS' ? '나의 반' : '전체 공개',
                                               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
                                             ),
                                           ),

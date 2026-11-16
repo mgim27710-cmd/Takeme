@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 
@@ -10,8 +11,13 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   String _selectedRole = 'HOMEROOM_TEACHER';
-  String _selectedClass = '햇살반';
-  final List<String> _classList = const ['햇살반', '열매반', '풀잎반', '새싹반', '심화B반'];
+  // 담당 학급: 기관 인증코드를 입력하면 서버에서 그 기관의 반 목록을 받아 온다 (코드에 고정된 반 이름 없음)
+  String? _selectedClass;
+  List<String> _classList = [];
+  bool _classesLoading = false;
+  String? _classesMessage; // 안내/오류 문구
+  String _classesLoadedFor = '';
+  Timer? _classesDebounce;
   final _authCodeController = TextEditingController();
   final _nameController = TextEditingController();
   final _parentNameController = TextEditingController();
@@ -25,8 +31,54 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _isEmailVerified = false;
   bool _isLoading = false;
 
+  /// 인증코드가 바뀌면 잠시 뒤(입력이 멈춘 뒤) 그 기관의 반 목록을 불러온다
+  void _onAuthCodeChanged(String _) {
+    _classesDebounce?.cancel();
+    _classesDebounce = Timer(const Duration(milliseconds: 600), _loadClasses);
+  }
+
+  Future<void> _loadClasses() async {
+    final code = _authCodeController.text.trim();
+    if (_selectedRole != 'HOMEROOM_TEACHER') return;
+    if (code.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _classList = [];
+          _selectedClass = null;
+          _classesMessage = null;
+          _classesLoadedFor = '';
+        });
+      }
+      return;
+    }
+    if (code == _classesLoadedFor) return;
+    setState(() {
+      _classesLoading = true;
+      _classesMessage = null;
+    });
+    final res = await ApiService().verifyAuthCode(code);
+    if (!mounted) return;
+    setState(() {
+      _classesLoading = false;
+      if (res['success'] == true) {
+        _classesLoadedFor = code;
+        _classList = List<String>.from(res['classes'] as List);
+        if (!_classList.contains(_selectedClass)) _selectedClass = null;
+        _classesMessage = _classList.isEmpty
+            ? '이 기관에 등록된 반이 없습니다. 원장님께 원아 명단 등록을 요청해 주세요.'
+            : null;
+      } else {
+        _classList = [];
+        _selectedClass = null;
+        _classesLoadedFor = '';
+        _classesMessage = res['message']?.toString() ?? '반 목록을 불러오지 못했습니다.';
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _classesDebounce?.cancel();
     _authCodeController.dispose();
     _nameController.dispose();
     _parentNameController.dispose();
@@ -99,6 +151,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
     if (_authCodeController.text.trim().isEmpty) {
       _showMessage('기관 인증코드를 입력해주세요.');
+      return;
+    }
+    if (_selectedRole == 'HOMEROOM_TEACHER' && _selectedClass == null) {
+      _showMessage('담당 학급을 선택해주세요.');
       return;
     }
     if (_nameController.text.trim().isEmpty) {
@@ -256,7 +312,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   // Auth Code
                   const Text('기관 인증코드', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF334155))),
                   const SizedBox(height: 6),
-                  _buildTextField(_authCodeController, '예: TAKEME123'),
+                  _buildTextField(_authCodeController, '예: TAKEME123', onChanged: _onAuthCodeChanged),
                   const SizedBox(height: 16),
 
                   // Homeroom class selector if HOMEROOM_TEACHER
@@ -264,7 +320,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     const Text('담당 학급 선택', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF334155))),
                     const SizedBox(height: 6),
                     DropdownButtonFormField<String>(
+                      key: ValueKey('class_${_classList.join(',')}'),
                       initialValue: _selectedClass,
+                      hint: Text(
+                        _classesLoading
+                            ? '반 목록을 불러오는 중...'
+                            : (_authCodeController.text.trim().isEmpty ? '기관 인증코드를 먼저 입력하세요' : '반을 선택하세요'),
+                        style: const TextStyle(fontSize: 14, color: Color(0xFF94A3B8)),
+                      ),
                       decoration: InputDecoration(
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -272,10 +335,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         fillColor: Colors.white,
                       ),
                       items: _classList.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                      onChanged: (val) {
-                        if (val != null) setState(() => _selectedClass = val);
-                      },
+                      onChanged: _classList.isEmpty ? null : (val) => setState(() => _selectedClass = val),
                     ),
+                    if (_classesMessage != null) ...[
+                      const SizedBox(height: 6),
+                      Text(_classesMessage!, style: const TextStyle(fontSize: 12, color: Color(0xFFEF4444))),
+                    ],
                     const SizedBox(height: 16),
                   ],
 
@@ -431,7 +496,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final isSelected = _selectedRole == role;
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _selectedRole = role),
+        onTap: () {
+          setState(() => _selectedRole = role);
+          if (role == 'HOMEROOM_TEACHER') _loadClasses();
+        },
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
@@ -459,9 +527,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
     bool obscureText = false,
     bool enabled = true,
     TextInputType? keyboardType,
+    ValueChanged<String>? onChanged,
   }) {
     return TextField(
       controller: controller,
+      onChanged: onChanged,
       obscureText: obscureText,
       enabled: enabled,
       keyboardType: keyboardType,

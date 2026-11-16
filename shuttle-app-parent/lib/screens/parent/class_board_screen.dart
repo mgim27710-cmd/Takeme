@@ -1,3 +1,4 @@
+import '../../widgets/load_error_view.dart';
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 
@@ -14,6 +15,7 @@ class ClassBoardScreen extends StatefulWidget {
 class _ClassBoardScreenState extends State<ClassBoardScreen> {
   List<Map<String, dynamic>> _posts = [];
   bool _isLoading = true;
+  String? _loadError; // 불러오기 실패 이유 (null 이면 정상)
 
   @override
   void initState() {
@@ -28,12 +30,23 @@ class _ClassBoardScreenState extends State<ClassBoardScreen> {
       return;
     }
 
-    final list = await ApiService().getClassBoardPosts(user.email);
-    if (mounted) {
-      setState(() {
-        _posts = list;
-        _isLoading = false;
-      });
+    try {
+      final list = await ApiService().getClassBoardPosts(user.email);
+      if (mounted) {
+        setState(() {
+          _posts = list;
+          _isLoading = false;
+          _loadError = null;
+        });
+      }
+    } catch (e) {
+      // 네트워크/서버 오류를 '비어 있음'으로 보여주지 않고 이유와 다시 시도를 알려준다
+      if (mounted) {
+        setState(() {
+          _loadError = friendlyError(e);
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -79,7 +92,9 @@ class _ClassBoardScreenState extends State<ClassBoardScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)))
-          : RefreshIndicator(
+          : _loadError != null
+              ? LoadErrorView(title: '알림장을 불러오지 못했습니다.', message: _loadError!, onRetry: _loadPosts)
+              : RefreshIndicator(
               onRefresh: _loadPosts,
               child: _posts.isEmpty
                   ? Center(

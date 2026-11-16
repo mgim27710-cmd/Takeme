@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { ScheduleOverride, OverrideType } from '../entities/schedule-override.entity';
 import { ApprovalService } from '../approval/approval.service';
@@ -16,7 +16,10 @@ import { PickupPoint } from '../entities/pickup-point.entity';
 
 import { BoardPost } from '../entities/board-post.entity';
 import { getStudentClassName } from '../utils/school.util';
+import { applyBoardVisibility, getLinkedClassNames } from '../utils/board-visibility.util';
 import { resolveMediaRef, resolveMediaRefs } from '../utils/s3.util';
+import { isNotificationEnabled, getUserNotificationSettings } from '../utils/notification.util';
+import { TeacherService } from '../teacher/teacher.service';
 
 @Injectable()
 export class ParentService {
@@ -220,6 +223,10 @@ export class ParentService {
       .getOne();
 
     const readKeys = new Set(Array.isArray(user.readNotificationKeys) ? user.readNotificationKeys : []);
+    if (user.notificationSettings && user.notificationSettings.all === false) {
+      return [];
+    }
+
     const items: Array<{
       id: number;
       key: string;
@@ -294,29 +301,36 @@ export class ParentService {
       });
     }
 
-    // 3. New Board Posts (새 알림장 글)
+    // 3. New Board Posts / Notices (새 알림장 / 새 게시물)
     const academyId = student?.academy?.id || user.academyId;
-    if (academyId && user.notifyBoardPost !== false) {
-      const className = student ? getStudentClassName(student) : null;
+    if (academyId) {
+      const classNames = await getLinkedClassNames(this.studentRepository, user.id);
+      if (classNames.length === 0 && student) {
+        const own = getStudentClassName(student);
+        if (own) classNames.push(own);
+      }
       const postQb = this.boardPostRepository.createQueryBuilder('post')
         .where('post.academyId = :aid', { aid: academyId });
 
-      if (className) {
-        postQb.andWhere('(post.visibility = :vAll OR post.targetClass = :tc)', { vAll: 'ALL', tc: className });
-      } else {
-        postQb.andWhere('post.visibility = :vAll', { vAll: 'ALL' });
-      }
+      applyBoardVisibility(postQb, classNames);
 
-      const posts = await postQb.orderBy('post.createdAt', 'DESC').take(15).getMany();
+      const posts = await postQb.orderBy('post.createdAt', 'DESC').take(25).getMany();
       for (const p of posts) {
+        const isNotice = p.postType === 'NOTICE';
+        if (isNotice) {
+          if (!isNotificationEnabled(user, 'notice')) continue;
+        } else {
+          if (!isNotificationEnabled(user, 'post')) continue;
+        }
+
         const key = `p_${p.id}`;
         const preview = p.content ? (p.content.length > 50 ? p.content.slice(0, 50) + '...' : p.content) : p.title;
         items.push({
           id: p.id,
           key,
-          title: `[새 알림장] ${p.title}`,
+          title: isNotice ? `[새 알림장] ${p.title}` : `[새 게시물] ${p.title}`,
           message: preview,
-          type: 'BOARD',
+          type: isNotice ? 'NOTICE' : 'POST',
           isRead: readKeys.has(key),
           createdAt: p.createdAt,
         });
@@ -357,28 +371,54 @@ export class ParentService {
   async getNotificationSettings(email: string) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
-    return {
-      notifyShuttleOperation: user.notifyShuttleOperation !== false,
-      notifyBoardPost: user.notifyBoardPost !== false,
-    };
+    return getUserNotificationSettings(user);
   }
 
-  async updateNotificationSettings(email: string, settings: { notifyShuttleOperation?: boolean; notifyBoardPost?: boolean }) {
+  async updateNotificationSettings(email: string, settings: Record<string, boolean>) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
+    const current = user.notificationSettings || {};
+    const updated = { ...current, ...settings };
+
+    // 기존 notifyBoardPost 설정 시 notifyNotice, notifyPost 둘 다에 반영
+    if (settings.notifyBoardPost !== undefined) {
+      user.notifyBoardPost = !!settings.notifyBoardPost;
+      if (settings.notifyNotice === undefined) {
+        user.notifyNotice = !!settings.notifyBoardPost;
+        updated.notifyNotice = !!settings.notifyBoardPost;
+        updated.notice = !!settings.notifyBoardPost;
+      }
+      if (settings.notifyPost === undefined) {
+        user.notifyPost = !!settings.notifyBoardPost;
+        updated.notifyPost = !!settings.notifyBoardPost;
+        updated.post = !!settings.notifyBoardPost;
+      }
+    }
+    if (settings.notifyNotice !== undefined) {
+      user.notifyNotice = !!settings.notifyNotice;
+      updated.notice = !!settings.notifyNotice;
+    }
+    if (settings.notice !== undefined) {
+      user.notifyNotice = !!settings.notice;
+      updated.notifyNotice = !!settings.notice;
+    }
+    if (settings.notifyPost !== undefined) {
+      user.notifyPost = !!settings.notifyPost;
+      updated.post = !!settings.notifyPost;
+    }
+    if (settings.post !== undefined) {
+      user.notifyPost = !!settings.post;
+      updated.notifyPost = !!settings.post;
+    }
     if (settings.notifyShuttleOperation !== undefined) {
       user.notifyShuttleOperation = !!settings.notifyShuttleOperation;
     }
-    if (settings.notifyBoardPost !== undefined) {
-      user.notifyBoardPost = !!settings.notifyBoardPost;
-    }
+
+    user.notificationSettings = updated;
     await this.userRepository.save(user);
     return {
       success: true,
-      settings: {
-        notifyShuttleOperation: user.notifyShuttleOperation !== false,
-        notifyBoardPost: user.notifyBoardPost !== false,
-      },
+      settings: getUserNotificationSettings(user),
     };
   }
 
@@ -508,6 +548,8 @@ export class ParentService {
     }
 
     const myChildStop = stops.find(s => s.isMyChild) || null;
+    // 개인정보 보호: 학부모에게는 내 아이 정류장만 전달 (다른 아이의 정류장 위치/이름 노출 차단)
+    const parentVisibleStops = stops.filter(s => s.isMyChild);
 
     return {
       vehicleId: student.assignedVehicle.id,
@@ -516,13 +558,34 @@ export class ParentService {
         longitude: parseFloat(academy.longitude as any),
         name: academy.name
       } : null,
-      stops,
+      stops: parentVisibleStops,
       routePoints,
       academyPickupPoints,
       myChildStop
     };
   }
 
+  async getRoutePath(email: string) {
+    let student = await this.studentRepository.createQueryBuilder('student')
+      .leftJoinAndSelect('student.parentUser', 'parentUser')
+      .leftJoinAndSelect('student.studentUser', 'studentUser')
+      .leftJoinAndSelect('student.assignedVehicle', 'vehicle')
+      .where('parentUser.email = :email OR studentUser.email = :email', { email })
+      .getOne();
+
+    if (!student) {
+      student = await this.studentRepository.findOne({
+        where: { raw: { email } },
+        relations: { assignedVehicle: true }
+      });
+    }
+
+    if (!student?.assignedVehicle) {
+      return { path: [], progressIndex: 0 };
+    }
+
+    return TeacherService.getRoutePathForVehicle(student.assignedVehicle.id);
+  }
 
   async createMessage(email: string, targetRoles: string[], message: string) {
     if (!message || message.trim() === '') {
@@ -869,7 +932,7 @@ export class ParentService {
     return { success: true, message: '비밀번호가 성공적으로 변경되었습니다.' };
   }
 
-  async getClassBoard(email: string) {
+  async getClassBoard(email: string, postType?: string) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) return [];
 
@@ -885,16 +948,21 @@ export class ParentService {
     const academyId = student.academy?.id || user.academyId;
     if (!academyId) return [];
 
-    const className = getStudentClassName(student);
+    // 다자녀: 내 아이들이 속한 모든 반의 글 + 전체 공개 (반이 없으면 전체 공개만)
+    const classNames = await getLinkedClassNames(this.studentRepository, user.id);
+    if (classNames.length === 0) {
+      const own = getStudentClassName(student);
+      if (own) classNames.push(own);
+    }
 
     const qb = this.boardPostRepository.createQueryBuilder('post')
       .leftJoinAndSelect('post.comments', 'comment')
       .where('post.academyId = :aid', { aid: academyId });
 
-    if (className) {
-      qb.andWhere('(post.visibility = :vAll OR post.targetClass = :tc OR post.className = :tc)', { vAll: 'ALL', tc: className });
-    } else {
-      qb.andWhere('post.visibility = :vAll', { vAll: 'ALL' });
+    applyBoardVisibility(qb, classNames);
+
+    if (postType && postType !== 'ALL') {
+      qb.andWhere('post.postType = :postType', { postType });
     }
 
     qb.orderBy('post.createdAt', 'DESC')
@@ -902,19 +970,30 @@ export class ParentService {
 
     const posts = await qb.getMany();
 
+    const authorUserIds = posts.map(p => p.authorUserId).filter(Boolean);
+    const roleMap = new Map<number, string>();
+    if (authorUserIds.length > 0) {
+      const authorUsers = await this.userRepository.find({ where: { id: In(authorUserIds) } });
+      for (const u of authorUsers) {
+        roleMap.set(u.id, u.role);
+      }
+    }
+
     return Promise.all(posts.map(async p => {
       const resolvedImageUrl = await resolveMediaRef(p.imageUrl);
       const resolvedImages = await resolveMediaRefs(p.images);
+      const effectiveRole = (p.authorUserId && roleMap.get(p.authorUserId)) || p.authorRole;
       return {
         id: p.id,
         title: p.title,
         content: p.content,
+        postType: p.postType || 'POST',
         imageUrl: resolvedImageUrl,
         images: resolvedImages,
         createdAt: p.createdAt,
         updatedAt: p.updatedAt,
         authorName: p.authorName,
-        authorRole: p.authorRole,
+        authorRole: effectiveRole,
         targetClass: p.targetClass,
         className: p.className || p.targetClass,
         likeCount: p.likeCount || 0,

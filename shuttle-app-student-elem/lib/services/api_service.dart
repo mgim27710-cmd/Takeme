@@ -9,6 +9,37 @@ import '../models/student_model.dart';
 import '../models/notification_model.dart';
 import '../models/route_model.dart';
 
+/// 서버가 응답은 했지만 처리하지 못한 경우(5xx) 등, 사용자에게 보여줄 수 있는 오류
+class ApiException implements Exception {
+  final int? statusCode;
+  final String message;
+  ApiException(this.message, [this.statusCode]);
+
+  @override
+  String toString() => message;
+}
+
+/// 예외를 사용자가 이해할 수 있는 한 줄 안내로 바꾼다 (기술적인 오류 문구를 그대로 보여주지 않는다)
+String friendlyError(Object e) {
+  if (e is ApiException) return e.message;
+  final t = e.toString();
+  if (t.contains('SocketException') ||
+      t.contains('ClientException') ||
+      t.contains('TimeoutException') ||
+      t.contains('HandshakeException') ||
+      t.contains('Failed host lookup')) {
+    return '인터넷 연결을 확인해 주세요.';
+  }
+  return '잠시 후 다시 시도해 주세요.';
+}
+
+/// 5xx(서버 오류)는 "데이터 없음"과 구분되도록 예외로 알린다. 4xx 는 호출한 쪽이 데이터 없음 등으로 판단한다.
+void throwIfServerError(http.Response res) {
+  if (res.statusCode >= 500) {
+    throw ApiException('서버에 문제가 있어 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.', res.statusCode);
+  }
+}
+
 class ApiService {
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
@@ -171,28 +202,29 @@ class ApiService {
       res = await http.post(url, headers: headers, body: encodedBody).timeout(const Duration(seconds: 7));
     } catch (e) {
       lastError = e;
-      print('[ApiService] Primary host (${AppConfig.apiHost}) failed: $e');
+      debugPrint('[ApiService] Primary host (${AppConfig.apiHost}) failed: $e');
     }
 
-    // 모바일 환경에서 1차 실패 또는 502/503 에러 발생 시 fallback host (http://52.63.245.203:3000) 자동 재시도
-    if (res == null || res.statusCode >= 500) {
+    // 1차 실패 또는 5xx 시 암호화되지 않은 대체 주소(http)로 재시도 -> 로그인 정보가 평문으로 가므로 개발(디버그)일 때만 허용
+    if (AppConfig.canUseHttpFallback && (res == null || res.statusCode >= 500)) {
       try {
         final fallbackUrl = Uri.parse('${AppConfig.fallbackApiHost}/auth/login');
-        print('[ApiService] Attempting fallback host: $fallbackUrl');
+        debugPrint('[ApiService] Attempting fallback host: $fallbackUrl');
         final fallbackRes = await http.post(fallbackUrl, headers: headers, body: encodedBody).timeout(const Duration(seconds: 7));
         if (fallbackRes.statusCode < 500) {
           res = fallbackRes;
           AppConfig.useFallback();
-          print('[ApiService] Fallback successful! Active host switched to: ${AppConfig.apiHost}');
+          debugPrint('[ApiService] Fallback successful! Active host switched to: ${AppConfig.apiHost}');
         }
       } catch (e) {
         lastError ??= e;
-        print('[ApiService] Fallback host failed: $e');
+        debugPrint('[ApiService] Fallback host failed: $e');
       }
     }
 
     if (res == null) {
-      throw Exception('서버에 연결할 수 없습니다. ($lastError)');
+      debugPrint('[ApiService] 서버 연결 실패: $lastError');
+      throw Exception('서버에 연결할 수 없습니다. 인터넷 연결을 확인하고 잠시 후 다시 시도해 주세요.');
     }
 
     final data = jsonDecode(utf8.decode(res.bodyBytes));
@@ -293,14 +325,13 @@ class ApiService {
   // PARENT & STUDENT
   // ----------------------------------------------------
   Future<List<NotificationModel>> getNotifications(String email) async {
-    try {
-      final url = Uri.parse('${AppConfig.apiHost}/parent/notifications?email=${Uri.encodeComponent(email)}');
-      final res = await getWithAuth(url);
-      if (res.statusCode == 200) {
-        final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
-        return list.map((item) => NotificationModel.fromJson(item as Map<String, dynamic>)).toList();
-      }
-    } catch (_) {}
+    final url = Uri.parse('${AppConfig.apiHost}/parent/notifications?email=${Uri.encodeComponent(email)}');
+    final res = await getWithAuth(url);
+    throwIfServerError(res);
+    if (res.statusCode == 200) {
+      final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
+      return list.map((item) => NotificationModel.fromJson(item as Map<String, dynamic>)).toList();
+    }
     return [];
   }
 
@@ -370,22 +401,26 @@ class ApiService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getClassBoardPosts(String email) async {
-    try {
-      final url = Uri.parse('${AppConfig.apiHost}/parent/class-board?email=${Uri.encodeComponent(email)}');
-      final res = await getWithAuth(url);
-      if (res.statusCode == 200) {
-        final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
-        return list.map((e) => e as Map<String, dynamic>).toList();
-      }
-    } catch (_) {}
+  Future<List<Map<String, dynamic>>> getClassBoardPosts(String email, {String? postType}) async {
+    final qp = <String, String>{'email': email};
+    if (postType != null && postType.isNotEmpty && postType != 'ALL') {
+      qp['postType'] = postType;
+    }
+    final url = Uri.parse('${AppConfig.apiHost}/parent/class-board').replace(queryParameters: qp);
+    final res = await getWithAuth(url);
+    throwIfServerError(res);
+    if (res.statusCode == 200) {
+      final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
+      return list.map((e) => e as Map<String, dynamic>).toList();
+    }
     return [];
   }
 
-  Future<RouteDataModel?> getParentRoute(String email) async {
+  Future<RouteDataModel?> getParentRoute(String email, {bool throwOnError = false}) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/parent/route?email=${Uri.encodeComponent(email)}');
       final res = await getWithAuth(url).timeout(const Duration(seconds: 6));
+      if (throwOnError) throwIfServerError(res);
       if (res.statusCode == 200) {
         final decoded = jsonDecode(utf8.decode(res.bodyBytes));
         if (decoded is Map<String, dynamic>) {
@@ -393,15 +428,17 @@ class ApiService {
         }
       }
     } catch (e) {
+      if (throwOnError) rethrow;
       debugPrint('[ApiService] getParentRoute error: $e');
     }
     return null;
   }
 
-  Future<StudentModel?> getMyChild(String email) async {
+  Future<StudentModel?> getMyChild(String email, {bool throwOnError = false}) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/parent/my-child?email=${Uri.encodeComponent(email)}');
       final res = await getWithAuth(url).timeout(const Duration(seconds: 6));
+      if (throwOnError) throwIfServerError(res);
       if (res.statusCode == 200) {
         final data = jsonDecode(utf8.decode(res.bodyBytes));
         if (data != null && data is Map<String, dynamic>) {
@@ -409,23 +446,27 @@ class ApiService {
         }
       }
     } catch (e) {
+      if (throwOnError) rethrow;
       debugPrint('[ApiService] getMyChild error: $e');
     }
     return null;
   }
 
-  Future<List<StudentModel>> getMyChildren(String email) async {
+  Future<List<StudentModel>> getMyChildren(String email, {bool throwOnError = false}) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/parent/my-children?email=${Uri.encodeComponent(email)}');
       final res = await getWithAuth(url);
+      if (throwOnError) throwIfServerError(res);
       if (res.statusCode == 200) {
         final list = jsonDecode(utf8.decode(res.bodyBytes));
         if (list is List) {
           return list.map((e) => StudentModel.fromJson(e as Map<String, dynamic>)).toList();
         }
       }
-    } catch (_) {}
-    final single = await getMyChild(email);
+    } catch (_) {
+      if (throwOnError) rethrow;
+    }
+    final single = await getMyChild(email, throwOnError: throwOnError);
     return single != null ? [single] : [];
   }
 
@@ -458,16 +499,15 @@ class ApiService {
   }
 
   Future<List<Map<String, dynamic>>> getMyChangeRequests() async {
-    try {
-      final url = Uri.parse('${AppConfig.apiHost}/approval/my');
-      final res = await getWithAuth(url);
-      if (res.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(res.bodyBytes));
-        if (data is List) {
-          return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-        }
+    final url = Uri.parse('${AppConfig.apiHost}/approval/my');
+    final res = await getWithAuth(url);
+    throwIfServerError(res);
+    if (res.statusCode == 200) {
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      if (data is List) {
+        return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
       }
-    } catch (_) {}
+    }
     return [];
   }
 
@@ -547,10 +587,11 @@ class ApiService {
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
   }
 
-  Future<Map<String, dynamic>?> getTodaySchedule(String email) async {
+  Future<Map<String, dynamic>?> getTodaySchedule(String email, {bool throwOnError = false}) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/parent/today-schedule?email=${Uri.encodeComponent(email)}');
       final res = await getWithAuth(url).timeout(const Duration(seconds: 6));
+      if (throwOnError) throwIfServerError(res);
       if (res.statusCode == 200) {
         final decoded = jsonDecode(utf8.decode(res.bodyBytes));
         if (decoded is Map<String, dynamic>) {
@@ -558,6 +599,7 @@ class ApiService {
         }
       }
     } catch (e) {
+      if (throwOnError) rethrow;
       debugPrint('[ApiService] getTodaySchedule error: $e');
     }
     return null;
@@ -824,105 +866,144 @@ class ApiService {
     }
   }
 
-  // ==================== CHAT APIs ====================
-  Future<List<Map<String, dynamic>>> getChatRooms(String email) async {
+  // ==================== REALTIME CHAT APIs ====================
+  Future<Map<String, dynamic>> getChatUsers() async {
     try {
-      final url = Uri.parse('${AppConfig.apiHost}/chat/rooms?email=${Uri.encodeComponent(email)}');
-      final res = await getWithAuth(url).timeout(const Duration(seconds: 6));
+      final url = Uri.parse('${AppConfig.apiHost}/chat/users');
+      final res = await getWithAuth(url);
       if (res.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
-        return data.whereType<Map<String, dynamic>>().toList();
-      }
-      return [];
-    } catch (e) {
-      debugPrint('[ApiService] getChatRooms error: $e');
-      return [];
-    }
-  }
-
-  Future<Map<String, List<Map<String, dynamic>>>> getChatUsers(String email) async {
-    try {
-      final url = Uri.parse('${AppConfig.apiHost}/chat/users?email=${Uri.encodeComponent(email)}');
-      final res = await getWithAuth(url).timeout(const Duration(seconds: 6));
-      if (res.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
+        final data = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
         return {
-          'drivers': (data['drivers'] as List<dynamic>? ?? []).whereType<Map<String, dynamic>>().toList(),
-          'teachers': (data['teachers'] as List<dynamic>? ?? []).whereType<Map<String, dynamic>>().toList(),
-          'admins': (data['admins'] as List<dynamic>? ?? []).whereType<Map<String, dynamic>>().toList(),
-          'parents': (data['parents'] as List<dynamic>? ?? []).whereType<Map<String, dynamic>>().toList(),
+          'success': true,
+          'drivers': (data['drivers'] as List? ?? []).cast<Map<String, dynamic>>(),
+          'teachers': (data['teachers'] as List? ?? []).cast<Map<String, dynamic>>(),
+          'parents': (data['parents'] as List? ?? []).cast<Map<String, dynamic>>(),
+          'admins': (data['admins'] as List? ?? []).cast<Map<String, dynamic>>(),
+        };
+      } else {
+        return {
+          'success': false,
+          'statusCode': res.statusCode,
+          'errorMessage': '서버 오류가 발생했습니다 (${res.statusCode}).',
+          'drivers': <Map<String, dynamic>>[],
+          'teachers': <Map<String, dynamic>>[],
+          'parents': <Map<String, dynamic>>[],
+          'admins': <Map<String, dynamic>>[],
         };
       }
-      return {'drivers': [], 'teachers': [], 'admins': [], 'parents': []};
     } catch (e) {
       debugPrint('[ApiService] getChatUsers error: $e');
-      return {'drivers': [], 'teachers': [], 'admins': [], 'parents': []};
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> getChatMessages(int roomId, {String? email, int? userId}) async {
-    try {
-      final queryParams = <String, String>{'roomId': roomId.toString()};
-      if (email != null) queryParams['email'] = email;
-      if (userId != null) queryParams['userId'] = userId.toString();
-      final uri = Uri.parse('${AppConfig.apiHost}/chat/messages').replace(queryParameters: queryParams);
-      final res = await getWithAuth(uri).timeout(const Duration(seconds: 6));
-      if (res.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
-        return data.whereType<Map<String, dynamic>>().toList();
-      }
-      return [];
-    } catch (e) {
-      debugPrint('[ApiService] getChatMessages error: $e');
-      return [];
-    }
-  }
-
-  Future<Map<String, dynamic>> sendChatMessage({
-    required int roomId,
-    required String text,
-    required String senderEmail,
-  }) async {
-    try {
-      final url = Uri.parse('${AppConfig.apiHost}/chat/messages');
-      final res = await postWithAuth(url, jsonEncode({
-        'roomId': roomId,
-        'text': text,
-        'senderEmail': senderEmail,
-      })).timeout(const Duration(seconds: 6));
-      final data = jsonDecode(utf8.decode(res.bodyBytes));
       return {
-        'success': res.statusCode == 200 || res.statusCode == 201,
-        'data': data,
+        'success': false,
+        'statusCode': 0,
+        'errorMessage': '네트워크 연결 오류가 발생했습니다.',
+        'drivers': <Map<String, dynamic>>[],
+        'teachers': <Map<String, dynamic>>[],
+        'parents': <Map<String, dynamic>>[],
+        'admins': <Map<String, dynamic>>[],
       };
-    } catch (e) {
-      debugPrint('[ApiService] sendChatMessage error: $e');
-      return {'success': false, 'message': '메시지 전송 실패: $e'};
     }
   }
 
-  Future<Map<String, dynamic>> createChatRoom({
-    required String name,
-    String type = 'DIRECT',
-    required List<int> userIds,
-    required String creatorEmail,
-  }) async {
+  Future<List<Map<String, dynamic>>> getChatRooms({bool throwOnError = false}) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/chat/rooms');
-      final res = await postWithAuth(url, jsonEncode({
-        'name': name,
-        'type': type,
+      final res = await getWithAuth(url);
+      if (throwOnError) throwIfServerError(res);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        if (data is List) {
+          return data.cast<Map<String, dynamic>>();
+        }
+      }
+    } catch (e) {
+      if (throwOnError) rethrow;
+      debugPrint('[ApiService] getChatRooms error: $e');
+    }
+    return [];
+  }
+
+  Future<List<Map<String, dynamic>>> getChatMessages(int roomId, {bool throwOnError = false}) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/messages?roomId=$roomId');
+      final res = await getWithAuth(url);
+      if (throwOnError) throwIfServerError(res);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        if (data is List) {
+          return data.cast<Map<String, dynamic>>();
+        }
+      }
+    } catch (e) {
+      if (throwOnError) rethrow;
+      debugPrint('[ApiService] getChatMessages error: $e');
+    }
+    return [];
+  }
+
+  Future<Map<String, dynamic>?> createChatRoom(List<int> userIds, {String? name, String? type}) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/rooms');
+      final payload = {
         'userIds': userIds,
-        'creatorEmail': creatorEmail,
-      })).timeout(const Duration(seconds: 6));
-      final data = jsonDecode(utf8.decode(res.bodyBytes));
-      return {
-        'success': res.statusCode == 200 || res.statusCode == 201,
-        'data': data,
+        if (name != null && name.isNotEmpty) 'name': name,
+        if (type != null && type.isNotEmpty) 'type': type,
       };
+      final res = await postWithAuth(url, jsonEncode(payload));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
     } catch (e) {
       debugPrint('[ApiService] createChatRoom error: $e');
-      return {'success': false, 'message': '채팅방 생성 실패: $e'};
     }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> sendChatMessage(int roomId, String text) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/messages');
+      final res = await postWithAuth(url, jsonEncode({'roomId': roomId, 'text': text}));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('[ApiService] sendChatMessage error: $e');
+    }
+    return null;
+  }
+
+  Future<bool> markChatRoomAsRead(int roomId) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/rooms/$roomId/read');
+      final res = await postWithAuth(url, '{}');
+      return res.statusCode == 200 || res.statusCode == 201;
+    } catch (e) {
+      debugPrint('[ApiService] markChatRoomAsRead error: $e');
+      return false;
+    }
+  }
+
+  Future<int> getChatTotalUnreadCount() async {
+    try {
+      final rooms = await getChatRooms();
+      int sum = 0;
+      for (final r in rooms) {
+        sum += (r['unreadCount'] as int? ?? 0);
+      }
+      return sum;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<Map<String, dynamic>?> getRoutePath() async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/parent/route-path');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
   }
 }

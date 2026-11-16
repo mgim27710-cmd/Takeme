@@ -10,7 +10,7 @@ import 'change_request_modal.dart';
 import 'my_requests_screen.dart';
 import 'student_notification_list_screen.dart';
 import 'student_board_screen.dart';
-import 'student_chat_room_list_screen.dart';
+import '../chat/chat_room_list_screen.dart';
 import '../settings_screen.dart';
 
 class StudentHomeScreen extends StatefulWidget {
@@ -32,6 +32,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   double? _busLat;
   double? _busLng;
   bool _isLoading = true;
+  String? _loadError; // 홈 데이터 일부 불러오기 실패 이유 (null 이면 정상)
 
   @override
   void initState() {
@@ -83,11 +84,23 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
         debugPrint('[StudentHomeScreen] Socket connect error: $e');
       }
 
-      final results = await Future.wait([
-        ApiService().getMyChild(user.email),
-        ApiService().getParentRoute(user.email),
-        ApiService().getTodaySchedule(user.email),
+      // 불러오기에 실패한 이유 (하나라도 실패하면 화면 위에 안내를 보여준다)
+      String? loadProblem;
+      final results = await Future.wait<Object?>([
+        ApiService().getMyChild(user.email, throwOnError: true).catchError((Object e) {
+          loadProblem ??= friendlyError(e);
+          return null;
+        }),
+        ApiService().getParentRoute(user.email, throwOnError: true).catchError((Object e) {
+          loadProblem ??= friendlyError(e);
+          return null;
+        }),
+        ApiService().getTodaySchedule(user.email, throwOnError: true).catchError((Object e) {
+          loadProblem ??= friendlyError(e);
+          return null;
+        }),
       ]).timeout(const Duration(seconds: 8), onTimeout: () {
+        loadProblem ??= '응답이 늦어 일부 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
         return [null, null, null];
       });
 
@@ -100,6 +113,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
           _studentInfo = student;
           _routeData = route;
           _todaySchedule = schedule;
+          _loadError = loadProblem;
         });
 
         if (route?.vehicleId != null) {
@@ -134,6 +148,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
       }
     } catch (e) {
       debugPrint('[StudentHomeScreen] _loadAllData error: $e');
+      if (mounted) setState(() => _loadError = friendlyError(e));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -142,8 +157,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
   /// 학생 모바일 통학 QR 탑승권 모달
   void _showStudentQRModal() {
     final user = ApiService().currentUser;
-    final studentName = _studentInfo?.name ?? user?.name ?? '김민준';
-    final vehicleName = _studentInfo?.vehicleName ?? '1호차 셔틀';
+    final studentName = _studentInfo?.name ?? user?.name ?? '학생';
+    final vehicleName = _studentInfo?.vehicleName ?? '차량 미배정';
 
     showModalBottomSheet(
       context: context,
@@ -347,11 +362,50 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     );
   }
 
+  /// 홈 데이터 중 일부를 불러오지 못했을 때 화면 위에 보여주는 안내 (이유 + 다시 시도)
+  Widget _buildLoadErrorBanner() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7ED),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFFED7AA)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_rounded, color: Color(0xFFEA580C), size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '일부 정보를 불러오지 못했습니다',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF9A3412)),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _loadError ?? '',
+                  style: const TextStyle(fontSize: 12, color: Color(0xFFC2410C)),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: _loadAllData,
+            child: const Text('다시 시도', style: TextStyle(fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildHomeBody() {
     final user = ApiService().currentUser;
-    final studentName = _studentInfo?.name ?? user?.name ?? '김민준';
-    final academyName = _routeData?.academyName ?? _studentInfo?.academyName ?? '마곡 안심 아카데미';
-    final vehicleName = _studentInfo?.vehicleName ?? '1호차 셔틀';
+    final studentName = _studentInfo?.name ?? user?.name ?? '학생';
+    final academyName = _routeData?.academyName ?? _studentInfo?.academyName ?? '소속 기관 정보 없음';
+    final vehicleName = _studentInfo?.vehicleName ?? '차량 미배정';
 
     return RefreshIndicator(
       onRefresh: _loadAllData,
@@ -364,6 +418,8 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (_loadError != null) _buildLoadErrorBanner(),
+
                 // 1. 내 프로필 및 통학 상태 카드
                 Container(
                   padding: const EdgeInsets.all(16),
@@ -600,7 +656,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                   childClassName: _studentInfo?.className,
                   isEmbedded: true,
                 ),
-                const StudentChatRoomListScreen(isEmbedded: true),
+                const ChatRoomListScreen(isEmbeddedTab: true),
               ],
             ),
       bottomNavigationBar: BottomNavigationBar(
