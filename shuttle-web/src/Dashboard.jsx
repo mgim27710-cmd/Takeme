@@ -7032,7 +7032,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             
             if (!showStudent || !displayLat || !displayLng) return null;
 
-            // 당일 1회 탑승 희망 또는 당일 임시 탑승지 변경 원아 감지
+            // 1. 당일 1회 탑승 희망 또는 당일 임시 탑승지 변경 원아 감지
             const isOneTimeStudent = Boolean(
               st.isOneTimeRide ||
               st.oneTimeType ||
@@ -7042,9 +7042,73 @@ const parseKindergartenExcelSheet = (sheet) => {
               (st.isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))
             );
 
-            // 일회성 탑승 원아는 차량 색상과 겹치지 않는 선명한 핫핑크(#f43f5e) 적용
-            const ONE_TIME_COLOR = '#f43f5e';
-            const stColor = isOneTimeStudent 
+            // 2. 미탑승 원아 판별 (도보 등원, 자가 픽업 등 - 회색 표시)
+            const isPureNotRiding = Boolean(st.isNotRiding && !isOneTimeStudent);
+
+            // 거리 계산 헬퍼 (Km 단위)
+            const calcDistKm = (lat1, lon1, lat2, lon2) => {
+              if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
+              const R = 6371;
+              const dLat = (Number(lat2) - Number(lat1)) * Math.PI / 180;
+              const dLon = (Number(lon2) - Number(lon1)) * Math.PI / 180;
+              const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                        Math.cos(Number(lat1) * Math.PI / 180) * Math.cos(Number(lat2) * Math.PI / 180) *
+                        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+              return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+            };
+
+            // 3. 증차 필요 판별: 25명 초과 또는 배차 없음 상태에서 주변 5km 내에 여유가 있는 다른 배차 차량이 없는 경우
+            let needsExtraBus = Boolean(st.needsExtraBus);
+            if (!isPureNotRiding && !needsExtraBus) {
+              const currentBusRiders = displayBusId
+                ? students.filter(s => (s.assignedBusId === displayBusId || s.assignedVehicle?.id === displayBusId) && !s.isNotRiding)
+                : [];
+              const isOverCapacity = currentBusRiders.length > 25;
+              const isUnassigned = !displayBusId;
+
+              if (isUnassigned || isOverCapacity) {
+                // 주변 5km 이내에 다른 배차 차량(현재 버스 제외, 정원 25명 미만인 여유 차량) 탐색
+                const hasNeighborWithin5Km = buses.some(b => {
+                  if (b.id === displayBusId) return false;
+                  const busRiders = students.filter(s => (s.assignedBusId === b.id || s.assignedVehicle?.id === b.id) && !s.isNotRiding);
+                  if (busRiders.length >= 25) return false;
+
+                  let minD = Infinity;
+                  let poly = b.polygonCoordinates;
+                  while (typeof poly === 'string') {
+                    try { poly = JSON.parse(poly); } catch (e) { break; }
+                  }
+                  if (Array.isArray(poly) && poly.length > 0) {
+                    for (const pt of poly) {
+                      if (Array.isArray(pt) && pt.length >= 2) {
+                        const d = calcDistKm(displayLat, displayLng, pt[0], pt[1]);
+                        if (d < minD) minD = d;
+                      }
+                    }
+                  }
+                  if (b.latitude && b.longitude) {
+                    const d = calcDistKm(displayLat, displayLng, b.latitude, b.longitude);
+                    if (d < minD) minD = d;
+                  }
+                  return minD <= 5.0; // 5km 이내
+                });
+
+                if (!hasNeighborWithin5Km) {
+                  needsExtraBus = true;
+                }
+              }
+            }
+
+            // 마커 색상 결정
+            const ONE_TIME_COLOR = '#f43f5e'; // 핫핑크 (당일 1회)
+            const NOT_RIDING_COLOR = '#94a3b8'; // 회색 (미탑승 학생)
+            const EXTRA_BUS_COLOR = '#ea580c'; // 선명한 주황색 (증차 필요)
+            
+            const stColor = needsExtraBus
+              ? EXTRA_BUS_COLOR
+              : isPureNotRiding
+              ? NOT_RIDING_COLOR
+              : isOneTimeStudent 
               ? ONE_TIME_COLOR 
               : displayBusId 
               ? (buses.find(b=>b.id===displayBusId)?.color || '#64748b') 
@@ -7052,17 +7116,34 @@ const parseKindergartenExcelSheet = (sheet) => {
 
             const isHighlighted = highlightedStudentId === st.id;
             const studentIcon = L.divIcon({
-              className: isHighlighted ? 'custom-student-marker-highlighted' : isOneTimeStudent ? 'custom-student-marker-onetime' : 'custom-student-marker',
+              className: isHighlighted 
+                ? 'custom-student-marker-highlighted' 
+                : needsExtraBus
+                ? 'custom-student-marker-extrabus'
+                : isPureNotRiding
+                ? 'custom-student-marker-notriding'
+                : isOneTimeStudent 
+                ? 'custom-student-marker-onetime' 
+                : 'custom-student-marker',
               html: isHighlighted ? `
                 <div style="position: relative; display: flex; flex-direction: column; align-items: center; z-index: 1000;">
                   <div style="position: absolute; top: -30px; background: #312e81; color: white; padding: 2.5px 8px; border-radius: 9999px; font-size: 11px; font-weight: 900; white-space: nowrap; box-shadow: 0 4px 12px rgba(49,46,129,0.5); border: 2px solid #818cf8; animation: bounce 1s infinite;">
                     ★ ${st.name} 탑승지
                   </div>
                   <div style="position: absolute; width: 42px; height: 42px; border-radius: 50%; background: #4f46e5; opacity: 0.35; animation: ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
-                  <div style="position: relative; background: #4f46e5; width: 26px; height: 26px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 14px rgba(79,70,229,0.8); display: flex; align-items: center; justify-content: center; color: white; font-size: 13px; font-weight: 900;">
-                    📍
+                  <div style="position: relative; background: #4f46e5; width: 26px; height: 26px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 14px rgba(79,70,229,0.8); display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: 900;">
+                    선택
                   </div>
                 </div>
+              ` : needsExtraBus ? `
+                <div style="position: relative; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;">
+                  <span style="position: absolute; inset: -3px; border-radius: 50%; background: #ea580c; opacity: 0.4; animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
+                  <div style="position: relative; background: #ea580c; width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid white; box-shadow: 0 3px 10px rgba(234,88,12,0.8); display: flex; align-items: center; justify-content: center; color: white; font-size: 13px; font-weight: 900; line-height: 1;">
+                    !
+                  </div>
+                </div>
+              ` : isPureNotRiding ? `
+                <div style="background-color: ${NOT_RIDING_COLOR}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.35);" title="미탑승 원아"></div>
               ` : isOneTimeStudent ? `
                 <div style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">
                   <span style="position: absolute; inset: -2px; border-radius: 50%; background: #f43f5e; opacity: 0.45; animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
@@ -7073,22 +7154,49 @@ const parseKindergartenExcelSheet = (sheet) => {
               ` : `
                 <div style="background-color: ${stColor}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>
               `,
-              iconSize: isHighlighted ? [44, 44] : isOneTimeStudent ? [24, 24] : [14, 14],
-              iconAnchor: isHighlighted ? [22, 22] : isOneTimeStudent ? [12, 12] : [7, 7]
+              iconSize: isHighlighted ? [44, 44] : needsExtraBus ? [26, 26] : isOneTimeStudent ? [24, 24] : [14, 14],
+              iconAnchor: isHighlighted ? [22, 22] : needsExtraBus ? [13, 13] : isOneTimeStudent ? [12, 12] : [7, 7]
             });
             return (
               <Marker key={st.id} position={[displayLat, displayLng]} icon={studentIcon}>
                 <Popup className="student-popup">
                 <div className="font-bold text-lg mb-1 flex items-center justify-between">
                   <span>{st.name} <span className="text-sm font-normal text-slate-500">{st.raw?.['성별']} / {st.raw?.['연령'] || st.raw?.['학년'] || ''}</span></span>
-                  {isOneTimeStudent && (
+                  {needsExtraBus ? (
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-300">
+                      증차 필요
+                    </span>
+                  ) : isPureNotRiding ? (
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300">
+                      미탑승
+                    </span>
+                  ) : isOneTimeStudent ? (
                     <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-300">
                       당일 1회 탑승
                     </span>
-                  )}
+                  ) : null}
                 </div>
                 <div className="text-sm text-slate-700 mb-2">{st.raw?.['유치원명'] || st.raw?.['학교명']} {st.raw?.['반명'] ? `(${st.raw?.['반명']})` : ''} {st.raw?.['하원구분'] ? `[${st.raw?.['하원구분']}]` : ''}</div>
                 
+                {needsExtraBus && (
+                  <div className="bg-amber-50 text-amber-950 border border-amber-300 text-xs font-bold p-2.5 rounded-xl mb-2 flex items-start gap-2 shadow-2xs">
+                    <span className="w-4 h-4 rounded-full bg-amber-500 text-white flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5">!</span>
+                    <div>
+                      <div className="font-black text-amber-950">주변 5KM내에 다른 배차 차량이 없어 증차가 필요합니다</div>
+                      <div className="text-[11px] text-amber-700 font-medium mt-0.5">
+                        (근처 차량 25명 정원 초과 또는 반경 5KM 이내 대체 노선 부재)
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {isPureNotRiding && (
+                  <div className="bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold p-2 rounded-lg mb-2 flex items-center justify-center gap-1.5 shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                    <span>[셔틀 미탑승] 도보 또는 자가 등하원 원아</span>
+                  </div>
+                )}
+
                 {isOneTimeStudent && (
                   <div className="bg-rose-50 text-rose-700 border border-rose-200 text-xs font-black p-2 rounded-lg mb-2 flex items-center justify-center gap-1.5 shadow-2xs">
                     <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
@@ -7106,11 +7214,15 @@ const parseKindergartenExcelSheet = (sheet) => {
                 </div>
                 
                 <div className="text-sm font-bold text-center p-2 rounded border mb-2" style={{ 
-                  backgroundColor: isOneTimeStudent ? '#fff1f2' : (stColor + '20'), 
-                  color: isOneTimeStudent ? '#e11d48' : stColor,
-                  borderColor: isOneTimeStudent ? '#fecdd3' : 'transparent'
+                  backgroundColor: needsExtraBus ? '#fff7ed' : isPureNotRiding ? '#f1f5f9' : isOneTimeStudent ? '#fff1f2' : (stColor + '20'), 
+                  color: needsExtraBus ? '#c2410c' : isPureNotRiding ? '#475569' : isOneTimeStudent ? '#e11d48' : stColor,
+                  borderColor: needsExtraBus ? '#fdba74' : isPureNotRiding ? '#cbd5e1' : isOneTimeStudent ? '#fecdd3' : 'transparent'
                 }}>
-                  {isOneTimeStudent 
+                  {needsExtraBus
+                    ? '증차 필요 (주변 5KM 내 다른 배차 차량 없음)'
+                    : isPureNotRiding
+                    ? '셔틀 미탑승 (도보/자차)'
+                    : isOneTimeStudent 
                     ? `당일 임시 탑승: ${displayBusId ? buses.find(b=>b.id===displayBusId)?.name : '임시 셔틀'} (1일)`
                     : (displayBusId ? `배차: ${buses.find(b=>b.id===displayBusId)?.name}` : '배차 없음 (구역 밖)')
                   }
@@ -7184,6 +7296,16 @@ const parseKindergartenExcelSheet = (sheet) => {
             </span>
           </div>
           <div className="space-y-1.5 text-xs font-bold text-slate-700">
+            {/* Needs Extra Bus indicator */}
+            <div className="flex items-center gap-2 p-1.5 rounded-lg bg-orange-50/90 border border-orange-200 text-orange-950">
+              <div className="relative w-5 h-5 flex items-center justify-center shrink-0">
+                <span className="w-4 h-4 rounded-full bg-orange-600 text-white text-[10px] font-black flex items-center justify-center border border-white shadow-2xs">!</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] font-black leading-tight">증차 필요 (주변 5KM 내 배차 없음)</div>
+                <div className="text-[10px] text-orange-700 font-normal">25명 초과 또는 대체 가능 호차 부재</div>
+              </div>
+            </div>
             {/* Full vehicle hatched pattern indicator */}
             <div 
               onClick={handleFocusFullBusZone}
@@ -7225,7 +7347,11 @@ const parseKindergartenExcelSheet = (sheet) => {
                 <div className="text-[10px] text-rose-600 font-normal">미탑승 셔틀 희망 원아</div>
               </div>
             </div>
-
+            {/* Pure not riding (Walk / Self-pickup) indicator */}
+            <div className="flex items-center gap-2 px-1.5 py-1 text-slate-600">
+              <span className="w-3.5 h-3.5 rounded-full bg-slate-400 border border-white shadow-xs shrink-0"></span>
+              <span className="text-[11px]">셔틀 미탑승 (도보/자차 - 회색 표시)</span>
+            </div>
             {/* Unassigned regular indicator */}
             <div 
               onClick={handleFocusUnassignedRiders}

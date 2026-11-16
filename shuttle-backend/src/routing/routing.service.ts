@@ -1131,7 +1131,7 @@ export class RoutingService {
           return dA - dB;
         });
 
-        // Retain 25 closest students, spill surplus to nearest available vehicle
+        // Retain 25 closest students, spill surplus to nearest available vehicle within 5km
         const surplus = vs.assignedStudents.splice(CAPACITY);
         for (const st of surplus) {
           let bestNeighbor: VehicleZoneState | null = null;
@@ -1141,7 +1141,7 @@ export class RoutingService {
               const oLat = otherVs.centroid[0] !== 0 ? otherVs.centroid[0] : avgLat;
               const oLng = otherVs.centroid[1] !== 0 ? otherVs.centroid[1] : avgLng;
               const d = this.getDistanceKm(Number(st.latitude), Number(st.longitude), oLat, oLng);
-              if (d < minNeighborDist) {
+              if (d < minNeighborDist && d <= 5.0) {
                 minNeighborDist = d;
                 bestNeighbor = otherVs;
               }
@@ -1150,7 +1150,10 @@ export class RoutingService {
           if (bestNeighbor) {
             bestNeighbor.assignedStudents.push(st);
           } else {
-            vs.assignedStudents.push(st);
+            // 주변 5km 이내에 다른 배차 차량이 없어 증차 필요 상태
+            st.needsExtraBus = true;
+            st.unassignedReason = 'SURPLUS_NO_NEIGHBOR_5KM';
+            await this.studentRepository.update(st.id, { assignedVehicle: null }).catch(() => {});
           }
         }
       }
