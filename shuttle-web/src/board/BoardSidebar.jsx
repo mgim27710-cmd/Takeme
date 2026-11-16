@@ -32,7 +32,7 @@ export default function BoardSidebar({
       {/* Header */}
       <div className="p-5 border-b border-slate-100 bg-white">
         <div className="flex items-center justify-between mb-1.5">
-          <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
+          <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
             <span>{titleText}</span>
           </h2>
           <span className="text-[11px] font-bold px-2.5 py-0.5 bg-blue-50 text-blue-700 rounded-full border border-blue-100">

@@ -455,7 +455,7 @@ export default function DocumentManager({
         <div className="flex items-center gap-2">
           <button
             onClick={() => setActiveSubTab('templates')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
               activeSubTab === 'templates'
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-200 scale-102'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -465,7 +465,7 @@ export default function DocumentManager({
           </button>
           <button
             onClick={() => setActiveSubTab('expiry')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
               activeSubTab === 'expiry'
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-200 scale-102'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -473,32 +473,32 @@ export default function DocumentManager({
           >
             만료일 알림 현황
             {expirySummary.urgentCount > 0 ? (
-              <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-extrabold animate-pulse">
+              <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full font-extrabold animate-pulse">
                 {expirySummary.urgentCount}
               </span>
             ) : (
-              <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+              <span className="bg-emerald-100 text-emerald-700 text-xs px-2 py-0.5 rounded-full font-bold">
                 정상
               </span>
             )}
           </button>
           <button
             onClick={() => setActiveSubTab('documents')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
               activeSubTab === 'documents'
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-200 scale-102'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
             등록 서류 보관함
-            <span className="bg-slate-200 text-slate-700 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+            <span className="bg-slate-200 text-slate-700 text-xs px-2 py-0.5 rounded-full font-bold">
               {documents.length}
             </span>
           </button>
         </div>
 
         {/* 탭 안내 가이드 문구 */}
-        <div className="text-xs text-slate-400 font-medium hidden sm:block">
+        <div className="text-xs text-slate-500 font-semibold hidden sm:block">
           {activeSubTab === 'templates' && '호차 및 원생을 선택하면 차량번호와 탑승 원생 명부가 법정 서식에 자동 완성됩니다.'}
           {activeSubTab === 'expiry' && '자동차 종합보험, 정기검사, 안전교육 4대 법정 기한을 관리합니다.'}
           {activeSubTab === 'documents' && '업로드하여 영구 보관 중인 서류들을 검색하고 다운로드할 수 있습니다.'}
@@ -541,7 +541,7 @@ export default function DocumentManager({
 
             <div className="flex items-center gap-3">
               <div>
-                <h2 className="text-base font-black text-slate-800 flex items-center gap-2">
+                <h2 className="text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
                   법정 의무 서류 및 안전교육 만료일 현황
                   <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-md">
                     2달 전 주의 · 1달 전 만료임박 · 2주 전 매일알림
@@ -793,7 +793,7 @@ export default function DocumentManager({
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-5">
               <div className="flex items-center gap-3">
                 <div>
-                  <h2 className="text-base font-black text-slate-800 flex items-center gap-2">
+                  <h2 className="text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
                     데이터베이스 연동 법정 서식 자동 발급 (10종)
                     <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-md">
                       A4 법적 규격 & DB 자동 기입
@@ -850,10 +850,10 @@ export default function DocumentManager({
 
             {/* SECTION 1: 필수 동의서 및 회계 서식 */}
             <div className="space-y-3">
-              <div className="text-xs font-extrabold text-slate-700 flex items-center gap-2">
+              <div className="text-sm font-black text-slate-800 flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-violet-600"></span>
                 <span>법정 의무 동의서 및 회계 증빙 서식 (4종)</span>
-                <span className="text-[10px] font-bold text-violet-700 bg-violet-50 px-2 py-0.5 rounded-md border border-violet-200">
+                <span className="text-xs font-bold text-violet-700 bg-violet-50 px-2 py-0.5 rounded-md border border-violet-200">
                   위치정보보호법·개인정보보호법 준수
                 </span>
               </div>
@@ -865,16 +865,16 @@ export default function DocumentManager({
                 >
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-extrabold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-md">법정필수</span>
-                      <span className="text-xs font-bold text-slate-800 group-hover:text-violet-700">
+                      <span className="text-xs font-bold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-md">법정필수</span>
+                      <span className="text-sm font-extrabold text-slate-900 group-hover:text-violet-700">
                         운전자 위치정보 수집·이용 동의서
                       </span>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-1">
+                    <div className="text-xs text-slate-600 mt-1 font-medium">
                       {activeBus ? `[${activeBus.name}] 기사 (${activeBus.driverName || '기사명'}) 및 차량번호 자동 연동` : '위치정보보호법 제15조 준수 기사용 실시간 관제 동의서'}
                     </div>
                   </div>
-                  <span className="text-xs font-bold text-violet-700 bg-white group-hover:bg-violet-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-violet-200 transition-colors shrink-0 shadow-2xs">
+                  <span className="text-xs font-black text-violet-700 bg-white group-hover:bg-violet-600 group-hover:text-white px-3.5 py-1.5 rounded-xl border border-violet-200 transition-colors shrink-0 shadow-2xs">
                     인쇄 / PDF
                   </span>
                 </button>
@@ -886,16 +886,16 @@ export default function DocumentManager({
                 >
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-extrabold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-md">개인정보보호법</span>
-                      <span className="text-xs font-bold text-slate-800 group-hover:text-violet-700">
+                      <span className="text-xs font-bold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-md">개인정보보호법</span>
+                      <span className="text-sm font-extrabold text-slate-900 group-hover:text-violet-700">
                         개인정보 수집·이용 동의서 (원생·학부모용)
                       </span>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-1">
+                    <div className="text-xs text-slate-600 mt-1 font-medium">
                       {activeStudent ? `[${activeStudent.name}] 학생 및 보호자 인적사항 자동 반영` : '등·하원 알림 및 승하차 관제를 위한 학부모 동의서'}
                     </div>
                   </div>
-                  <span className="text-xs font-bold text-violet-700 bg-white group-hover:bg-violet-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-violet-200 transition-colors shrink-0 shadow-2xs">
+                  <span className="text-xs font-black text-violet-700 bg-white group-hover:bg-violet-600 group-hover:text-white px-3.5 py-1.5 rounded-xl border border-violet-200 transition-colors shrink-0 shadow-2xs">
                     인쇄 / PDF
                   </span>
                 </button>
@@ -907,16 +907,16 @@ export default function DocumentManager({
                 >
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-extrabold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-md">종사자필수</span>
-                      <span className="text-xs font-bold text-slate-800 group-hover:text-violet-700">
+                      <span className="text-xs font-bold bg-violet-100 text-violet-700 px-2 py-0.5 rounded-md">종사자필수</span>
+                      <span className="text-sm font-extrabold text-slate-900 group-hover:text-violet-700">
                         통학차량 종사자 개인정보 동의서 (기사·교사용)
                       </span>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-1">
+                    <div className="text-xs text-slate-600 mt-1 font-medium">
                       {activeBus ? `[${activeBus.name}] 기사(${activeBus.driverName || '미지정'}) 및 차량선생님 정보 반영` : '운전자·차량선생님 자격검증 및 범죄경력조회 동의 양식'}
                     </div>
                   </div>
-                  <span className="text-xs font-bold text-violet-700 bg-white group-hover:bg-violet-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-violet-200 transition-colors shrink-0 shadow-2xs">
+                  <span className="text-xs font-black text-violet-700 bg-white group-hover:bg-violet-600 group-hover:text-white px-3.5 py-1.5 rounded-xl border border-violet-200 transition-colors shrink-0 shadow-2xs">
                     인쇄 / PDF
                   </span>
                 </button>
@@ -928,16 +928,16 @@ export default function DocumentManager({
                 >
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-extrabold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-md">회계·지출</span>
-                      <span className="text-xs font-bold text-slate-800 group-hover:text-emerald-700">
+                      <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-md">회계·지출</span>
+                      <span className="text-sm font-extrabold text-slate-900 group-hover:text-emerald-700">
                         통학차량 운영비 및 유류비 정산서
                       </span>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-1">
+                    <div className="text-xs text-slate-600 mt-1 font-medium">
                       {activeBus ? `[${activeBus.name}] ${activeBus.plateNumber || ''} 유류대·정비비·용역 결재서식` : '통학버스 유류비/정비비/통행료 지출 증빙 결재 서식'}
                     </div>
                   </div>
-                  <span className="text-xs font-bold text-emerald-700 bg-white group-hover:bg-emerald-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-emerald-200 transition-colors shrink-0 shadow-2xs">
+                  <span className="text-xs font-black text-emerald-700 bg-white group-hover:bg-emerald-600 group-hover:text-white px-3.5 py-1.5 rounded-xl border border-emerald-200 transition-colors shrink-0 shadow-2xs">
                     인쇄 / PDF
                   </span>
                 </button>
@@ -947,7 +947,7 @@ export default function DocumentManager({
             {/* SECTION 2: 원아별 학부모 제출 법정 동의서 서식 */}
             <div className="space-y-3 pt-4 border-t border-slate-100">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="text-xs font-extrabold text-slate-700 flex items-center gap-2">
+                <div className="text-sm font-black text-slate-800 flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-indigo-600"></span>
                   <span>원아별 통학차량 이용 및 귀가 동의서 (2종)</span>
                 </div>
@@ -979,16 +979,16 @@ export default function DocumentManager({
                 >
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-extrabold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md">입소필수</span>
-                      <span className="text-xs font-bold text-slate-800 group-hover:text-indigo-600">
+                      <span className="text-xs font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md">입소필수</span>
+                      <span className="text-sm font-extrabold text-slate-900 group-hover:text-indigo-600">
                         어린이 통학차량 이용 신청 및 안전동의서
                       </span>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-1">
+                    <div className="text-xs text-slate-600 mt-1 font-medium">
                       {activeStudent ? `[${activeStudent.name}] 원아 인적사항·탑승지 자동 연동` : '통학차량 탑승 안전수칙 보호자 서약서'}
                     </div>
                   </div>
-                  <span className="text-xs font-bold text-indigo-600 bg-white group-hover:bg-indigo-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-indigo-200 transition-colors shrink-0 shadow-2xs">
+                  <span className="text-xs font-black text-indigo-600 bg-white group-hover:bg-indigo-600 group-hover:text-white px-3.5 py-1.5 rounded-xl border border-indigo-200 transition-colors shrink-0 shadow-2xs">
                     인쇄 / PDF
                   </span>
                 </button>
@@ -999,16 +999,16 @@ export default function DocumentManager({
                 >
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-extrabold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md">감사필수</span>
-                      <span className="text-xs font-bold text-slate-800 group-hover:text-indigo-600">
+                      <span className="text-xs font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md">감사필수</span>
+                      <span className="text-sm font-extrabold text-slate-900 group-hover:text-indigo-600">
                         영유아 귀가 동의서 및 응급처치 동의서
                       </span>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-1">
+                    <div className="text-xs text-slate-600 mt-1 font-medium">
                       {activeStudent ? `[${activeStudent.name}] 지정 인계 보호자(대리인) 및 응급이송 동의서` : '하원 시 대리인 인계 확인 및 119 응급처치 위임 동의서'}
                     </div>
                   </div>
-                  <span className="text-xs font-bold text-indigo-600 bg-white group-hover:bg-indigo-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-indigo-200 transition-colors shrink-0 shadow-2xs">
+                  <span className="text-xs font-black text-indigo-600 bg-white group-hover:bg-indigo-600 group-hover:text-white px-3.5 py-1.5 rounded-xl border border-indigo-200 transition-colors shrink-0 shadow-2xs">
                     인쇄 / PDF
                   </span>
                 </button>
@@ -1017,7 +1017,7 @@ export default function DocumentManager({
 
             {/* SECTION 3: 통학차량 비치 및 일일 점검 법정 일지 */}
             <div className="space-y-3 pt-4 border-t border-slate-100">
-              <div className="text-xs font-extrabold text-slate-700 flex items-center gap-2">
+              <div className="text-sm font-black text-slate-800 flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
                 <span>통학차량 비치 및 일일 점검 법정 서식 (4종)</span>
               </div>
@@ -1028,16 +1028,16 @@ export default function DocumentManager({
                 >
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-extrabold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md">법정필수</span>
-                      <span className="text-xs font-bold text-slate-800 group-hover:text-blue-600">
+                      <span className="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md">법정필수</span>
+                      <span className="text-sm font-extrabold text-slate-900 group-hover:text-blue-600">
                         일일 안전점검표 {activeBus ? `(${activeBus.name})` : ''}
                       </span>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-1">
+                    <div className="text-xs text-slate-600 mt-1 font-medium">
                       {activeBus ? '호차, 차량번호, 기사/동승자 자동 기입 (도로교통법 제53조)' : '어린이 하차확인장치·안전띠 등 9대 항목 점검표'}
                     </div>
                   </div>
-                  <span className="text-xs font-bold text-blue-600 bg-white group-hover:bg-blue-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-blue-200 transition-colors shrink-0 shadow-2xs">
+                  <span className="text-xs font-black text-blue-600 bg-white group-hover:bg-blue-600 group-hover:text-white px-3.5 py-1.5 rounded-xl border border-blue-200 transition-colors shrink-0 shadow-2xs">
                     인쇄 / PDF
                   </span>
                 </button>
@@ -1048,16 +1048,16 @@ export default function DocumentManager({
                 >
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-extrabold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md">법정필수</span>
-                      <span className="text-xs font-bold text-slate-800 group-hover:text-blue-600">
+                      <span className="text-xs font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-md">법정필수</span>
+                      <span className="text-sm font-extrabold text-slate-900 group-hover:text-blue-600">
                         동승보호자 탑승일지 및 승하차명부
                       </span>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-1">
+                    <div className="text-xs text-slate-600 mt-1 font-medium">
                       {activeBus ? `원생 명부 (${activeBusStudents.length}명) 자동 포함` : '배정 원생 승하차 및 안전띠·잔류원아 확인부'}
                     </div>
                   </div>
-                  <span className="text-xs font-bold text-blue-600 bg-white group-hover:bg-blue-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-blue-200 transition-colors shrink-0 shadow-2xs">
+                  <span className="text-xs font-black text-blue-600 bg-white group-hover:bg-blue-600 group-hover:text-white px-3.5 py-1.5 rounded-xl border border-blue-200 transition-colors shrink-0 shadow-2xs">
                     인쇄 / PDF
                   </span>
                 </button>
@@ -1068,16 +1068,16 @@ export default function DocumentManager({
                 >
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-extrabold bg-red-100 text-red-700 px-2 py-0.5 rounded-md">차량비치필수</span>
-                      <span className="text-xs font-bold text-slate-800 group-hover:text-red-600">
+                      <span className="text-xs font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-md">차량비치필수</span>
+                      <span className="text-sm font-extrabold text-slate-900 group-hover:text-red-600">
                         비상연락망 및 건강·알레르기 특이사항 명부
                       </span>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-1">
+                    <div className="text-xs text-slate-600 mt-1 font-medium">
                       {activeBus ? `[${activeBus.name}] 원아 보호자 연락처 및 알레르기·기저질환 연동` : '응급상황 대비 보호자 비상연락망 및 알레르기 명부'}
                     </div>
                   </div>
-                  <span className="text-xs font-bold text-red-600 bg-white group-hover:bg-red-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-red-200 transition-colors shrink-0 shadow-2xs">
+                  <span className="text-xs font-black text-red-600 bg-white group-hover:bg-red-600 group-hover:text-white px-3.5 py-1.5 rounded-xl border border-red-200 transition-colors shrink-0 shadow-2xs">
                     인쇄 / PDF
                   </span>
                 </button>
@@ -1088,16 +1088,16 @@ export default function DocumentManager({
                 >
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-extrabold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-md">운행필수</span>
-                      <span className="text-xs font-bold text-slate-800 group-hover:text-emerald-700">
+                      <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-md">운행필수</span>
+                      <span className="text-sm font-extrabold text-slate-900 group-hover:text-emerald-700">
                         호차별 운행 노선표 및 승·하차 정류장 시간표
                       </span>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-1">
+                    <div className="text-xs text-slate-600 mt-1 font-medium">
                       {activeBus ? `[${activeBus.name}] 경유 정류장 (${activeBusStudents.length}곳) 및 등·하원 예정 시각` : '운전석 비치 및 학부모 배부용 노선 시간표'}
                     </div>
                   </div>
-                  <span className="text-xs font-bold text-emerald-700 bg-white group-hover:bg-emerald-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-emerald-200 transition-colors shrink-0 shadow-2xs">
+                  <span className="text-xs font-black text-emerald-700 bg-white group-hover:bg-emerald-600 group-hover:text-white px-3.5 py-1.5 rounded-xl border border-emerald-200 transition-colors shrink-0 shadow-2xs">
                     인쇄 / PDF
                   </span>
                 </button>

@@ -165,10 +165,10 @@ export function openPrintDocument(type, data = {}) {
         return `
           <tr>
             <td class="center">${idx + 1}</td>
-            <td class="center bold" style="font-size: 11px;">${st.name || st.realName}</td>
-            <td class="center" style="font-size: 10px; color: #475569;">${schoolGrade}</td>
-            <td style="font-size: 10px; color: #1e293b;" title="${cleanLocation}">${cleanLocation}</td>
-            <td class="center" style="font-size: 10px; font-family: monospace;">${phone}</td>
+            <td class="center bold" style="font-size: 13px;">${st.name || st.realName}</td>
+            <td class="center" style="font-size: 12.5px; color: #475569;">${schoolGrade}</td>
+            <td style="font-size: 12.5px; color: #1e293b;" title="${cleanLocation}">${cleanLocation}</td>
+            <td class="center" style="font-size: 12.5px; font-family: monospace;">${phone}</td>
             <td class="center font-check">[ &nbsp;&nbsp; ]</td>
             <td class="center font-check">[ &nbsp;&nbsp; ]</td>
           </tr>
@@ -177,7 +177,7 @@ export function openPrintDocument(type, data = {}) {
     } else {
       rosterRowsHtml = `
         <tr>
-          <td colspan="7" class="center" style="padding: 12px; color: #94a3b8; font-size: 11px;">
+          <td colspan="7" class="center" style="padding: 12px; color: #94a3b8; font-size: 13px;">
             배정된 원생 정보가 없습니다. (수기로 작성 가능)
           </td>
         </tr>
@@ -220,10 +220,10 @@ export function openPrintDocument(type, data = {}) {
         </table>
 
         <div style="margin-top: 15px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: flex-end;">
-          <h2 style="font-size: 13px; font-weight: 800; color: #0f172a; margin: 0;">
+          <h2 style="font-size: 15px; font-weight: 800; color: #0f172a; margin: 0;">
             ${bus ? `[${bus.name}]` : ''} 탑승 원생 명단 및 승하차 안전 확인부
           </h2>
-          <span style="font-size: 11px; color: #2563eb; font-weight: bold;">
+          <span style="font-size: 13px; color: #2563eb; font-weight: bold;">
             배정 원생: ${studentCount}명
           </span>
         </div>
@@ -302,16 +302,16 @@ export function openPrintDocument(type, data = {}) {
         return `
           <tr>
             <td class="center">${idx + 1}</td>
-            <td class="center bold" style="font-size: 11px;">${st.name || st.realName}</td>
-            <td class="center" style="font-size: 10px;">${classInfo}</td>
-            <td class="center" style="font-size: 10px;">${parentName}</td>
-            <td class="center bold" style="font-size: 10px; font-family: monospace; color: #0f172a;">
+            <td class="center bold" style="font-size: 13px;">${st.name || st.realName}</td>
+            <td class="center" style="font-size: 12.5px;">${classInfo}</td>
+            <td class="center" style="font-size: 12.5px;">${parentName}</td>
+            <td class="center bold" style="font-size: 12.5px; font-family: monospace; color: #0f172a;">
               ${phone}${subPhone ? `<br><span style="color:#64748b;font-weight:normal;">${subPhone}</span>` : ''}
             </td>
-            <td style="font-size: 10px; ${hasAllergy ? 'color: #dc2626; font-weight: 700; background: #fef2f2;' : 'color: #475569;'}">
+            <td style="font-size: 12.5px; ${hasAllergy ? 'color: #dc2626; font-weight: 700; background: #fef2f2;' : 'color: #475569;'}">
               ${hasAllergy ? `⚠️ ${allergyText}` : '특이사항 없음 (건강 양호)'}
             </td>
-            <td class="center" style="font-size: 10px; color: #475569;"> 인근 소아응급실 / 지정병원</td>
+            <td class="center" style="font-size: 12.5px; color: #475569;"> 인근 소아응급실 / 지정병원</td>
           </tr>
         `;
       }).join('');
@@ -356,7 +356,7 @@ export function openPrintDocument(type, data = {}) {
             <th>호차 / 차량번호</th>
             <td style="font-weight: bold; color: #2563eb;">${bus ? `${bus.name} (${plateText})` : '전 호차 통합'}</td>
             <th>운전자 / 동승보호자</th>
-            <td style="font-size: 10.5px;">기사: ${driverInfo} / 동승: ${companionInfo}</td>
+            <td style="font-size: 13px;">기사: ${driverInfo} / 동승: ${companionInfo}</td>
           </tr>
         </table>
 
@@ -371,10 +371,10 @@ export function openPrintDocument(type, data = {}) {
         </table>
 
         <div style="margin-bottom: 6px; display: flex; justify-content: space-between; align-items: flex-end;">
-          <h2 style="font-size: 13px; font-weight: 800; color: #0f172a; margin: 0;">
+          <h2 style="font-size: 15px; font-weight: 800; color: #0f172a; margin: 0;">
             탑승 원아별 비상연락처 및 알레르기·기저질환 유의사항 (${busStudents.length}명)
           </h2>
-          <span style="font-size: 10px; color: #dc2626; font-weight: bold;">
+          <span style="font-size: 12.5px; color: #dc2626; font-weight: bold;">
             ※ 응급상황 발생 시 119 구급대원에게 본 명부를 즉시 제시하십시오.
           </span>
         </div>
@@ -396,8 +396,8 @@ export function openPrintDocument(type, data = {}) {
           </tbody>
         </table>
 
-        <div style="padding: 12px 14px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 4px; font-size: 10.5px; line-height: 1.7; color: #334155;">
-          <strong style="color: #0f172a; font-size: 11px;">[통학버스 응급상황 발생 시 법정 행동수칙]</strong><br>
+        <div style="padding: 12px 14px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 4px; font-size: 13px; line-height: 1.7; color: #334155;">
+          <strong style="color: #0f172a; font-size: 13px;">[통학버스 응급상황 발생 시 법정 행동수칙]</strong><br>
           1. <strong>즉시 정차 및 2차 사고 방지:</strong> 비상점멸등을 켜고 갓길 등 안전지대에 정차한 후 삼각대를 설치합니다.<br>
           2. <strong>원아 안전 확보 및 응급처치:</strong> 호흡곤란·알레르기 쇼크·경련 등 응급환자 발생 시 즉시 119에 신고하고 기도 확보 및 구급상자를 활용하여 응급조치를 실시합니다.<br>
           3. <strong>신속한 보고 및 보호자 연락:</strong> 기관 관리자 및 위 비상연락망의 보호자에게 즉시 상황을 알리고 인계 절차를 진행합니다.
@@ -447,10 +447,10 @@ export function openPrintDocument(type, data = {}) {
             <td class="center bold">${idx + 1}</td>
             <td class="center bold" style="color: #2563eb; font-family: monospace;">${pickupTime}</td>
             <td class="center bold" style="color: #059669; font-family: monospace;">${dropoffTime}</td>
-            <td style="font-size: 10.5px; font-weight: 600; color: #1e293b;">${stopLocation}</td>
-            <td class="center bold" style="font-size: 11px;">${st.name || st.realName}</td>
-            <td class="center" style="font-size: 10px;">${classInfo}</td>
-            <td class="center" style="font-size: 10px; font-family: monospace;">${phone}</td>
+            <td style="font-size: 13px; font-weight: 600; color: #1e293b;">${stopLocation}</td>
+            <td class="center bold" style="font-size: 13px;">${st.name || st.realName}</td>
+            <td class="center" style="font-size: 12.5px;">${classInfo}</td>
+            <td class="center" style="font-size: 12.5px; font-family: monospace;">${phone}</td>
           </tr>
         `;
       }).join('');
@@ -495,15 +495,15 @@ export function openPrintDocument(type, data = {}) {
             <th>운행 호차 / 번호</th>
             <td style="font-weight: bold; color: #2563eb;">${bus ? `${bus.name} (${plateText})` : '전체 노선'}</td>
             <th>운전자 / 차량선생님</th>
-            <td style="font-size: 10.5px;">기사: ${driverText} / 동승: ${companionText}</td>
+            <td style="font-size: 12px;">기사: ${driverText} / 동승: ${companionText}</td>
           </tr>
         </table>
 
         <div style="margin-top: 14px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: flex-end;">
-          <h2 style="font-size: 13px; font-weight: 800; color: #0f172a; margin: 0;">
+          <h2 style="font-size: 15px; font-weight: 800; color: #0f172a; margin: 0;">
             ${bus ? `[${bus.name}]` : ''} 경유 정류장 순번 및 승·하차 예정 시각표 (총 ${busStudents.length}개 지점)
           </h2>
-          <span style="font-size: 10.5px; color: #475569; font-weight: 600;">
+          <span style="font-size: 13px; color: #475569; font-weight: 600;">
             ※ 원활하고 안전한 운행을 위해 예정 시각 <strong>5분 전</strong>까지 정류장에서 대기해 주시기 바랍니다.
           </span>
         </div>
@@ -525,8 +525,8 @@ export function openPrintDocument(type, data = {}) {
           </tbody>
         </table>
 
-        <div style="padding: 12px 14px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 4px; font-size: 10.5px; line-height: 1.7; color: #334155;">
-          <strong style="color: #0f172a; font-size: 11px;">[통학버스 이용 및 정류장 안전 안내]</strong><br>
+        <div style="padding: 12px 14px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 4px; font-size: 13px; line-height: 1.7; color: #334155;">
+          <strong style="color: #0f172a; font-size: 13px;">[통학버스 이용 및 정류장 안전 안내]</strong><br>
           1. 도로 사정 및 기상 상황에 따라 도착 시각이 3~5분가량 차이가 날 수 있으며, <strong>Takeme 앱 실시간 위치 알림</strong>을 통해 정확한 도착 예정 시각을 확인하실 수 있습니다.<br>
           2. 결석 또는 자가 등·하원 시에는 원활한 노선 운행을 위해 등원 전 미리 앱 또는 동승보호자에게 알려주시기 바랍니다.<br>
           3. 하원 시에는 지정된 성인 보호자께서 정류장에 나와 직접 원아를 인계받아 주셔야 합니다.
@@ -559,7 +559,7 @@ export function openPrintDocument(type, data = {}) {
       <div class="doc-container">
         <div class="header-section">
           <div class="title-wrap" style="width: 100%; text-align: center;">
-            <h1 style="font-size: 21px;">영유아 안전 귀가 동의서 및 응급처치 동의서</h1>
+            <h1 style="font-size: 24px;">영유아 안전 귀가 동의서 및 응급처치 동의서</h1>
             <p class="sub-text">유아교육법·영유아보육법 및 어린이통학버스 안전점검 필수 구비 표준서식 (${academyName} 귀중)</p>
           </div>
         </div>
@@ -578,14 +578,14 @@ export function openPrintDocument(type, data = {}) {
             <th>등·하원 방법</th>
             <td style="font-weight: bold; color: #2563eb;">통학차량 이용 (${assignedBusName})</td>
             <th>승·하차 지점(주소)</th>
-            <td style="font-size: 10.5px;">${address}</td>
+            <td style="font-size: 13px;">${address}</td>
           </tr>
         </table>
 
         <h2 style="font-size: 12.5px; font-weight: 800; color: #0f172a; margin: 16px 0 6px 0;">
           2. 하원 시 원아 인계 지정 보호자 (대리인) 등록
         </h2>
-        <p style="font-size: 10.5px; color: #475569; margin: 0 0 6px 0;">
+        <p style="font-size: 13px; color: #475569; margin: 0 0 6px 0;">
           ※ 영유아 안전사고 예방을 위해 <strong>아래에 사전 등록된 성인 보호자(대리인)에게만 원아를 인계</strong>합니다. 등록되지 않은 제3자에게 인계를 원하실 경우 반드시 사전에 원으로 연락해 주셔야 합니다.
         </p>
         <table class="check-table">
@@ -641,7 +641,7 @@ export function openPrintDocument(type, data = {}) {
           </tr>
         </table>
 
-        <div style="margin: 14px 0; padding: 12px 15px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 10.5px; line-height: 1.75; color: #334155;">
+        <div style="margin: 14px 0; padding: 12px 15px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 13px; line-height: 1.75; color: #334155;">
           <strong>[귀가 및 응급처치 서약 사항]</strong><br>
           1. 본인은 원아의 안전한 하원을 위해 지정된 하차 시각에 맞춰 위 등록된 보호자(또는 대리인)가 정류장에서 직접 인계받을 것을 서약합니다.<br>
           2. 원내 활동 및 통학차량 탑승 중 질병이나 불의의 사고로 인하여 응급상황이 발생했을 때, 보호자에게 즉시 연락이 닿지 않거나 긴급을 요하는 경우 <strong>119 구급대 및 교직원이 인근 지정 의료기관으로 즉시 이송하고 의료진의 판단에 따라 필요한 응급처치를 시행하는 것에 동의</strong>합니다.
@@ -673,7 +673,7 @@ export function openPrintDocument(type, data = {}) {
       <div class="doc-container">
         <div class="header-section">
           <div class="title-wrap" style="width: 100%; text-align: center;">
-            <h1 style="font-size: 22px;">어린이 통학차량 이용 신청 및 안전동의서</h1>
+            <h1 style="font-size: 24px;">어린이 통학차량 이용 신청 및 안전동의서</h1>
             <p class="sub-text">${academyName ? `${academyName} 귀중` : '기관 관리자 귀중'}</p>
           </div>
         </div>
@@ -681,7 +681,7 @@ export function openPrintDocument(type, data = {}) {
         <table class="info-table" style="margin-top: 20px;">
           <tr>
             <th style="width: 18%;">원 생 명</th>
-            <td style="width: 32%; font-weight: bold; font-size: 13px; color: #1e293b;">${stName}</td>
+            <td style="width: 32%; font-weight: bold; font-size: 15px; color: #1e293b;">${stName}</td>
             <th style="width: 18%;">유치원 / 연령 / 반</th>
             <td style="width: 32%; font-weight: bold;">${schoolGrade}</td>
           </tr>
@@ -695,13 +695,13 @@ export function openPrintDocument(type, data = {}) {
             <th>배정 희망 차량</th>
             <td style="font-weight: bold; color: #2563eb;">${assignedBusName || '유치원 배차 규정에 따름'}</td>
             <th>탑승지 (주소)</th>
-            <td style="font-size: 11px;">${address}</td>
+            <td style="font-size: 13px;">${address}</td>
           </tr>
         </table>
 
         <div style="margin: 25px 0; padding: 18px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px;">
-          <h3 style="font-size: 13px; font-weight: bold; margin-bottom: 10px; color: #1e293b;">[통학차량 안전수칙 준수 서약]</h3>
-          <ol style="font-size: 11px; line-height: 2.0; color: #334155; padding-left: 20px; margin: 0;">
+          <h3 style="font-size: 15px; font-weight: bold; margin-bottom: 10px; color: #1e293b;">[통학차량 안전수칙 준수 서약]</h3>
+          <ol style="font-size: 13px; line-height: 2.0; color: #334155; padding-left: 20px; margin: 0;">
             <li>원생은 차량 탑승 즉시 좌석 안전띠를 반드시 착용하고, 차량이 완전히 멈출 때까지 절대 풀지 않습니다.</li>
             <li>차량 운행 중에는 창밖으로 손이나 머리를 내밀지 않으며, 자리에서 일어나거나 장난을 치지 않습니다.</li>
             <li>승·하차 시에는 동승보호자의 안내에 따라 차례대로 손잡이를 잡고 안전하게 승·하차합니다.</li>
@@ -730,19 +730,19 @@ export function openPrintDocument(type, data = {}) {
       <div class="doc-container">
         <div class="header-section">
           <div class="title-wrap" style="width: 100%; text-align: center;">
-            <h1 style="font-size: 21px;">어린이통학버스 운전자 위치정보 수집·이용 동의서</h1>
+            <h1 style="font-size: 24px;">어린이통학버스 운전자 위치정보 수집·이용 동의서</h1>
             <p class="sub-text">위치정보의 보호 및 이용 등에 관한 법률 제15조 및 도로교통법 제53조 준수</p>
           </div>
         </div>
 
-        <div style="margin: 15px 0 10px 0; font-size: 11px; color: #475569; line-height: 1.6;">
+        <div style="margin: 15px 0 10px 0; font-size: 13px; color: #475569; line-height: 1.6;">
           ${academyName}은(는) 「위치정보의 보호 및 이용 등에 관한 법률」 제15조(위치정보의 수집 등의 금지) 규정에 따라 통학차량 실시간 안전 관제 및 원아 안심 승하차 알림 서비스를 위해 운전자의 개인위치정보를 수집·이용하고자 하오니 아래 내용을 확인하시고 동의하여 주시기 바랍니다.
         </div>
 
         <table class="info-table" style="margin-top: 10px;">
           <tr>
             <th style="width: 18%;">운전자 성명</th>
-            <td style="width: 32%; font-weight: bold; font-size: 13px;">${driverName || '__________________'}</td>
+            <td style="width: 32%; font-weight: bold; font-size: 15px;">${driverName || '__________________'}</td>
             <th style="width: 18%;">생년월일</th>
             <td style="width: 32%;">______년 ___월 ___일</td>
           </tr>
@@ -760,8 +760,8 @@ export function openPrintDocument(type, data = {}) {
           </tr>
         </table>
 
-        <div style="margin: 18px 0; padding: 14px 16px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 11px; line-height: 1.8; color: #334155;">
-          <h4 style="margin: 0 0 6px 0; font-size: 12px; color: #1e293b; font-weight: bold;">[위치정보 수집 및 이용에 관한 법정 고지]</h4>
+        <div style="margin: 18px 0; padding: 14px 16px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 13px; line-height: 1.8; color: #334155;">
+          <h4 style="margin: 0 0 6px 0; font-size: 14px; color: #1e293b; font-weight: bold;">[위치정보 수집 및 이용에 관한 법정 고지]</h4>
           <ol style="margin: 0; padding-left: 18px;">
             <li><b>수집·이용 목적:</b> 어린이통학버스 실시간 이동 경로 및 운행 상태 관제, 실시간 도착 알림 서비스 제공, 차량 안전 사고 예방 및 긴급 구호 조치</li>
             <li><b>수집하는 위치정보 항목:</b> 모바일 단말기(스마트폰 기사용 앱)의 실시간 GPS 위치 좌표(위도, 경도), 이동 속도, 운행 시각 및 궤적</li>
@@ -771,9 +771,9 @@ export function openPrintDocument(type, data = {}) {
           </ol>
         </div>
 
-        <div style="border: 1px solid #94a3b8; background: #ffffff; padding: 10px 14px; border-radius: 6px; text-align: center; font-size: 12px; font-weight: bold; margin-bottom: 25px;">
+        <div style="border: 1px solid #94a3b8; background: #ffffff; padding: 10px 14px; border-radius: 6px; text-align: center; font-size: 14px; font-weight: bold; margin-bottom: 25px;">
           본인은 상기 위치정보의 수집·이용 및 제3자 제공에 관한 모든 내용을 충분히 이해하였으며 이에 동의합니다.<br>
-          <span style="font-size: 11px; font-weight: normal; color: #475569;">[ &nbsp; ] 위 위치정보 수집 및 이용에 동의함 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [ &nbsp; ] 동의하지 않음</span>
+          <span style="font-size: 13px; font-weight: normal; color: #475569;">[ &nbsp; ] 위 위치정보 수집 및 이용에 동의함 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [ &nbsp; ] 동의하지 않음</span>
         </div>
 
         <div class="footer-sign" style="margin-top: 30px;">
@@ -781,7 +781,7 @@ export function openPrintDocument(type, data = {}) {
           <div class="sign-names" style="margin-top: 30px;">
             운전자(기사) 성명: <span style="font-weight: bold; text-decoration: underline;">&nbsp;&nbsp;${driverName || '__________________'} &nbsp;&nbsp;</span> (자필 서명)
           </div>
-          <div style="margin-top: 15px; font-size: 13px; font-weight: bold; color: #1e293b;">
+          <div style="margin-top: 15px; font-size: 15px; font-weight: bold; color: #1e293b;">
             ${academyName} 귀중
           </div>
         </div>
@@ -800,7 +800,7 @@ export function openPrintDocument(type, data = {}) {
       <div class="doc-container">
         <div class="header-section">
           <div class="title-wrap" style="width: 100%; text-align: center;">
-            <h1 style="font-size: 21px;">원생 및 보호자 개인정보 수집·이용 및 제공 동의서</h1>
+            <h1 style="font-size: 24px;">원생 및 보호자 개인정보 수집·이용 및 제공 동의서</h1>
             <p class="sub-text">개인정보보호법 제15조(수집·이용) 및 제17조(제3자 제공), 제23조(민감정보 처리) 준수</p>
           </div>
         </div>
@@ -808,7 +808,7 @@ export function openPrintDocument(type, data = {}) {
         <table class="info-table" style="margin-top: 15px;">
           <tr>
             <th style="width: 18%;">원 생 명</th>
-            <td style="width: 32%; font-weight: bold; font-size: 13px;">${stName || '__________________'}</td>
+            <td style="width: 32%; font-weight: bold; font-size: 15px;">${stName || '__________________'}</td>
             <th style="width: 18%;">소속 / 반명</th>
             <td style="width: 32%; font-weight: bold;">${schoolGrade}</td>
           </tr>
@@ -820,13 +820,13 @@ export function openPrintDocument(type, data = {}) {
           </tr>
           <tr>
             <th>탑승지 (주소)</th>
-            <td colspan="3" style="font-size: 11px;">${address || '________________________________________________________'}</td>
+            <td colspan="3" style="font-size: 13px;">${address || '________________________________________________________'}</td>
           </tr>
         </table>
 
         <!-- 1. 기본 개인정보 수집 및 이용 -->
-        <div style="margin: 15px 0 10px 0; padding: 12px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 11px; line-height: 1.7;">
-          <h4 style="margin: 0 0 5px 0; font-size: 12px; color: #1e293b; font-weight: bold;">1. [필수] 개인정보 수집 및 이용 동의</h4>
+        <div style="margin: 15px 0 10px 0; padding: 12px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 13px; line-height: 1.7;">
+          <h4 style="margin: 0 0 5px 0; font-size: 14px; color: #1e293b; font-weight: bold;">1. [필수] 개인정보 수집 및 이용 동의</h4>
           <div>• <b>수집 항목:</b> 원생 성명, 생년월일, 성별, 주소(탑승지/하원지), 보호자 성명 및 휴대전화번호, 비상연락처</div>
           <div>• <b>수집·이용 목적:</b> 통학차량 노선 배정, 탑승자 명부 작성, 승하차 실시간 알림, 비상상황 긴급 연락</div>
           <div>• <b>보유 및 이용 기간:</b> 통학차량 서비스 이용 종료 및 원아 졸업/퇴원 시까지 (관계법령에 따른 보존 의무 기간 준수)</div>
@@ -836,8 +836,8 @@ export function openPrintDocument(type, data = {}) {
         </div>
 
         <!-- 2. 민감정보(건강/알레르기) 처리 동의 -->
-        <div style="margin: 10px 0; padding: 12px; border: 1px solid #cbd5e1; background: #fffbeb; border-radius: 6px; font-size: 11px; line-height: 1.7;">
-          <h4 style="margin: 0 0 5px 0; font-size: 12px; color: #92400e; font-weight: bold;">2. [선택] 민감정보(건강 및 알레르기) 수집 및 이용 동의</h4>
+        <div style="margin: 10px 0; padding: 12px; border: 1px solid #cbd5e1; background: #fffbeb; border-radius: 6px; font-size: 13px; line-height: 1.7;">
+          <h4 style="margin: 0 0 5px 0; font-size: 14px; color: #92400e; font-weight: bold;">2. [선택] 민감정보(건강 및 알레르기) 수집 및 이용 동의</h4>
           <div>• <b>수집 항목:</b> 원생 지병, 알레르기 유발 식품/물질 (${allergies}), 특이 체질 및 응급처치 주의사항</div>
           <div>• <b>수집 목적:</b> 차량 내 응급상황 발생 시 신속하고 적절한 응급처치 및 병원 후송 시 의료진 전달</div>
           <div>• <b>보유 기간:</b> 통학차량 이용 기간 종료 시까지</div>
@@ -847,8 +847,8 @@ export function openPrintDocument(type, data = {}) {
         </div>
 
         <!-- 3. 개인정보 제3자 제공 동의 -->
-        <div style="margin: 10px 0 20px 0; padding: 12px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 11px; line-height: 1.7;">
-          <h4 style="margin: 0 0 5px 0; font-size: 12px; color: #1e293b; font-weight: bold;">3. [필수] 개인정보 제3자 제공 동의</h4>
+        <div style="margin: 10px 0 20px 0; padding: 12px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 12px; line-height: 1.7;">
+          <h4 style="margin: 0 0 5px 0; font-size: 13px; color: #1e293b; font-weight: bold;">3. [필수] 개인정보 제3자 제공 동의</h4>
           <div>• <b>제공받는 자:</b> 통학차량 운전기사 및 차량선생님(동승자), 긴급구조기관(소방서·경찰서·의료기관)</div>
           <div>• <b>제공 목적:</b> 안전 승하차 인솔, 결석·지각 확인, 긴급 환자 이송 및 사고 대응</div>
           <div>• <b>제공 항목:</b> 원생 성명, 탑승지, 보호자 연락처, 긴급처치 정보</div>
@@ -863,7 +863,7 @@ export function openPrintDocument(type, data = {}) {
           <div class="sign-names" style="margin-top: 25px;">
             법정대리인(보호자) 성명: <span style="font-weight: bold; text-decoration: underline;">&nbsp;&nbsp;${parentName || '__________________'} &nbsp;&nbsp;</span> (자필 서명)
           </div>
-          <div style="margin-top: 15px; font-size: 13px; font-weight: bold; color: #1e293b;">
+          <div style="margin-top: 15px; font-size: 15px; font-weight: bold; color: #1e293b;">
             ${academyName} 귀중
           </div>
         </div>
@@ -878,7 +878,7 @@ export function openPrintDocument(type, data = {}) {
       <div class="doc-container">
         <div class="header-section">
           <div class="title-wrap" style="width: 100%; text-align: center;">
-            <h1 style="font-size: 21px;">통학차량 종사자(기사·교사) 개인정보 수집·이용 동의서</h1>
+            <h1 style="font-size: 24px;">통학차량 종사자(기사·교사) 개인정보 수집·이용 동의서</h1>
             <p class="sub-text">개인정보보호법 및 도로교통법 제53조 준수 (어린이통학버스 운영자 법정 구비 서식)</p>
           </div>
         </div>
@@ -908,8 +908,8 @@ export function openPrintDocument(type, data = {}) {
           </tr>
         </table>
 
-        <div style="margin: 25px 0; padding: 16px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 11px; line-height: 1.9; color: #334155;">
-          <h4 style="margin: 0 0 8px 0; font-size: 12px; color: #1e293b; font-weight: bold;">[종사자 개인정보 수집 및 법적 검증 고지]</h4>
+        <div style="margin: 25px 0; padding: 16px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 13px; line-height: 1.9; color: #334155;">
+          <h4 style="margin: 0 0 8px 0; font-size: 14px; color: #1e293b; font-weight: bold;">[종사자 개인정보 수집 및 법적 검증 고지]</h4>
           <ol style="margin: 0; padding-left: 18px;">
             <li><b>수집 목적:</b> 어린이통학버스 운전자 및 동승보호자의 법정 적격 심사(도로교통법 제53조), 관할 경찰서 및 교육청 신고 등록, 성범죄 및 아동학대 관련 범죄전력 조회 확인, 긴급 비상연락체계 구축</li>
             <li><b>수집 항목:</b> 성명, 주민등록번호(고유식별정보 - 도로교통법 및 아동복지법에 따른 법령상 처리), 주소, 휴대전화번호, 운전면허정보, 통학버스 안전교육 이수증 사본</li>
@@ -918,9 +918,9 @@ export function openPrintDocument(type, data = {}) {
           </ol>
         </div>
 
-        <div style="border: 1px solid #94a3b8; background: #ffffff; padding: 12px; border-radius: 6px; text-align: center; font-size: 12px; font-weight: bold; margin-bottom: 30px;">
+        <div style="border: 1px solid #94a3b8; background: #ffffff; padding: 12px; border-radius: 6px; text-align: center; font-size: 14px; font-weight: bold; margin-bottom: 30px;">
           본인은 상기 개인정보 및 고유식별정보의 수집·이용과 관할 관청 제출에 동의합니다.<br>
-          <span style="font-size: 11px; font-weight: normal; color: #475569;">[ &nbsp; ] 동의함 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [ &nbsp; ] 동의하지 않음</span>
+          <span style="font-size: 13px; font-weight: normal; color: #475569;">[ &nbsp; ] 동의함 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [ &nbsp; ] 동의하지 않음</span>
         </div>
 
         <div class="footer-sign" style="margin-top: 40px;">
@@ -928,7 +928,7 @@ export function openPrintDocument(type, data = {}) {
           <div class="sign-names" style="margin-top: 30px;">
             종사자(기사·교사) 성명: <span style="font-weight: bold; text-decoration: underline;">&nbsp;&nbsp;${driverName || companionName || '__________________'} &nbsp;&nbsp;</span> (자필 서명)
           </div>
-          <div style="margin-top: 15px; font-size: 13px; font-weight: bold; color: #1e293b;">
+          <div style="margin-top: 15px; font-size: 15px; font-weight: bold; color: #1e293b;">
             ${academyName} 귀중
           </div>
         </div>
@@ -944,7 +944,7 @@ export function openPrintDocument(type, data = {}) {
       <div class="doc-container">
         <div class="header-section">
           <div class="title-wrap">
-            <h1 style="font-size: 21px;">통학차량 운영비 및 유류비 정산서</h1>
+            <h1 style="font-size: 24px;">통학차량 운영비 및 유류비 정산서</h1>
             <p class="sub-text">회계 세무 증빙 및 통학차량 운영비 지출결의 표준서식 [${busNameText}]</p>
           </div>
           <table class="approval-table">
@@ -1032,15 +1032,15 @@ export function openPrintDocument(type, data = {}) {
               <td style="text-align: center; color: #94a3b8;">이용내역서</td>
             </tr>
             <tr style="background: #f1f5f9; font-weight: bold;">
-              <td colspan="3" style="text-align: center; font-size: 13px;">합 &nbsp;&nbsp;&nbsp;&nbsp; 계 (총 지출액)</td>
+              <td colspan="3" style="text-align: center; font-size: 15px;">합 &nbsp;&nbsp;&nbsp;&nbsp; 계 (총 지출액)</td>
               <td style="text-align: right; font-size: 14px; color: #dc2626; font-family: monospace;">373,300 원</td>
-              <td style="text-align: center; font-size: 11px;">영수증 6매</td>
+              <td style="text-align: center; font-size: 13px;">영수증 6매</td>
             </tr>
           </tbody>
         </table>
 
         <!-- 영수증 부착 및 확인 박스 -->
-        <div style="margin-top: 20px; padding: 15px; border: 1px dashed #94a3b8; background: #fafafa; border-radius: 6px; text-align: center; color: #64748b; font-size: 11px;">
+        <div style="margin-top: 20px; padding: 15px; border: 1px dashed #94a3b8; background: #fafafa; border-radius: 6px; text-align: center; color: #64748b; font-size: 13px;">
           <b>[ 영수증 부착 및 확인 안내 ]</b><br>
           신용카드 매출전표, 현금영수증, 세금계산서 원본을 본 정산서 뒷면에 부착하여 결재 바랍니다.<br>
           위 통학차량 운영 지출 내역은 학원·유치원 회계 관리 규정에 따라 정당하게 집행되었음을 확인합니다.
@@ -1071,7 +1071,7 @@ export function openPrintDocument(type, data = {}) {
       <style>
         @page {
           size: A4 portrait;
-          margin: 12mm 15mm 12mm 15mm;
+          margin: 10mm 12mm 10mm 12mm;
         }
         * {
           box-sizing: border-box;
@@ -1079,112 +1079,115 @@ export function openPrintDocument(type, data = {}) {
         }
         body {
           margin: 0;
-          padding: 20px;
-          color: #111827;
+          padding: 24px;
+          color: #0f172a;
           background: #f1f5f9;
         }
         .doc-container {
           max-width: 210mm;
           margin: 0 auto;
           background: #ffffff;
-          padding: 25px 30px;
-          border-radius: 4px;
+          padding: 28px 32px;
+          border-radius: 6px;
           box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
         .header-section {
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          margin-bottom: 16px;
-          border-bottom: 2px solid #0f172a;
-          padding-bottom: 10px;
+          margin-bottom: 18px;
+          border-bottom: 2.5px solid #0f172a;
+          padding-bottom: 12px;
         }
         .title-wrap h1 {
-          font-size: 19px;
-          margin: 0 0 4px 0;
+          font-size: 23px;
+          margin: 0 0 6px 0;
           font-weight: 900;
           letter-spacing: -0.5px;
           color: #0f172a;
         }
         .sub-text {
-          font-size: 11px;
-          color: #64748b;
+          font-size: 13px;
+          color: #475569;
+          font-weight: 500;
           margin: 0;
         }
         .approval-table {
           border-collapse: collapse;
-          font-size: 10px;
+          font-size: 12.5px;
         }
         .approval-table th, .approval-table td {
           border: 1px solid #334155;
           text-align: center;
-          padding: 3px 6px;
+          padding: 4px 8px;
         }
         .approval-table th {
           background: #f8fafc;
-          font-weight: 600;
+          font-weight: 700;
         }
         .v-header {
-          width: 20px;
+          width: 24px;
           background: #f1f5f9 !important;
         }
         .sign-box {
-          height: 44px;
-          width: 55px;
+          height: 48px;
+          width: 62px;
         }
         .info-table, .check-table, .notes-table {
           width: 100%;
           border-collapse: collapse;
-          margin-bottom: 12px;
-          font-size: 11px;
+          margin-bottom: 14px;
+          font-size: 13px;
+          line-height: 1.5;
         }
         .info-table th, .info-table td,
         .check-table th, .check-table td,
         .notes-table th, .notes-table td {
           border: 1px solid #cbd5e1;
-          padding: 6px 8px;
+          padding: 8px 10px;
         }
         .info-table th, .check-table th, .notes-table th {
           background: #f8fafc;
-          color: #1e293b;
-          font-weight: 700;
+          color: #0f172a;
+          font-weight: 800;
           text-align: center;
         }
         .center {
           text-align: center;
         }
         .bold {
-          font-weight: 600;
+          font-weight: 700;
         }
         .font-check {
-          font-weight: 600;
-          color: #334155;
+          font-weight: 700;
+          color: #1e293b;
+          font-size: 13px;
           letter-spacing: 0.5px;
         }
         .footer-sign {
-          margin-top: 25px;
+          margin-top: 28px;
           text-align: center;
-          font-size: 12px;
-          line-height: 1.8;
-          color: #1e293b;
+          font-size: 14.5px;
+          line-height: 1.85;
+          color: #0f172a;
         }
         .date-line {
-          font-weight: 700;
-          margin: 10px 0;
-          font-size: 13px;
+          font-weight: 800;
+          margin: 12px 0;
+          font-size: 15.5px;
         }
         .sign-names {
-          font-size: 12px;
-          font-weight: 600;
-          margin-top: 12px;
+          font-size: 14.5px;
+          font-weight: 700;
+          margin-top: 14px;
         }
         .print-btn-bar {
           text-align: center;
           padding: 14px;
           background: #2563eb;
           color: white;
-          font-weight: bold;
-          font-size: 14px;
+          font-weight: 800;
+          font-size: 15px;
           margin-bottom: 20px;
           border-radius: 8px;
           cursor: pointer;

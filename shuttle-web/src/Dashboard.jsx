@@ -122,6 +122,24 @@ function MapCenterOnStudent({ selectedStudentLocation }) {
   return null;
 }
 
+// 지도 범례 및 외부 요청에 따라 구역(Bounds) 또는 특정 좌표로 부드럽게 지도를 포커스하는 헬퍼
+function MapFocusHandler({ focusTarget }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!focusTarget) return;
+    try {
+      if (focusTarget.bounds && focusTarget.bounds.isValid && focusTarget.bounds.isValid()) {
+        map.fitBounds(focusTarget.bounds, { padding: [60, 60], maxZoom: 16 });
+      } else if (focusTarget.center && Array.isArray(focusTarget.center)) {
+        map.flyTo(focusTarget.center, focusTarget.zoom || 16, { duration: 1.2 });
+      }
+    } catch (e) {
+      console.error('Map focus error:', e);
+    }
+  }, [focusTarget, map]);
+  return null;
+}
+
 // 차량 만석 시 45도 대각선 빗금(Hatched Pattern)을 Leaflet SVG 레이어에 주입하는 컴포넌트
 function MapPatternDefs({ buses }) {
   const map = useMap();
@@ -660,6 +678,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
 
   const [busLocations, setBusLocations] = useState({});
   const [operatingBuses, setOperatingBuses] = useState({}); // { [busId]: boolean }
+  const [isUnassignedCollapsed, setIsUnassignedCollapsed] = useState(true); // 미배정 원아 셀 접이식 기본값 true
 
   // Substitute Driver & Teacher Modal State
   const [substituteModalBus, setSubstituteModalBus] = useState(null);
@@ -757,6 +776,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const [selectedPaymentStudent, setSelectedPaymentStudent] = useState(null);
   const [highlightedStudentId, setHighlightedStudentId] = useState(null);
   const [highlightedStudentLocation, setHighlightedStudentLocation] = useState(null);
+  const [mapFocusTarget, setMapFocusTarget] = useState(null); // { bounds, center, zoom, timestamp }
   const [collapsedGroups, setCollapsedGroups] = useState({});
   const [expandedStudentDetailIds, setExpandedStudentDetailIds] = useState(new Set());
 
@@ -799,6 +819,159 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       ...prev,
       [key]: !prev[key]
     }));
+  };
+
+  // 지도 범례 클릭 핸들러: 전체 구역(모든 호차 및 기관)으로 지도 뷰 리셋/포커스
+  const handleFocusAllZones = () => {
+    const allPoints = [];
+    if (academy && !isNaN(academy.lat) && !isNaN(academy.lng)) {
+      allPoints.push([Number(academy.lat), Number(academy.lng)]);
+    }
+    buses.forEach(bus => {
+      if (Array.isArray(bus.points)) {
+        bus.points.forEach(pt => {
+          if (Array.isArray(pt) && pt.length >= 2 && !isNaN(pt[0]) && !isNaN(pt[1])) {
+            allPoints.push([Number(pt[0]), Number(pt[1])]);
+          }
+        });
+      }
+    });
+    students.forEach(st => {
+      if (st.lat && st.lng && !isNaN(st.lat) && !isNaN(st.lng)) {
+        allPoints.push([Number(st.lat), Number(st.lng)]);
+      }
+    });
+
+    if (allPoints.length > 0) {
+      const bounds = L.latLngBounds(allPoints);
+      setMapFocusTarget({
+        bounds,
+        timestamp: Date.now()
+      });
+      setSelectedBusId(null);
+      if (['log', 'messages', 'documents', 'board', 'classes', 'auth'].includes(activeTab)) {
+        handleTabChange('status');
+      }
+    } else {
+      setMapFocusTarget({
+        center: academy && !isNaN(academy.lat) && !isNaN(academy.lng) ? [Number(academy.lat), Number(academy.lng)] : [37.5650, 126.9750],
+        zoom: 14,
+        timestamp: Date.now()
+      });
+    }
+  };
+
+  // 지도 범례 클릭 핸들러: 특정 호차 구역으로 지도 뷰 포커스
+  const handleFocusBusZone = (bus) => {
+    if (!bus) return;
+    const targetPoints = [];
+
+    // 1. 차량 구역 폴리곤 좌표들
+    if (Array.isArray(bus.points) && bus.points.length > 0) {
+      bus.points.forEach(pt => {
+        if (Array.isArray(pt) && pt.length >= 2 && !isNaN(pt[0]) && !isNaN(pt[1])) {
+          targetPoints.push([Number(pt[0]), Number(pt[1])]);
+        }
+      });
+    }
+
+    // 2. 해당 호차에 배정된 원아들의 좌표들
+    const busStudents = students.filter(s => (s.assignedBusId === bus.id || s.assignedDepartureBusId === bus.id) && s.lat && s.lng);
+    busStudents.forEach(st => {
+      if (!isNaN(st.lat) && !isNaN(st.lng)) {
+        targetPoints.push([Number(st.lat), Number(st.lng)]);
+      }
+    });
+
+    if (targetPoints.length > 0) {
+      const bounds = L.latLngBounds(targetPoints);
+      setMapFocusTarget({
+        bounds,
+        timestamp: Date.now()
+      });
+      setSelectedBusId(bus.id);
+      // 만약 지도를 가리는 전면 뷰어 탭이 열려있다면 상태/현황 탭으로 복귀
+      if (['log', 'messages', 'documents', 'board', 'classes', 'auth'].includes(activeTab)) {
+        handleTabChange('status');
+      }
+    } else {
+      alert(`[${bus.name}]에 등록된 구역 좌표나 배정된 탑승지 위치가 없습니다.`);
+    }
+  };
+
+  // 지도 범례 클릭 핸들러: 만석 구역으로 포커스
+  const handleFocusFullBusZone = () => {
+    const fullBus = buses.find(b => {
+      const riders = getBusCapacityInfo(b.id, students);
+      return riders.isFull;
+    });
+
+    if (fullBus) {
+      handleFocusBusZone(fullBus);
+    } else {
+      alert('현재 만석(정원 도달)인 통학차량 구역이 없습니다.');
+    }
+  };
+
+  // 지도 범례 클릭 핸들러: 당일 1회 탑승 원아 위치로 포커스
+  const handleFocusOneTimeRiders = () => {
+    const oneTimeStudents = students.filter(st => 
+      (st.isOneTimeRide || (st.isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))) &&
+      st.lat && st.lng && !isNaN(st.lat) && !isNaN(st.lng)
+    );
+
+    if (oneTimeStudents.length === 1) {
+      setMapFocusTarget({
+        center: [Number(oneTimeStudents[0].lat), Number(oneTimeStudents[0].lng)],
+        zoom: 16,
+        timestamp: Date.now()
+      });
+      setHighlightedStudentId(oneTimeStudents[0].id);
+      if (['log', 'messages', 'documents', 'board', 'classes', 'auth'].includes(activeTab)) {
+        handleTabChange('status');
+      }
+    } else if (oneTimeStudents.length > 1) {
+      const bounds = L.latLngBounds(oneTimeStudents.map(s => [Number(s.lat), Number(s.lng)]));
+      setMapFocusTarget({
+        bounds,
+        timestamp: Date.now()
+      });
+      if (['log', 'messages', 'documents', 'board', 'classes', 'auth'].includes(activeTab)) {
+        handleTabChange('status');
+      }
+    } else {
+      alert('현재 등록된 당일 1회 탑승 원아가 없습니다.');
+    }
+  };
+
+  // 지도 범례 클릭 핸들러: 정규 미배정 원아 위치로 포커스
+  const handleFocusUnassignedRiders = () => {
+    const unassigned = students.filter(st => 
+      !st.isNotRiding && !st.assignedBusId && st.lat && st.lng && !isNaN(st.lat) && !isNaN(st.lng)
+    );
+
+    if (unassigned.length === 1) {
+      setMapFocusTarget({
+        center: [Number(unassigned[0].lat), Number(unassigned[0].lng)],
+        zoom: 16,
+        timestamp: Date.now()
+      });
+      setHighlightedStudentId(unassigned[0].id);
+      if (['log', 'messages', 'documents', 'board', 'classes', 'auth'].includes(activeTab)) {
+        handleTabChange('status');
+      }
+    } else if (unassigned.length > 1) {
+      const bounds = L.latLngBounds(unassigned.map(s => [Number(s.lat), Number(s.lng)]));
+      setMapFocusTarget({
+        bounds,
+        timestamp: Date.now()
+      });
+      if (['log', 'messages', 'documents', 'board', 'classes', 'auth'].includes(activeTab)) {
+        handleTabChange('status');
+      }
+    } else {
+      alert('현재 미배정된 원아가 없습니다.');
+    }
   };
 
   // 대체 기사 및 교사 임시 계정 프리셋 목록 생성 (드롭다운 선택 지원)
@@ -4279,112 +4452,148 @@ const parseKindergartenExcelSheet = (sheet) => {
       )}
 
       {/* Bookmark Rail (Left Navigation) */}
-      <div className={`w-20 h-full max-h-screen shrink-0 ${terms.themeBg} flex flex-col items-center py-6 gap-4 z-20 shadow-xl transition-colors duration-300 overflow-y-auto overflow-x-hidden select-none [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-white/40`}>
-        <div className="text-white font-black text-xs tracking-wider shrink-0 mb-0.5">Takeme</div>
-        <div className="text-[11px] text-white/80 text-center truncate max-w-[70px] mb-3 font-medium shrink-0" title={currentUser.name}>
-          {isSuperAdmin ? '플랫폼관리' : (currentUser.name ? `${currentUser.name} 관리자님` : '관리자님')}
+      <div className={`w-24 h-full max-h-screen shrink-0 ${terms.themeBg} flex flex-col items-center py-5 gap-2.5 z-20 shadow-xl transition-colors duration-300 overflow-y-auto overflow-x-hidden select-none [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-white/40`}>
+        <div className="text-white font-extrabold text-sm tracking-wider shrink-0 mb-0.5">Takeme</div>
+        <div className="text-[11px] text-white/90 text-center truncate max-w-[84px] mb-2 font-semibold shrink-0 px-1 py-0.5 rounded bg-black/20" title={currentUser.name}>
+          {isSuperAdmin ? '플랫폼관리' : (currentUser.name ? `${currentUser.name} 관리자` : '관리자')}
         </div>
         <button 
           onClick={() => handleTabChange('status')} 
-          className={`p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'status' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} 
+          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'status' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
           title="차량 및 구역 관리"
         >
           {/* 차량 및 통학버스 아이콘 */}
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 17a2 2 0 100 4 2 2 0 000-4zm10 0a2 2 0 100 4 2 2 0 000-4zM4 6a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm0 5h16M9 6v5m6-5v5" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">차량·구역</span>
         </button>
-        <button onClick={() => handleTabChange('students')} className={`p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'students' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title={`${terms.students} 정보`}>
+        <button 
+          onClick={() => handleTabChange('students')} 
+          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'students' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
+          title={`${terms.students} 정보`}
+        >
           {/* 학생 아이콘 */}
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            {/* 상단 꼭지 단추 */}
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <ellipse cx="12" cy="4.9" rx="1.3" ry="0.7" />
-            {/* 돔형 크라운 (모자 몸통) */}
             <path d="M5.2 14 C4.6 9.2 7.8 5.6 10.7 5.2 M13.3 5.2 C16.2 5.6 19.4 9.2 18.8 14" />
-            {/* 돔 하단 이마 곡선 */}
             <path d="M5.2 14 C8 16.2 16 16.2 18.8 14" />
-            {/* 모자 챙 (Brim) */}
             <path d="M5.2 14 C3.2 14.8 1.8 15.8 1.2 16.8 C4.5 20.6 19.5 20.6 22.8 16.8 C22.2 15.8 20.8 14.8 18.8 14" />
-            {/* 패널 절개선 */}
             <path d="M11.2 5.5 C9.8 8.8 8.8 12.2 8.5 15.8" />
             <path d="M12.8 5.5 C14.2 8.8 15.2 12.2 15.5 15.8" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">{terms.student}정보</span>
         </button>
-        <button onClick={() => handleTabChange('classes')} className={`p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'classes' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title={`${terms.class} 관리`}>
+        <button 
+          onClick={() => handleTabChange('classes')} 
+          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'classes' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
+          title={`${terms.class} 관리`}
+        >
           {/* 교실 학급 칠판 아이콘 */}
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <rect x="3" y="4" width="18" height="12" rx="2" strokeWidth={2} />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h5m-3 4v4m6-4v4m-8 0h10" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">{terms.class}관리</span>
         </button>
-        <button onClick={() => handleTabChange('auth')} className={`p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'auth' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="인증 관리">
+        <button 
+          onClick={() => handleTabChange('auth')} 
+          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'auth' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
+          title="가입 승인 및 인증 관리"
+        >
           {/* 가입 승인 및 인증 방패 아이콘 */}
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">가입승인</span>
         </button>
-        <button onClick={() => handleTabChange('log')} className={`p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'log' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="캘린더 및 로그보기">
+        <button 
+          onClick={() => handleTabChange('log')} 
+          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'log' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
+          title="캘린더 및 출석 일지"
+        >
           {/* 캘린더 달력 아이콘 */}
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <rect x="3" y="4" width="18" height="18" rx="2" strokeWidth={2} />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 2v4M8 2v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">출석·일지</span>
         </button>
-        <button onClick={() => { setUnreadAlertCount(0); handleTabChange('messages'); }} className={`relative p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'messages' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="메세지함">
+        <button 
+          onClick={() => { setUnreadAlertCount(0); handleTabChange('messages'); }} 
+          className={`relative w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'messages' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
+          title="대화 및 메세지함"
+        >
           {/* 대화 및 메시지함 아이콘 */}
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">소통·대화</span>
           {unreadAlertCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-amber-500 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-blue-700 animate-bounce shadow-sm">
+            <span className="absolute top-0.5 right-1.5 bg-amber-500 text-white text-[10px] font-black w-4.5 h-4.5 rounded-full flex items-center justify-center border-2 border-white shadow-sm">
               {unreadAlertCount > 99 ? '99+' : unreadAlertCount}
             </span>
           )}
         </button>
-        <button onClick={() => handleTabChange('documents')} className={`relative p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'documents' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="행정 및 안전 서류 관리">
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <button 
+          onClick={() => handleTabChange('documents')} 
+          className={`relative w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'documents' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
+          title="행정 및 안전 서류 관리"
+        >
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">안전서류</span>
           {urgentExpiryCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-blue-700 animate-pulse shadow-sm">
+            <span className="absolute top-0.5 right-1.5 bg-red-600 text-white text-[10px] font-black w-4.5 h-4.5 rounded-full flex items-center justify-center border-2 border-white animate-pulse shadow-sm">
               {urgentExpiryCount}
             </span>
           )}
         </button>
         <button 
           onClick={() => handleTabChange('board')} 
-          className={`relative p-4 rounded-2xl transition-all shrink-0 cursor-pointer ${activeTab === 'board' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} 
+          className={`relative w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'board' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
           title={terms.board}
         >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">알림·게시</span>
         </button>
 
-        <button onClick={() => handleTabChange('settings')} className={`p-4 rounded-2xl transition-all mt-auto pt-2 shrink-0 mb-1 cursor-pointer ${activeTab === 'settings' ? `bg-white ${terms.themeText} shadow-lg scale-110` : 'text-white/80 hover:bg-black/20'}`} title="환경설정">
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+        <button 
+          onClick={() => handleTabChange('settings')} 
+          className={`w-20 py-2.5 px-1 rounded-xl transition-all mt-auto shrink-0 mb-1 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'settings' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
+          title="환경설정"
+        >
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          <span className="text-[11px] font-bold tracking-tight">환경설정</span>
         </button>
       </div>
 
       {/* Sidebar Content Panel */}
-      <div className={`bg-white shadow-lg z-10 flex flex-col w-[380px] shrink-0 break-keep ${activeTab === 'messages' ? 'hidden' : ''}`}>
+      <div className={`bg-white shadow-lg z-10 flex flex-col w-[400px] shrink-0 break-keep ${activeTab === 'messages' ? 'hidden' : ''}`}>
 
         {(activeTab === 'status' || activeTab === 'buses') && (
           <div className="p-6 h-full flex flex-col overflow-y-auto break-keep">
             {/* Header */}
-            <div className="mb-4">
+            <div className="mb-4 shrink-0">
               <div className="flex items-center gap-2">
-                <h2 className="text-xl font-bold text-slate-800">차량 및 구역 관리</h2>
+                <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">차량 및 구역 관리</h2>
                 <span className={`text-xs px-2.5 py-1 rounded-lg font-black shadow-xs flex items-center gap-1 border ${terms.themeBadge}`}>
                   <span>{terms.icon}</span>
                   <span>{activeEducationLevel}</span>
                 </span>
               </div>
-              <p className="text-[13px] text-slate-500 mt-1">호차별 운행 구역, 차량 정보 및 탑승 {terms.students}을 통합 관리합니다.</p>
+              <p className="text-xs text-slate-600 font-medium mt-1">호차별 운행 구역, 차량 정보 및 탑승 {terms.students}을 통합 관리합니다.</p>
             </div>
 
             {/* Action Buttons: Integrated Zone Mapping & Pickup Points */}
-            <div className="space-y-2.5 mb-4">
+            <div className="space-y-2 mb-3 shrink-0">
+              {/* 메인 액션 버튼: 새 통학 차량 추가 */}
               <button
                 type="button"
                 onClick={() => {
@@ -4402,7 +4611,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                   });
                   setShowAddBusModal(true);
                 }}
-                className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl shadow-xs hover:shadow-md transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm active:scale-[0.99] cursor-pointer"
+                className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl shadow-xs hover:shadow-md transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm active:scale-[0.99] cursor-pointer"
               >
                 <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
@@ -4410,68 +4619,90 @@ const parseKindergartenExcelSheet = (sheet) => {
                 <span>새 통학 차량 추가</span>
               </button>
 
-              <div className="grid grid-cols-2 gap-2">
+              {/* 1차 빠른 도구 바 (3분할 세그먼트 칩) */}
+              <div className="grid grid-cols-3 gap-1.5">
                 <button
+                  type="button"
                   onClick={() => setIsResettingZones(!isResettingZones)}
-                  className={`w-full py-2.5 px-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 shadow-xs whitespace-nowrap ${
+                  className={`py-1.5 px-1 rounded-lg text-xs font-bold border transition-all flex items-center justify-center gap-1 shadow-2xs whitespace-nowrap cursor-pointer ${
                     isResettingZones
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-inner'
-                      : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:border-blue-300'
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-inner font-extrabold'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200'
                   }`}
+                  title="구역 매핑 엑셀 업로드 및 재계산"
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l4-4m0 0l4 4m-4-4v12" />
-                  </svg>
-                  {isResettingZones ? '엑셀 매핑 닫기' : '구역 매핑 엑셀'}
+                  <span>🗺️</span>
+                  <span>구역 매핑</span>
+                </button>
+
+                <button 
+                  type="button"
+                  onClick={() => setShowPickupPoints(!showPickupPoints)} 
+                  className={`py-1.5 px-1 rounded-lg text-xs font-bold border transition-all whitespace-nowrap flex items-center justify-center gap-1 shadow-2xs cursor-pointer ${
+                    showPickupPoints 
+                      ? 'border-orange-500 bg-orange-50 text-orange-700 font-extrabold' 
+                      : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-orange-300 hover:text-orange-700 hover:bg-orange-50/50'
+                  }`}
+                  title="지도에서 탑승지 핀 표시/숨기기"
+                >
+                  <span>📍</span>
+                  <span>{showPickupPoints ? '탑승지 ON' : '탑승지 OFF'}</span>
                 </button>
 
                 <button
+                  type="button"
+                  onClick={() => {
+                    handleTabChange('auth');
+                    setAuthTab('SUBSTITUTE');
+                  }}
+                  className="py-1.5 px-1 rounded-lg text-xs font-bold border transition-all flex items-center justify-center gap-1 shadow-2xs whitespace-nowrap cursor-pointer bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 hover:text-slate-900"
+                  title="대체 기사 임시 계정 일괄 현황 바로가기"
+                >
+                  <span>📋</span>
+                  <span>대체기사</span>
+                  {buses.some(b => b.isDriverResting || b.substituteDriver?.isActive) && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-ping"></span>
+                  )}
+                </button>
+              </div>
+
+              {/* 2차 서브 편집 도구 바 (슬림 2분할) */}
+              <div className="flex items-center gap-1.5 text-xs">
+                <button
+                  type="button"
                   onClick={() => {
                     setIsZoneEditingMode(!isZoneEditingMode);
                     if (isZoneEditingMode) setEditingZoneBusId(null);
                   }}
-                  className={`w-full py-2.5 px-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 shadow-xs whitespace-nowrap ${
+                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold border transition-all flex items-center justify-center gap-1 shadow-2xs whitespace-nowrap cursor-pointer ${
                     isZoneEditingMode
-                      ? 'bg-amber-500 text-white border-amber-500 shadow-inner'
-                      : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100 hover:border-amber-300'
+                      ? 'bg-amber-500 text-white border-amber-500 shadow-inner font-extrabold'
+                      : 'bg-white text-slate-700 border-slate-200 hover:border-amber-300 hover:text-amber-800'
                   }`}
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
-                  {isZoneEditingMode ? '구역 수정 종료' : '구역 매핑 수정'}
+                  <span>{isZoneEditingMode ? '구역 수정 종료' : '구역 꼭짓점 직접 수정'}</span>
+                </button>
+
+                <button 
+                  type="button"
+                  onClick={() => setIsAddingPickupPoint(!isAddingPickupPoint)} 
+                  className={`py-1.5 px-2.5 rounded-lg text-xs font-bold border transition-all whitespace-nowrap flex items-center justify-center gap-1 shadow-2xs cursor-pointer ${
+                    isAddingPickupPoint 
+                      ? 'border-purple-500 bg-purple-50 text-purple-700 shadow-inner font-extrabold' 
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-purple-300 hover:text-purple-700'
+                  }`}
+                  title="지도 클릭하여 새 탑승지 등록"
+                >
+                  <span>{isAddingPickupPoint ? '위치 클릭 중...' : '+ 탑승지 등록'}</span>
                 </button>
               </div>
 
-              {/* 대체 기사 임시 계정 일괄 관리 바로가기 버튼 */}
-              <button
-                type="button"
-                onClick={() => {
-                  handleTabChange('auth');
-                  setAuthTab('SUBSTITUTE');
-                }}
-                className="w-full py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-between border shadow-2xs cursor-pointer bg-slate-50 hover:bg-slate-100/90 text-slate-800 border-slate-200"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-slate-500">📋</span>
-                  <span className="truncate">대체 기사 임시 계정 일괄 현황</span>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {buses.some(b => b.isDriverResting || b.substituteDriver?.isActive) ? (
-                    <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-md text-[10px] font-bold">
-                      대체 운행 {buses.filter(b => b.isDriverResting || b.substituteDriver?.isActive).length}건
-                    </span>
-                  ) : (
-                    <span className="text-[11px] text-slate-500 font-medium">
-                      총 {buses.length}호차 &gt;
-                    </span>
-                  )}
-                </div>
-              </button>
-
-              {/* Integrated Zone Remapping Panel */}
+              {/* Integrated Zone Remapping Panel (구역 매핑 엑셀 펼침) */}
               {isResettingZones && (
-                <div className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50/60 rounded-2xl border border-blue-200 shadow-xs space-y-3">
+                <div className="p-3.5 bg-gradient-to-br from-blue-50 to-indigo-50/60 rounded-2xl border border-blue-200 shadow-xs space-y-2.5 animate-fade-in">
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-blue-900 text-xs flex items-center gap-1.5">
                       <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4563,29 +4794,6 @@ const parseKindergartenExcelSheet = (sheet) => {
                   </div>
                 </div>
               )}
-
-              <div className="grid grid-cols-2 gap-2">
-                <button 
-                  onClick={() => setShowPickupPoints(!showPickupPoints)} 
-                  className={`w-full py-2.5 px-2 rounded-xl text-sm font-bold border transition-all whitespace-nowrap text-center ${
-                    showPickupPoints 
-                      ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-inner' 
-                      : 'border-slate-200 bg-white text-slate-600 hover:border-orange-300 hover:text-orange-600 shadow-xs'
-                  }`}
-                >
-                  {showPickupPoints ? '탑승지 숨기기' : '탑승지 보기'}
-                </button>
-                <button 
-                  onClick={() => setIsAddingPickupPoint(!isAddingPickupPoint)} 
-                  className={`w-full py-2.5 px-2 rounded-xl text-sm font-bold border transition-all whitespace-nowrap text-center ${
-                    isAddingPickupPoint 
-                      ? 'border-purple-500 bg-purple-50 text-purple-700 shadow-inner' 
-                      : 'border-slate-200 bg-white text-slate-600 hover:border-purple-300 hover:text-purple-600 shadow-xs'
-                  }`}
-                >
-                  {isAddingPickupPoint ? '위치 클릭 중...' : '+ 탑승지 추가'}
-                </button>
-              </div>
             </div>
 
             {/* Bus Cards List */}
@@ -4609,52 +4817,52 @@ const parseKindergartenExcelSheet = (sheet) => {
                       }`}
                     >
                       {/* Bus Card Header */}
-                      <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2.5">
+                      <div className="flex items-center justify-between mb-2.5 border-b border-slate-100 pb-2">
                         <div 
-                          className="flex items-center gap-2.5 cursor-pointer min-w-0"
+                          className="flex items-center gap-2 cursor-pointer min-w-0"
                           onClick={() => setSelectedBusId(isSelected ? null : bus.id)}
                         >
                           <div className="w-3.5 h-3.5 rounded-full shadow-xs shrink-0" style={{ backgroundColor: bus.color }}></div>
                           <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-bold text-slate-900 text-base">{bus.name}</span>
-                              {isFull && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-700 border border-rose-300 shadow-2xs" title="25인승 정원 만석 (지도 구역 대각선 빗금 표시)">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
-                                  만석 (총 {totalCount}/{busCapacity}명) 빗금
-                                </span>
-                              )}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-extrabold text-slate-900 text-base">{bus.name}</span>
                               {bus.plateNumber && (
-                                <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded font-mono">
+                                <span className="text-xs text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded font-mono font-medium">
                                   {bus.plateNumber}
                                 </span>
                               )}
                               {operatingBuses[bus.id] && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-extrabold bg-emerald-500 text-white animate-pulse shadow-xs">
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-extrabold bg-emerald-500 text-white animate-pulse shadow-xs">
                                   운행중
+                                </span>
+                              )}
+                              {isFull && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-700 border border-rose-300 shadow-2xs">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
+                                  만석
                                 </span>
                               )}
                             </div>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-1.5 shrink-0">
+                        <div className="flex items-center gap-1 shrink-0">
                           <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingBus(bus);
-                          }}
-                          className="text-xs bg-slate-100 text-slate-700 font-bold px-2.5 py-1.5 rounded-lg hover:bg-blue-50 hover:text-blue-600 transition-colors whitespace-nowrap shrink-0 border border-slate-200/80"
-                        >
-                          상세 설정
-                        </button>
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingBus(bus);
+                            }}
+                            className="text-xs bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 font-bold px-2 py-1 rounded-lg transition-colors whitespace-nowrap shrink-0 border border-slate-200 cursor-pointer"
+                          >
+                            상세 설정
+                          </button>
                           <button 
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleDeleteBus(bus);
                             }}
-                            className="text-xs bg-white text-slate-400 hover:text-red-600 hover:bg-red-50 font-bold px-2 py-1.5 rounded-lg transition-colors whitespace-nowrap border border-slate-200 hover:border-red-200 cursor-pointer"
+                            className="text-xs bg-white text-slate-400 hover:text-red-600 hover:bg-red-50 font-bold px-1.5 py-1 rounded-lg transition-colors whitespace-nowrap border border-slate-200 hover:border-red-200 cursor-pointer"
                             title="차량 삭제"
                           >
                             삭제
@@ -4662,112 +4870,86 @@ const parseKindergartenExcelSheet = (sheet) => {
                         </div>
                       </div>
 
-                      {/* Info Summary Grid */}
-                      <div className="grid grid-cols-2 gap-2 text-xs mb-2">
-                        <div className={`p-2 rounded-xl border transition-colors ${bus.isDriverResting || bus.substituteDriver?.isActive ? 'bg-amber-50/90 border-amber-200' : 'bg-slate-50 border-slate-100'}`}>
-                          <div className="flex items-center justify-between mb-0.5">
-                            <span className="text-slate-400 block text-[11px] font-medium">기사님</span>
+                      {/* Compact Staff Info Bar (기사/지도교사 컴팩트 바) */}
+                      <div className="bg-slate-50/90 rounded-xl p-2 border border-slate-200 mb-2 space-y-1.5 text-xs">
+                        {/* 기사님 행 */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-slate-400 font-bold shrink-0 text-[11px]">기사</span>
+                            <span className="font-extrabold text-slate-900 truncate">
+                              {bus.driverName || '미등록'}
+                            </span>
                             {bus.isDriverResting || bus.substituteDriver?.isActive ? (
-                              <span className="text-[10px] bg-amber-200 text-amber-800 font-black px-1.5 py-0.5 rounded border border-amber-300">
-                                휴식 중
+                              <span className="text-[10px] bg-amber-100 text-amber-900 font-extrabold px-1.5 py-0.2 rounded border border-amber-300 shrink-0">
+                                대체: {bus.substituteDriver?.name || '휴식중'}
                               </span>
-                            ) : (
-                              <span className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-1.5 py-0.5 rounded">
-                                정상
-                              </span>
-                            )}
+                            ) : null}
                           </div>
-                          <span className="font-bold text-slate-800 truncate block">
-                            {bus.driverName || '미등록'}
-                          </span>
-                          {bus.isDriverResting || bus.substituteDriver?.isActive ? (
-                            <div className="mt-1 pt-1 border-t border-blue-200 text-[11px] text-blue-900 font-bold truncate flex items-center gap-1">
-                              <span>🔄</span>
-                              <span>대체: {bus.substituteDriver?.name || '대체기사'}</span>
-                            </div>
-                          ) : null}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenSubstituteModal(bus);
+                            }}
+                            className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline px-1 py-0.5 shrink-0 flex items-center gap-0.5 cursor-pointer"
+                            title="기사님 휴식 처리 및 대체 기사 배정 관리"
+                          >
+                            <span>휴식·대체 관리</span>
+                          </button>
                         </div>
-                        <div className={`p-2 rounded-xl border transition-colors ${bus.isTeacherResting || bus.substituteTeacher?.isActive ? 'bg-blue-50/80 border-blue-200' : 'bg-slate-50 border-slate-100'}`}>
-                          <div className="flex items-center justify-between mb-0.5">
-                            <span className="text-slate-400 block text-[11px] font-medium">차량선생님</span>
+                        {/* 차량선생님 행 */}
+                        <div className="flex items-center justify-between border-t border-slate-200/60 pt-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-slate-400 font-bold shrink-0 text-[11px]">차량선생님</span>
+                            <span className="font-extrabold text-slate-900 truncate">
+                              {bus.teacherName || '미등록'}
+                            </span>
                             {bus.isTeacherResting || bus.substituteTeacher?.isActive ? (
-                              <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded border border-blue-200">
-                                휴식 중
+                              <span className="text-[10px] bg-blue-100 text-blue-900 font-extrabold px-1.5 py-0.2 rounded border border-blue-200 shrink-0">
+                                대체: {bus.substituteTeacher?.name || '휴식중'}
                               </span>
-                            ) : (
-                              <span className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-1.5 py-0.5 rounded">
-                                정상
-                              </span>
-                            )}
+                            ) : null}
                           </div>
-                          <span className="font-bold text-slate-800 truncate block">
-                            {bus.teacherName || '미등록'}
-                          </span>
-                          {bus.isTeacherResting || bus.substituteTeacher?.isActive ? (
-                            <div className="mt-1 pt-1 border-t border-blue-200 text-[11px] text-blue-900 font-bold truncate flex items-center gap-1">
-                              <span>🔄</span>
-                              <span>대체: {bus.substituteTeacher?.name || '대체교사'}</span>
-                            </div>
-                          ) : null}
+                          {bus.isDriverResting || bus.substituteDriver?.isActive || bus.isTeacherResting || bus.substituteTeacher?.isActive ? (
+                            <span className="text-[10px] text-amber-700 font-bold">운행 조정 중</span>
+                          ) : (
+                            <span className="text-[10px] text-emerald-700 font-bold flex items-center gap-0.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                              정상
+                            </span>
+                          )}
                         </div>
                       </div>
 
-                      {/* 대체 기사 / 휴식 관리 버튼 */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenSubstituteModal(bus);
-                        }}
-                        className={`w-full py-1.5 px-2.5 mb-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border shadow-2xs cursor-pointer ${
-                          bus.isDriverResting || bus.substituteDriver?.isActive || bus.isTeacherResting || bus.substituteTeacher?.isActive
-                            ? 'bg-slate-900 hover:bg-slate-800 text-white border-slate-900 shadow-xs'
-                            : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200 hover:border-slate-300'
-                        }`}
-                        title="기사님 휴식 처리 및 대체 기사 임시 계정을 발급/관리합니다."
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                        </svg>
-                        {bus.isDriverResting || bus.substituteDriver?.isActive
-                          ? '대체 기사 운행 중 (설정 / 복귀 관리)'
-                          : '기사 휴식 및 대체 기사 배정'}
-                      </button>
-
-                      {/* Zone & Students Status Bar */}
+                      {/* Integrated Riders Status & Visual Progress Bar (통합 인원 바) */}
                       <div 
-                        className="flex items-center justify-between text-xs cursor-pointer p-2.5 rounded-xl bg-slate-50/80 hover:bg-slate-100 transition-colors"
+                        className="p-2.5 rounded-xl bg-slate-50/90 hover:bg-slate-100 transition-colors border border-slate-200 cursor-pointer"
                         onClick={() => setSelectedBusId(isSelected ? null : bus.id)}
                       >
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-slate-800 text-xs">탑승 인원</span>
-                          <span className={`font-black px-2 py-0.5 rounded-md text-xs ${isFull ? 'bg-rose-100 text-rose-800 border border-rose-300' : 'bg-blue-100 text-blue-700'}`}>
-                            총 {totalCount} / {busCapacity}명 {isFull ? '(만석)' : ''}
-                          </span>
+                        <div className="flex items-center justify-between text-xs mb-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-extrabold text-slate-800">탑승 인원</span>
+                            <span className={`font-black px-1.5 py-0.2 rounded text-xs ${isFull ? 'bg-rose-100 text-rose-800 border border-rose-300' : 'bg-blue-100 text-blue-800 border border-blue-200'}`}>
+                              {totalCount}/{busCapacity}명 {isFull ? '(만석)' : ''}
+                            </span>
+                            <span className="text-[11px] text-slate-500 font-medium">
+                              (정규 {regularStudents.length} · 1회 {oneTimeStudents.length})
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 text-slate-600 font-bold shrink-0">
+                            <span className="text-xs">{isSelected ? '접기' : '명단보기'}</span>
+                            <svg className={`w-3.5 h-3.5 transition-transform ${isSelected ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1 text-slate-400">
-                          <span className="text-xs">{isSelected ? '접기' : '명단보기'}</span>
-                          <svg className={`w-3.5 h-3.5 transition-transform ${isSelected ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </div>
-                      </div>
 
-                      {/* 정규 vs 1회 탑승자 분리 안내 바 */}
-                      <div className="grid grid-cols-2 gap-1.5 text-[11px] mt-1.5 px-0.5">
-                        <div className="flex items-center justify-between bg-blue-50/70 border border-blue-100 px-2.5 py-1 rounded-lg">
-                          <span className="text-slate-600 font-semibold flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                            정규 탑승
-                          </span>
-                          <span className="font-black text-blue-800">{regularStudents.length}명</span>
-                        </div>
-                        <div className="flex items-center justify-between bg-rose-50/70 border border-rose-100 px-2.5 py-1 rounded-lg">
-                          <span className="text-rose-700 font-semibold flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-                            1회 탑승
-                          </span>
-                          <span className="font-black text-rose-700">{oneTimeStudents.length}명</span>
+                        {/* Visual Progress Gauge */}
+                        <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-300 ${isFull ? 'bg-rose-500' : 'bg-blue-600'}`}
+                            style={{ width: `${Math.min(100, Math.round((totalCount / (busCapacity || 25)) * 100))}%` }}
+                          ></div>
                         </div>
                       </div>
 
@@ -4791,29 +4973,29 @@ const parseKindergartenExcelSheet = (sheet) => {
 
                       {/* Expandable Students List */}
                       {isSelected && (
-                        <div className="mt-3 border-t border-slate-100 pt-3 space-y-2">
-                          <div className="text-xs font-bold text-slate-600 flex justify-between items-center px-1">
+                        <div className="mt-3 border-t border-slate-200 pt-3 space-y-2">
+                          <div className="text-xs font-bold text-slate-700 flex justify-between items-center px-1">
                             <span>탑승 원아 명단 (총 {totalCount}명)</span>
-                            <div className="flex items-center gap-1 text-[10px]">
-                              <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-bold">정규 {regularStudents.length}</span>
-                              <span className="px-1.5 py-0.5 bg-rose-50 text-rose-700 rounded font-bold">1회 {oneTimeStudents.length}</span>
+                            <div className="flex items-center gap-1 text-xs">
+                              <span className="px-1.5 py-0.5 bg-blue-50 text-blue-800 rounded font-bold border border-blue-200">정규 {regularStudents.length}</span>
+                              <span className="px-1.5 py-0.5 bg-rose-50 text-rose-800 rounded font-bold border border-rose-200">1회 {oneTimeStudents.length}</span>
                             </div>
                           </div>
 
                           {/* 1회 탑승자 목록 (상단 강조) */}
                           {oneTimeStudents.length > 0 && (
                             <div className="space-y-1">
-                              <div className="text-[10px] font-black text-rose-700 flex items-center gap-1 px-1">
+                              <div className="text-xs font-black text-rose-700 flex items-center gap-1 px-1">
                                 <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
                                 <span>당일 1회 탑승자 ({oneTimeStudents.length}명)</span>
                               </div>
                               {oneTimeStudents.map(st => (
-                                <div key={st.id} className="text-xs flex justify-between items-center bg-rose-50/70 border border-rose-200 p-2 rounded-xl shadow-2xs">
+                                <div key={st.id} className="text-xs flex justify-between items-center bg-rose-50 border border-rose-200 p-2 rounded-xl shadow-2xs">
                                   <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className="px-1.5 py-0.2 bg-rose-500 text-white rounded text-[10px] font-black">1회</span>
-                                    <span className="font-bold text-rose-950 truncate">{st.name}</span>
+                                    <span className="px-1.5 py-0.2 bg-rose-500 text-white rounded text-[11px] font-black">1회</span>
+                                    <span className="font-extrabold text-rose-950 truncate">{st.name}</span>
                                   </div>
-                                  <span className="text-rose-600 text-[11px] truncate max-w-[130px]" title={st.address || st.boardingLocation}>
+                                  <span className="text-rose-700 font-medium text-xs truncate max-w-[130px]" title={st.address || st.boardingLocation}>
                                     {st.boardingLocation || st.address || '위치 미등록'}
                                   </span>
                                 </div>
@@ -4824,19 +5006,19 @@ const parseKindergartenExcelSheet = (sheet) => {
                           {/* 정규 탑승자 목록 */}
                           <div className="space-y-1">
                             {oneTimeStudents.length > 0 && (
-                              <div className="text-[10px] font-black text-slate-500 flex items-center gap-1 px-1 pt-1">
+                              <div className="text-xs font-black text-slate-600 flex items-center gap-1 px-1 pt-1">
                                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
                                 <span>정규 탑승자 ({regularStudents.length}명)</span>
                               </div>
                             )}
                             <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
                               {regularStudents.map(st => (
-                                <div key={st.id} className="text-xs flex justify-between items-center bg-slate-50 p-2 rounded-xl border border-slate-100">
+                                <div key={st.id} className="text-xs flex justify-between items-center bg-slate-50 p-2 rounded-xl border border-slate-200">
                                   <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className="px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded text-[10px] font-bold">정규</span>
-                                    <span className="font-bold text-slate-800 truncate">{st.name}</span>
+                                    <span className="px-1.5 py-0.2 bg-slate-200 text-slate-800 rounded text-[11px] font-bold">정규</span>
+                                    <span className="font-extrabold text-slate-900 truncate">{st.name}</span>
                                   </div>
-                                  <span className="text-slate-400 text-[11px] truncate max-w-[140px]" title={st.address || st.boardingLocation}>
+                                  <span className="text-slate-600 font-medium text-xs truncate max-w-[140px]" title={st.address || st.boardingLocation}>
                                     {st.boardingLocation || st.address || '위치 미등록'}
                                   </span>
                                 </div>
@@ -4850,662 +5032,566 @@ const parseKindergartenExcelSheet = (sheet) => {
                 })
               )}
 
-            {/* Persistent Unassigned Students Panel (미배정셀은 항상 뜨게) */}
-            <div className="mt-4 p-3.5 bg-amber-50/80 border-2 border-amber-300 rounded-2xl shadow-xs shrink-0">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
-                  <h4 className="font-black text-amber-950 text-xs">
-                    미배정 원아 셀 ({students.filter(st => !st.assignedBusId && !st.isNotRiding).length}명)
-                  </h4>
-                </div>
-                <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
-                  상시 노출
-                </span>
-              </div>
-
-              {students.filter(st => !st.assignedBusId && !st.isNotRiding).length === 0 ? (
-                <p className="text-[11px] text-amber-800/80 font-medium py-1">현재 모든 원아가 통학 차량에 배정되어 있습니다.</p>
-              ) : (
-                <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
-                  {students.filter(st => !st.assignedBusId && !st.isNotRiding).map(st => (
-                    <div key={st.id} className="flex items-center justify-between bg-white p-2 rounded-xl border border-amber-200 text-xs shadow-2xs">
-                      <div className="min-w-0 pr-2">
-                        <span className="font-bold text-slate-800 block truncate">{st.name}</span>
-                        <span className="text-[10px] text-slate-400 block truncate">{st.address || '주소 미등록'}</span>
-                      </div>
-                      <select
-                        onChange={(e) => {
-                          const targetBid = Number(e.target.value);
-                          if (!targetBid) return;
-                          setStudents(prev => prev.map(s => s.id === st.id ? { ...s, assignedBusId: targetBid } : s));
-                        }}
-                        defaultValue=""
-                        className="text-[11px] font-bold py-1 px-1.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg shrink-0 cursor-pointer"
-                      >
-                        <option value="" disabled>차량 배정</option>
-                        {buses.map(b => (
-                          <option key={b.id} value={b.id}>{b.name}</option>
-                        ))}
-                      </select>
+            {/* Persistent Unassigned Students Panel (접이식 아코디언) */}
+            {(() => {
+              const unassignedList = students.filter(st => !st.assignedBusId && !st.isNotRiding);
+              return (
+                <div className="mt-3 p-3 bg-amber-50/80 border border-amber-300 rounded-2xl shadow-xs shrink-0 transition-all">
+                  <div 
+                    onClick={() => setIsUnassignedCollapsed(!isUnassignedCollapsed)}
+                    className="flex items-center justify-between cursor-pointer select-none"
+                    title={isUnassignedCollapsed ? '클릭하여 미배정 원아 명단 펼치기' : '클릭하여 접기'}
+                  >
+                    <div className="flex items-center gap-2">
+                      {unassignedList.length > 0 && (
+                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                      )}
+                      <h4 className="font-extrabold text-amber-950 text-xs">
+                        미배정 {terms.student} ({unassignedList.length}명)
+                      </h4>
                     </div>
-                  ))}
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800">
+                      <span className="text-[11px] bg-amber-100 hover:bg-amber-200 px-2 py-0.5 rounded-md border border-amber-200 transition-colors">
+                        {isUnassignedCollapsed ? '+ 펼치기' : '− 접기'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {!isUnassignedCollapsed && (
+                    <div className="mt-2.5 pt-2 border-t border-amber-200/80 animate-fade-in">
+                      {unassignedList.length === 0 ? (
+                        <p className="text-[11px] text-amber-800/80 font-medium py-1">현재 모든 {terms.student}이 통학 차량에 배정되어 있습니다.</p>
+                      ) : (
+                        <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+                          {unassignedList.map(st => (
+                            <div key={st.id} className="flex items-center justify-between bg-white p-2 rounded-xl border border-amber-200 text-xs shadow-2xs">
+                              <div className="min-w-0 pr-2">
+                                <span className="font-extrabold text-slate-800 block truncate">{st.name}</span>
+                                <span className="text-[10px] text-slate-500 block truncate font-medium">{st.address || '주소 미등록'}</span>
+                              </div>
+                              <select
+                                onChange={(e) => {
+                                  const targetBid = Number(e.target.value);
+                                  if (!targetBid) return;
+                                  setStudents(prev => prev.map(s => s.id === st.id ? { ...s, assignedBusId: targetBid } : s));
+                                }}
+                                defaultValue=""
+                                className="text-[11px] font-bold py-1 px-1.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg shrink-0 cursor-pointer"
+                              >
+                                <option value="" disabled>차량 배정</option>
+                                {buses.map(b => (
+                                  <option key={b.id} value={b.id}>{b.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              );
+            })()}
 
             </div>
           </div>
         )}
 
-        {activeTab === 'students' && (
-          <div className="p-4 h-full flex flex-col">
-            <h2 className="text-lg font-bold text-slate-800 mb-1 text-center">{terms.student} 정보</h2>
-            <p className="text-[13px] text-slate-500 mb-3 text-center">
-              {terms.student}을 직접 추가하거나 엑셀 파일로 일괄 등록할 수 있습니다.
-            </p>
+        {activeTab === 'students' && (() => {
+          // Helper: Clean, Slim & High-readability Student Card
+          const renderCleanStudentCard = (st, showBusBadge = true) => {
+            const isExpanded = expandedStudentDetailIds.has(st.id);
+            const bus = buses.find(b => b.id === st.assignedBusId);
+            const isNotRiding = Boolean(st.isNotRiding || st.raw?.['미탑승'] || st.raw?.['차량미탑승']);
+            const needsAddress = !isNotRiding && (!st.address || !st.lat || !st.lng || st.addressNeedsInput || st.raw?.['주소입력필요']);
+            const depBus = st.assignedDepartureBusId ? buses.find(b => b.id === st.assignedDepartureBusId) : null;
+            const rawClass = st.raw?.['반명'];
+            const rawAge = st.raw?.['연령'] !== undefined && st.raw?.['연령'] !== null ? st.raw['연령'] : st.raw?.['학년'];
+            const hasAllergy = Boolean(st.allergies || st.raw?.['알레르기']);
 
-            <input 
-              type="file" 
-              accept=".xlsx, .xls" 
-              className="hidden" 
-              ref={fileInputRef} 
-              onChange={handleStudentUpload} 
-            />
-
-            {/* Primary Action Button: 원생/학생 추가 */}
-            <button
-              onClick={handleOpenAddStudentModal}
-              className="w-full py-2.5 px-3 mb-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 text-sm active:scale-[0.99]"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-              </svg>
-              {terms.student} 추가
-            </button>
-
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isProcessing}
-              className="w-full py-2.5 px-3 mb-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl border border-slate-200 transition-colors disabled:opacity-50 text-center text-sm flex items-center justify-center gap-1.5"
-            >
-              <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l4-4m0 0l4 4m-4-4v12" />
-              </svg>
-              {isProcessing ? '처리 중...' : '원아 엑셀 업로드'}
-            </button>
-
-            <a 
-              href="/원아_정보_입력_시트.xlsx" 
-              download="원아_정보_입력_시트.xlsx" 
-              className="w-full py-2 mb-2 bg-white text-slate-600 rounded-xl text-[13px] font-semibold border border-slate-200 shadow-xs hover:bg-slate-50 transition-colors text-center flex items-center justify-center gap-1.5"
-            >
-              <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              원아 등록 양식 다운로드
-            </a>
-
-
-
-            {students.length > 0 ? (
-              <div className="mt-1 flex-1 flex flex-col min-h-0">
-                {/* Header with Title and Count */}
-                <div className="flex justify-between items-center mb-2 border-b pb-1.5 shrink-0">
-                  <h3 className="font-bold text-slate-700 text-sm">등록 원아 목록</h3>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[13px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                      총 {students.length}명 {filteredStudents.length !== students.length ? `(검색 ${filteredStudents.length}명)` : ''}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Student Search and Class Filter Bar */}
-                <div className="flex items-center gap-1.5 mb-2 shrink-0">
-                  <div className="relative flex-1">
-                    <input
-                      type="text"
-                      value={studentSearchKeyword}
-                      onChange={(e) => setStudentSearchKeyword(e.target.value)}
-                      placeholder="원아명, 전화번호 검색..."
-                      className="w-full pl-7 pr-6 py-1.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white transition"
+            return (
+              <div
+                key={st.id}
+                onClick={() => handleStudentMapClick(st)}
+                title="클릭 시 지도에서 위치를 확인합니다"
+                className={`p-2.5 rounded-xl transition-all group cursor-pointer ${
+                  highlightedStudentId === st.id
+                    ? 'relative ring-2 ring-indigo-500 border-indigo-500 bg-indigo-50/40 z-1 shadow-xs'
+                    : needsAddress
+                    ? 'bg-rose-50/40 border border-rose-300 ring-1 ring-rose-100 shadow-2xs'
+                    : 'bg-white border border-slate-200 hover:border-blue-400 hover:shadow-xs shadow-2xs'
+                }`}
+              >
+                {/* Row 1: Header (Dot + Name + Meta + Urgent Badges + Actions) */}
+                <div className="flex items-center justify-between gap-1 mb-1.5">
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                    <div 
+                      className="w-2.5 h-2.5 rounded-full shrink-0 shadow-2xs" 
+                      style={{ backgroundColor: needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b') }} 
                     />
-                    <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
-                    {studentSearchKeyword && (
-                      <button
-                        type="button"
-                        onClick={() => setStudentSearchKeyword('')}
-                        className="absolute right-2 top-1 text-slate-400 hover:text-slate-600 text-xs font-bold"
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                  <select
-                    value={studentClassFilter}
-                    onChange={(e) => setStudentClassFilter(e.target.value)}
-                    className="w-24 py-1.5 px-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700 shrink-0"
-                  >
-                    <option value="ALL">전체 반</option>
-                    {availableClasses.map(cls => (
-                      <option key={cls} value={cls}>{cls}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Filter Mode Selector: 전체 / 반별 / 연령별 / 차량별 */}
-                <div className="grid grid-cols-4 gap-1 p-1 bg-slate-100 rounded-xl mb-2 shrink-0 text-[13px] font-bold">
-                  <button 
-                    type="button" 
-                    onClick={() => setStudentFilterMode('ALL')} 
-                    className={`py-1.5 rounded-lg transition-all text-center ${studentFilterMode === 'ALL' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
-                  >
-                    전체
-                  </button>
-                  <button 
-                    type="button" 
-                    onClick={() => setStudentFilterMode('CLASS')} 
-                    className={`py-1.5 rounded-lg transition-all text-center ${studentFilterMode === 'CLASS' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
-                  >
-                    반별
-                  </button>
-                  <button 
-                    type="button" 
-                    onClick={() => setStudentFilterMode('AGE')} 
-                    className={`py-1.5 rounded-lg transition-all text-center ${studentFilterMode === 'AGE' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
-                  >
-                    연령별
-                  </button>
-                  <button 
-                    type="button" 
-                    onClick={() => setStudentFilterMode('BUS')} 
-                    className={`py-1.5 rounded-lg transition-all text-center ${studentFilterMode === 'BUS' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
-                  >
-                    차량별
-                  </button>
-                </div>
-
-                {/* Sort Bar: 이름순 / 나이순 / 반 순서 */}
-                <div className="flex items-center justify-between mb-2 px-1 text-xs shrink-0">
-                  <span className="font-bold text-slate-500">
-                    정렬 기준
-                  </span>
-                  <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-xs font-bold">
-                    <button
-                      type="button"
-                      onClick={() => setStudentSortBy('NAME')}
-                      className={`px-2.5 py-1 rounded-md transition-all ${studentSortBy === 'NAME' ? 'bg-white text-blue-700 shadow-2xs font-extrabold' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                      이름순
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setStudentSortBy('AGE')}
-                      className={`px-2.5 py-1 rounded-md transition-all ${studentSortBy === 'AGE' ? 'bg-white text-blue-700 shadow-2xs font-extrabold' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                      나이순
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setStudentSortBy('CLASS')}
-                      className={`px-2.5 py-1 rounded-md transition-all ${studentSortBy === 'CLASS' ? 'bg-white text-blue-700 shadow-2xs font-extrabold' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                      반 순서
-                    </button>
-                  </div>
-                </div>
-
-                {/* Group Accordion Controls (when not ALL) */}
-                {studentFilterMode !== 'ALL' && (
-                  <div className="flex justify-between items-center px-1 mb-1.5 shrink-0">
-                    <span className="text-xs font-bold text-slate-500">
-                      {studentFilterMode === 'CLASS' && '반별 분류'}
-                      {studentFilterMode === 'AGE' && '연령별 분류'}
-                      {studentFilterMode === 'BUS' && '차량별 분류'}
+                    <span className="font-extrabold text-slate-900 text-sm shrink-0 tracking-tight">
+                      {st.name}
                     </span>
-                    <button 
+                    {(rawClass || rawAge) && (
+                      <span className="text-[11px] text-slate-500 font-semibold truncate shrink-0">
+                        {rawClass}{rawClass && rawAge ? ' · ' : ''}{rawAge}
+                      </span>
+                    )}
+
+                    {/* Urgent / Status Badges */}
+                    <div className="flex items-center gap-1 truncate">
+                      {st.boardStatus === 'ABSENT' && (
+                        <span className="text-[10px] bg-red-100 text-red-700 font-extrabold px-1.5 py-0.2 rounded border border-red-200 shrink-0">
+                          결석
+                        </span>
+                      )}
+                      {st.boardStatus === 'SELF_PICKUP' && (
+                        <span className="text-[10px] bg-blue-100 text-blue-700 font-extrabold px-1.5 py-0.2 rounded border border-blue-200 shrink-0">
+                          개별픽업
+                        </span>
+                      )}
+                      {(st.isOneTimeRide || (st.isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))) && (
+                        <span className="text-[10px] bg-rose-100 text-rose-700 font-extrabold px-1.5 py-0.2 rounded border border-rose-200 shrink-0 animate-pulse">
+                          당일1회
+                        </span>
+                      )}
+                      {needsAddress && (
+                        <span className="text-[10px] bg-red-500 text-white font-extrabold px-1.5 py-0.2 rounded shrink-0">
+                          주소필요
+                        </span>
+                      )}
+                      {hasAllergy && (
+                        <span 
+                          className="text-[10px] bg-amber-50 text-amber-700 font-bold px-1.5 py-0.2 rounded border border-amber-200 shrink-0 flex items-center gap-0.5" 
+                          title={`알레르기: ${st.allergies || st.raw['알레르기']}`}
+                        >
+                          ⚠️ 알레르기
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Action Buttons: 수정 & 상세 토글 */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
                       type="button"
-                      onClick={handleToggleAllGroups}
-                      className="text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-0.5"
+                      onClick={(e) => { e.stopPropagation(); handleOpenEditStudentModal(st); }}
+                      className="w-6 h-6 flex items-center justify-center rounded-lg bg-slate-50 hover:bg-blue-50 text-slate-500 hover:text-blue-600 transition-colors border border-slate-200"
+                      title="원아 정보 및 주소 수정"
                     >
-                      {getGroupedStudents().some(g => collapsedGroups[g.key]) ? '+ 모두 펼치기' : '− 모두 접기'}
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
                     </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); toggleStudentDetail(st.id); }}
+                      className={`w-6 h-6 flex items-center justify-center rounded-lg text-xs font-black transition-colors border ${
+                        isExpanded 
+                          ? 'bg-blue-600 text-white border-blue-600' 
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                      }`}
+                      title={isExpanded ? '상세 접기' : '상세 정보 더보기'}
+                    >
+                      {isExpanded ? '−' : '+'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Row 2: Address or Need Address Warning */}
+                {needsAddress ? (
+                  <div className="mb-1.5 p-1.5 bg-rose-50/80 rounded-lg border border-rose-200 flex items-center justify-between gap-1.5">
+                    <span className="text-[11px] text-rose-700 font-bold truncate">
+                      ⚠️ 도로명 주소 등록 필요 {st.raw?.['실패주소'] ? `(${st.raw['실패주소']})` : ''}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleOpenEditStudentModal(st); }}
+                      className="px-2 py-0.5 text-[10px] bg-rose-600 hover:bg-rose-700 text-white font-bold rounded shadow-2xs shrink-0"
+                    >
+                      주소 입력
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-600 font-medium truncate mb-1 flex items-center gap-1" title={st.address}>
+                    <svg className="w-3 h-3 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    <span className="truncate">{st.address || '주소 미등록'}</span>
                   </div>
                 )}
 
-                {/* Students Content Area */}
-                <div className="flex-1 overflow-y-auto space-y-2.5 px-1.5 py-1">
-                  {studentFilterMode === 'ALL' ? (
-                    // Flat List with Student Detail Toggle (+)
-                    sortStudentsList(filteredStudents).map(st => {
-                      const isExpanded = expandedStudentDetailIds.has(st.id);
-                      const bus = buses.find(b => b.id === st.assignedBusId);
-                      const isNotRiding = Boolean(st.isNotRiding || st.raw?.['미탑승'] || st.raw?.['차량미탑승']);
-                      const needsAddress = !isNotRiding && (!st.address || !st.lat || !st.lng || st.addressNeedsInput || st.raw?.['주소입력필요']);
-                      const depBus = st.assignedDepartureBusId ? buses.find(b => b.id === st.assignedDepartureBusId) : null;
-                      return (
-                        <div
-                          key={st.id}
-                          onClick={() => handleStudentMapClick(st)}
-                          title="클릭 시 지도에서 탑승지 위치를 눈에 띄게 확인합니다"
-                          className={`p-2.5 rounded-xl shadow-xs hover:shadow-md transition-all group cursor-pointer ${
-                            highlightedStudentId === st.id
-                              ? 'relative ring-2 ring-indigo-500 border-indigo-500 bg-indigo-50/40 z-1'
-                              : needsAddress
-                              ? 'bg-red-50/30 border-2 border-red-500 ring-2 ring-red-100'
-                              : 'bg-white border border-slate-200 hover:border-indigo-300'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b') }}></div>
-                              <span className="font-bold text-slate-800 text-sm shrink-0">{st.name}</span>
-                              <div className="flex items-center gap-1 overflow-hidden truncate">
-                                {st.boardStatus === 'ABSENT' && (
-                                  <span className="text-xs bg-red-100 text-red-700 font-extrabold px-1.5 py-0.5 rounded border border-red-300 shrink-0">
-                                    결석
-                                  </span>
-                                )}
-                                {st.boardStatus === 'SELF_PICKUP' && (
-                                  <span className="text-xs bg-blue-100 text-blue-700 font-extrabold px-1.5 py-0.5 rounded border border-blue-300 shrink-0">
-                                    개별 픽업
-                                  </span>
-                                )}
-                                {(st.isOneTimeRide || (st.isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))) && (
-                                  <span className="text-xs bg-rose-100 text-rose-700 font-extrabold px-1.5 py-0.5 rounded border border-rose-300 shrink-0 animate-pulse">
-                                    당일 1회 탑승
-                                  </span>
-                                )}
-                                {needsAddress && (
-                                  <span className="text-xs bg-red-100 text-red-700 font-extrabold px-1.5 py-0.5 rounded border border-red-300 shrink-0 animate-pulse">
-                                    주소 입력 필요
-                                  </span>
-                                )}
-                                {st.raw?.['반명'] && (
-                                  <span className="text-xs bg-blue-50 text-blue-600 font-semibold px-1.5 py-0.5 rounded border border-blue-100 shrink-0">
-                                    {st.raw['반명']}
-                                  </span>
-                                )}
-                                {(st.raw?.['연령'] !== undefined && st.raw?.['연령'] !== null ? st.raw['연령'] : st.raw?.['학년']) && (
-                                  <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded shrink-0">
-                                    {st.raw['연령'] !== undefined && st.raw['연령'] !== null ? st.raw['연령'] : st.raw['학년']}
-                                  </span>
-                                )}
-                                {(st.allergies || st.raw?.['알레르기']) && (
-                                  <span className="text-xs bg-red-50 text-red-600 font-bold px-1.5 py-0.5 rounded border border-red-200 shrink-0">
-                                    알레르기: {st.allergies || st.raw['알레르기']}
-                                  </span>
-                                )}
-                                {st.raw?.['하원구분'] && (
-                                  <span className="text-xs bg-amber-50 text-amber-700 font-semibold px-1.5 py-0.5 rounded border border-amber-200 shrink-0">
-                                    {st.raw['하원구분']}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0 ml-1">
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); handleOpenEditStudentModal(st); }}
-                                className="w-5 h-5 flex items-center justify-center rounded-md bg-slate-100 hover:bg-blue-100 text-slate-500 hover:text-blue-600 text-xs transition-colors"
-                                title="원아 정보 및 주소 수정"
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                                </svg>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); toggleStudentDetail(st.id); }}
-                                className="w-5 h-5 flex items-center justify-center rounded-md bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-black transition-colors"
-                                title={isExpanded ? '상세 접기' : '상세 정보 펼쳐보기 (+)'}
-                              >
-                                {isExpanded ? '−' : '+'}
-                              </button>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); handleDeleteStudent(st); }}
-                                className="text-slate-300 hover:text-red-500 p-0.5 rounded transition-colors opacity-80 group-hover:opacity-100"
-                                title="원아 삭제"
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            </div>
-                          </div>
+                {/* Row 3: Guardian Phone & Bus Badge */}
+                <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-100">
+                  <span className="text-slate-600 font-semibold text-[11px] flex items-center gap-1 truncate">
+                    <span className="text-slate-400 font-normal">보호자:</span>
+                    {st.raw?.['보호자 성함'] ? `${st.raw['보호자 성함']} ` : ''}
+                    <span className="text-slate-700 font-bold">
+                      {maskPhoneNumber(st.raw?.['부모연락처'] || st.raw?.['보호자연락처'] || st.raw?.['보호자 연락처'] || st.parentPhone)}
+                    </span>
+                  </span>
 
-                          {needsAddress ? (
-                            <div className="my-1.5 p-1.5 bg-red-50 rounded-lg border border-red-200 flex items-center justify-between gap-1.5">
-                              <div className="flex items-center gap-1 text-xs text-red-600 font-bold truncate">
-                                <svg className="w-3.5 h-3.5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                </svg>
-                                <span className="truncate">도로명 주소 필요 {st.raw?.['실패주소'] ? `(${st.raw['실패주소']})` : ''}</span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); handleOpenEditStudentModal(st); }}
-                                className="px-2 py-0.5 text-xs bg-red-600 hover:bg-red-700 text-white font-bold rounded shadow-2xs transition active:scale-95 shrink-0"
-                              >
-                                주소 입력
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="text-[13px] text-slate-600 truncate mb-1" title={st.address}>
-                              {st.address}
-                            </div>
-                          )}
-
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="text-slate-400 text-xs">
-                              {st.raw?.['보호자 성함'] ? `${st.raw?.['보호자 성함']} ` : ''}
-                              {maskPhoneNumber(st.raw?.['부모연락처'] || st.raw?.['보호자연락처'] || st.raw?.['보호자 연락처'])}
-                            </span>
-                            <span className="font-bold text-xs px-2 py-0.5 rounded-md" style={{ color: isNotRiding ? '#64748b' : (needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b')), backgroundColor: isNotRiding ? '#f1f5f9' : (needsAddress ? '#fee2e2' : `${st.color || bus?.color || '#64748b'}15`) }}>
-                              {isNotRiding ? '도보/자차(미탑승)' : (needsAddress ? '배정 대기(주소 필요)' : (bus && depBus && bus.id !== depBus.id ? `등: ${bus.name} / 하: ${depBus.name}` : (bus ? bus.name : (depBus ? `하원: ${depBus.name}` : '배정 대기'))))}
-                            </span>
-                          </div>
-
-                          {/* Expandable Details via (+) */}
-                          {isExpanded && (
-                            <div className="mt-2 pt-2 border-t border-dashed border-slate-200 text-xs text-slate-600 space-y-1 bg-slate-50/70 p-2 rounded-lg animate-fade-in">
-                              {st.raw?.['유치원명'] && (
-                                <div className="flex justify-between">
-                                  <span className="text-slate-400">소속 유치원:</span>
-                                  <span className="font-semibold text-slate-700">{st.raw['유치원명']}</span>
-                                </div>
-                              )}
-                              {(st.boardingLocation || st.raw?.['등원지']) && (
-                                <div className="flex justify-between">
-                                  <span className="text-slate-400">등원지:</span>
-                                  <span className="font-semibold text-slate-700 truncate max-w-[150px]">{st.raw?.['등원지'] || st.boardingLocation}</span>
-                                </div>
-                              )}
-                              {st.raw?.['하원지'] && (
-                                <div className="flex justify-between">
-                                  <span className="text-slate-400">하원지:</span>
-                                  <span className="font-semibold text-slate-700 truncate max-w-[150px]">{st.raw['하원지']}</span>
-                                </div>
-                              )}
-                              {(st.raw?.['등원시간'] || st.raw?.['하원시간']) && (
-                                <div className="flex justify-between">
-                                  <span className="text-slate-400">등/하원시간:</span>
-                                  <span className="font-semibold text-slate-700">{st.raw?.['등원시간'] || '-'} / {st.raw?.['하원시간'] || '-'}</span>
-                                </div>
-                              )}
-                              {st.raw?.['담임명'] && (
-                                <div className="flex justify-between">
-                                  <span className="text-slate-400">담임 교사:</span>
-                                  <span className="font-semibold text-slate-700">{formatTeacherName(st.raw['담임명'])}</span>
-                                </div>
-                              )}
-                              {(st.allergies || st.raw?.['알레르기']) && (
-                                <div className="flex justify-between items-start bg-red-50/70 p-1.5 rounded border border-red-100">
-                                  <span className="text-red-600 font-bold shrink-0">알레르기:</span>
-                                  <span className="font-semibold text-red-700 text-right max-w-[180px] break-keep">{st.allergies || st.raw['알레르기']}</span>
-                                </div>
-                              )}
-                              {st.raw?.['비고'] && (
-                                <div className="flex justify-between">
-                                  <span className="text-slate-400">비고:</span>
-                                  <span className="font-semibold text-slate-700 truncate max-w-[160px]">{st.raw['비고']}</span>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })
-                  ) : (
-                    // Grouped Accordion List (반별, 연령별, 차량별)
-                    getGroupedStudents().map(group => {
-                      const isCollapsed = Boolean(collapsedGroups[group.key]);
-                      return (
-                        <div key={group.key} className="border border-slate-200 rounded-xl bg-white overflow-hidden shadow-xs">
-                          <div 
-                            onClick={() => toggleGroupCollapse(group.key)}
-                            className="p-2.5 bg-slate-50 hover:bg-slate-100 flex items-center justify-between cursor-pointer transition-colors border-b border-slate-100 select-none"
-                          >
-                            <div className="flex items-center gap-2">
-                              {group.bus && (
-                                <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: group.bus.color }}></div>
-                              )}
-                              <span className="text-sm font-bold text-slate-800">{group.name}</span>
-                              <span className="text-[13px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
-                                {group.list.length}명
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-bold text-slate-400">
-                                {isCollapsed ? '펼치기' : '접기'}
-                              </span>
-                              <span className="w-5 h-5 flex items-center justify-center rounded-md bg-white border border-slate-200 text-xs font-black text-slate-600 shadow-2xs">
-                                {isCollapsed ? '+' : '−'}
-                              </span>
-                            </div>
-                          </div>
-
-                          {!isCollapsed && (
-                            <div className="p-2 space-y-2 bg-slate-50/40">
-                              {group.list.length === 0 ? (
-                                <div className="text-xs text-slate-400 text-center py-2">배정된 원아가 없습니다.</div>
-                              ) : (
-                                group.list.map(st => {
-                                  const isExpanded = expandedStudentDetailIds.has(st.id);
-                                  const bus = buses.find(b => b.id === st.assignedBusId);
-                                  const isNotRiding = Boolean(st.isNotRiding || st.raw?.['미탑승'] || st.raw?.['차량미탑승']);
-                                  const needsAddress = !isNotRiding && (!st.address || !st.lat || !st.lng || st.addressNeedsInput || st.raw?.['주소입력필요']);
-                                  const depBus = st.assignedDepartureBusId ? buses.find(b => b.id === st.assignedDepartureBusId) : null;
-                                  return (
-                                    <div
-                                      key={st.id}
-                                      onClick={() => handleStudentMapClick(st)}
-                                      title="클릭 시 지도에서 탑승지 위치를 눈에 띄게 확인합니다"
-                                      className={`p-2.5 rounded-xl shadow-xs hover:shadow-md transition-all group cursor-pointer ${
-                                        highlightedStudentId === st.id
-                                          ? 'relative ring-2 ring-indigo-500 border-indigo-500 bg-indigo-50/40 z-1'
-                                          : needsAddress
-                                          ? 'bg-red-50/30 border-2 border-red-500 ring-2 ring-red-100'
-                                          : 'bg-white border border-slate-200 hover:border-indigo-300'
-                                      }`}
-                                    >
-                                      <div className="flex items-center justify-between mb-1">
-                                        <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                                          <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b') }}></div>
-                                          <span className="font-bold text-slate-800 text-sm shrink-0">{st.name}</span>
-                                          <div className="flex items-center gap-1 overflow-hidden truncate">
-                                            {needsAddress && (
-                                              <span className="text-xs bg-red-100 text-red-700 font-extrabold px-1.5 py-0.5 rounded border border-red-300 shrink-0 animate-pulse">
-                                                주소 입력 필요
-                                              </span>
-                                            )}
-                                            {studentFilterMode !== 'CLASS' && st.raw?.['반명'] && (
-                                              <span className="text-xs bg-blue-50 text-blue-600 font-semibold px-1.5 py-0.5 rounded border border-blue-100 shrink-0">
-                                                {st.raw['반명']}
-                                              </span>
-                                            )}
-                                            {studentFilterMode !== 'AGE' && (st.raw?.['연령'] !== undefined && st.raw?.['연령'] !== null ? st.raw['연령'] : st.raw['학년']) && (
-                                              <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded shrink-0">
-                                                {st.raw['연령'] !== undefined && st.raw['연령'] !== null ? st.raw['연령'] : st.raw['학년']}
-                                              </span>
-                                            )}
-                                            {(st.allergies || st.raw?.['알레르기']) && (
-                                              <span className="text-xs bg-red-50 text-red-600 font-bold px-1.5 py-0.5 rounded border border-red-200 shrink-0">
-                                                알레르기: {st.allergies || st.raw['알레르기']}
-                                              </span>
-                                            )}
-                                            {st.raw?.['하원구분'] && (
-                                              <span className="text-xs bg-amber-50 text-amber-700 font-semibold px-1.5 py-0.5 rounded border border-amber-200 shrink-0">
-                                                {st.raw['하원구분']}
-                                              </span>
-                                            )}
-                                          </div>
-                                        </div>
-                                        <div className="flex items-center gap-1 shrink-0 ml-1">
-                                          <button
-                                            type="button"
-                                            onClick={(e) => { e.stopPropagation(); handleOpenEditStudentModal(st); }}
-                                            className="w-5 h-5 flex items-center justify-center rounded-md bg-slate-100 hover:bg-blue-100 text-slate-500 hover:text-blue-600 text-xs transition-colors"
-                                            title="원아 정보 및 주소 수정"
-                                          >
-                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                                            </svg>
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={(e) => { e.stopPropagation(); toggleStudentDetail(st.id); }}
-                                            className="w-5 h-5 flex items-center justify-center rounded-md bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-black transition-colors"
-                                            title={isExpanded ? '상세 접기' : '상세 정보 펼쳐보기 (+)'}
-                                          >
-                                            {isExpanded ? '−' : '+'}
-                                          </button>
-                                          <button
-                                            onClick={(e) => { e.stopPropagation(); handleDeleteStudent(st); }}
-                                            className="text-slate-300 hover:text-red-500 p-0.5 rounded transition-colors opacity-80 group-hover:opacity-100"
-                                            title="원아 삭제"
-                                          >
-                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                            </svg>
-                                          </button>
-                                        </div>
-                                      </div>
-
-                                      {needsAddress ? (
-                                        <div className="my-1.5 p-1.5 bg-red-50 rounded-lg border border-red-200 flex items-center justify-between gap-1.5">
-                                          <div className="flex items-center gap-1 text-xs text-red-600 font-bold truncate">
-                                            <svg className="w-3.5 h-3.5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                            </svg>
-                                            <span className="truncate">도로명 주소 필요 {st.raw?.['실패주소'] ? `(${st.raw['실패주소']})` : ''}</span>
-                                          </div>
-                                          <button
-                                            type="button"
-                                            onClick={(e) => { e.stopPropagation(); handleOpenEditStudentModal(st); }}
-                                            className="px-2 py-0.5 text-xs bg-red-600 hover:bg-red-700 text-white font-bold rounded shadow-2xs transition active:scale-95 shrink-0"
-                                          >
-                                            주소 입력
-                                          </button>
-                                        </div>
-                                      ) : (
-                                        <div className="text-[13px] text-slate-600 truncate mb-1" title={st.address}>
-                                          {st.address}
-                                        </div>
-                                      )}
-
-                                      <div className="flex justify-between items-center text-xs">
-                                        <span className="text-slate-400 text-xs">
-                                          {st.raw?.['보호자 성함'] ? `${st.raw?.['보호자 성함']} ` : ''}
-                                          {maskPhoneNumber(st.raw?.['부모연락처'] || st.raw?.['보호자연락처'] || st.raw?.['보호자 연락처'])}
-                                        </span>
-                                        {studentFilterMode !== 'BUS' && (
-                                          <span className="font-bold text-xs px-2 py-0.5 rounded-md" style={{ color: isNotRiding ? '#64748b' : (needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b')), backgroundColor: isNotRiding ? '#f1f5f9' : (needsAddress ? '#fee2e2' : `${st.color || bus?.color || '#64748b'}15`) }}>
-                                            {isNotRiding ? '도보/자차(미탑승)' : (needsAddress ? '배정 대기(주소 필요)' : (bus && depBus && bus.id !== depBus.id ? `등: ${bus.name} / 하: ${depBus.name}` : (bus ? bus.name : (depBus ? `하원: ${depBus.name}` : '배정 대기'))))}
-                                          </span>
-                                        )}
-                                      </div>
-
-                                      {/* Expandable Details via (+) */}
-                                      {isExpanded && (
-                                        <div className="mt-2 pt-2 border-t border-dashed border-slate-200 text-xs text-slate-600 space-y-1 bg-slate-50/70 p-2 rounded-lg animate-fade-in">
-                                          {st.raw?.['유치원명'] && (
-                                            <div className="flex justify-between">
-                                              <span className="text-slate-400">소속 유치원:</span>
-                                              <span className="font-semibold text-slate-700">{st.raw['유치원명']}</span>
-                                            </div>
-                                          )}
-                                          {(st.boardingLocation || st.raw?.['등원지']) && (
-                                            <div className="flex justify-between">
-                                              <span className="text-slate-400">등원지:</span>
-                                              <span className="font-semibold text-slate-700 truncate max-w-[150px]">{st.raw?.['등원지'] || st.boardingLocation}</span>
-                                            </div>
-                                          )}
-                                          {st.raw?.['하원지'] && (
-                                            <div className="flex justify-between">
-                                              <span className="text-slate-400">하원지:</span>
-                                              <span className="font-semibold text-slate-700 truncate max-w-[150px]">{st.raw['하원지']}</span>
-                                            </div>
-                                          )}
-                                          {(st.raw?.['등원시간'] || st.raw?.['하원시간']) && (
-                                            <div className="flex justify-between">
-                                              <span className="text-slate-400">등/하원시간:</span>
-                                              <span className="font-semibold text-slate-700">{st.raw?.['등원시간'] || '-'} / {st.raw?.['하원시간'] || '-'}</span>
-                                            </div>
-                                          )}
-                                          {st.raw?.['담임명'] && (
-                                            <div className="flex justify-between">
-                                              <span className="text-slate-400">담임 교사:</span>
-                                              <span className="font-semibold text-slate-700">{formatTeacherName(st.raw['담임명'])}</span>
-                                            </div>
-                                          )}
-                                          {(st.allergies || st.raw?.['알레르기']) && (
-                                            <div className="flex justify-between items-start bg-red-50/70 p-1.5 rounded border border-red-100">
-                                              <span className="text-red-600 font-bold shrink-0">알레르기:</span>
-                                              <span className="font-semibold text-red-700 text-right max-w-[180px] break-keep">{st.allergies || st.raw['알레르기']}</span>
-                                            </div>
-                                          )}
-                                          {st.raw?.['비고'] && (
-                                            <div className="flex justify-between">
-                                              <span className="text-slate-400">비고:</span>
-                                              <span className="font-semibold text-slate-700 truncate max-w-[160px]">{st.raw['비고']}</span>
-                                            </div>
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })
+                  {showBusBadge && (
+                    <span 
+                      className="font-extrabold text-[10px] px-1.5 py-0.5 rounded border shrink-0" 
+                      style={{ 
+                        color: isNotRiding ? '#475569' : (needsAddress ? '#dc2626' : (st.color || bus?.color || '#475569')), 
+                        borderColor: isNotRiding ? '#cbd5e1' : (needsAddress ? '#fca5a5' : `${st.color || bus?.color || '#94a3b8'}50`), 
+                        backgroundColor: isNotRiding ? '#f1f5f9' : (needsAddress ? '#fee2e2' : `${st.color || bus?.color || '#64748b'}15`) 
+                      }}
+                    >
+                      {isNotRiding ? '미탑승(도보/자차)' : (needsAddress ? '배정 대기' : (bus && depBus && bus.id !== depBus.id ? `등:${bus.name} / 하:${depBus.name}` : (bus ? bus.name : (depBus ? `하원:${depBus.name}` : '배정 대기'))))}
+                    </span>
                   )}
                 </div>
+
+                {/* Expandable Details via (+) */}
+                {isExpanded && (
+                  <div className="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-700 bg-slate-50 p-2.5 rounded-lg border border-slate-200 animate-fade-in space-y-1.5">
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
+                      {st.raw?.['유치원명'] && (
+                        <div>
+                          <span className="text-slate-400 font-medium">소속: </span>
+                          <span className="font-bold text-slate-800">{st.raw['유치원명']}</span>
+                        </div>
+                      )}
+                      {st.raw?.['담임명'] && (
+                        <div>
+                          <span className="text-slate-400 font-medium">담임: </span>
+                          <span className="font-bold text-slate-800">{formatTeacherName(st.raw['담임명'])}</span>
+                        </div>
+                      )}
+                      {(st.boardingLocation || st.raw?.['등원지']) && (
+                        <div className="col-span-2 truncate">
+                          <span className="text-slate-400 font-medium">등원지: </span>
+                          <span className="font-bold text-slate-800">{st.raw?.['등원지'] || st.boardingLocation}</span>
+                        </div>
+                      )}
+                      {st.raw?.['하원지'] && (
+                        <div className="col-span-2 truncate">
+                          <span className="text-slate-400 font-medium">하원지: </span>
+                          <span className="font-bold text-slate-800">{st.raw['하원지']}</span>
+                        </div>
+                      )}
+                      {(st.raw?.['등원시간'] || st.raw?.['하원시간']) && (
+                        <div className="col-span-2">
+                          <span className="text-slate-400 font-medium">등/하원시간: </span>
+                          <span className="font-bold text-slate-800">{st.raw?.['등원시간'] || '-'} / {st.raw?.['하원시간'] || '-'}</span>
+                        </div>
+                      )}
+                      {hasAllergy && (
+                        <div className="col-span-2 bg-amber-50 p-1.5 rounded border border-amber-200 text-amber-800">
+                          <span className="font-extrabold text-amber-900">⚠️ 알레르기 주의: </span>
+                          <span className="font-bold">{st.allergies || st.raw['알레르기']}</span>
+                        </div>
+                      )}
+                      {st.raw?.['비고'] && (
+                        <div className="col-span-2 text-slate-600 bg-white p-1.5 rounded border border-slate-200">
+                          <span className="font-medium text-slate-400">비고: </span>
+                          <span>{st.raw['비고']}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Expanded Bottom Actions */}
+                    <div className="pt-2 border-t border-slate-200 flex items-center justify-between gap-1">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedPaymentStudent(st);
+                          handleTabChange('messages');
+                        }}
+                        className="text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-md border border-indigo-200 flex items-center gap-1 transition"
+                      >
+                        <svg className="w-3 h-3 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                        </svg>
+                        <span>상담 탑승지/결재 신청</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleDeleteStudent(st); }}
+                        className="text-[11px] font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-1 rounded-md border border-red-200 flex items-center gap-1 transition"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                        <span>삭제</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="mt-2 flex-1 flex flex-col items-center justify-center text-center p-4 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                <h4 className="font-bold text-slate-700 text-sm mb-1 text-center">등록된 원생이 없습니다</h4>
-                <p className="text-[13px] text-slate-500 mb-3 text-center max-w-xs leading-relaxed">
-                  [원생 추가] 버튼을 눌러 직접 등록하거나, 엑셀 파일을 업로드하여 구역에 맞추어 자동으로 배차해보세요.
-                </p>
-                <div className="flex gap-2">
-                  <button 
-                    onClick={handleOpenAddStudentModal}
-                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 shadow-sm transition text-center"
-                  >
-                    원생 추가하기
-                  </button>
-                  <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 shadow-sm transition text-center"
-                  >
-                    엑셀 파일 업로드
-                  </button>
+            );
+          };
+
+          return (
+            <div className="p-6 h-full flex flex-col break-keep">
+              {/* Header */}
+              <div className="mb-4 shrink-0">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">{terms.student} 정보</h2>
+                  <span className={`text-xs px-2.5 py-1 rounded-lg font-black shadow-xs flex items-center gap-1 border ${terms.themeBadge}`}>
+                    <span>{terms.icon}</span>
+                    <span>{activeEducationLevel}</span>
+                  </span>
                 </div>
+                <p className="text-xs text-slate-600 font-medium mt-1">
+                  {terms.student}을 직접 추가하거나 엑셀 파일로 일괄 등록하고 통학 배차를 관리합니다.
+                </p>
               </div>
-            )}
-          </div>
-        )}
+
+              <input 
+                type="file" 
+                accept=".xlsx, .xls" 
+                className="hidden" 
+                ref={fileInputRef} 
+                onChange={handleStudentUpload} 
+              />
+
+              {/* 1. Header Action Row: 메인 추가 + 엑셀/양식 툴바 */}
+              <div className="flex gap-1.5 mb-1.5 shrink-0">
+                <button
+                  onClick={handleOpenAddStudentModal}
+                  className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 text-xs active:scale-[0.99]"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span>{terms.student} 추가</span>
+                </button>
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isProcessing}
+                  className="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl border border-slate-200 transition-colors disabled:opacity-50 text-xs flex items-center gap-1 shrink-0"
+                  title="원아 명단 엑셀 일괄 등록"
+                >
+                  <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l4-4m0 0l4 4m-4-4v12" />
+                  </svg>
+                  <span>{isProcessing ? '처리중' : '엑셀 업로드'}</span>
+                </button>
+                <a 
+                  href="/원아_정보_입력_시트.xlsx" 
+                  download="원아_정보_입력_시트.xlsx" 
+                  className="px-2 py-2 bg-white hover:bg-slate-50 text-slate-600 font-bold rounded-xl border border-slate-200 shadow-2xs transition-colors text-xs flex items-center justify-center shrink-0"
+                  title="원아 등록 양식(.xlsx) 다운로드"
+                >
+                  <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                </a>
+              </div>
+
+              {/* 2. Sub Quick Action: 상담 결재 슬림 바 */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedPaymentStudent(null);
+                  handleTabChange('messages');
+                }}
+                className="w-full py-1.5 mb-2 bg-indigo-50/70 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold border border-indigo-200/80 transition-all flex items-center justify-center gap-1.5 shrink-0"
+              >
+                <svg className="w-3.5 h-3.5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                </svg>
+                <span>상담 탑승지 등록 및 결재 신청</span>
+              </button>
+
+              {students.length > 0 ? (
+                <div className="flex-1 flex flex-col min-h-0">
+                  {/* 3. Search and Class Filter Bar */}
+                  <div className="flex items-center gap-1.5 mb-1.5 shrink-0">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        value={studentSearchKeyword}
+                        onChange={(e) => setStudentSearchKeyword(e.target.value)}
+                        placeholder="원아명, 전화번호 검색..."
+                        className="w-full pl-7 pr-6 py-1.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white transition"
+                      />
+                      <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                      {studentSearchKeyword && (
+                        <button
+                          type="button"
+                          onClick={() => setStudentSearchKeyword('')}
+                          className="absolute right-2 top-1 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                    <select
+                      value={studentClassFilter}
+                      onChange={(e) => setStudentClassFilter(e.target.value)}
+                      className="w-24 py-1.5 px-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700 shrink-0"
+                    >
+                      <option value="ALL">전체 반</option>
+                      {availableClasses.map(cls => (
+                        <option key={cls} value={cls}>{cls}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 4. Compact Segment & Sort Row */}
+                  <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-100 text-xs shrink-0">
+                    {/* Filter Tabs */}
+                    <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                      {[
+                        { id: 'ALL', label: '전체' },
+                        { id: 'CLASS', label: '반별' },
+                        { id: 'AGE', label: '연령' },
+                        { id: 'BUS', label: '차량' }
+                      ].map(tab => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setStudentFilterMode(tab.id)}
+                          className={`px-2 py-0.5 rounded text-xs font-bold transition-all ${
+                            studentFilterMode === tab.id
+                              ? 'bg-white text-blue-700 shadow-2xs font-extrabold'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Sort Dropdown / Toggle & Count */}
+                    <div className="flex items-center gap-1.5 text-xs font-bold">
+                      <select
+                        value={studentSortBy}
+                        onChange={(e) => setStudentSortBy(e.target.value)}
+                        className="py-1 px-1.5 text-[11px] font-bold bg-slate-50 border border-slate-200 rounded text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 shrink-0"
+                      >
+                        <option value="NAME">이름순</option>
+                        <option value="AGE">나이순</option>
+                        <option value="CLASS">반순</option>
+                      </select>
+                      <span className="text-blue-600 font-extrabold bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 text-[11px]">
+                        {filteredStudents.length}명
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Group Accordion Controls (when not ALL) */}
+                  {studentFilterMode !== 'ALL' && (
+                    <div className="flex justify-between items-center px-1 mb-1.5 shrink-0">
+                      <span className="text-xs font-bold text-slate-500">
+                        {studentFilterMode === 'CLASS' && '반별 분류'}
+                        {studentFilterMode === 'AGE' && '연령별 분류'}
+                        {studentFilterMode === 'BUS' && '차량별 분류'}
+                      </span>
+                      <button 
+                        type="button"
+                        onClick={handleToggleAllGroups}
+                        className="text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-0.5"
+                      >
+                        {getGroupedStudents().some(g => collapsedGroups[g.key]) ? '+ 모두 펼치기' : '− 모두 접기'}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Students Content Area */}
+                  <div className="flex-1 overflow-y-auto space-y-2 px-0.5 py-1">
+                    {studentFilterMode === 'ALL' ? (
+                      sortStudentsList(filteredStudents).map(st => renderCleanStudentCard(st, true))
+                    ) : (
+                      getGroupedStudents().map(group => {
+                        const isCollapsed = Boolean(collapsedGroups[group.key]);
+                        return (
+                          <div key={group.key} className="border border-slate-200 rounded-xl bg-white overflow-hidden shadow-2xs">
+                            <div 
+                              onClick={() => toggleGroupCollapse(group.key)}
+                              className="p-2.5 bg-slate-50 hover:bg-slate-100 flex items-center justify-between cursor-pointer transition-colors border-b border-slate-100 select-none"
+                            >
+                              <div className="flex items-center gap-2">
+                                {group.bus && (
+                                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: group.bus.color }}></div>
+                                )}
+                                <span className="text-sm font-bold text-slate-800">{group.name}</span>
+                                <span className="text-[12px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">
+                                  {group.list.length}명
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-bold text-slate-400">
+                                  {isCollapsed ? '펼치기' : '접기'}
+                                </span>
+                                <span className="w-5 h-5 flex items-center justify-center rounded-md bg-white border border-slate-200 text-xs font-black text-slate-600 shadow-2xs">
+                                  {isCollapsed ? '+' : '−'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {!isCollapsed && (
+                              <div className="p-2 space-y-2 bg-slate-50/40">
+                                {group.list.length === 0 ? (
+                                  <div className="text-xs text-slate-400 text-center py-2">배정된 원아가 없습니다.</div>
+                                ) : (
+                                  group.list.map(st => renderCleanStudentCard(st, studentFilterMode !== 'BUS'))
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-2 flex-1 flex flex-col items-center justify-center text-center p-4 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                  <h4 className="font-bold text-slate-700 text-sm mb-1 text-center">등록된 원생이 없습니다</h4>
+                  <p className="text-[13px] text-slate-500 mb-3 text-center max-w-xs leading-relaxed">
+                    [원아 추가] 버튼을 눌러 직접 등록하거나, 엑셀 파일을 업로드하여 구역에 맞추어 자동으로 배차해보세요.
+                  </p>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={handleOpenAddStudentModal}
+                      className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 shadow-sm transition text-center"
+                    >
+                      원아 추가하기
+                    </button>
+                    <button 
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-50 shadow-sm transition text-center"
+                    >
+                      엑셀 파일 업로드
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {activeTab === 'classes' && (
           <div className="p-6 h-full flex flex-col">
-            <h2 className="text-xl font-bold text-slate-800 mb-1">반 및 분반 관리</h2>
-            <p className="text-[13px] text-slate-500 mb-4">
-              관리자이 새로운 반을 개설하고, 원아들을 드래그하여 반에 넣고 담당 담임교사를 배정할 수 있습니다.
-            </p>
+            <div className="mb-4 shrink-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">반 및 분반 관리</h2>
+                <span className={`text-xs px-2.5 py-1 rounded-lg font-black shadow-xs flex items-center gap-1 border ${terms.themeBadge}`}>
+                  <span>{terms.icon}</span>
+                  <span>{activeEducationLevel}</span>
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 font-medium mt-1">
+                새로운 {terms.class}을 개설하고, {terms.students}을 배정하며 담당 담임교사를 매칭합니다.
+              </p>
+            </div>
 
             <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-4 text-xs space-y-2">
               <div className="flex justify-between font-bold">
-                <span className="text-blue-900">개설된 반:</span>
-                <span className="text-blue-700">{availableClasses.length}개 반</span>
+                <span className="text-blue-900">개설된 {terms.class}:</span>
+                <span className="text-blue-700">{availableClasses.length}개 {terms.class}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-600">전체 원아:</span>
+                <span className="text-slate-600">전체 {terms.students}:</span>
                 <span className="font-bold text-slate-800">{students.length}명</span>
               </div>
               <div className="flex justify-between">
@@ -5516,8 +5602,8 @@ const parseKindergartenExcelSheet = (sheet) => {
 
             <div className="flex-1 flex flex-col overflow-hidden">
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-bold text-slate-700">개설된 반 목록</h3>
-                <span className="text-xs text-slate-400">총 {availableClasses.length}개</span>
+                <h3 className="text-sm font-extrabold text-slate-800">개설된 {terms.class} 목록</h3>
+                <span className="text-xs font-bold text-slate-400">총 {availableClasses.length}개</span>
               </div>
               <div className="flex-1 overflow-y-auto space-y-2 pr-1">
                 {availableClasses.map(cls => {
@@ -5546,10 +5632,10 @@ const parseKindergartenExcelSheet = (sheet) => {
           <div className="flex flex-col h-full bg-white">
             {/* Header */}
             <div className="p-5 border-b border-slate-100 bg-white">
-              <h2 className="text-xl font-black text-slate-800 mb-1 flex items-center gap-2">
+              <h2 className="text-xl font-extrabold text-slate-900 tracking-tight mb-1 flex items-center gap-2">
                 키 인증 관리
               </h2>
-              <p className="text-[13px] text-slate-500 font-medium">원생, 차량 스태프, 교사의 앱 연동과 승인을 관리합니다.</p>
+              <p className="text-xs text-slate-500 font-medium">원생, 차량 스태프, 교사의 앱 연동과 승인을 관리합니다.</p>
             </div>
 
             <div className="p-4 flex flex-col gap-4 overflow-y-auto">
@@ -5733,12 +5819,15 @@ const parseKindergartenExcelSheet = (sheet) => {
 
         {activeTab === 'settings' && (
           <div className="p-6 h-full flex flex-col overflow-y-auto break-keep">
-            <h2 className="text-xl font-bold text-slate-800 mb-6">환경설정</h2>
+            <div className="mb-4 shrink-0">
+              <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">환경설정</h2>
+              <p className="text-xs text-slate-500 font-medium mt-1">기관 정보, 보안 설정 및 계정 권한을 관리합니다.</p>
+            </div>
             
             <div className="space-y-4">
               <div className="p-4 bg-orange-50 rounded-xl border border-orange-100 transition-all">
                 <div className="flex items-center justify-between mb-1">
-                  <h3 className="font-bold text-orange-700">{terms.institution} 정보 관리</h3>
+                  <h3 className="text-sm font-extrabold text-orange-950">{terms.institution} 정보 관리</h3>
                   {academy?.businessNumber && (
                     <span className="text-[11px] bg-orange-200/70 text-orange-800 font-semibold px-2 py-0.5 rounded-full">
                       사업자번호: {academy.businessNumber}
@@ -6317,7 +6406,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               </div>
 
               <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 mt-auto space-y-2">
-                <h3 className="font-bold text-slate-700 mb-1">계정 관리</h3>
+                <h3 className="text-sm font-extrabold text-slate-800 mb-1">계정 관리</h3>
                 <button 
                   onClick={handleLogout}
                   className="w-full py-2.5 px-3 bg-white text-slate-700 rounded-xl text-sm font-bold border border-slate-300 shadow-xs hover:bg-slate-100 transition-colors whitespace-nowrap"
@@ -6339,10 +6428,10 @@ const parseKindergartenExcelSheet = (sheet) => {
         {activeTab === 'log' && (
             <div className="flex flex-col h-full">
               <div className="p-5 border-b border-slate-100 bg-white">
-                <h2 className="text-xl font-black text-slate-800 mb-2 flex items-center gap-2">
+                <h2 className="text-xl font-extrabold text-slate-900 tracking-tight mb-1 flex items-center gap-2">
                   캘린더 및 로그
                 </h2>
-                <p className="text-sm text-slate-500 font-medium">원생의 출결과 로그를 확인하세요.</p>
+                <p className="text-xs text-slate-500 font-medium">원생의 출결과 로그를 확인하세요.</p>
               </div>
               <div className="p-4 flex flex-col gap-2.5">
                 <button onClick={() => setLogTab('ALL')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'ALL' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>전체 일정 (변수 & 행사)</button>
@@ -6547,7 +6636,7 @@ const parseKindergartenExcelSheet = (sheet) => {
 
           {/* 슈퍼 관리자 전용 교육 부문 스위처 */}
           {isSuperAdmin && (
-            <div className="flex items-center bg-slate-900/90 backdrop-blur-md p-1 rounded-xl shadow-lg border border-slate-700 text-xs font-bold gap-1">
+            <div className="flex items-center bg-slate-900/95 backdrop-blur-md p-1 rounded-xl shadow-lg border border-slate-700 text-xs font-bold gap-1">
               {[
                 { id: 'kindergarten', label: '유치원', icon: '🏫', path: '/dashboard/kindergarten' },
                 { id: 'elementary', label: '초등부', icon: '🎒', path: '/dashboard/elementary' },
@@ -6563,7 +6652,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                   className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
                     activeEducationLevel === lvl.label
                       ? 'bg-blue-600 text-white shadow-md font-black'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                      : 'text-slate-200 hover:text-white hover:bg-slate-800 font-bold'
                   }`}
                   title={`${lvl.label} 대시보드로 즉시 전환`}
                 >
@@ -6576,14 +6665,14 @@ const parseKindergartenExcelSheet = (sheet) => {
 
           {isSuperAdmin && (
             <div className="flex items-center gap-2 bg-indigo-700 text-white px-3 py-1.5 rounded-lg shadow-lg text-xs font-bold border border-indigo-500">
-              <span className="whitespace-nowrap">{terms.institution} 선택:</span>
+              <span className="whitespace-nowrap font-extrabold">{terms.institution} 선택:</span>
               <select
                 value={selectedAcademyId || ''}
                 onChange={(e) => {
                   const val = Number(e.target.value);
                   if (val) handleSwitchAcademy(val);
                 }}
-                className="bg-white text-slate-800 px-2 py-1 rounded font-bold text-xs outline-none cursor-pointer"
+                className="bg-white text-slate-900 px-2.5 py-1 rounded font-extrabold text-xs outline-none cursor-pointer border border-indigo-300"
               >
                 {visibleAcademies.length > 0 ? (
                   visibleAcademies.map(ac => (
@@ -6609,7 +6698,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             </div>
           )}
 
-          <div className="flex bg-white rounded-lg shadow-lg border border-slate-200 overflow-hidden text-sm font-bold">
+          <div className="flex bg-white rounded-lg shadow-lg border border-slate-300 overflow-hidden text-sm font-bold">
             {[
               { id: 'ALL', label: '전체' },
               { id: 'MON', label: '월' },
@@ -6623,7 +6712,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               <button
                 key={day.id}
                 onClick={() => setSelectedDay(day.id)}
-                className={`px-3 py-2 transition-colors ${selectedDay === day.id ? 'bg-blue-600 text-white' : 'hover:bg-slate-50 text-slate-700 border-l first:border-l-0 border-slate-200'}`}
+                className={`px-3 py-2 transition-colors ${selectedDay === day.id ? 'bg-blue-600 text-white font-black shadow-xs' : 'hover:bg-slate-100 text-slate-800 font-bold border-l first:border-l-0 border-slate-200'}`}
               >
                 {day.label}
               </button>
@@ -6689,6 +6778,7 @@ const parseKindergartenExcelSheet = (sheet) => {
           <MapPatternDefs buses={buses} />
           <MapBoundsFit buses={buses} academy={academy} />
           <MapCenterOnStudent selectedStudentLocation={highlightedStudentLocation} />
+          <MapFocusHandler focusTarget={mapFocusTarget} />
 
           {/* Draw Academy Marker */}
           {academy && !isNaN(academy.lat) && !isNaN(academy.lng) && (
@@ -7085,51 +7175,109 @@ const parseKindergartenExcelSheet = (sheet) => {
           })}
         </MapContainer>
 
-        {/* Floating Map Legend (지도 고대비 범례 안내) */}
+        {/* Floating Map Legend (지도 고대비 범례 안내 - 클릭 시 해당 구역/위치로 이동) */}
         <div className="absolute bottom-6 left-6 z-[1000] bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200 p-3.5 max-w-xs transition-all pointer-events-auto">
           <div className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-2 flex items-center justify-between">
             <span>지도 표시 범례</span>
-            <span className="text-[10px] text-slate-400 font-normal">고대비 색상</span>
+            <span className="text-[10px] text-blue-600 font-extrabold flex items-center gap-0.5">
+              클릭 시 구역 이동 ↗
+            </span>
           </div>
           <div className="space-y-1.5 text-xs font-bold text-slate-700">
             {/* Full vehicle hatched pattern indicator */}
-            <div className="flex items-center gap-2 p-1.5 rounded-lg bg-amber-50/80 border border-amber-200 text-amber-900">
+            <div 
+              onClick={handleFocusFullBusZone}
+              role="button"
+              title="클릭 시 만석 통학차량 구역으로 지도를 이동합니다"
+              className="flex items-center gap-2 p-1.5 rounded-lg bg-amber-50/80 hover:bg-amber-100/90 border border-amber-200 text-amber-900 cursor-pointer transition-all active:scale-[0.98] select-none group"
+            >
               <div 
-                className="w-5 h-5 rounded-md border border-amber-400 shrink-0 shadow-2xs"
+                className="w-5 h-5 rounded-md border border-amber-400 shrink-0 shadow-2xs group-hover:scale-105 transition-transform"
                 style={{
                   background: 'repeating-linear-gradient(45deg, #d97706 0, #d97706 2.5px, #fef3c7 2.5px, #fef3c7 6px)'
                 }}
               ></div>
               <div className="flex-1 min-w-0">
-                <div className="text-[11px] font-black leading-tight">만석 구역 (빗금 표시)</div>
+                <div className="text-[11px] font-black leading-tight flex items-center justify-between">
+                  <span>만석 구역 (빗금 표시)</span>
+                  <span className="text-[10px] text-amber-600 font-bold opacity-0 group-hover:opacity-100 transition-opacity">이동 →</span>
+                </div>
                 <div className="text-[10px] text-amber-700 font-normal">25인승 정원 도달 · 26명 외곽 분산 배차</div>
               </div>
             </div>
+
             {/* One-time rider indicator */}
-            <div className="flex items-center gap-2 p-1.5 rounded-lg bg-rose-50/80 border border-rose-200 text-rose-900">
-              <div className="relative w-5 h-5 flex items-center justify-center shrink-0">
+            <div 
+              onClick={handleFocusOneTimeRiders}
+              role="button"
+              title="클릭 시 당일 1회 탑승 원아 위치로 지도를 이동합니다"
+              className="flex items-center gap-2 p-1.5 rounded-lg bg-rose-50/80 hover:bg-rose-100/90 border border-rose-200 text-rose-900 cursor-pointer transition-all active:scale-[0.98] select-none group"
+            >
+              <div className="relative w-5 h-5 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                 <span className="absolute inset-0 rounded-full bg-rose-400 opacity-60 animate-ping"></span>
                 <span className="relative w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] font-black flex items-center justify-center border border-white">1</span>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-[11px] font-black leading-tight">당일 1회 탑승 / 임시 위치</div>
+                <div className="text-[11px] font-black leading-tight flex items-center justify-between">
+                  <span>당일 1회 탑승 / 임시 위치</span>
+                  <span className="text-[10px] text-rose-600 font-bold opacity-0 group-hover:opacity-100 transition-opacity">이동 →</span>
+                </div>
                 <div className="text-[10px] text-rose-600 font-normal">미탑승 셔틀 희망 원아</div>
               </div>
             </div>
+
             {/* Unassigned regular indicator */}
-            <div className="flex items-center gap-2 px-1.5 py-1 text-slate-600">
-              <span className="w-3.5 h-3.5 rounded-full bg-slate-500 border border-white shadow-xs shrink-0"></span>
-              <span className="text-[11px]">정규 미배정 (구역 밖)</span>
+            <div 
+              onClick={handleFocusUnassignedRiders}
+              role="button"
+              title="클릭 시 미배정 원아 위치로 지도를 이동합니다"
+              className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-100/90 text-slate-700 cursor-pointer transition-all active:scale-[0.98] select-none group"
+            >
+              <span className="w-3.5 h-3.5 rounded-full bg-slate-500 border border-white shadow-xs shrink-0 group-hover:scale-110 transition-transform"></span>
+              <div className="flex-1 flex items-center justify-between min-w-0">
+                <span className="text-[11px]">정규 미배정 (구역 밖)</span>
+                <span className="text-[10px] text-slate-400 font-bold opacity-0 group-hover:opacity-100 transition-opacity">이동 →</span>
+              </div>
             </div>
-            {/* Bus list with colors */}
+
+            {/* Bus list with colors: 클릭 시 해당 호차 구역으로 뷰 이동 */}
             {buses.length > 0 && (
-              <div className="pt-1.5 border-t border-slate-100 flex flex-wrap gap-1.5">
-                {buses.map(b => (
-                  <span key={b.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold text-white shadow-2xs" style={{ backgroundColor: b.color || '#1d4ed8' }}>
-                    <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
-                    {b.name}
-                  </span>
-                ))}
+              <div className="pt-2 border-t border-slate-100">
+                <div className="text-[10px] font-bold text-slate-400 mb-1.5 flex items-center justify-between">
+                  <span>호차별 운행 구역</span>
+                  <span className="text-blue-600 font-bold">호차 클릭 시 이동</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {/* 전체 구역 한눈에 보기 버튼 */}
+                  <button
+                    type="button"
+                    onClick={handleFocusAllZones}
+                    title="모든 호차 구역과 기관 위치를 한눈에 봅니다"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-black text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-300 shadow-2xs hover:shadow-xs hover:scale-105 active:scale-95 transition-all cursor-pointer ring-offset-1 hover:ring-2 hover:ring-slate-400 select-none"
+                  >
+                    <svg className="w-3.5 h-3.5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                    </svg>
+                    <span>전체</span>
+                  </button>
+
+                  {buses.map(b => (
+                    <button
+                      key={b.id}
+                      type="button"
+                      onClick={() => handleFocusBusZone(b)}
+                      title={`[${b.name}] 구역으로 지도 뷰를 이동합니다`}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-black text-white shadow-xs hover:shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer ring-offset-1 hover:ring-2 hover:ring-blue-400 select-none"
+                      style={{ backgroundColor: b.color || '#1d4ed8' }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                      <span>{b.name}</span>
+                      <svg className="w-2.5 h-2.5 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -7781,372 +7929,263 @@ const parseKindergartenExcelSheet = (sheet) => {
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 overflow-y-auto space-y-4 text-xs">
+            <div className="p-5 overflow-y-auto space-y-3.5 text-xs">
               {substituteFormTab === 'driver' ? (
                 <>
-                  {/* 현재 기사님 상태 카드 */}
-                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
-                    <div>
-                      <span className="text-[11px] text-slate-500 font-semibold block">현재 배정된 정규 기사</span>
-                      <span className="text-sm font-bold text-slate-800">{substituteModalBus.driverName || '미등록'}</span>
-                      <span className="text-xs text-slate-500 ml-2">({substituteModalBus.driverPhone || '연락처 없음'})</span>
+                  {/* 1. 현재 정규 기사 상태 요약 바 */}
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-xs text-slate-500 font-bold shrink-0">정규 기사</span>
+                      <span className="text-sm font-extrabold text-slate-900 truncate">{substituteModalBus.driverName || '미등록'}</span>
+                      {substituteModalBus.driverPhone && (
+                        <span className="text-xs text-slate-500 font-mono shrink-0">({substituteModalBus.driverPhone})</span>
+                      )}
                     </div>
                     {substituteForm.driverIsActive ? (
-                      <span className="px-2.5 py-1 bg-blue-50 text-blue-800 border border-blue-200 font-bold rounded-lg flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                      <span className="px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 font-extrabold rounded-md text-xs flex items-center gap-1 shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
                         휴식 중 (대체 운행)
                       </span>
                     ) : (
-                      <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 font-bold rounded-lg">
+                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded-md text-xs shrink-0">
                         정상 운행 중
                       </span>
                     )}
                   </div>
 
-                  {/* 휴식 사유 */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">기사님 휴식 사유</label>
-                    <div className="flex gap-1.5 flex-wrap mb-1.5">
-                      {['연차 휴가', '병가 / 입원', '경조사', '차량 긴급 정비', '개인 사정'].map(r => (
-                        <button
-                          key={r}
-                          type="button"
-                          onClick={() => setSubstituteForm({ ...substituteForm, driverReason: r })}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors border cursor-pointer ${
-                            substituteForm.driverReason === r
-                              ? 'bg-slate-900 text-white border-slate-900'
-                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                          }`}
+                  {/* 2. 휴식 사유 및 대체 기사 배정 영역 */}
+                  <div className="space-y-3 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs">
+                    {/* 휴식 사유 */}
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-xs font-extrabold text-slate-800 shrink-0">휴식 사유</label>
+                      <div className="flex items-center gap-1.5 flex-1 max-w-[280px]">
+                        <select
+                          value={['연차 휴가', '병가 / 입원', '경조사', '차량 긴급 정비'].includes(substituteForm.driverReason) ? substituteForm.driverReason : '직접입력'}
+                          onChange={e => {
+                            if (e.target.value !== '직접입력') {
+                              setSubstituteForm({ ...substituteForm, driverReason: e.target.value });
+                            }
+                          }}
+                          className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 outline-none cursor-pointer"
                         >
-                          {r}
-                        </button>
-                      ))}
-                    </div>
-                    <input
-                      type="text"
-                      value={substituteForm.driverReason}
-                      onChange={e => setSubstituteForm({ ...substituteForm, driverReason: e.target.value })}
-                      placeholder="사유를 직접 입력하거나 위 항목을 선택하세요"
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-semibold"
-                    />
-                  </div>
-
-                  {/* 임시 계정 선택 박스 (풀 / 프리셋 드롭다운) */}
-                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/90 shadow-2xs space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-sm">🔑</span>
-                        <label className="text-xs font-bold text-slate-800">
-                          임시 계정 선택 (등록 계정 및 예비 풀)
-                        </label>
+                          <option value="연차 휴가">연차 휴가</option>
+                          <option value="병가 / 입원">병가 / 입원</option>
+                          <option value="경조사">경조사</option>
+                          <option value="차량 긴급 정비">차량 긴급 정비</option>
+                          <option value="직접입력">기타 (직접 입력)</option>
+                        </select>
                       </div>
-                      <span className="text-[10px] font-bold text-slate-600 bg-slate-200/80 px-2 py-0.5 rounded-md">
-                        원클릭 자동 완성
-                      </span>
                     </div>
 
-                    <select
-                      value={substituteForm.selectedDriverPreset || 'current_default'}
-                      onChange={(e) => handleSelectDriverPreset(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs cursor-pointer"
-                    >
-                      <optgroup label="현재 및 다른 호차 계정">
-                        {getSubstituteDriverPresets(substituteModalBus).filter(p => p.category !== '예비 기사 풀 (공용)').map(p => (
-                          <option key={p.key} value={p.key}>{p.label}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="공용 예비 기사 풀 (Spare Pool)">
-                        {getSubstituteDriverPresets(substituteModalBus).filter(p => p.category === '예비 기사 풀 (공용)').map(p => (
-                          <option key={p.key} value={p.key}>{p.label}</option>
-                        ))}
-                      </optgroup>
-                      <option value="custom">➕ 직접 새 계정 / 기사 정보 입력 (사용자 지정)</option>
-                    </select>
+                    {!['연차 휴가', '병가 / 입원', '경조사', '차량 긴급 정비'].includes(substituteForm.driverReason) && (
+                      <input
+                        type="text"
+                        value={substituteForm.driverReason}
+                        onChange={e => setSubstituteForm({ ...substituteForm, driverReason: e.target.value })}
+                        placeholder="사유를 직접 입력하세요"
+                        className="w-full px-3 py-1.5 border border-slate-300 rounded-xl outline-none text-xs font-semibold animate-fade-in"
+                      />
+                    )}
 
-                    {/* 빠른 선택 칩 버튼들 */}
-                    <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                      <span className="text-[10px] text-slate-500 font-bold shrink-0">빠른 선택:</span>
-                      {getSubstituteDriverPresets(substituteModalBus).map(p => {
-                        const isSelected = substituteForm.selectedDriverPreset === p.key;
-                        let chipName = '호차 기본';
-                        if (p.key === 'spare_1') chipName = '예비 1호';
-                        else if (p.key === 'spare_2') chipName = '예비 2호';
-                        else if (p.key === 'spare_3') chipName = '예비 3호';
-                        else if (p.key.startsWith('bus_')) chipName = p.label.split(']')[0].replace('[', '');
+                    {/* 대체 기사 선택 (드롭다운) */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-extrabold text-slate-800">대체 기사 배정</label>
+                        <span className="text-[10px] text-blue-600 font-bold">계정 자동 매칭</span>
+                      </div>
+                      <select
+                        value={substituteForm.selectedDriverPreset || 'current_default'}
+                        onChange={(e) => handleSelectDriverPreset(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs cursor-pointer"
+                      >
+                        <optgroup label="현재 및 다른 호차 전용 계정">
+                          {getSubstituteDriverPresets(substituteModalBus).filter(p => p.category !== '예비 기사 풀 (공용)').map(p => (
+                            <option key={p.key} value={p.key}>{p.label}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="공용 예비 기사 풀 (Spare Pool)">
+                          {getSubstituteDriverPresets(substituteModalBus).filter(p => p.category === '예비 기사 풀 (공용)').map(p => (
+                            <option key={p.key} value={p.key}>{p.label}</option>
+                          ))}
+                        </optgroup>
+                        <option value="custom">➕ 직접 성명/연락처 입력 (사용자 지정)</option>
+                      </select>
+                    </div>
 
-                        return (
-                          <button
-                            key={p.key}
-                            type="button"
-                            onClick={() => handleSelectDriverPreset(p.key)}
-                            className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
-                              isSelected
-                                ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
-                            }`}
-                          >
-                            {chipName}
-                          </button>
-                        );
-                      })}
+                    {/* 배정 기사 정보 요약 or 직접 입력 */}
+                    {substituteForm.selectedDriverPreset === 'custom' ? (
+                      <div className="grid grid-cols-2 gap-2 pt-1 animate-fade-in">
+                        <input
+                          type="text"
+                          value={substituteForm.driverName}
+                          onChange={e => setSubstituteForm({ ...substituteForm, driverName: e.target.value })}
+                          placeholder="대체 기사 성명"
+                          className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-bold"
+                        />
+                        <input
+                          type="text"
+                          value={substituteForm.driverPhone}
+                          onChange={e => setSubstituteForm({ ...substituteForm, driverPhone: formatPhoneNumber(e.target.value) })}
+                          placeholder="연락처 (010-0000-0000)"
+                          maxLength={13}
+                          className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-bold"
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 text-xs">
+                        <span className="font-extrabold text-slate-800 flex items-center gap-1.5 truncate">
+                          <span className="text-slate-400 font-normal">배정 기사:</span>
+                          {substituteForm.driverName || '대체 기사님'}
+                          <span className="text-slate-500 font-mono text-[11px]">({substituteForm.driverPhone})</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectDriverPreset('custom')}
+                          className="text-[11px] font-bold text-slate-500 hover:text-blue-600 underline shrink-0 cursor-pointer"
+                        >
+                          직접 수정
+                        </button>
+                      </div>
+                    )}
+
+                    {/* 3. 기사 앱 로그인 계정 (원클릭 복사 바) */}
+                    <div className="bg-slate-100/90 rounded-xl p-2.5 border border-slate-200 flex items-center justify-between text-xs">
+                      <div className="min-w-0 pr-2">
+                        <span className="text-[10px] text-slate-500 font-bold block">기사 앱 로그인 정보</span>
+                        <span className="font-mono font-bold text-slate-800 truncate block text-[11px]">
+                          {substituteForm.driverEmail} / {substituteForm.driverPassword}
+                        </span>
+                      </div>
                       <button
                         type="button"
-                        onClick={() => handleSelectDriverPreset('custom')}
-                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
-                          substituteForm.selectedDriverPreset === 'custom'
-                            ? 'bg-slate-800 text-white border-slate-800 shadow-2xs'
-                            : 'bg-white hover:bg-slate-100 text-slate-600 border-slate-200'
-                        }`}
+                        onClick={() => {
+                          navigator.clipboard.writeText(`아이디: ${substituteForm.driverEmail}\n비밀번호: ${substituteForm.driverPassword}`);
+                          alert('대체 기사 계정 정보가 클립보드에 복사되었습니다.');
+                        }}
+                        className="px-2.5 py-1 bg-white hover:bg-slate-200 text-slate-700 font-bold text-[11px] rounded-lg border border-slate-200 shrink-0 shadow-2xs cursor-pointer"
+                        title="아이디와 비밀번호 한 번에 복사"
                       >
-                        직접입력
+                        계정 복사
                       </button>
-                    </div>
-                  </div>
-
-                  {/* 대체 기사 정보 */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">대체 기사 성명</label>
-                      <input
-                        type="text"
-                        value={substituteForm.driverName}
-                        onChange={e => setSubstituteForm({ ...substituteForm, driverName: e.target.value })}
-                        placeholder="예: 홍길동 (대체)"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-semibold"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">대체 기사 연락처</label>
-                      <input
-                        type="text"
-                        value={substituteForm.driverPhone}
-                        onChange={e => setSubstituteForm({ ...substituteForm, driverPhone: formatPhoneNumber(e.target.value) })}
-                        placeholder="010-0000-0000"
-                        maxLength={13}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-semibold"
-                      />
-                    </div>
-                  </div>
-
-                  {/* 대체 기사 전용 임시 계정 (보안 핵심 영역) */}
-                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-sm">🔑</span>
-                        <span className="font-extrabold text-slate-800 text-xs">대체 기사 임시 계정 (기사 전용 앱)</span>
-                      </div>
-                      {substituteForm.driverIsActive ? (
-                        <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full border border-blue-200 flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
-                          로그인 활성화됨 (승인)
-                        </span>
-                      ) : (
-                        <span className="text-[10px] bg-slate-200 text-slate-600 font-bold px-2 py-0.5 rounded-full">
-                          평소 비활성화 (잠금)
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="text-[11px] text-slate-600 leading-relaxed bg-white p-2.5 rounded-xl border border-slate-200">
-                      🔒 <strong className="text-slate-800">보안 정책:</strong> 이 계정은 보안을 위해 <span className="text-rose-600 font-bold">평소에는 로그인이 자동 차단</span>됩니다. 관리자가 아래 <strong className="text-blue-700">‘대체 운행 활성화’</strong>를 켰을 때만 기사 앱(포트 8081 등)에 로그인할 수 있습니다.
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-0.5">임시 아이디 (이메일)</label>
-                        <div className="flex gap-1">
-                          <input
-                            type="text"
-                            value={substituteForm.driverEmail}
-                            onChange={e => setSubstituteForm({ ...substituteForm, driverEmail: e.target.value })}
-                            className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono font-semibold"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText(substituteForm.driverEmail);
-                              alert('임시 아이디가 클립보드에 복사되었습니다.');
-                            }}
-                            className="px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg whitespace-nowrap cursor-pointer"
-                            title="아이디 복사"
-                          >
-                            복사
-                          </button>
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-0.5">임시 비밀번호</label>
-                        <div className="flex gap-1">
-                          <input
-                            type="text"
-                            value={substituteForm.driverPassword}
-                            onChange={e => setSubstituteForm({ ...substituteForm, driverPassword: e.target.value })}
-                            className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono font-semibold"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText(substituteForm.driverPassword);
-                              alert('임시 비밀번호가 클립보드에 복사되었습니다.');
-                            }}
-                            className="px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg whitespace-nowrap cursor-pointer"
-                            title="비밀번호 복사"
-                          >
-                            복사
-                          </button>
-                        </div>
-                      </div>
                     </div>
                   </div>
                 </>
               ) : (
                 <>
-                  {/* 차량선생님 대체 폼 */}
-                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
-                    <div>
-                      <span className="text-[11px] text-slate-500 font-semibold block">현재 배정된 정규 차량선생님</span>
-                      <span className="text-sm font-bold text-slate-800">{substituteModalBus.teacherName || '미등록'}</span>
-                      <span className="text-xs text-slate-500 ml-2">({substituteModalBus.teacherPhone || '연락처 없음'})</span>
+                  {/* 차량선생님 탭 컴팩트 폼 */}
+                  <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-xs text-slate-500 font-bold shrink-0">정규 차량선생님</span>
+                      <span className="text-sm font-extrabold text-slate-900 truncate">{substituteModalBus.teacherName || '미등록'}</span>
+                      {substituteModalBus.teacherPhone && (
+                        <span className="text-xs text-slate-500 font-mono shrink-0">({substituteModalBus.teacherPhone})</span>
+                      )}
                     </div>
                     {substituteForm.teacherIsActive ? (
-                      <span className="px-2.5 py-1 bg-blue-50 text-blue-800 border border-blue-200 font-bold rounded-lg flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                      <span className="px-2 py-0.5 bg-blue-100 text-blue-900 border border-blue-300 font-extrabold rounded-md text-xs flex items-center gap-1 shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
                         휴식 중 (대체 차량선생님)
                       </span>
                     ) : (
-                      <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 font-bold rounded-lg">
+                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded-md text-xs shrink-0">
                         정상 탑승 중
                       </span>
                     )}
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">교사님 휴식 사유</label>
-                    <input
-                      type="text"
-                      value={substituteForm.teacherReason}
-                      onChange={e => setSubstituteForm({ ...substituteForm, teacherReason: e.target.value })}
-                      placeholder="예: 병가, 개인사정, 연차 등"
-                      className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-semibold"
-                    />
-                  </div>
-
-                  {/* 임시 교사 계정 선택 박스 (풀 / 프리셋 드롭다운) */}
-                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/90 shadow-2xs space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-sm">🔑</span>
-                        <label className="text-xs font-bold text-slate-800">
-                          임시 교사 계정 선택 (등록 계정 및 예비 풀)
-                        </label>
+                  <div className="space-y-3 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs">
+                    {/* 교사 휴식 사유 */}
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-xs font-extrabold text-slate-800 shrink-0">휴식 사유</label>
+                      <div className="flex items-center gap-1.5 flex-1 max-w-[280px]">
+                        <input
+                          type="text"
+                          value={substituteForm.teacherReason}
+                          onChange={e => setSubstituteForm({ ...substituteForm, teacherReason: e.target.value })}
+                          placeholder="예: 병가, 개인사정, 연차 등"
+                          className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 outline-none"
+                        />
                       </div>
-                      <span className="text-[10px] font-bold text-slate-600 bg-slate-200/80 px-2 py-0.5 rounded-md">
-                        원클릭 자동 완성
-                      </span>
                     </div>
 
-                    <select
-                      value={substituteForm.selectedTeacherPreset || 'current_default'}
-                      onChange={(e) => handleSelectTeacherPreset(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs cursor-pointer"
-                    >
-                      <optgroup label="현재 및 다른 호차 계정">
-                        {getSubstituteTeacherPresets(substituteModalBus).filter(p => p.category !== '예비 교사 풀 (공용)').map(p => (
-                          <option key={p.key} value={p.key}>{p.label}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="공용 예비 교사 풀 (Spare Pool)">
-                        {getSubstituteTeacherPresets(substituteModalBus).filter(p => p.category === '예비 교사 풀 (공용)').map(p => (
-                          <option key={p.key} value={p.key}>{p.label}</option>
-                        ))}
-                      </optgroup>
-                      <option value="custom">➕ 직접 새 계정 / 교사 정보 입력 (사용자 지정)</option>
-                    </select>
+                    {/* 대체 교사 선택 드롭다운 */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-extrabold text-slate-800">대체 교사 배정</label>
+                        <span className="text-[10px] text-blue-600 font-bold">계정 자동 매칭</span>
+                      </div>
+                      <select
+                        value={substituteForm.selectedTeacherPreset || 'current_default'}
+                        onChange={(e) => handleSelectTeacherPreset(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs cursor-pointer"
+                      >
+                        <optgroup label="현재 및 다른 호차 전용 계정">
+                          {getSubstituteTeacherPresets(substituteModalBus).filter(p => p.category !== '예비 교사 풀 (공용)').map(p => (
+                            <option key={p.key} value={p.key}>{p.label}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="공용 예비 교사 풀 (Spare Pool)">
+                          {getSubstituteTeacherPresets(substituteModalBus).filter(p => p.category === '예비 교사 풀 (공용)').map(p => (
+                            <option key={p.key} value={p.key}>{p.label}</option>
+                          ))}
+                        </optgroup>
+                        <option value="custom">➕ 직접 성명/연락처 입력 (사용자 지정)</option>
+                      </select>
+                    </div>
 
-                    {/* 빠른 선택 칩 버튼들 */}
-                    <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                      <span className="text-[10px] text-slate-500 font-bold shrink-0">빠른 선택:</span>
-                      {getSubstituteTeacherPresets(substituteModalBus).map(p => {
-                        const isSelected = substituteForm.selectedTeacherPreset === p.key;
-                        let chipName = '호차 기본';
-                        if (p.key === 'spare_1') chipName = '예비 1호';
-                        else if (p.key === 'spare_2') chipName = '예비 2호';
-                        else if (p.key.startsWith('bus_')) chipName = p.label.split(']')[0].replace('[', '');
+                    {substituteForm.selectedTeacherPreset === 'custom' ? (
+                      <div className="grid grid-cols-2 gap-2 pt-1 animate-fade-in">
+                        <input
+                          type="text"
+                          value={substituteForm.teacherName}
+                          onChange={e => setSubstituteForm({ ...substituteForm, teacherName: e.target.value })}
+                          placeholder="대체 교사 성명"
+                          className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-bold"
+                        />
+                        <input
+                          type="text"
+                          value={substituteForm.teacherPhone}
+                          onChange={e => setSubstituteForm({ ...substituteForm, teacherPhone: formatPhoneNumber(e.target.value) })}
+                          placeholder="연락처 (010-0000-0000)"
+                          maxLength={13}
+                          className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-bold"
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 text-xs">
+                        <span className="font-extrabold text-slate-800 flex items-center gap-1.5 truncate">
+                          <span className="text-slate-400 font-normal">배정 교사:</span>
+                          {substituteForm.teacherName || '대체 교사님'}
+                          <span className="text-slate-500 font-mono text-[11px]">({substituteForm.teacherPhone})</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectTeacherPreset('custom')}
+                          className="text-[11px] font-bold text-slate-500 hover:text-blue-600 underline shrink-0 cursor-pointer"
+                        >
+                          직접 수정
+                        </button>
+                      </div>
+                    )}
 
-                        return (
-                          <button
-                            key={p.key}
-                            type="button"
-                            onClick={() => handleSelectTeacherPreset(p.key)}
-                            className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
-                              isSelected
-                                ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
-                            }`}
-                          >
-                            {chipName}
-                          </button>
-                        );
-                      })}
+                    <div className="bg-slate-100/90 rounded-xl p-2.5 border border-slate-200 flex items-center justify-between text-xs">
+                      <div className="min-w-0 pr-2">
+                        <span className="text-[10px] text-slate-500 font-bold block">교사 앱 로그인 정보</span>
+                        <span className="font-mono font-bold text-slate-800 truncate block text-[11px]">
+                          {substituteForm.teacherEmail} / {substituteForm.teacherPassword}
+                        </span>
+                      </div>
                       <button
                         type="button"
-                        onClick={() => handleSelectTeacherPreset('custom')}
-                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all border cursor-pointer ${
-                          substituteForm.selectedTeacherPreset === 'custom'
-                            ? 'bg-slate-800 text-white border-slate-800 shadow-2xs'
-                            : 'bg-white hover:bg-slate-100 text-slate-600 border-slate-200'
-                        }`}
+                        onClick={() => {
+                          navigator.clipboard.writeText(`아이디: ${substituteForm.teacherEmail}\n비밀번호: ${substituteForm.teacherPassword}`);
+                          alert('대체 교사 계정 정보가 클립보드에 복사되었습니다.');
+                        }}
+                        className="px-2.5 py-1 bg-white hover:bg-slate-200 text-slate-700 font-bold text-[11px] rounded-lg border border-slate-200 shrink-0 shadow-2xs cursor-pointer"
+                        title="아이디와 비밀번호 한 번에 복사"
                       >
-                        직접입력
+                        계정 복사
                       </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">대체 교사 성명</label>
-                      <input
-                        type="text"
-                        value={substituteForm.teacherName}
-                        onChange={e => setSubstituteForm({ ...substituteForm, teacherName: e.target.value })}
-                        placeholder="예: 김선생님 (대체)"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-semibold"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">대체 교사 연락처</label>
-                      <input
-                        type="text"
-                        value={substituteForm.teacherPhone}
-                        onChange={e => setSubstituteForm({ ...substituteForm, teacherPhone: formatPhoneNumber(e.target.value) })}
-                        placeholder="010-0000-0000"
-                        maxLength={13}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-semibold"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
-                    <span className="font-extrabold text-slate-800 text-xs block">교사 전용 앱 임시 계정</span>
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-0.5">아이디</label>
-                        <input
-                          type="text"
-                          value={substituteForm.teacherEmail}
-                          onChange={e => setSubstituteForm({ ...substituteForm, teacherEmail: e.target.value })}
-                          className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono font-semibold"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-600 mb-0.5">비밀번호</label>
-                        <input
-                          type="text"
-                          value={substituteForm.teacherPassword}
-                          onChange={e => setSubstituteForm({ ...substituteForm, teacherPassword: e.target.value })}
-                          className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono font-semibold"
-                        />
-                      </div>
                     </div>
                   </div>
                 </>
@@ -8154,88 +8193,62 @@ const parseKindergartenExcelSheet = (sheet) => {
             </div>
 
             {/* Modal Actions Footer */}
-            <div className="p-5 border-t border-slate-100 bg-slate-50 flex flex-col gap-2 shrink-0">
-              {substituteFormTab === 'driver' ? (
-                <>
-                  <div className="flex gap-2">
-                    {substituteForm.driverIsActive ? (
-                      <button
-                        type="button"
-                        onClick={() => handleSaveSubstituteStaff('RESTORE_DRIVER')}
-                        className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <span>🔙</span>
-                        <span>원래 기사님 복귀 (대체 운행 종료 & 계정 잠금)</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleSaveSubstituteStaff('ACTIVATE_DRIVER')}
-                        className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <span>🚀</span>
-                        <span>기사 휴식 처리 및 대체 운행 활성화 (로그인 허용)</span>
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex justify-between items-center pt-1">
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setSubstituteModalBus(null)}
+                className="px-4 py-2 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                닫기
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSaveSubstituteStaff('SAVE_ONLY')}
+                  className="px-3.5 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                >
+                  설정만 저장
+                </button>
+
+                {substituteFormTab === 'driver' ? (
+                  substituteForm.driverIsActive ? (
                     <button
                       type="button"
-                      onClick={() => handleSaveSubstituteStaff('SAVE_ONLY')}
-                      className="px-3.5 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                      onClick={() => handleSaveSubstituteStaff('RESTORE_DRIVER')}
+                      className="py-2 px-4 bg-slate-900 hover:bg-black text-white font-extrabold rounded-xl text-xs transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
                     >
-                      설정 내용만 저장
+                      <span>🔙 원래 기사 복귀</span>
                     </button>
+                  ) : (
                     <button
                       type="button"
-                      onClick={() => setSubstituteModalBus(null)}
-                      className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                      onClick={() => handleSaveSubstituteStaff('ACTIVATE_DRIVER')}
+                      className="py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl text-xs transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
                     >
-                      닫기
+                      <span>🚀 대체 운행 시작</span>
                     </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex gap-2">
-                    {substituteForm.teacherIsActive ? (
-                      <button
-                        type="button"
-                        onClick={() => handleSaveSubstituteStaff('RESTORE_TEACHER')}
-                        className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <span>🔙</span>
-                        <span>원래 차량선생님 복귀 (대체 종료)</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleSaveSubstituteStaff('ACTIVATE_TEACHER')}
-                        className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <span>🚀</span>
-                        <span>차량선생님 휴식 처리 및 대체 교사 활성화</span>
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex justify-between items-center pt-1">
+                  )
+                ) : (
+                  substituteForm.teacherIsActive ? (
                     <button
                       type="button"
-                      onClick={() => handleSaveSubstituteStaff('SAVE_ONLY')}
-                      className="px-3.5 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                      onClick={() => handleSaveSubstituteStaff('RESTORE_TEACHER')}
+                      className="py-2 px-4 bg-slate-900 hover:bg-black text-white font-extrabold rounded-xl text-xs transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
                     >
-                      설정 내용만 저장
+                      <span>🔙 원래 차량선생님 복귀</span>
                     </button>
+                  ) : (
                     <button
                       type="button"
-                      onClick={() => setSubstituteModalBus(null)}
-                      className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                      onClick={() => handleSaveSubstituteStaff('ACTIVATE_TEACHER')}
+                      className="py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl text-xs transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
                     >
-                      닫기
+                      <span>🚀 대체 차량선생님 활성화</span>
                     </button>
-                  </div>
-                </>
-              )}
+                  )
+                )}
+              </div>
             </div>
           </div>
         </div>

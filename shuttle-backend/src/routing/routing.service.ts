@@ -3395,8 +3395,10 @@ export class RoutingService {
 
   private async hydratePostMedia(post: BoardPost): Promise<BoardPost> {
     if (!post) return post;
-    const resolvedImageUrl = await resolveMediaRef(post.imageUrl);
-    const resolvedImages = await resolveMediaRefs(post.images);
+    const [resolvedImageUrl, resolvedImages] = await Promise.all([
+      resolveMediaRef(post.imageUrl),
+      resolveMediaRefs(post.images),
+    ]);
     return {
       ...post,
       imageUrl: resolvedImageUrl,

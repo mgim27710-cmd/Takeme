@@ -310,30 +310,80 @@ export class ChatService {
     }
 
     const rooms = await query.getMany();
+    const roomIds = rooms.map(r => r.id);
 
-    for (const room of rooms) {
-      const latestMessage = await this.messageRepo.findOne({
-        where: { room: { id: room.id } },
-        order: { createdAt: 'DESC' },
-        relations: { sender: true },
-      });
-      (room as any).latestMessage = latestMessage || null;
+    const latestMap = new Map<number, ChatMessage>();
+    const unreadMap = new Map<number, number>();
 
-      // 안 읽은 메시지 수 계산
-      const allMsgs = await this.messageRepo.find({
-        where: { room: { id: room.id } },
-        relations: { sender: true },
-      });
-      let unread = 0;
-      for (const m of allMsgs) {
-        if (m.sender && m.sender.id !== userId) {
-          const reads = (m.readBy || []).map(Number);
-          if (!reads.includes(userId)) {
-            unread++;
+    if (roomIds.length > 0) {
+      // 1) 각 방별 최신 메시지를 MAX(id) 기반 단일 조인 쿼리로 일괄 조회
+      try {
+        const latestMessages = await this.messageRepo
+          .createQueryBuilder('msg')
+          .leftJoinAndSelect('msg.sender', 'sender')
+          .leftJoinAndSelect('msg.room', 'room')
+          .innerJoin(
+            (subQuery) =>
+              subQuery
+                .select('m.roomId', 'roomId')
+                .addSelect('MAX(m.id)', 'maxId')
+                .from(ChatMessage, 'm')
+                .where('m.roomId IN (:...roomIds)', { roomIds })
+                .groupBy('m.roomId'),
+            'latest',
+            'msg.id = latest.maxId'
+          )
+          .getMany();
+
+        for (const msg of latestMessages) {
+          if (msg.room?.id) {
+            latestMap.set(msg.room.id, msg);
+          }
+        }
+      } catch (err) {
+        // 폴백: 서브쿼리 조인이 실패할 경우 최신순 조회로 안전하게 매핑
+        const recentMessages = await this.messageRepo.find({
+          where: { room: { id: In(roomIds) } },
+          order: { createdAt: 'DESC' },
+          relations: { sender: true, room: true },
+          take: roomIds.length * 5,
+        });
+        for (const msg of recentMessages) {
+          if (msg.room?.id && !latestMap.has(msg.room.id)) {
+            latestMap.set(msg.room.id, msg);
           }
         }
       }
-      (room as any).unreadCount = unread;
+
+      // 2) 안 읽은 메시지 수 계산:
+      // senderId != userId 인 안 읽은 메시지 후보들만 경량 조회
+      try {
+        const candidateMsgs = await this.messageRepo
+          .createQueryBuilder('msg')
+          .select(['msg.id', 'msg.readBy', 'room.id', 'sender.id'])
+          .leftJoin('msg.room', 'room')
+          .leftJoin('msg.sender', 'sender')
+          .where('room.id IN (:...roomIds)', { roomIds })
+          .andWhere('(sender.id IS NULL OR sender.id != :userId)', { userId })
+          .getMany();
+
+        for (const m of candidateMsgs) {
+          const reads = (m.readBy || []).map(Number);
+          if (!reads.includes(userId)) {
+            const rId = m.room?.id;
+            if (rId) {
+              unreadMap.set(rId, (unreadMap.get(rId) || 0) + 1);
+            }
+          }
+        }
+      } catch (err) {
+        // 에러 시 0 유지
+      }
+    }
+
+    for (const room of rooms) {
+      (room as any).latestMessage = latestMap.get(room.id) || null;
+      (room as any).unreadCount = unreadMap.get(room.id) || 0;
     }
 
     // 결재 전용 방 제외 및 알림 채널 단 1개 유지
@@ -383,18 +433,20 @@ export class ChatService {
 
     const updatedIds: number[] = [];
     if (currentUserId) {
+      const toUpdate: ChatMessage[] = [];
       for (const m of messages) {
         if (m.sender && m.sender.id !== currentUserId) {
           const readByList = (m.readBy || []).map(Number);
           if (!readByList.includes(currentUserId)) {
             readByList.push(currentUserId);
             m.readBy = readByList;
-            await this.messageRepo.save(m);
+            toUpdate.push(m);
             updatedIds.push(m.id);
           }
         }
       }
-      if (updatedIds.length > 0) {
+      if (toUpdate.length > 0) {
+        await this.messageRepo.save(toUpdate);
         this.chatGateway.server?.to(`chat_${roomId}`).emit('messagesRead', {
           roomId,
           userId: currentUserId,

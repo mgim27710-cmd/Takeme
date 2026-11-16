@@ -229,7 +229,10 @@ export default function BoardViewer({
 
   // Load posts from backend or fallback to localStorage
   const fetchPosts = async () => {
-    setIsLoading(true);
+    // 화면에 이미 게시글이 있다면 스피너로 화면을 가리지 않고 백그라운드 갱신(SWR)
+    if (!posts || posts.length === 0) {
+      setIsLoading(true);
+    }
     try {
       const activeAcademyId = selectedAcademyId || localStorage.getItem('takeme_selected_academy_id') || (() => {
         try { return JSON.parse(localStorage.getItem('takeme_user') || '{}').academyId; } catch(e){ return ''; }
@@ -244,8 +247,9 @@ export default function BoardViewer({
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
           const levelFiltered = data.filter(p => !p.educationLevel || p.educationLevel === currentEducationLevel);
-          setPosts(levelFiltered.length > 0 ? levelFiltered : defaultPosts);
-          localStorage.setItem(boardStorageKey, JSON.stringify(levelFiltered.length > 0 ? levelFiltered : defaultPosts));
+          const finalPosts = levelFiltered.length > 0 ? levelFiltered : defaultPosts;
+          setPosts(finalPosts);
+          localStorage.setItem(boardStorageKey, JSON.stringify(finalPosts));
           return;
         }
       }
@@ -260,13 +264,28 @@ export default function BoardViewer({
     } catch (e) {
       console.warn('Backend fetch failed, falling back to local data', e);
       const saved = localStorage.getItem(boardStorageKey);
-      setPosts(saved ? JSON.parse(saved) : defaultPosts);
+      if (saved) {
+        setPosts(JSON.parse(saved));
+      } else if (!posts || posts.length === 0) {
+        setPosts(defaultPosts);
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
+    // 즉각 렌더링 (0초 반응): 로컬 캐시가 있으면 네트워크 응답 전에 즉시 화면에 노출
+    try {
+      const saved = localStorage.getItem(boardStorageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setPosts(parsed);
+        }
+      }
+    } catch (_) {}
+
     fetchPosts();
   }, [selectedAcademyId, currentEducationLevel]);
 

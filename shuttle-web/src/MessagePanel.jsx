@@ -135,9 +135,17 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   const isKindergarten = currentEducationLevel === '유치원';
   const isElementary = currentEducationLevel === '초등부';
   const isMiddleHigh = currentEducationLevel === '중,고등부';
-  const [rooms, setRooms] = useState([]);
+  const chatRoomsCacheKey = `takeme_chat_rooms_${currentEducationLevel}`;
+  const [rooms, setRooms] = useState(() => {
+    try {
+      const saved = localStorage.getItem(chatRoomsCacheKey);
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return [];
+  });
   const [activeRoom, setActiveRoom] = useState(null);
   const [messages, setMessages] = useState([]);
+  const messagesCacheRef = useRef(new Map());
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [searchRoomQuery, setSearchRoomQuery] = useState('');
@@ -280,8 +288,20 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
   // Initial Load: Fetch rooms
   useEffect(() => {
-    setActiveRoom(null);
-    setMessages([]);
+    // 로컬 캐시에서 즉시 방 목록 복원 (0초 반응)
+    try {
+      const saved = localStorage.getItem(chatRoomsCacheKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setRooms(parsed);
+          if (!activeRoomRef.current) {
+            setActiveRoom(parsed[0]);
+          }
+        }
+      }
+    } catch (_) {}
+
     fetchRooms();
   }, [myUser.email, currentEducationLevel]);
 
@@ -381,6 +401,12 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       }
     }
 
+    // 인메모리 캐시에서 해당 방의 직전 메시지 즉시 렌더링 (0초 전환)
+    if (messagesCacheRef.current.has(activeRoom.id)) {
+      setMessages(messagesCacheRef.current.get(activeRoom.id));
+      scrollToBottom();
+    }
+
     fetchMessages(activeRoom.id);
 
     return () => {
@@ -421,6 +447,9 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         // 학제 일치 검증 필터 (방에 educationLevel이 명시된 경우 현재 학제와 반드시 일치해야 함)
         const filtered = (data || []).filter((r) => !r.educationLevel || r.educationLevel === currentEducationLevel);
         setRooms(filtered);
+        try {
+          localStorage.setItem(chatRoomsCacheKey, JSON.stringify(filtered));
+        } catch (_) {}
         if (initialRoomType) {
           const match = filtered.find((r) => r.type === initialRoomType);
           if (match) {
@@ -458,6 +487,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       if (res.ok) {
         const data = await res.json();
         setMessages(data);
+        messagesCacheRef.current.set(roomId, data);
         setRooms((prev) =>
           prev.map((r) => (Number(r.id) === Number(roomId) ? { ...r, unreadCount: 0 } : r))
         );
@@ -1470,8 +1500,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
               </svg>
             </div>
             <div>
-              <h2 className="text-base font-extrabold text-slate-800 tracking-tight leading-none">메세지함</h2>
-              <span className="text-[11px] text-slate-400 font-medium">실시간 원내 메신저</span>
+              <h2 className="text-xl font-extrabold text-slate-900 tracking-tight leading-none mb-0.5">메세지함</h2>
+              <span className="text-xs text-slate-500 font-medium">실시간 원내 메신저</span>
             </div>
           </div>
 

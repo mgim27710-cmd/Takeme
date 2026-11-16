@@ -11,35 +11,43 @@ export default defineConfig({
   server: {
     proxy: {
       '/routing': {
-        target: 'http://localhost:8081',
+        target: 'https://52.63.245.203.sslip.io',
+        secure: false,
         changeOrigin: true,
       },
       '/auth': {
-        target: 'http://localhost:8081',
+        target: 'https://52.63.245.203.sslip.io',
+        secure: false,
         changeOrigin: true,
       },
       '/parent': {
-        target: 'http://localhost:8081',
+        target: 'https://52.63.245.203.sslip.io',
+        secure: false,
         changeOrigin: true,
       },
       '/teacher': {
-        target: 'http://localhost:8081',
+        target: 'https://52.63.245.203.sslip.io',
+        secure: false,
         changeOrigin: true,
       },
       '/chat': {
-        target: 'http://localhost:8081',
+        target: 'https://52.63.245.203.sslip.io',
+        secure: false,
         changeOrigin: true,
       },
       '/approval': {
-        target: 'http://localhost:8081',
+        target: 'https://52.63.245.203.sslip.io',
+        secure: false,
         changeOrigin: true,
       },
       '/directions': {
-        target: 'http://localhost:8081',
+        target: 'https://52.63.245.203.sslip.io',
+        secure: false,
         changeOrigin: true,
       },
       '/socket.io': {
-        target: 'http://localhost:8081',
+        target: 'https://52.63.245.203.sslip.io',
+        secure: false,
         ws: true,
         changeOrigin: true,
       },
