@@ -376,7 +376,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             final user = ApiService().currentUser;
                             final authorName = user?.name.isNotEmpty == true
                                 ? user!.name
-                                : (user?.role == 'HOMEROOM_TEACHER' ? '담임교사' : '지도교사');
+                                : (user?.role == 'HOMEROOM_TEACHER' ? '담임교사' : '차량선생님');
                             final authorRole = user?.role == 'HOMEROOM_TEACHER' ? 'HOMEROOM_TEACHER' : (user?.role ?? 'TEACHER');
 
                             final res = await ApiService().createBoardPost(
@@ -915,7 +915,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                           final user = ApiService().currentUser;
                           final authorName = user?.name.isNotEmpty == true
                               ? user!.name
-                              : (user?.role == 'HOMEROOM_TEACHER' ? '담임교사' : '지도교사');
+                              : (user?.role == 'HOMEROOM_TEACHER' ? '담임교사' : '차량선생님');
                           final authorRole = user?.role == 'HOMEROOM_TEACHER' ? 'HOMEROOM_TEACHER' : (user?.role ?? 'TEACHER');
 
                           final res = await ApiService().addPostComment(
@@ -1134,7 +1134,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                                     child: Text(
                                                       post['authorRole'] == 'ADMIN' || post['authorRole'] == 'ACADEMY_ADMIN'
                                                           ? '기관 관리자'
-                                                          : (post['authorRole'] == 'HOMEROOM_TEACHER' ? '담임교사' : '지도교사'),
+                                                          : (post['authorRole'] == 'HOMEROOM_TEACHER' ? '담임교사' : '차량선생님'),
                                                       style: TextStyle(
                                                         fontSize: 10,
                                                         fontWeight: FontWeight.bold,

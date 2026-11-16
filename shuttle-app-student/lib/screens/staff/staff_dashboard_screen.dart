@@ -461,7 +461,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: Text(
-          isDriver ? '기사님 운행 대시보드' : '지도교사 셔틀 탑승 관리',
+          isDriver ? '기사님 운행 대시보드' : '차량선생님 셔틀 탑승 관리',
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF1E293B)),
         ),
         backgroundColor: Colors.white,

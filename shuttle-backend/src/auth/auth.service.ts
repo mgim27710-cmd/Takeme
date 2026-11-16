@@ -252,7 +252,7 @@ export class AuthService {
     const isProfessorTestAccount = (cleanEmail === 'professor@takeme.com');
     const isTeacherTest = (cleanEmail === 'teacher@takeme.com' || cleanEmail === 'teacher_prof@takeme.com');
     const isDriverTest = (cleanEmail === 'driver@takeme.com' || cleanEmail === 'driver_prof@takeme.com');
-    const isParentTest = (cleanEmail === 'parent@takeme.com' || cleanEmail === 'parent_prof@takeme.com');
+    const isParentTest = (cleanEmail === 'parent@takeme.com' || cleanEmail === 'parent_prof@takeme.com' || cleanEmail === 'parent_seoa@takeme.com');
 
     if (!user) {
       if (cleanEmail === 'kdu2224capstone@gmail.com' || cleanEmail === '2224kducapstone@gmail.com' || isProfessorTestAccount) {
@@ -266,24 +266,26 @@ export class AuthService {
       } else if (isTeacherTest) {
         user = await this.usersRepository.findOne({
           where: [
+            { email: 'teacher_prof@takeme.com' },
             { email: 'teacher@takeme.com' },
-            { role: UserRole.TEACHER },
-            { role: UserRole.HOMEROOM_TEACHER },
-            { role: UserRole.SHUTTLE_TEACHER },
+            { role: UserRole.HOMEROOM_TEACHER, academyId: 21 },
+            { role: UserRole.TEACHER, academyId: 21 },
           ],
         });
       } else if (isDriverTest) {
         user = await this.usersRepository.findOne({
           where: [
+            { email: 'driver_prof@takeme.com' },
             { email: 'driver@takeme.com' },
-            { role: UserRole.DRIVER },
+            { role: UserRole.DRIVER, academyId: 21 },
           ],
         });
       } else if (isParentTest) {
         user = await this.usersRepository.findOne({
           where: [
+            { email: 'parent_prof@takeme.com' },
             { email: 'parent@takeme.com' },
-            { role: UserRole.PARENT },
+            { role: UserRole.PARENT, academyId: 21 },
           ],
         });
       }
@@ -779,7 +781,7 @@ export class AuthService {
           success: true,
           message: isHomeroom
             ? `${targetAcademy.name} 담임교사(${savedUser.assignedClass || '학급'})로 등록되었습니다.`
-            : `${targetAcademy.name} 셔틀버스 지도교사로 등록되었습니다.`,
+            : `${targetAcademy.name} 통학차량 차량선생님으로 등록되었습니다.`,
           userId: savedUser.id,
           role: userRole,
           assignedClass: savedUser.assignedClass || '',

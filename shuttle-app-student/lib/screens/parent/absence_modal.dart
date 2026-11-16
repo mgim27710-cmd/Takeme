@@ -20,7 +20,7 @@ class _AbsenceModalState extends State<AbsenceModal> {
   String _overrideType = 'ABSENCE'; // 'ABSENCE' | 'CHANGE_LOCATION' | 'MESSAGE'
   final _reasonController = TextEditingController();
   final _dateController = TextEditingController();
-  final Set<String> _selectedRoles = {'TEACHER'};
+  final Set<String> _selectedRoles = {'SHUTTLE_TEACHER'};
   bool _isLoading = false;
 
   @override
@@ -221,7 +221,7 @@ class _AbsenceModalState extends State<AbsenceModal> {
                 Wrap(
                   spacing: 8,
                   children: [
-                    _buildRoleChip('TEACHER', '지도교사'),
+                    _buildRoleChip('SHUTTLE_TEACHER', '차량선생님'),
                     _buildRoleChip('DRIVER', '기사님'),
                     _buildRoleChip('ACADEMY_ADMIN', '원장선생님'),
                   ],

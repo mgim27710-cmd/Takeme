@@ -94,6 +94,16 @@ export class ChatController {
     return this.chatService.getMessages(parseInt(roomId, 10), uid);
   }
 
+  @Get('rooms/:roomId/messages')
+  async getRoomMessagesAlias(
+    @Param('roomId') roomId: string,
+    @Query('userId') userId?: string,
+    @Req() req?: any,
+  ) {
+    const uid = this.extractUserId(req, userId);
+    return this.chatService.getMessages(parseInt(roomId, 10), uid);
+  }
+
   @Post('rooms')
   async createRoom(
     @Body('name') name: string,

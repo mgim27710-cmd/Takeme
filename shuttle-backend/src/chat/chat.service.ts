@@ -51,7 +51,7 @@ export class ChatService {
       return { drivers: [], teachers: [], parents: [], students: [], admins: [] };
     }
 
-    // 1. 차량 정보 조회 (기사 및 동승교사 매핑)
+    // 1. 차량 정보 조회 (기사 및 차량선생님 매핑)
     const vehicles = await this.vehicleRepo.find({
       where: { academy: { id: targetAcademyId } },
       relations: { driverUser: true, teacherUser: true },
@@ -67,7 +67,7 @@ export class ChatService {
         vehicleUserIds.add(v.driverUser.id);
       }
       if (v.teacherUser) {
-        teacherVehicleMap.set(v.teacherUser.id, v.busNumber ? `${v.busNumber} 동승교사` : '동승교사');
+        teacherVehicleMap.set(v.teacherUser.id, v.busNumber ? `${v.busNumber} 차량선생님` : '차량선생님');
         vehicleUserIds.add(v.teacherUser.id);
       }
     }
@@ -131,7 +131,7 @@ export class ChatService {
         u.role === UserRole.HOMEROOM_TEACHER ||
         u.role === UserRole.SHUTTLE_TEACHER
       ) {
-        const sub = u.assignedClass ? `${u.assignedClass} 담임` : teacherVehicleMap.get(u.id) || '교사';
+        const sub = u.assignedClass ? `${u.assignedClass} 담임` : teacherVehicleMap.get(u.id) || (u.role === UserRole.SHUTTLE_TEACHER ? '차량선생님' : '교사');
         teachers.push({
           id: u.id,
           name: u.name || '선생님',
@@ -561,7 +561,7 @@ export class ChatService {
         busNumber: v.busNumber,
         driverName: v.driverUser?.name || v.driverName || '기사님',
         driverPhone: v.driverPhone,
-        teacherName: v.teacherUser?.name || v.teacherName || '지도교사',
+        teacherName: v.teacherUser?.name || v.teacherName || '차량선생님',
         teacherPhone: v.teacherPhone,
         colorHex: v.colorHex || '#3b82f6',
       })),
@@ -668,6 +668,8 @@ export class ChatService {
       throw new ForbiddenException('다른 유치원의 차량에는 신청할 수 없습니다.');
     }
 
+    const targetAcademyId = vehicle?.academy?.id || requester.academyId;
+
     let studentName = data.studentName;
     let studentObj: Student | null = null;
     let studentRaw: any = {};
@@ -676,34 +678,63 @@ export class ChatService {
         where: { id: Number(data.studentId) },
         relations: { parentUser: true, assignedVehicle: true },
       });
-      if (studentObj) {
-        studentName = studentObj.adminDisplayName || studentObj.name;
-        if (typeof studentObj.raw === 'string') {
-          try { studentRaw = JSON.parse(studentObj.raw); } catch (e) {}
-        } else if (typeof studentObj.raw === 'object' && studentObj.raw) {
-          studentRaw = studentObj.raw;
-        }
-      }
+    } else if (studentName && targetAcademyId) {
+      const trimmedName = String(studentName).trim();
+      const candidates = await this.studentRepo.find({
+        where: { academy: { id: targetAcademyId } },
+        relations: { parentUser: true, assignedVehicle: true },
+      });
+      studentObj =
+        candidates.find(
+          (c) =>
+            c.name === trimmedName ||
+            c.adminDisplayName === trimmedName ||
+            (c.name && c.name.split('/')[0].trim() === trimmedName),
+        ) || null;
+    }
 
+    if (studentObj) {
+      studentName = studentObj.adminDisplayName || studentObj.name;
+      if (typeof studentObj.raw === 'string') {
+        try { studentRaw = JSON.parse(studentObj.raw); } catch (e) {}
+      } else if (typeof studentObj.raw === 'object' && studentObj.raw) {
+        studentRaw = studentObj.raw;
+      }
+    }
+
+    const resolvedStudentId = data.studentId ? Number(data.studentId) : studentObj?.id;
+    if (resolvedStudentId) {
       // Check if an active payment request already exists for this student (중복 신청 방지 원아 락)
-      const existingPending = await this.messageRepo
-        .createQueryBuilder('m')
-        .where("m.type = 'PAYMENT_REQUEST'")
-        .andWhere("m.payload->>'studentId' = :sId", { sId: String(data.studentId) })
-        .andWhere("m.payload->>'status' IN ('PENDING', 'RE_REQUESTED')")
-        .getOne();
+      const recentRequests = await this.messageRepo.find({
+        where: { type: 'PAYMENT_REQUEST' },
+        order: { id: 'DESC' },
+        take: 200,
+      });
+      const existingPending = recentRequests.find((m) => {
+        let p: any = m.payload;
+        if (typeof p === 'string') {
+          try { p = JSON.parse(p); } catch (e) { p = null; }
+        }
+        return (
+          p &&
+          String(p.studentId) === String(resolvedStudentId) &&
+          ['PENDING', 'RE_REQUESTED'].includes(p.status)
+        );
+      });
 
       if (existingPending) {
-        const reqName = existingPending.payload?.requesterName || '다른 교직원';
-        const reqStatus = existingPending.payload?.status === 'RE_REQUESTED' ? '새 위치 제안 검토 중' : '승인 대기 중';
+        let p: any = existingPending.payload;
+        if (typeof p === 'string') {
+          try { p = JSON.parse(p); } catch (e) { p = {}; }
+        }
+        const reqName = p?.requesterName || '다른 교직원';
+        const reqStatus = p?.status === 'RE_REQUESTED' ? '새 위치 제안 검토 중' : '승인 대기 중';
         throw new BadRequestException(
           `이미 해당 원아(${studentName})에 대한 결제/탑승 승인 요청이 진행 중입니다. (신청자: ${reqName}, 상태: ${reqStatus})`
         );
       }
     }
     studentName = studentName || '신규 원생';
-
-    const targetAcademyId = vehicle?.academy?.id || requester.academyId;
 
     // 결재를 진행할 1:1 또는 그룹 대화방 찾기
     let targetRoom: ChatRoom | null = null;
@@ -755,14 +786,14 @@ export class ChatService {
       allergies: studentObj?.allergies || studentRaw.알레르기 || '',
       vehicleId: vehicle.id,
       busNumber: vehicle.busNumber,
-      teacherName: vehicle.teacherUser?.name || vehicle.teacherName || '담당 지도교사',
+      teacherName: vehicle.teacherUser?.name || vehicle.teacherName || '담당 차량선생님',
       teacherEmail: vehicle.teacherUser?.email || null,
       driverName: vehicle.driverUser?.name || vehicle.driverName || '기사님',
       isPublicContest: false,
       requestType: 'ONE_ON_ONE',
       targetTeacherId: vehicle.teacherUser?.id || null,
       targetTeacherEmail: vehicle.teacherUser?.email || null,
-      targetTeacherName: vehicle.teacherUser?.name || vehicle.teacherName || '담당 지도교사',
+      targetTeacherName: vehicle.teacherUser?.name || vehicle.teacherName || '담당 차량선생님',
       requesterId: requester.id,
       requesterEmail: requester.email,
       requesterName: requester.name || requester.email,
@@ -800,7 +831,7 @@ export class ChatService {
         student: studentObj,
         receiverUser: studentObj.parentUser,
         targetRoles: ['PARENT'],
-        message: `[통학 셔틀 결재 신청 접수] ${studentName} 원아의 [${payload.busNumber}] ${rideType === 'TODAY_ONLY' ? '당일 탑승' : '정규 탑승'} 결재 신청이 접수되어 지도교사 승인 대기 중입니다. (탑승 희망지: ${payload.boardingLocation})`,
+        message: `[통학 셔틀 결재 신청 접수] ${studentName} 원아의 [${payload.busNumber}] ${rideType === 'TODAY_ONLY' ? '당일 탑승' : '정규 탑승'} 결재 신청이 접수되어 차량선생님 승인 대기 중입니다. (탑승 희망지: ${payload.boardingLocation})`,
       });
       await this.parentMessageRepo.save(parentMsg).catch(() => {});
     }
@@ -867,7 +898,7 @@ export class ChatService {
       const alreadyDecidedBy = payload.decidedBy || '다른 담당자';
       const alreadyDecidedBus = payload.busNumber || '';
       throw new BadRequestException(
-        `이미 ${alreadyDecidedBy} 지도교사에 의해 결재가 완료되었습니다. (${alreadyDecidedBus}) 추가 결재가 불가능합니다.`
+        `이미 ${alreadyDecidedBy} 차량선생님에 의해 결재가 완료되었습니다. (${alreadyDecidedBus}) 추가 결재가 불가능합니다.`
       );
     }
 
@@ -879,11 +910,11 @@ export class ChatService {
 
     if (isRequester) {
       throw new ForbiddenException(
-        '본인이 직접 신청한 결재 건은 본인이 결재할 수 없습니다. 상대방(담당 지도교사 또는 원장님)만 결재 가능합니다.'
+        '본인이 직접 신청한 결재 건은 본인이 결재할 수 없습니다. 상대방(담당 차량선생님 또는 원장님)만 결재 가능합니다.'
       );
     }
 
-    // 3. 1:1 결재 시 상대방(지정된 지도교사 또는 관리자)만 결재 가능
+    // 3. 1:1 결재 시 상대방(지정된 차량선생님 또는 관리자)만 결재 가능
     const isAdmin = decider.role === UserRole.ACADEMY_ADMIN || decider.role === UserRole.SUPER_ADMIN;
     const isDesignatedTeacher =
       (payload.targetTeacherId && Number(payload.targetTeacherId) === decider.id) ||
@@ -891,7 +922,7 @@ export class ChatService {
       (payload.teacherEmail && payload.teacherEmail.toLowerCase() === decider.email.toLowerCase());
 
     if (!isDesignatedTeacher && !isAdmin) {
-      throw new ForbiddenException('해당 1:1 결재 건은 지정된 담당 지도교사 또는 원장님만 결재할 수 있습니다.');
+      throw new ForbiddenException('해당 1:1 결재 건은 지정된 담당 차량선생님 또는 원장님만 결재할 수 있습니다.');
     }
 
     if (decision === 'APPROVED') {
@@ -921,6 +952,23 @@ export class ChatService {
         });
       }
 
+      const academy = vehicle.academy || (await this.academyRepo.findOne({ where: { id: decider.academyId } }));
+
+      if (!student && payload.studentName && academy?.id) {
+        const trimmedName = String(payload.studentName).trim();
+        const candidates = await this.studentRepo.find({
+          where: { academy: { id: academy.id } },
+          relations: { academy: true },
+        });
+        student =
+          candidates.find(
+            (c) =>
+              c.name === trimmedName ||
+              c.adminDisplayName === trimmedName ||
+              (c.name && c.name.split('/')[0].trim() === trimmedName),
+          ) || null;
+      }
+
       const finalLocation = payload.counterProposal?.suggestedLocation || payload;
       const finalLat = Number(finalLocation.latitude || payload.latitude);
       const finalLng = Number(finalLocation.longitude || payload.longitude);
@@ -928,7 +976,6 @@ export class ChatService {
       const finalAddress = finalLocation.address || payload.address || finalBoardingLocation;
 
       if (!student) {
-        const academy = vehicle.academy || (await this.academyRepo.findOne({ where: { id: decider.academyId } }));
         student = this.studentRepo.create({
           name: payload.studentName,
           adminDisplayName: payload.studentName,
@@ -936,7 +983,7 @@ export class ChatService {
           boardingLocation: finalBoardingLocation,
           latitude: finalLat,
           longitude: finalLng,
-          academy,
+          academy: academy || undefined,
           approvalStatus: 'APPROVED',
         });
       }
@@ -1027,7 +1074,7 @@ export class ChatService {
       payload.decidedAt = new Date().toISOString();
       payload.vehicleId = vehicle.id;
       payload.busNumber = vehicle.busNumber;
-      payload.teacherName = formatTeacherName(decider.name || vehicle.teacherUser?.name) || '지도교사';
+      payload.teacherName = formatTeacherName(decider.name || vehicle.teacherUser?.name) || '차량선생님';
       payload.teacherEmail = decider.email;
       payload.driverName = vehicle.driverUser?.name || vehicle.driverName || '기사님';
 
@@ -1038,7 +1085,7 @@ export class ChatService {
       const isCounterApproved = Boolean(payload.counterProposal);
       let confText = '';
       if (isCounterApproved) {
-        confText = `✓ [재결재 수락 완료] 지도교사 제안 탑승지(${finalBoardingLocation})로 최종 승인되었습니다. (${payload.studentName} 원아 -> ${payload.busNumber}, ${isTodayOnly ? '오늘 하루 탑승' : '정규 등록'})`;
+        confText = `✓ [재결재 수락 완료] 차량선생님 제안 탑승지(${finalBoardingLocation})로 최종 승인되었습니다. (${payload.studentName} 원아 -> ${payload.busNumber}, ${isTodayOnly ? '오늘 하루 탑승' : '정규 등록'})`;
       } else {
         confText = isTodayOnly
           ? `✓ [당일 탑승 수락 완료] 오늘 하루만 ${payload.studentName} 원아가 ${payload.busNumber}에 임시 탑승합니다. (익일 자정 픽업으로 자동 원복, 담당: ${decider.name || '선생님'})`
@@ -1058,7 +1105,7 @@ export class ChatService {
       this.chatGateway.broadcastMessageToRoom(message.room.id, savedConf);
 
       const notifyTitle = '결재 승인 완료 알림';
-      const notifyText = `[결재 승인 완료] ${payload.studentName} 원아의 [${vehicle.busNumber}] ${isTodayOnly ? '당일 임시' : '정규'} 탑승 결재가 ${formatTeacherName(decider.name)} 지도교사에 의해 최종 승인 완료되었습니다. (탑승지: ${finalBoardingLocation})`;
+      const notifyText = `[결재 승인 완료] ${payload.studentName} 원아의 [${vehicle.busNumber}] ${isTodayOnly ? '당일 임시' : '정규'} 탑승 결재가 ${formatTeacherName(decider.name)} 차량선생님에 의해 최종 승인 완료되었습니다. (탑승지: ${finalBoardingLocation})`;
 
       await this.sendSystemNotification(
         targetAcadId || null,
@@ -1107,7 +1154,7 @@ export class ChatService {
         targetAcadId || null,
         'PAYMENT_DECISION',
         '결재 반려 알림',
-        `[결재 반려] ${payload.studentName} 원아의 탑승 요청이 ${formatTeacherName(decider.name)} 지도교사에 의해 반려되었습니다.`,
+        `[결재 반려] ${payload.studentName} 원아의 탑승 요청이 ${formatTeacherName(decider.name)} 차량선생님에 의해 반려되었습니다.`,
         {
           messageId: message.id,
           roomId: message.room.id,
@@ -1165,7 +1212,7 @@ export class ChatService {
     const suggested = data.suggestedLocation || {};
     const newLat = Number(suggested.latitude) || originalLocation.latitude;
     const newLng = Number(suggested.longitude) || originalLocation.longitude;
-    const newBoardingLocation = suggested.boardingLocation || '지도교사 제안 탑승지';
+    const newBoardingLocation = suggested.boardingLocation || '차량선생님 제안 탑승지';
     const newAddress = suggested.address || newBoardingLocation;
 
     payload.status = 'RE_REQUESTED';
@@ -1198,7 +1245,7 @@ export class ChatService {
     const notifyMsg = this.messageRepo.create({
       room: message.room,
       sender: proposer,
-      text: `🔄 [탑승지 변경 재결재 요청] ${payload.studentName} 원아 탑승지를 ${proposer.name} 지도교사가 수정 제안하였습니다.\n(사유: ${data.note || '위치 변경'})`,
+      text: `🔄 [탑승지 변경 재결재 요청] ${payload.studentName} 원아 탑승지를 ${proposer.name} 차량선생님이 수정 제안하였습니다.\n(사유: ${data.note || '위치 변경'})`,
       type: 'TEXT',
       readBy: [proposer.id],
     });
@@ -1235,17 +1282,17 @@ export class ChatService {
 
     const finalLocation = payload.counterProposal?.suggestedLocation?.boardingLocation || payload.boardingLocation || student.boardingLocation || '지정 하차지';
     const busName = payload.busNumber || student.assignedVehicle?.busNumber || '셔틀 차량';
-    const teacherName = payload.teacherName || '담당 지도교사';
+    const teacherName = payload.teacherName || '담당 차량선생님';
     const isTodayOnly = (payload.rideType || 'TODAY_ONLY') === 'TODAY_ONLY';
 
     let notiText = '';
     if (payload.status === 'RE_REQUESTED' || payload.counterProposal) {
       const reason = payload.counterProposal?.note || '안전 승하차 위치 조정';
-      notiText = `[통학 셔틀 하차지 안내] 오늘 ${student.adminDisplayName || student.name} 원아는 [${busName}]을(를) 이용하여 [${finalLocation}]에서 하차합니다. (사유: ${reason}, 지도교사: ${teacherName})`;
+      notiText = `[통학 셔틀 하차지 안내] 오늘 ${student.adminDisplayName || student.name} 원아는 [${busName}]을(를) 이용하여 [${finalLocation}]에서 하차합니다. (사유: ${reason}, 차량선생님: ${teacherName})`;
     } else {
       notiText = isTodayOnly
-        ? `[오늘 하원 셔틀 안내] 오늘 ${student.adminDisplayName || student.name} 원아가 [${busName}]에 임시 탑승하여 [${finalLocation}]에서 하차할 예정입니다. (지도교사: ${teacherName})`
-        : `[정규 셔틀 탑승 안내] ${student.adminDisplayName || student.name} 원아가 [${busName}] 정규 셔틀을 이용하며 [${finalLocation}]에서 하차 예정입니다. (지도교사: ${teacherName})`;
+        ? `[오늘 하원 셔틀 안내] 오늘 ${student.adminDisplayName || student.name} 원아가 [${busName}]에 임시 탑승하여 [${finalLocation}]에서 하차할 예정입니다. (차량선생님: ${teacherName})`
+        : `[정규 셔틀 탑승 안내] ${student.adminDisplayName || student.name} 원아가 [${busName}] 정규 셔틀을 이용하며 [${finalLocation}]에서 하차 예정입니다. (차량선생님: ${teacherName})`;
     }
 
     // 1. Create ParentMessage

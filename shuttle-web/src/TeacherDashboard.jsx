@@ -443,41 +443,34 @@ export default function TeacherDashboard({
     return { distance: minDist, label };
   };
 
-  // Fetch Payment Requests from Payment System Chat Room
+  // Fetch Payment Requests for Academy
   const fetchRideRequests = async () => {
     try {
       const token = localStorage.getItem('takeme_token');
-      const email = localTeacherUser?.email || currentUser?.email || '';
-      const res = await fetch(`${API_BASE_URL}/chat/rooms?email=${encodeURIComponent(email)}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
-      if (!res.ok) return;
-      const rooms = await res.json();
-      const paymentRoom = rooms.find(r => r.type === 'PAYMENT_SYSTEM' || r.name === '결제 시스템 방');
-      if (!paymentRoom) return;
-
-      const msgRes = await fetch(`${API_BASE_URL}/chat/rooms/${paymentRoom.id}/messages`, {
+      const acadId = selectedAcademyId || localTeacherUser?.academyId || currentUser?.academyId || '';
+      const msgRes = await fetch(`${API_BASE_URL}/chat/payment/requests${acadId ? `?academyId=${acadId}` : ''}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       if (!msgRes.ok) return;
       const messages = await msgRes.json();
 
       const map = {};
-      messages.forEach(msg => {
-        if (msg.type === 'PAYMENT_REQUEST' && msg.payload?.studentId) {
-          const stId = Number(msg.payload.studentId);
+      (Array.isArray(messages) ? messages : []).forEach(msg => {
+        const payload = msg.payload || msg;
+        const stId = Number(payload?.studentId || msg.studentId);
+        if (stId) {
           map[stId] = {
-            messageId: msg.id,
-            status: msg.payload.status || 'PENDING',
-            vehicleId: msg.payload.vehicleId,
-            busNumber: msg.payload.busNumber,
-            teacherName: msg.payload.teacherName,
-            driverName: msg.payload.driverName,
-            boardingLocation: msg.payload.boardingLocation,
-            note: msg.payload.note,
-            counterProposal: msg.payload.counterProposal,
-            counterNote: msg.payload.counterNote,
-            counterProposedBy: msg.payload.counterProposedBy,
+            messageId: msg.id || msg.messageId,
+            status: payload.status || msg.status || 'PENDING',
+            vehicleId: payload.vehicleId || msg.vehicleId,
+            busNumber: payload.busNumber || msg.busNumber,
+            teacherName: payload.teacherName || msg.teacherName,
+            driverName: payload.driverName || msg.driverName,
+            boardingLocation: payload.boardingLocation || msg.boardingLocation,
+            note: payload.note || msg.note,
+            counterProposal: payload.counterProposal || msg.counterProposal,
+            counterNote: payload.counterNote || msg.counterNote,
+            counterProposedBy: payload.counterProposedBy || msg.counterProposedBy,
             createdAt: msg.createdAt,
             updatedAt: msg.updatedAt
           };
@@ -647,7 +640,7 @@ export default function TeacherDashboard({
             status: 'PENDING',
             vehicleId: targetBus?.id,
             busNumber: targetBus?.name || targetBus?.busNumber,
-            teacherName: targetBus?.teacherName || targetBus?.teacherUser?.name || '담당 지도교사',
+            teacherName: targetBus?.teacherName || targetBus?.teacherUser?.name || '담당 차량선생님',
             driverName: targetBus?.driverName || '기사님',
             boardingLocation: dropoffLocation,
             rideType: quickRequestRideType,
@@ -655,7 +648,7 @@ export default function TeacherDashboard({
           }
         }));
 
-        alert(`[${student.name}] 원아의 ${isTodayOnly ? '당일 1회' : '정규'} 탑승 결제 요청이 ${targetBus.name} ${targetBus.teacherName || ''} 지도교사님께 자동으로 발송되었습니다.\n지도교사 수락 시 카드가 초록색으로 변경됩니다.`);
+        alert(`[${student.name}] 원아의 ${isTodayOnly ? '당일 1회' : '정규'} 탑승 결제 요청이 ${targetBus.name} ${targetBus.teacherName || ''} 차량선생님께 자동으로 발송되었습니다.\n차량선생님 수락 시 카드가 초록색으로 변경됩니다.`);
         setQuickRequestModal(null);
       } else {
         const err = await res.json().catch(() => ({}));
@@ -672,7 +665,7 @@ export default function TeacherDashboard({
   // Homeroom Teacher accepts or rejects the Guide Teacher's counter-proposal (재결재 새로운 위치 요청)
   const handleDecidePaymentRequest = async (messageId, decision) => {
     if (!messageId || isDecidingRequest) return;
-    const actionText = decision === 'APPROVED' ? '지도교사가 새로 제안한 위치로 탑승을 수락' : '탑승 요청을 반려하고 원래대로 픽업';
+    const actionText = decision === 'APPROVED' ? '차량선생님이 새로 제안한 위치로 탑승을 수락' : '탑승 요청을 반려하고 원래대로 픽업';
     if (!window.confirm(`${actionText}하시겠습니까?`)) return;
 
     setIsDecidingRequest(messageId);
@@ -818,7 +811,7 @@ export default function TeacherDashboard({
 
       // 2. Broadcast message to parents
       try {
-        await fetch(`${API_BASE_URL}/routing/admin/message`, {
+        await fetch(`${API_BASE_URL}/routing/admin-messages/send`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2176,14 +2169,14 @@ export default function TeacherDashboard({
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <span className="text-[11px] font-extrabold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-md border border-purple-200">
-                              지도교사 새 위치 제안 도착
+                              차량선생님 새 위치 제안 도착
                             </span>
                             <span className="text-xs text-purple-700 font-bold">
                               {Object.entries(rideRequests).filter(([_, r]) => r && r.status === 'RE_REQUESTED').length}건 확인 필요
                             </span>
                           </div>
                           <p className="text-xs text-purple-900 mt-1 font-semibold leading-relaxed">
-                            지도교사님이 안전한 승하차를 위해 새로운 위치를 제안했습니다. 아래 보라색 원아 카드에서 새 위치를 확인하시고 [새 위치로 수락] 또는 [픽업 유지]를 선택해주세요.
+                            차량선생님이 안전한 승하차를 위해 새로운 위치를 제안했습니다. 아래 보라색 원아 카드에서 새 위치를 확인하시고 [새 위치로 수락] 또는 [픽업 유지]를 선택해주세요.
                           </p>
                         </div>
                       </div>
@@ -2460,9 +2453,9 @@ export default function TeacherDashboard({
                                     </span>
                                   </div>
                                   <div className="flex items-center justify-between">
-                                    <span className="text-emerald-800">지도교사:</span>
+                                    <span className="text-emerald-800">차량선생님:</span>
                                     <span className="font-bold text-emerald-950">
-                                      {rideReq?.teacherName || bus?.teacherName || '배정 지도교사'}
+                                      {rideReq?.teacherName || bus?.teacherName || '배정 차량선생님'}
                                     </span>
                                   </div>
                                   <div className="flex items-center justify-between">
@@ -2478,7 +2471,7 @@ export default function TeacherDashboard({
                                     <svg className="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                                     </svg>
-                                    <span>지도교사 새 위치 제안</span>
+                                    <span>차량선생님 새 위치 제안</span>
                                   </div>
                                   <div className="bg-white p-2 rounded-lg border border-purple-200">
                                     <span className="text-[10px] text-purple-600 font-bold block">새 하차 희망 위치:</span>
@@ -2527,9 +2520,9 @@ export default function TeacherDashboard({
                                     </span>
                                   </div>
                                   <div className="flex items-center justify-between">
-                                    <span className="text-amber-800">담당 지도교사:</span>
+                                    <span className="text-amber-800">담당 차량선생님:</span>
                                     <span className="font-bold text-amber-950">
-                                      {rideReq?.teacherName || '지도교사 승인 대기'}
+                                      {rideReq?.teacherName || '차량선생님 승인 대기'}
                                     </span>
                                   </div>
                                   <div className="pt-1">
@@ -2595,7 +2588,7 @@ export default function TeacherDashboard({
                                   onClick={() => {
                                     if (isNonShuttle) {
                                       if (isRidePending) {
-                                        alert(`[${student.name}] 원아는 이미 ${rideReq?.busNumber || '셔틀 차량'} 지도교사님께 탑승 및 결재 승인 요청 중입니다.`);
+                                        alert(`[${student.name}] 원아는 이미 ${rideReq?.busNumber || '셔틀 차량'} 차량선생님께 탑승 및 결재 승인 요청 중입니다.`);
                                         return;
                                       }
                                       if (isRideApproved) {
@@ -3167,9 +3160,9 @@ export default function TeacherDashboard({
                     )}
 
                     <div className="flex items-center justify-between text-xs pt-1">
-                      <span className="text-slate-500 font-bold">담당 지도교사:</span>
+                      <span className="text-slate-500 font-bold">담당 차량선생님:</span>
                       <span className="font-extrabold text-slate-800">
-                        {quickRequestModal.targetBus.teacherName || quickRequestModal.targetBus.teacherUser?.name || '담당 지도교사'}
+                        {quickRequestModal.targetBus.teacherName || quickRequestModal.targetBus.teacherUser?.name || '담당 차량선생님'}
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-xs">
@@ -3189,12 +3182,12 @@ export default function TeacherDashboard({
               {/* Full Capacity Warning Alert */}
               {quickRequestMode !== 'CONTEST' && quickRequestModal.allEvaluatedBuses?.every(b => !b.hasSeats) && (
                 <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-800 font-bold leading-relaxed">
-                  주의: 모든 통학버스가 만차(승차 정원 초과) 상태입니다. 원장님 및 담당 지도교사님과 사전 상의 후 신청해주세요.
+                  주의: 모든 통학버스가 만차(승차 정원 초과) 상태입니다. 원장님 및 담당 차량선생님과 사전 상의 후 신청해주세요.
                 </div>
               )}
 
               <p className="text-xs text-slate-600 font-medium leading-relaxed text-center px-2">
-                위 원아의 하차 위치를 담당하는 <strong className="text-indigo-600">{quickRequestModal.targetBus?.name} {quickRequestModal.targetBus?.teacherName || ''} 지도교사님</strong>께 {quickRequestRideType === 'TODAY_ONLY' ? '오늘 하루 하원 탑승' : '정규 셔틀 등록'} 결제를 신청하시겠습니까?
+                위 원아의 하차 위치를 담당하는 <strong className="text-indigo-600">{quickRequestModal.targetBus?.name} {quickRequestModal.targetBus?.teacherName || ''} 차량선생님</strong>께 {quickRequestRideType === 'TODAY_ONLY' ? '오늘 하루 하원 탑승' : '정규 셔틀 등록'} 결제를 신청하시겠습니까?
               </p>
             </div>
 
@@ -3237,7 +3230,7 @@ export default function TeacherDashboard({
                   셔틀 탑승 전자 결재 히스토리
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  담임교사 및 지도교사 간 진행된 모든 셔틀 결재 신청 및 승인/반려 이력을 조회합니다.
+                  담임교사 및 차량선생님 간 진행된 모든 셔틀 결재 신청 및 승인/반려 이력을 조회합니다.
                 </p>
               </div>
               <button
@@ -3262,7 +3255,7 @@ export default function TeacherDashboard({
                         <th className="py-2.5 px-3">원아명</th>
                         <th className="py-2.5 px-3">탑승 희망 차량</th>
                         <th className="py-2.5 px-3">하차 / 탑승 위치</th>
-                        <th className="py-2.5 px-3">담당 지도교사</th>
+                        <th className="py-2.5 px-3">담당 차량선생님</th>
                         <th className="py-2.5 px-3">결재 상태</th>
                         <th className="py-2.5 px-3">신청 / 처리 일시</th>
                       </tr>
@@ -3280,7 +3273,7 @@ export default function TeacherDashboard({
                             {req.boardingLocation || '위치 정보 없음'}
                           </td>
                           <td className="py-3 px-3 text-slate-700 font-semibold">
-                            {req.teacherName || '배정 지도교사'}
+                            {req.teacherName || '배정 차량선생님'}
                           </td>
                           <td className="py-3 px-3">
                             {req.status === 'APPROVED' ? (

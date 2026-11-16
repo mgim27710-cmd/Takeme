@@ -39,10 +39,13 @@ export class TeacherService {
     @Optional() @InjectRepository(ChatRoomMember) private chatRoomMemberRepository?: Repository<ChatRoomMember>,
   ) {}
 
-  private async isTodayHoliday(): Promise<boolean> {
+  private async isTodayHoliday(academyId?: number | null): Promise<boolean> {
+    if (!academyId) return false;
     const today = new Date().toISOString().split('T')[0];
     const holiday = await this.academyHolidayRepository.findOne({
       where: {
+        academy: { id: academyId },
+        type: 'ACADEMY_HOLIDAY' as any,
         startDate: LessThanOrEqual(today),
         endDate: MoreThanOrEqual(today),
       }
@@ -154,7 +157,7 @@ export class TeacherService {
   }
 
   /**
-   * 로그인한 직원(지도교사 또는 기사)에게 배정된 차량 찾기.
+   * 로그인한 직원(차량선생님 또는 기사)에게 배정된 차량 찾기.
    * 테넌트 격리(Tenant Isolation)를 보장하며, 타 학원 차량이나 임의 1호차 자동 할당을 차단합니다.
    */
   private async findAssignedVehicle(userId: number, relations: any = {}) {
@@ -174,10 +177,10 @@ export class TeacherService {
   }
 
   async getStudents(email: string) {
-    if (await this.isTodayHoliday()) return [];
-
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
+
+    if (await this.isTodayHoliday(user.academyId)) return [];
 
     if ((user.role as string) === 'HOMEROOM_TEACHER' || user.role === UserRole.HOMEROOM_TEACHER) {
       if (!hasAssignedClass(user.assignedClass)) {
@@ -287,12 +290,12 @@ export class TeacherService {
   }
 
   async getRoute(email: string) {
-    if (await this.isTodayHoliday()) {
-      return { stops: [], routePoints: [], academy: null, vehicleId: null };
-    }
-
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
+
+    if (await this.isTodayHoliday(user.academyId)) {
+      return { stops: [], routePoints: [], academy: null, vehicleId: null };
+    }
 
     const vehicle = await this.findAssignedVehicle(user.id, { academy: true });
     if (!vehicle) return { stops: [], routePoints: [], academy: null, vehicleId: null };
@@ -374,15 +377,19 @@ export class TeacherService {
       order: { createdAt: 'DESC' }
     });
 
+    const isHomeroom = (user.role as string) === 'HOMEROOM_TEACHER' || user.role === UserRole.HOMEROOM_TEACHER || !!user.assignedClass;
+    const isShuttle = (user.role as string) === 'SHUTTLE_TEACHER' || user.role === UserRole.SHUTTLE_TEACHER || (!user.assignedClass && user.role === UserRole.TEACHER);
+
     for (const m of messages) {
+      const roles = Array.isArray(m.targetRoles) ? m.targetRoles : [];
+      const roleMatches =
+        roles.includes('ALL') ||
+        (isHomeroom && (roles.includes('HOMEROOM_TEACHER') || (roles.includes('TEACHER') && !roles.includes('SHUTTLE_TEACHER')))) ||
+        (isShuttle && (roles.includes('SHUTTLE_TEACHER') || (roles.includes('TEACHER') && !roles.includes('HOMEROOM_TEACHER'))));
+
       const isTarget =
         (m.receiverUser && m.receiverUser.id === user.id) ||
-        (m.targetRoles &&
-          Array.isArray(m.targetRoles) &&
-          (m.targetRoles.includes('TEACHER') ||
-            m.targetRoles.includes('HOMEROOM_TEACHER') ||
-            m.targetRoles.includes('SHUTTLE_TEACHER') ||
-            m.targetRoles.includes('ALL')));
+        roleMatches;
 
       if (isTarget) {
         const dedupeKey = `${m.message}_${new Date(m.createdAt).getMinutes()}`;
@@ -476,7 +483,7 @@ export class TeacherService {
         order: { createdAt: 'DESC' }
       });
 
-      let adminLogMessage = `${vehicle.busNumber}호차 ${student.adminDisplayName || student.name} 원생 지도교사 메모 업데이트: ${memo}`;
+      let adminLogMessage = `${vehicle.busNumber}호차 ${student.adminDisplayName || student.name} 원생 차량선생님 메모 업데이트: ${memo}`;
       if (latestMessage) {
         const timeStr = new Date(latestMessage.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
         adminLogMessage = `[${student.adminDisplayName || student.name} 학부모님 ${timeStr} 메세지] ${latestMessage.message}\n` +
@@ -697,7 +704,7 @@ export class TeacherService {
         recipient: vehicle.driverUser || undefined,
         recipientRole: 'DRIVER',
         type: 'ESCORT_CONFIRMED',
-        message: `${escortName} 지도교사가 동승 확인을 완료하였습니다.`,
+        message: `${escortName} 차량선생님이 탑승 확인을 완료하였습니다.`,
         academy: vehicle.academy || undefined,
       });
       await this.notificationRepository.save(escortNoti);
@@ -1064,7 +1071,7 @@ export class TeacherService {
     const parentMsg = this.messageRepository.create({
       student: originalMsg.student,
       targetRoles: ['PARENT'],
-      message: `[지도교사 응답] ${replyToStudent}`
+      message: `[차량선생님 응답] ${replyToStudent}`
     });
     await this.messageRepository.save(parentMsg);
 
@@ -1075,7 +1082,7 @@ export class TeacherService {
       if (originalMsg.student.parentUser) {
         this.locationGateway.server.to(room).emit('teacherReply', { 
           email: originalMsg.student.parentUser.email, 
-          message: `[지도교사 응답] ${replyToStudent}` 
+          message: `[차량선생님 응답] ${replyToStudent}` 
         });
       }
       // Emit TTS to Driver
@@ -1658,7 +1665,7 @@ export class TeacherService {
 
     this.locationGateway?.broadcastDepartSignal(vehicle.id, stopName);
     const label = stopName ? ` (${stopName})` : '';
-    await this.appendBoardingLog(vehicle.id, null, `지도교사 출발 가능 신호 발송${label}`, 'SYSTEM');
+    await this.appendBoardingLog(vehicle.id, null, `차량선생님 출발 가능 신호 발송${label}`, 'SYSTEM');
     return { success: true, message: '기사님께 출발 신호를 전달했습니다.' };
   }
 
@@ -1708,7 +1715,7 @@ export class TeacherService {
       endDate: today,
       overrideType: OverrideType.CHANGE_LOCATION,
       newVehicleId: vehicle.id,
-      reason: '지도교사 현장 추가 탑승 요청',
+      reason: '차량선생님 현장 추가 탑승 요청',
     });
     await this.scheduleOverrideRepository.save(override);
     return { success: true };

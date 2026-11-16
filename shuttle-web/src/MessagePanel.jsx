@@ -113,7 +113,7 @@ function ComparisonLocationMap({ original, suggested }) {
           <Popup>관리자 지정: {original.boardingLocation}</Popup>
         </Marker>
         <Marker position={pos2} icon={greenPinIcon}>
-          <Popup>지도교사 제안: {suggested.boardingLocation}</Popup>
+          <Popup>차량선생님 제안: {suggested.boardingLocation}</Popup>
         </Marker>
       </MapContainer>
       <div className="absolute bottom-1 left-1 right-1 flex items-center justify-between bg-white/95 backdrop-blur-xs px-2.5 py-1 rounded-lg text-[10px] border border-slate-200 z-[400] shadow-2xs font-extrabold">
@@ -232,7 +232,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   const [isDeciding, setIsDeciding] = useState(null);
   const [isPushingParent, setIsPushingParent] = useState(null);
 
-  // Counter-Proposal (지도교사 재결재 요청) Modal State
+  // Counter-Proposal (차량선생님 재결재 요청) Modal State
   const [counterModalMsg, setCounterModalMsg] = useState(null);
   const [counterLocation, setCounterLocation] = useState({ lat: 37.842, lng: 127.123, boardingLocation: '', address: '' });
   const [counterNote, setCounterNote] = useState('');
@@ -823,7 +823,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     }
   };
 
-  // Open Counter-Proposal Modal (지도교사가 다른 위치 핀 찍어 재결재 요청)
+  // Open Counter-Proposal Modal (차량선생님이 다른 위치 핀 찍어 재결재 요청)
   const handleOpenCounterModal = (msg) => {
     setCounterModalMsg(msg);
     const p = msg.payload || {};
@@ -1018,7 +1018,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           });
           scrollToBottom();
         } else if (createdMsg.roomId) {
-          alert('담당 차량 지도교사와의 결재 대화방으로 결재 신청서가 안전하게 발송되었습니다.\n(학부모 대화방에는 결재 카드가 노출되지 않습니다.)');
+          alert('담당 차량선생님과의 결재 대화방으로 결재 신청서가 안전하게 발송되었습니다.\n(학부모 대화방에는 결재 카드가 노출되지 않습니다.)');
         }
         await fetchRooms();
       } else {
@@ -1443,9 +1443,9 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   </div>
                   <p className="text-[11px] text-slate-400 truncate">
                     {isCurrentRoomPaymentSystem
-                      ? '신규 학생 탑승 요청 및 담당 차량 지도교사 수락/거절 시스템 채널입니다.'
+                      ? '신규 학생 탑승 요청 및 담당 차량선생님 수락/거절 시스템 채널입니다.'
                       : isCurrentRoomNotificationSystem
-                      ? '결재 완료(지도교사/학부모/원장 승인) 및 출결/통학 변동 알림 전용 채널입니다.'
+                      ? '결재 완료(차량선생님/학부모/원장 승인) 및 출결/통학 변동 알림 전용 채널입니다.'
                       : (activeRoom.members || [])
                           .map((m) => m.user)
                           .filter(Boolean)
@@ -1669,7 +1669,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     '신규 탑승 및 결재 승인 요청'
                                   </h4>
                                   <span className="text-[10px] text-indigo-600 font-medium">
-                                    '담당 차량 지도교사 수락/거절'
+                                    '담당 차량선생님 수락/거절'
                                   </span>
                                 </div>
                               </div>
@@ -1720,13 +1720,13 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                                     </svg>
-                                    <span>지도교사 위치 변경 재결재 요청</span>
+                                    <span>차량선생님 위치 변경 재결재 요청</span>
                                   </div>
                                   <p className="text-xs font-bold text-purple-950 bg-white/80 p-2.5 rounded-xl border border-purple-100 leading-relaxed">
                                     "{payload.counterProposal?.note || payload.counterNote || '통학버스 운행 여건에 따른 탑승 위치 변경 제안'}"
                                   </p>
                                   <div className="text-[10px] text-purple-700 font-semibold text-right">
-                                    제안 지도교사: {payload.counterProposal?.proposedBy || payload.counterProposedBy || '담당 지도교사'}
+                                    제안 차량선생님: {payload.counterProposal?.proposedBy || payload.counterProposedBy || '담당 차량선생님'}
                                   </div>
                                 </div>
                               )}
@@ -1782,7 +1782,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     </span>
                                   </div>
                                   <div className="p-2.5 rounded-xl bg-emerald-50/60 border border-emerald-300">
-                                    <span className="text-[10px] font-bold text-emerald-700 block">지도교사 제안 탑승지</span>
+                                    <span className="text-[10px] font-bold text-emerald-700 block">차량선생님 제안 탑승지</span>
                                     <span className="font-extrabold text-emerald-950 block truncate" title={payload.counterProposal.suggestedLocation?.boardingLocation}>
                                       {payload.counterProposal.suggestedLocation?.boardingLocation}
                                     </span>
@@ -1901,12 +1901,12 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     <span>상대방 결재 대기 중</span>
                                   </div>
                                   <p className="text-[11px] text-amber-700 font-medium">
-                                    신청자는 직접 결재할 수 없으며, 상대방({isContest ? '지도교사 공모 수락자' : `${formatTeacherName(payload.teacherName) || '담당 지도교사'} / 원장님`})만 결재 가능합니다.
+                                    신청자는 직접 결재할 수 없으며, 상대방({isContest ? '차량선생님 공모 수락자' : `${formatTeacherName(payload.teacherName) || '담당 차량선생님'} / 원장님`})만 결재 가능합니다.
                                   </p>
                                 </div>
                               ) : isParent ? (
                                 <div className="text-center py-2.5 px-3 bg-slate-100 rounded-xl text-xs text-slate-500 font-medium">
-                                  담당 차량 지도교사 또는 관리자 승인 대기 중입니다.
+                                  담당 차량선생님 또는 관리자 승인 대기 중입니다.
                                 </div>
                               ) : payload.status === 'RE_REQUESTED' ? (
                                 /* Action for Director/Admin on Counter-Proposal */
@@ -1921,7 +1921,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                                       </svg>
-                                      <span>지도교사 제안 위치로 최종 수락</span>
+                                      <span>차량선생님 제안 위치로 최종 수락</span>
                                     </button>
                                     <button
                                       type="button"
@@ -1933,7 +1933,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     </button>
                                   </div>
                                   <p className="text-[10px] text-center text-slate-400 font-medium">
-                                    관리자님께서 수락하시면 지도교사가 제안한 위치로 최종 노선/구역이 확정됩니다.
+                                    관리자님께서 수락하시면 차량선생님이 제안한 위치로 최종 노선/구역이 확정됩니다.
                                   </p>
                                 </div>
                               ) : isContest ? (
@@ -1961,7 +1961,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     </button>
                                   </div>
                                   <p className="text-[10px] text-center text-purple-700 font-semibold">
-                                    담당 지도교사 또는 원장님께서 수락하시면 해당 차량의 탑승 노선에 자동 반영됩니다.
+                                    담당 차량선생님 또는 원장님께서 수락하시면 해당 차량의 탑승 노선에 자동 반영됩니다.
                                   </p>
                                 </div>
                               ) : (isTargetTeacher || isAdmin) ? (
@@ -2001,13 +2001,13 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                   </div>
                                 </div>
                               ) : (
-                                /* 1:1 결재 건이지만 다른 지도교사가 열람한 경우 */
+                                /* 1:1 결재 건이지만 다른 차량선생님이 열람한 경우 */
                                 <div className="p-3 bg-slate-100 rounded-xl border border-slate-200 text-center space-y-0.5">
                                   <div className="text-xs font-bold text-slate-700">
                                     1:1 지정 결재 건
                                   </div>
                                   <p className="text-[10px] text-slate-500">
-                                    해당 1:1 결재는 지정된 담당 지도교사({formatTeacherName(payload.teacherName) || payload.busNumber}) 또는 원장님만 결재할 수 있습니다.
+                                    해당 1:1 결재는 지정된 담당 차량선생님({formatTeacherName(payload.teacherName) || payload.busNumber}) 또는 원장님만 결재할 수 있습니다.
                                   </p>
                                 </div>
                               )}
@@ -2060,7 +2060,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             {isCurrentRoomNotificationSystem ? (
               <div className="p-4 bg-slate-50 border-t border-slate-200 text-center text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>실시간 알림 채널입니다. (지도교사/학부모 결재 승인 완료 및 출결 변동 알림 자동 수신 전용)</span>
+                <span>실시간 알림 채널입니다. (차량선생님/학부모 결재 승인 완료 및 출결 변동 알림 자동 수신 전용)</span>
               </div>
             ) : (
               <div className="p-4 bg-white border-t border-slate-200 flex items-end gap-2 shadow-sm relative">
@@ -2597,7 +2597,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 </div>
                 <div>
                   <h3 className="text-sm font-extrabold text-indigo-950">신규 탑승 및 결재 신청</h3>
-                  <p className="text-[11px] text-indigo-600 font-medium">담당 차량 지도교사에게 탑승 승인 및 배정을 요청합니다.</p>
+                  <p className="text-[11px] text-indigo-600 font-medium">담당 차량선생님에게 탑승 승인 및 배정을 요청합니다.</p>
                 </div>
               </div>
               <button
@@ -2760,7 +2760,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                       <option value="">-- 차량(호차)을 선택하세요 --</option>
                       {(paymentContext.vehicles || []).map((v) => (
                         <option key={v.id} value={v.id}>
-                          {v.busNumber} (담당 지도교사: {formatTeacherName(v.teacherName)} / 기사: {v.driverName})
+                          {v.busNumber} (담당 차량선생님: {formatTeacherName(v.teacherName)} / 기사: {v.driverName})
                         </option>
                       ))}
                     </select>
@@ -2916,7 +2916,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                       rows={3}
                       value={paymentForm.note}
                       onChange={(e) => setPaymentForm((prev) => ({ ...prev, note: e.target.value }))}
-                      placeholder="지도교사에게 전달할 메시지를 입력하세요."
+                      placeholder="차량선생님에게 전달할 메시지를 입력하세요."
                       className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none font-medium leading-relaxed"
                     />
                   </div>
@@ -2946,7 +2946,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       )}
 
       {/* ============================================================ */}
-      {/* 지도교사 위치 수정 및 재결재 요청 모달 (Counter-Proposal) */}
+      {/* 차량선생님 위치 수정 및 재결재 요청 모달 (Counter-Proposal) */}
       {/* ============================================================ */}
       {counterModalMsg && (
         <div className="fixed inset-0 z-[3100] bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
@@ -2956,7 +2956,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
               <div>
                 <h3 className="text-sm font-black flex items-center gap-2">
                   <span>탑승 위치 변경 및 재결재 요청</span>
-                  <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-bold">지도교사 위치 역제안</span>
+                  <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-bold">차량선생님 위치 역제안</span>
                 </h3>
                 <p className="text-[11px] text-amber-100 mt-0.5">
                   통학버스 운행/회차 여건에 맞추어 다른 위치를 핀으로 찍어 관리자님께 재결재를 요청합니다.
@@ -3032,7 +3032,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                       빨간 핀: 관리자 원래 위치
                     </span>
                     <span className="bg-emerald-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow">
-                      초록 핀: 지도교사 제안 위치
+                      초록 핀: 차량선생님 제안 위치
                     </span>
                   </div>
                 </div>

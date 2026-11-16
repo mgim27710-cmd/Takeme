@@ -286,10 +286,18 @@ export class RoutingService {
     '#78350f', // 8: warm chocolate (브라운)
   ];
   private colorIndex = 0;
-  private routeUpdateNotifier?: (academyId?: number, message?: string) => void;
+  private routeUpdateNotifiers: Array<(academyId?: number, message?: string) => void> = [];
+  private substituteStaffMap: Map<number, {
+    isDriverResting?: boolean;
+    substituteDriver?: any;
+    isTeacherResting?: boolean;
+    substituteTeacher?: any;
+    origDriverUserId?: number | null;
+    origTeacherUserId?: number | null;
+  }> = new Map();
 
   public registerRouteUpdateNotifier(fn: (academyId?: number, message?: string) => void) {
-    this.routeUpdateNotifier = fn;
+    this.routeUpdateNotifiers.push(fn);
   }
 
   private systemNotificationHandler?: (academyId: number | null, category: string, title: string, content: string, extra?: any) => Promise<any>;
@@ -305,9 +313,11 @@ export class RoutingService {
   }
 
   public notifyRouteUpdated(academyId?: number, message?: string) {
-    try {
-      this.routeUpdateNotifier?.(academyId, message);
-    } catch {}
+    for (const fn of this.routeUpdateNotifiers) {
+      try {
+        fn(academyId, message);
+      } catch {}
+    }
   }
 
   private getDistinctColor(): string {
@@ -1237,6 +1247,7 @@ export class RoutingService {
       }
       if (!Array.isArray(parsedPoints)) parsedPoints = [];
       
+      const subState = this.substituteStaffMap.get(v.id);
       return {
         id: v.id,
         name: v.busNumber,
@@ -1259,6 +1270,10 @@ export class RoutingService {
         isDriverLocked: !!v.driverUser?.isLocked,
         teacherUserId: v.teacherUser?.id || null,
         isTeacherLocked: !!v.teacherUser?.isLocked,
+        isDriverResting: Boolean(subState?.isDriverResting),
+        substituteDriver: subState?.substituteDriver || null,
+        isTeacherResting: Boolean(subState?.isTeacherResting),
+        substituteTeacher: subState?.substituteTeacher || null,
       };
     });
     
@@ -1397,7 +1412,7 @@ export class RoutingService {
             );
           }
         } else if (!isAdminOrDesk) {
-          // 관리자·담당 담임교사 외(기사, 지도교사 등)는 개인정보(전화번호·생년월일) 마스킹 처리
+          // 관리자·담당 담임교사 외(기사, 차량선생님 등)는 개인정보(전화번호·생년월일) 마스킹 처리
           formattedStudents = formattedStudents.map(s => ({
             ...s,
             parentPhone: null,
@@ -2165,14 +2180,17 @@ export class RoutingService {
       where: academy ? { id: studentId, academy: { id: academy.id } } : { id: studentId },
       relations: { assignedVehicle: true, assignedDepartureVehicle: true, academy: true }
     });
+    if (!student) {
+      student = await this.studentRepository.findOne({
+        where: { id: studentId },
+        relations: { assignedVehicle: true, assignedDepartureVehicle: true, academy: true }
+      });
+    }
     if (!student) throw new NotFoundException('원아를 찾을 수 없습니다.');
-    if (!academy && student.academy) {
+    if (student.academy) {
       academy = student.academy;
     }
     if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
-
-    if (data.name !== undefined) student.name = data.name;
-    if (data.adminDisplayName !== undefined) student.adminDisplayName = data.adminDisplayName;
 
     let parsedRaw: any = {};
     if (student.raw) {
@@ -2183,18 +2201,42 @@ export class RoutingService {
       }
     }
 
+    if (data.name !== undefined) {
+      const cleanName = String(data.name).trim();
+      student.name = cleanName;
+      student.adminDisplayName = data.adminDisplayName !== undefined ? String(data.adminDisplayName).trim() : cleanName;
+      parsedRaw['원아명'] = cleanName;
+      parsedRaw['이름'] = cleanName;
+      parsedRaw['학생이름/영문이름'] = cleanName;
+    } else if (data.adminDisplayName !== undefined) {
+      student.adminDisplayName = String(data.adminDisplayName).trim();
+    }
+
     if (data.address !== undefined) {
       const trimmedAddress = String(data.address || '').trim();
       student.address = trimmedAddress;
-      student.boardingLocation = trimmedAddress;
-      if (trimmedAddress) {
+      student.boardingLocation = String(data.boardingLocation || data.inLocation || trimmedAddress).trim();
+      parsedRaw['도로명주소'] = trimmedAddress;
+      parsedRaw['주소'] = trimmedAddress;
+      parsedRaw['등원지'] = student.boardingLocation;
+      parsedRaw['탑승지'] = student.boardingLocation;
+
+      const providedLat = data.lat !== undefined && data.lat !== null && !isNaN(parseFloat(data.lat)) ? parseFloat(data.lat) : undefined;
+      const providedLng = data.lng !== undefined && data.lng !== null && !isNaN(parseFloat(data.lng)) ? parseFloat(data.lng) : undefined;
+
+      if (providedLat !== undefined && providedLng !== undefined) {
+        student.latitude = providedLat;
+        student.longitude = providedLng;
+        delete parsedRaw['주소입력필요'];
+        delete parsedRaw['실패주소'];
+      } else if (trimmedAddress) {
         const coords = await this.geocodeAddress(trimmedAddress);
         if (coords) {
           student.latitude = coords.lat;
           student.longitude = coords.lng;
           delete parsedRaw['주소입력필요'];
           delete parsedRaw['실패주소'];
-        } else {
+        } else if (!student.latitude || !student.longitude) {
           student.latitude = null as any;
           student.longitude = null as any;
           parsedRaw['주소입력필요'] = true;
@@ -2205,25 +2247,61 @@ export class RoutingService {
         student.longitude = null as any;
         parsedRaw['주소입력필요'] = true;
       }
+    } else if (data.boardingLocation !== undefined || data.inLocation !== undefined) {
+      student.boardingLocation = String(data.boardingLocation || data.inLocation || '').trim();
+      parsedRaw['등원지'] = student.boardingLocation;
+      parsedRaw['탑승지'] = student.boardingLocation;
     }
 
-    if (data.className !== undefined) parsedRaw['반명'] = data.className;
-    if (data.age !== undefined) parsedRaw['연령'] = data.age;
-    if (data.gender !== undefined) parsedRaw['성별'] = data.gender;
-    if (data.parentName !== undefined) parsedRaw['보호자 성함'] = data.parentName;
-    if (data.parentPhone !== undefined) {
-      parsedRaw['부모연락처'] = data.parentPhone;
-      parsedRaw['보호자연락처'] = data.parentPhone;
+    if (data.className !== undefined) {
+      student.className = String(data.className).trim();
+      parsedRaw['반명'] = student.className;
+      parsedRaw['반'] = student.className;
+      parsedRaw['학급'] = student.className;
     }
+    if (data.age !== undefined) parsedRaw['연령'] = data.age;
+    if (data.birthDate !== undefined) {
+      student.birthDate = data.birthDate;
+      parsedRaw['생년월일'] = data.birthDate;
+    }
+    if (data.gender !== undefined) {
+      student.gender = data.gender;
+      parsedRaw['성별'] = data.gender;
+    }
+    if (data.parentName !== undefined) {
+      parsedRaw['보호자 성함'] = data.parentName;
+      parsedRaw['보호자성함'] = data.parentName;
+      parsedRaw['학부모성함'] = data.parentName;
+    }
+    if (data.parentPhone !== undefined || data.phone !== undefined) {
+      const ph = data.parentPhone !== undefined ? data.parentPhone : data.phone;
+      student.phone = ph;
+      parsedRaw['부모연락처'] = ph;
+      parsedRaw['보호자연락처'] = ph;
+      parsedRaw['학부모연락처'] = ph;
+      parsedRaw['연락처'] = ph;
+    }
+    if (data.teacherName !== undefined) {
+      parsedRaw['담임명'] = data.teacherName;
+    }
+    if (data.departureType !== undefined) {
+      parsedRaw['하원구분'] = data.departureType;
+    }
+    if (data.inTime !== undefined) parsedRaw['등원시간'] = data.inTime;
+    if (data.outTime !== undefined) parsedRaw['하원시간'] = data.outTime;
     if (data.allergies !== undefined) {
       student.allergies = data.allergies;
       parsedRaw['알레르기'] = data.allergies;
     }
-    if (data.note !== undefined) parsedRaw['비고'] = data.note;
+    if (data.note !== undefined) {
+      student.teacherMemo = data.note;
+      parsedRaw['비고'] = data.note;
+    }
 
     if (data.isNotRiding !== undefined) {
       student.isNotRiding = Boolean(data.isNotRiding);
       parsedRaw['차량미탑승'] = student.isNotRiding;
+      parsedRaw['미탑승'] = student.isNotRiding;
       if (student.isNotRiding) {
         delete parsedRaw['주소입력필요'];
         delete parsedRaw['실패주소'];
@@ -2232,17 +2310,21 @@ export class RoutingService {
       }
     }
 
-    if (data.dropoffLocation !== undefined) {
-      student.dropoffLocation = data.dropoffLocation;
-      parsedRaw['하차지'] = data.dropoffLocation;
+    if (data.dropoffLocation !== undefined || data.outLocation !== undefined) {
+      const dropLoc = data.dropoffLocation !== undefined ? data.dropoffLocation : data.outLocation;
+      student.dropoffLocation = dropLoc;
+      parsedRaw['하차지'] = dropLoc;
+      parsedRaw['하원지'] = dropLoc;
     }
 
     const inBus = data.assignedBusId !== undefined ? data.assignedBusId : (data.inBusId !== undefined ? data.inBusId : data.assignedVehicleId);
+    let explicitVehicle: Vehicle | null = null;
     if (inBus) {
       const vehicle = await this.vehicleRepository.findOne({
         where: { id: Number(inBus), academy: { id: academy.id } }
       });
       if (vehicle) {
+        explicitVehicle = vehicle;
         student.assignedVehicle = vehicle;
         parsedRaw['등원차량'] = vehicle.busNumber;
         parsedRaw['호차'] = vehicle.busNumber;
@@ -2253,12 +2335,14 @@ export class RoutingService {
     }
 
     const outBus = data.assignedDepartureBusId !== undefined ? data.assignedDepartureBusId : (data.outBusId !== undefined ? data.outBusId : data.assignedDepartureVehicleId);
+    let explicitDepVehicle: Vehicle | null = null;
     if (outBus !== undefined) {
       if (outBus) {
         const dVehicle = await this.vehicleRepository.findOne({
           where: { id: Number(outBus), academy: { id: academy.id } }
         });
         if (dVehicle) {
+          explicitDepVehicle = dVehicle;
           student.assignedDepartureVehicle = dVehicle;
           parsedRaw['하원차량'] = dVehicle.busNumber;
         }
@@ -2271,9 +2355,15 @@ export class RoutingService {
     await this.studentRepository.save(student);
 
     // If student now has valid coordinates, auto-expand vehicle zone!
-    if (student.latitude && student.longitude) {
+    if (student.latitude && student.longitude && !student.isNotRiding) {
       try {
         await this.expandZonesToStudents(academy.id, userId);
+        // Preserve admin's explicit vehicle assignment if expandZonesToStudents altered it
+        if (explicitVehicle) {
+          student.assignedVehicle = explicitVehicle;
+          if (explicitDepVehicle) student.assignedDepartureVehicle = explicitDepVehicle;
+          await this.studentRepository.save(student);
+        }
       } catch (e: any) {
         console.warn('Auto zone expansion on student update:', e?.message || e);
       }
@@ -2284,6 +2374,10 @@ export class RoutingService {
   }
 
   async addStudent(studentData: any, academyId?: number, userId?: number) {
+    const existingId = studentData?.id || studentData?.editingStudentId || studentData?.studentId;
+    if (existingId && !isNaN(Number(existingId))) {
+      return this.updateStudent(Number(existingId), studentData, academyId, userId);
+    }
     const academy = await this.getAcademy(academyId, userId);
     if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
 
@@ -2687,6 +2781,180 @@ export class RoutingService {
     Object.assign(vehicle, data);
     await this.vehicleRepository.save(vehicle);
     return vehicle;
+  }
+
+  async createVehicle(data: any, academyId?: number, userId?: number) {
+    const targetAcademyId = data?.academyId || academyId;
+    const academy = await this.getAcademy(targetAcademyId, userId);
+    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
+
+    const busNumber = String(data.busNumber || data.name || '신규호차').trim();
+    const vehicle = this.vehicleRepository.create({
+      busNumber,
+      plateNumber: data.plateNumber ? String(data.plateNumber).trim() : '',
+      driverName: data.driverName ? String(data.driverName).trim() : '미정',
+      driverPhone: data.driverPhone ? String(data.driverPhone).trim() : '000-0000-0000',
+      teacherName: data.teacherName ? formatTeacherName(String(data.teacherName).trim()) : '미정',
+      teacherPhone: data.teacherPhone ? String(data.teacherPhone).trim() : '000-0000-0000',
+      capacity: Number(data.capacity) || 25,
+      colorHex: data.color || data.colorHex || this.getDistinctColor(),
+      polygonCoordinates: Array.isArray(data.polygonCoordinates) ? data.polygonCoordinates : [],
+      academy,
+    });
+
+    const saved = await this.vehicleRepository.save(vehicle);
+    const allCount = await this.vehicleRepository.count({ where: { academy: { id: academy.id } } });
+    academy.vehicleCount = allCount;
+    await this.academyRepository.save(academy).catch(() => {});
+
+    this.notifyRouteUpdated(academy.id);
+    return {
+      id: saved.id,
+      name: saved.busNumber,
+      busNumber: saved.busNumber,
+      plateNumber: saved.plateNumber,
+      driverName: saved.driverName,
+      driverPhone: saved.driverPhone,
+      teacherName: saved.teacherName,
+      teacherPhone: saved.teacherPhone,
+      capacity: saved.capacity,
+      color: saved.colorHex,
+      points: [],
+      polygon: [],
+      polygonCoordinates: [],
+      driverApprovalStatus: saved.driverApprovalStatus,
+      teacherApprovalStatus: saved.teacherApprovalStatus,
+    };
+  }
+
+  async saveSubstituteStaff(body: any, academyId?: number, userId?: number) {
+    const busId = Number(body.busId || body.vehicleId);
+    if (!busId) throw new BadRequestException('차량 ID가 필요합니다.');
+
+    const vehicle = await this.vehicleRepository.findOne({
+      where: { id: busId },
+      relations: { academy: true, driverUser: true, teacherUser: true },
+    });
+    if (!vehicle) throw new BadRequestException('해당 차량을 찾을 수 없습니다.');
+
+    const bcrypt = require('bcrypt');
+    const prevState = this.substituteStaffMap.get(busId) || {};
+    const origDriverUserId = prevState.origDriverUserId !== undefined ? prevState.origDriverUserId : (vehicle.driverUser?.id || null);
+    const origTeacherUserId = prevState.origTeacherUserId !== undefined ? prevState.origTeacherUserId : (vehicle.teacherUser?.id || null);
+
+    // Handle Substitute Driver Account
+    if (body.substituteDriver?.email) {
+      const subEmail = String(body.substituteDriver.email).trim().toLowerCase();
+      const subPass = body.substituteDriver.password || 'password123!';
+      const passHash = await bcrypt.hash(subPass, 10);
+      let subUser = await this.userRepository.findOne({ where: { email: subEmail } });
+      if (!subUser) {
+        subUser = this.userRepository.create({
+          email: subEmail,
+          passwordHash: passHash,
+          role: UserRole.DRIVER,
+          name: body.substituteDriver.name || '대체 기사님',
+          phone: body.substituteDriver.phone || '010-9999-1001',
+          academy: vehicle.academy,
+          academyId: vehicle.academy?.id,
+          approvalStatus: 'APPROVED',
+          isLocked: !body.isDriverResting,
+        });
+      } else {
+        subUser.passwordHash = passHash;
+        subUser.name = body.substituteDriver.name || subUser.name;
+        subUser.phone = body.substituteDriver.phone || subUser.phone;
+        subUser.academyId = vehicle.academy?.id || subUser.academyId;
+        subUser.approvalStatus = 'APPROVED';
+        subUser.isLocked = !body.isDriverResting;
+        subUser.failedLoginAttempts = 0;
+      }
+      await this.userRepository.save(subUser);
+    }
+
+    // Handle Substitute Teacher Account
+    if (body.substituteTeacher?.email) {
+      const subEmail = String(body.substituteTeacher.email).trim().toLowerCase();
+      const subPass = body.substituteTeacher.password || 'password123!';
+      const passHash = await bcrypt.hash(subPass, 10);
+      let subUser = await this.userRepository.findOne({ where: { email: subEmail } });
+      if (!subUser) {
+        subUser = this.userRepository.create({
+          email: subEmail,
+          passwordHash: passHash,
+          role: UserRole.SHUTTLE_TEACHER,
+          name: body.substituteTeacher.name || '대체 교사님',
+          phone: body.substituteTeacher.phone || '010-9999-2001',
+          academy: vehicle.academy,
+          academyId: vehicle.academy?.id,
+          approvalStatus: 'APPROVED',
+          isLocked: !body.isTeacherResting,
+        });
+      } else {
+        subUser.passwordHash = passHash;
+        subUser.name = body.substituteTeacher.name || subUser.name;
+        subUser.phone = body.substituteTeacher.phone || subUser.phone;
+        subUser.academyId = vehicle.academy?.id || subUser.academyId;
+        subUser.approvalStatus = 'APPROVED';
+        subUser.isLocked = !body.isTeacherResting;
+        subUser.failedLoginAttempts = 0;
+      }
+      await this.userRepository.save(subUser);
+    }
+
+    this.substituteStaffMap.set(busId, {
+      isDriverResting: Boolean(body.isDriverResting),
+      substituteDriver: body.substituteDriver || null,
+      isTeacherResting: Boolean(body.isTeacherResting),
+      substituteTeacher: body.substituteTeacher || null,
+      origDriverUserId,
+      origTeacherUserId,
+    });
+
+    return {
+      success: true,
+      busId,
+      isDriverResting: Boolean(body.isDriverResting),
+      substituteDriver: body.substituteDriver,
+      isTeacherResting: Boolean(body.isTeacherResting),
+      substituteTeacher: body.substituteTeacher,
+    };
+  }
+
+  async saveDispatch(body: any, academyId?: number, userId?: number) {
+    const academy = await this.getAcademy(academyId, userId);
+    if (Array.isArray(body.buses)) {
+      for (const b of body.buses) {
+        if (!b.id) continue;
+        const v = await this.vehicleRepository.findOne({ where: { id: Number(b.id) } });
+        if (!v) continue;
+        if (b.points || b.polygonCoordinates) {
+          v.polygonCoordinates = b.points || b.polygonCoordinates;
+        }
+        if (b.driverName !== undefined) v.driverName = b.driverName;
+        if (b.teacherName !== undefined) v.teacherName = b.teacherName;
+        if (b.plateNumber !== undefined) v.plateNumber = b.plateNumber;
+        if (b.capacity !== undefined) v.capacity = Number(b.capacity) || 25;
+        await this.vehicleRepository.save(v);
+      }
+    }
+    if (Array.isArray(body.students) && body.students.length > 0) {
+      await this.batchUpdateStudents(
+        body.students.map((s: any) => ({
+          id: s.id,
+          inBusId: s.assignedBusId,
+          outBusId: s.assignedDepartureBusId !== undefined ? s.assignedDepartureBusId : s.assignedBusId,
+          isNotRiding: s.isNotRiding,
+          boardingLocation: s.boardingLocation,
+        })),
+        academy?.id || academyId,
+        userId,
+      );
+    }
+    if (academy?.id) {
+      this.notifyRouteUpdated(academy.id);
+    }
+    return { success: true };
   }
 
   async getDailyLogs(date: string, vehicleId: number) {
@@ -3582,7 +3850,7 @@ export class RoutingService {
     fs.writeFileSync(filePath, buffer);
 
     const host = reqHost || '52.63.245.203.sslip.io';
-    const protocol = host.includes('localhost') ? 'http' : 'https';
+    const protocol = (host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':3000')) ? 'http' : 'https';
     const url = `${protocol}://${host}/uploads/board/${randomName}`;
 
     return {

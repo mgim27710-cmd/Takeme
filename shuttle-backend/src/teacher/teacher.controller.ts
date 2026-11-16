@@ -141,7 +141,7 @@ export class TeacherController {
     return this.teacherService.updateMemo(email, studentId, body.memo);
   }
 
-  // 학생 앱이 지도교사 화면의 QR을 스캔해서 호출하는 API.
+  // 학생 앱이 차량선생님 화면의 QR을 스캔해서 호출하는 API.
   // 호출하는 사람이 학생·학부모이므로, 학생은 토큰으로 확인하고 교사 이메일은 QR 값(body)을 사용한다.
   @Post('student-board')
   @Roles('STUDENT', 'PARENT')

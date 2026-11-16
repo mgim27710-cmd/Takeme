@@ -195,7 +195,7 @@ export default function Wizard() {
                     <input type="text" className="form-input text-sm" value={v.driverPhone} onChange={e=>updateVehicle(idx, 'driverPhone', e.target.value)} placeholder="010-0000-0000" maxLength={13} />
                   </div>
                   <div className="col-span-1 mt-4">
-                    <label className="block text-xs font-bold text-slate-500 mb-1">지도교사 이름</label>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">차량선생님 성함</label>
                     <input type="text" className="form-input text-sm" value={v.teacherName} onChange={e=>updateVehicle(idx, 'teacherName', e.target.value)} placeholder="이순신" />
                   </div>
                   <div className="col-span-1 mt-4">

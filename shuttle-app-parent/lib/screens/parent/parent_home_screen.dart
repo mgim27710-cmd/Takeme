@@ -290,7 +290,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                 border: Border.all(color: const Color(0xFFE2E8F0)),
               ),
               child: Text(
-                '📌 $description\n원장님 및 버스 지도교사님께 실시간으로 전달됩니다.',
+                '📌 $description\n원장님 및 차량선생님께 실시간으로 전달됩니다.',
                 style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), height: 1.4),
               ),
             ),
@@ -480,7 +480,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    '식품이나 약품 등 주의해야 할 알레르기를 등록해주세요. 버스 지도교사 및 기사님께 실시간 공유됩니다.',
+                    '식품이나 약품 등 주의해야 할 알레르기를 등록해주세요. 차량선생님 및 기사님께 실시간 공유됩니다.',
                     style: TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.4),
                   ),
                   const SizedBox(height: 14),
@@ -643,7 +643,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
             Container(
               padding: const EdgeInsets.all(24),
               child: const Text(
-                '지도교사님의 폰에 띄워진 QR 코드를 사각형 안에 맞춰주세요.',
+                '차량선생님의 폰에 띄워진 QR 코드를 사각형 안에 맞춰주세요.',
                 style: TextStyle(color: Colors.white, fontSize: 13),
                 textAlign: TextAlign.center,
               ),

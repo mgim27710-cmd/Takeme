@@ -189,7 +189,7 @@ export default function AuthViewer({
           </div>
           <p className="text-xs text-slate-500 mt-1">
             {currentTab === 'STUDENT' && '앱에 원 인증코드를 입력하고 가입한 원아 및 학부모의 접근 권한을 승인하거나 해제합니다.'}
-            {currentTab === 'STAFF' && '통학차량 기사님과 동승 지도교사의 계정 연동 및 운행 권한을 관리합니다.'}
+            {currentTab === 'STAFF' && '통학차량 기사님과 차량선생님의 계정 연동 및 운행 권한을 관리합니다.'}
             {currentTab === 'TEACHER' && '원 인증코드로 가입된 유치원 교사의 계정 연동 상태를 확인하고 관리합니다.'}
             {currentTab === 'SUBSTITUTE' && '각 호차별 기사님의 휴식(연차·병가 등)에 따른 대체 기사 임시 로그인 계정 발급 및 활성화 상태를 일괄 관리합니다.'}
           </p>
@@ -569,7 +569,7 @@ export default function AuthViewer({
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
               <div>
                 <h3 className="font-bold text-slate-800 text-sm">통학차량 스태프 가입 및 승인 현황</h3>
-                <p className="text-xs text-slate-500 mt-0.5">각 호차별 기사님 및 동승 지도교사의 앱 연동 승인 상태를 관리합니다.</p>
+                <p className="text-xs text-slate-500 mt-0.5">각 호차별 기사님 및 차량선생님의 앱 연동 승인 상태를 관리합니다.</p>
               </div>
               <div className="flex items-center gap-2 text-xs">
                 <span className="font-semibold text-slate-600">등록 차량:</span>
@@ -679,7 +679,7 @@ export default function AuthViewer({
                             <div className="min-w-0">
                               <div className="flex items-center gap-2">
                                 <span className="font-bold text-slate-800 text-sm whitespace-nowrap">
-                                  {bus.teacherName || '지도교사 미지정'}
+                                  {bus.teacherName || '차량선생님 미지정'}
                                 </span>
                                 {bus.teacherApprovalStatus === 'APPROVED' ? (
                                   <span className="text-[11px] bg-green-100 text-green-700 px-2.5 py-0.5 rounded-full font-bold border border-green-200 whitespace-nowrap">
@@ -740,7 +740,7 @@ export default function AuthViewer({
                     </div>
 
                     <div className="text-[11px] text-slate-400 bg-slate-50/50 p-2.5 rounded-xl border border-dashed border-slate-200">
-                      기사님/교사가 앱에서 회원가입 시 '운전기사' 또는 '차량 지도교사'를 선택하고 해당 차량을 지정하면 승인 대기 목록에 표시됩니다.
+                      기사님/교사가 앱에서 회원가입 시 '운전기사' 또는 '차량선생님'를 선택하고 해당 차량을 지정하면 승인 대기 목록에 표시됩니다.
                     </div>
                   </div>
                 );
@@ -893,7 +893,7 @@ export default function AuthViewer({
 
               <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
                 <div>
-                  <div className="text-[11px] font-bold text-slate-600">대체 지도교사 운행중</div>
+                  <div className="text-[11px] font-bold text-slate-600">대체 차량선생님 운행중</div>
                   <div className="text-2xl font-black text-slate-800 mt-0.5">{substituteStats.activeTeachers}명</div>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center text-lg font-bold">
@@ -1009,7 +1009,7 @@ export default function AuthViewer({
                 const isDriver = substituteRoleTab === 'DRIVER';
                 const sub = isDriver ? (bus.substituteDriver || {}) : (bus.substituteTeacher || {});
                 const isResting = isDriver ? Boolean(bus.isDriverResting || sub.isActive) : Boolean(bus.isTeacherResting || sub.isActive);
-                const originalName = isDriver ? (bus.driverName || '기사 미배정') : (bus.teacherName || '지도교사 미배정');
+                const originalName = isDriver ? (bus.driverName || '기사 미배정') : (bus.teacherName || '차량선생님 미배정');
                 const originalPhone = isDriver ? (bus.driverPhone || '') : (bus.teacherPhone || '');
                 const defaultEmail = isDriver ? `sub_driver${bus.id}@takeme.com` : `sub_teacher${bus.id}@takeme.com`;
                 const accountEmail = sub.email || defaultEmail;
@@ -1069,7 +1069,7 @@ export default function AuthViewer({
                     <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/70 flex items-center justify-between gap-3 text-xs">
                       <div>
                         <span className="text-[10px] font-bold text-slate-400 block mb-0.5">
-                          1️⃣ 배정된 본래 정규 {isDriver ? '기사님' : '지도교사님'}
+                          1️⃣ 배정된 본래 정규 {isDriver ? '기사님' : '차량선생님'}
                         </span>
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-slate-800 text-sm">{originalName}</span>
@@ -1098,7 +1098,7 @@ export default function AuthViewer({
                           </span>
                           <div className="flex items-center gap-2">
                             <span className="font-extrabold text-slate-900 text-sm">
-                              {sub.name || (isDriver ? '대체 기사님' : '대체 지도교사님')}
+                              {sub.name || (isDriver ? '대체 기사님' : '대체 차량선생님')}
                             </span>
                             {sub.phone && <span className="text-slate-600 font-mono text-xs">{sub.phone}</span>}
                           </div>

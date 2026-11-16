@@ -321,7 +321,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             }
 
                             final user = ApiService().currentUser;
-                            final authorName = user?.name ?? '지도교사';
+                            final authorName = user?.name ?? '차량선생님';
 
                             final res = await ApiService().createBoardPost(
                               title: title,
@@ -510,7 +510,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                           commentCtrl.clear();
 
                           final user = ApiService().currentUser;
-                          final authorName = user?.name ?? '지도교사';
+                          final authorName = user?.name ?? '차량선생님';
 
                           final res = await ApiService().addPostComment(
                             postId,
@@ -722,7 +722,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                                       borderRadius: BorderRadius.circular(4),
                                                     ),
                                                     child: Text(
-                                                      post['authorRole'] == 'ADMIN' ? '원장님' : '지도교사',
+                                                      post['authorRole'] == 'ADMIN' ? '원장님' : '차량선생님',
                                                       style: TextStyle(
                                                         fontSize: 10,
                                                         fontWeight: FontWeight.bold,

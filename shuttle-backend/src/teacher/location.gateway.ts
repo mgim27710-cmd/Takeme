@@ -194,7 +194,7 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     }
   }
 
-  /** 원장 웹에서 탑승지 추가/삭제 시 지도교사에게 푸시 알림 전송 */
+  /** 원장 웹에서 탑승지 추가/삭제 시 차량선생님에게 푸시 알림 전송 */
   broadcastTeacherPush(message: string, academyId?: number) {
     if (this.server) {
       this.server.emit('teacherPush', {
@@ -205,7 +205,7 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     }
   }
 
-  /** 지도교사가 탑승 완료 후 기사 앱에 "출발하셔도 됩니다" 신호 전송 */
+  /** 차량선생님이 탑승 완료 후 기사 앱에 "출발하셔도 됩니다" 신호 전송 */
   broadcastDepartSignal(vehicleId: number, stopName?: string) {
     const room = `vehicle_${vehicleId}`;
     const payload = {
@@ -299,7 +299,9 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     }
 
     let academyId: number | undefined;
-    if (user.academyId) {
+    if (data?.academyId && !isNaN(Number(data.academyId))) {
+      academyId = Number(data.academyId);
+    } else if (user.academyId) {
       academyId = Number(user.academyId);
     } else if (user.email) {
       const dbUser = await this.userRepository.findOne({
@@ -308,10 +310,29 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       });
       if (dbUser?.academyId || dbUser?.academy?.id) {
         academyId = Number(dbUser.academyId || dbUser.academy.id);
+      } else if (dbUser) {
+        const st = await this.studentRepository.findOne({
+          where: [{ parentUser: { id: dbUser.id } }, { studentUser: { id: dbUser.id } }],
+          relations: { academy: true },
+        });
+        if (st?.academy?.id) {
+          academyId = st.academy.id;
+        } else {
+          const vh = await this.vehicleRepository.findOne({
+            where: [{ driverUser: { id: dbUser.id } }, { teacherUser: { id: dbUser.id } }],
+            relations: { academy: true },
+          });
+          if (vh?.academy?.id) {
+            academyId = vh.academy.id;
+          }
+        }
       }
     }
 
     if (!academyId) {
+      if (user?.role === 'SUPER_ADMIN') {
+        return { success: true, room: null, academyId: null };
+      }
       console.warn(`[joinAcademyRoom] Academy not found for client: ${client.id}`);
       return { success: false, message: '유효한 유치원 정보가 없습니다.' };
     }

@@ -494,7 +494,7 @@ export function openPrintDocument(type, data = {}) {
           <tr>
             <th>운행 호차 / 번호</th>
             <td style="font-weight: bold; color: #2563eb;">${bus ? `${bus.name} (${plateText})` : '전체 노선'}</td>
-            <th>운전자 / 동승교사</th>
+            <th>운전자 / 차량선생님</th>
             <td style="font-size: 10.5px;">기사: ${driverText} / 동승: ${companionText}</td>
           </tr>
         </table>
@@ -849,7 +849,7 @@ export function openPrintDocument(type, data = {}) {
         <!-- 3. 개인정보 제3자 제공 동의 -->
         <div style="margin: 10px 0 20px 0; padding: 12px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 11px; line-height: 1.7;">
           <h4 style="margin: 0 0 5px 0; font-size: 12px; color: #1e293b; font-weight: bold;">3. [필수] 개인정보 제3자 제공 동의</h4>
-          <div>• <b>제공받는 자:</b> 통학차량 운전기사 및 동승인솔교사, 긴급구조기관(소방서·경찰서·의료기관)</div>
+          <div>• <b>제공받는 자:</b> 통학차량 운전기사 및 차량선생님(동승자), 긴급구조기관(소방서·경찰서·의료기관)</div>
           <div>• <b>제공 목적:</b> 안전 승하차 인솔, 결석·지각 확인, 긴급 환자 이송 및 사고 대응</div>
           <div>• <b>제공 항목:</b> 원생 성명, 탑승지, 보호자 연락처, 긴급처치 정보</div>
           <div style="margin-top: 6px; text-align: right; font-weight: bold; color: #1e40af;">
@@ -886,7 +886,7 @@ export function openPrintDocument(type, data = {}) {
         <table class="info-table" style="margin-top: 20px;">
           <tr>
             <th style="width: 20%;">직 구분</th>
-            <td style="width: 30%;">[ &nbsp; ] 운전기사 &nbsp;&nbsp; [ &nbsp; ] 동승인솔교사</td>
+            <td style="width: 30%;">[ &nbsp; ] 운전기사 &nbsp;&nbsp; [ &nbsp; ] 차량선생님(동승자)</td>
             <th style="width: 20%;">성 명</th>
             <td style="width: 30%; font-weight: bold;">${driverName || companionName || '__________________'}</td>
           </tr>

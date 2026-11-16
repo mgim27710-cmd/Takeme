@@ -622,7 +622,7 @@ export default function DocumentManager({
               </span>
             </div>
             <div className="text-[11px] text-slate-500 font-medium">
-              * 기사 앱(운전자교육·차량) & 동승교사 앱(동승자교육·차량)에 지정 주기별 자동 알림 연동
+              * 기사 앱(운전자교육·차량) & 차량선생님 앱(동승자교육·차량)에 지정 주기별 자동 알림 연동
             </div>
           </div>
 
@@ -800,7 +800,7 @@ export default function DocumentManager({
                     </span>
                   </h2>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    호차 및 원아를 선택하면 기사명, 차량번호, 동승교사, 원아 인적사항 및 배정 정보가 법정 양식에 자동으로 채워집니다.
+                    호차 및 원아를 선택하면 기사명, 차량번호, 차량선생님, 원아 인적사항 및 배정 정보가 법정 양식에 자동으로 채워집니다.
                   </p>
                 </div>
               </div>
@@ -913,7 +913,7 @@ export default function DocumentManager({
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-500 mt-1">
-                      {activeBus ? `[${activeBus.name}] 기사(${activeBus.driverName || '미지정'}) 및 동승교사 정보 반영` : '운전자·동승교사 자격검증 및 범죄경력조회 동의 양식'}
+                      {activeBus ? `[${activeBus.name}] 기사(${activeBus.driverName || '미지정'}) 및 차량선생님 정보 반영` : '운전자·차량선생님 자격검증 및 범죄경력조회 동의 양식'}
                     </div>
                   </div>
                   <span className="text-xs font-bold text-violet-700 bg-white group-hover:bg-violet-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-violet-200 transition-colors shrink-0 shadow-2xs">
@@ -1620,7 +1620,7 @@ export default function DocumentManager({
                 </div>
                 <div>
                   <h3 className="text-base font-black text-slate-800">
-                    기사 및 동승교사 모바일 앱 만료 알림 발송 현황
+                    기사 및 차량선생님 모바일 앱 만료 알림 발송 현황
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
                     2달 전 주의(주 1회) · 1달 전 만료임박 · 2주 전 매일 알림 규칙에 따라 앱으로 자동 전송되는 큐입니다.

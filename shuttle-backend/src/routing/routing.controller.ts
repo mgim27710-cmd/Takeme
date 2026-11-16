@@ -311,6 +311,52 @@ export class RoutingController {
     return this.routingService.updateStudent(Number(id), body || {}, academyId, userId);
   }
 
+  @Post('student/:id')
+  async updateStudentPostAlias(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: any,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+    @Query('academyId') academyIdQuery?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, body?.academyId || academyIdHeader || academyIdQuery, userIdHeader);
+    return this.routingService.updateStudent(Number(id), body || {}, academyId, userId);
+  }
+
+  @Post('vehicle')
+  async createVehicle(
+    @Req() req: any,
+    @Body() body: any,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, body?.academyId || academyIdHeader, userIdHeader);
+    return this.routingService.createVehicle(body || {}, academyId, userId);
+  }
+
+  @Post('substitute-staff')
+  async saveSubstituteStaff(
+    @Req() req: any,
+    @Body() body: any,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, body?.academyId || academyIdHeader, userIdHeader);
+    return this.routingService.saveSubstituteStaff(body || {}, academyId, userId);
+  }
+
+  @Post('save-dispatch')
+  async saveDispatch(
+    @Req() req: any,
+    @Body() body: any,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, body?.academyId || academyIdHeader, userIdHeader);
+    return this.routingService.saveDispatch(body || {}, academyId, userId);
+  }
+
   @Delete('vehicle/:id')
   async deleteVehicle(
     @Req() req: any,
@@ -378,6 +424,11 @@ export class RoutingController {
 
   @Post('admin-messages/send')
   async sendAdminMessage(@Body() body: { targetRoles: string[], vehicleId: number | null, studentIds: number[], message: string }) {
+    return this.routingService.sendAdminMessage(body);
+  }
+
+  @Post('admin/message')
+  async sendAdminMessageAlias(@Body() body: { targetRoles: string[], vehicleId: number | null, studentIds: number[], message: string }) {
     return this.routingService.sendAdminMessage(body);
   }
 

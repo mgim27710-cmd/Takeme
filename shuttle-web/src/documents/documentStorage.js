@@ -386,7 +386,7 @@ export function syncStaffExpiryNotifications(buses = [], educationLevel) {
     const busName = bus.name || bus.busNumber || `${busId}호차`;
     const plate = bus.plateNumber || '차량번호 미등록';
     const driverName = bus.driverName || '기사님';
-    const teacherName = bus.teacherName || '동승교사';
+    const teacherName = bus.teacherName || '차량선생님';
     const busRecord = records[busId] || {};
 
     const items = [

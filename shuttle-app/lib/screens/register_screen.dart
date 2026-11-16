@@ -105,7 +105,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (_selectedRole == 'HOMEROOM_TEACHER') {
         _showMessage('담임교사 성명을 입력해주세요.');
       } else if (_selectedRole == 'SHUTTLE_TEACHER') {
-        _showMessage('지도교사 성명을 입력해주세요.');
+        _showMessage('차량선생님 성명을 입력해주세요.');
       } else if (_selectedRole == 'PARENT') {
         _showMessage('원아 이름을 입력해주세요.');
       } else {
@@ -227,7 +227,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     children: [
                       _buildRoleButton('HOMEROOM_TEACHER', '담임교사'),
                       const SizedBox(width: 6),
-                      _buildRoleButton('SHUTTLE_TEACHER', '지도교사'),
+                      _buildRoleButton('SHUTTLE_TEACHER', '차량선생님'),
                       const SizedBox(width: 6),
                       _buildRoleButton('PARENT', '학부모'),
                       const SizedBox(width: 6),
@@ -248,7 +248,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       _selectedRole == 'HOMEROOM_TEACHER'
                           ? '유치원 교실 담임교사: 학급 알림장 사진/공지 등록 및 학부모 소통을 담당합니다.'
                           : (_selectedRole == 'SHUTTLE_TEACHER'
-                              ? '통학차량 동승 지도교사: 셔틀버스 원아 탑승 명단 확인, 결석 처리 및 탑승 QR 체크를 담당합니다.'
+                              ? '통학차량 차량선생님: 셔틀버스 원아 탑승 명단 확인, 결석 처리 및 탑승 QR 체크를 담당합니다.'
                               : (_selectedRole == 'PARENT'
                                   ? '원아 학부모: 자녀 통학 실시간 위치 확인 및 출결 결석 신청을 이용할 수 있습니다.'
                                   : '셔틀 운전 기사님: 통학차량 안전 운행 및 실시간 내비게이션 경로 안내를 이용할 수 있습니다.')),
@@ -288,7 +288,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     _selectedRole == 'HOMEROOM_TEACHER'
                         ? '담임교사 성명'
                         : (_selectedRole == 'SHUTTLE_TEACHER'
-                            ? '지도교사 성명'
+                            ? '차량선생님 성명'
                             : (_selectedRole == 'PARENT' ? '원아 이름' : '기사님 성명')),
                     style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF334155)),
                   ),
@@ -298,7 +298,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     _selectedRole == 'HOMEROOM_TEACHER'
                         ? '유치원에 등록된 담임교사 성명 (예: 김선생)'
                         : (_selectedRole == 'SHUTTLE_TEACHER'
-                            ? '유치원에 등록된 동승 지도교사 성명 (예: 박교사)'
+                            ? '유치원에 등록된 차량선생님 성명 (예: 박교사)'
                             : (_selectedRole == 'PARENT' ? '유치원에 등록된 원아 이름 (예: 홍길동)' : '유치원에 등록된 기사님 성명 (예: 박기사)')),
                   ),
                   const SizedBox(height: 16),

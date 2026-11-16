@@ -1091,10 +1091,10 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         alert(`[${substituteModalBus.name}] 원래 기사님이 복귀하셨습니다.\n대체 기사 임시 계정은 보안을 위해 즉시 비활성화(잠금)되었습니다.`);
         setSubstituteModalBus(null);
       } else if (mode === 'ACTIVATE_TEACHER') {
-        alert(`[${substituteModalBus.name}] 지도교사님이 휴식 처리되었으며,\n대체 교사(${payload.substituteTeacher.name}) 임시 계정이 활성화되었습니다.`);
+        alert(`[${substituteModalBus.name}] 차량선생님이 휴식 처리되었으며,\n대체 차량선생님(${payload.substituteTeacher.name}) 임시 계정이 활성화되었습니다.`);
         setSubstituteModalBus(null);
       } else if (mode === 'RESTORE_TEACHER') {
-        alert(`[${substituteModalBus.name}] 원래 지도교사님이 복귀하셨으며,\n대체 교사 임시 계정이 비활성화되었습니다.`);
+        alert(`[${substituteModalBus.name}] 원래 차량선생님이 복귀하셨으며,\n대체 차량선생님 임시 계정이 비활성화되었습니다.`);
         setSubstituteModalBus(null);
       } else {
         alert('대체 인력 설정 정보가 성공적으로 저장되었습니다.');
@@ -2190,14 +2190,14 @@ export default function Dashboard({ initialEducationLevel } = {}) {
           });
         }
 
-        // 차량에 등록되어 있으나 교사 회원 목록에 없는 동승교사 보완
+        // 차량에 등록되어 있으나 교사 회원 목록에 없는 차량선생님 보완
         buses.forEach(b => {
           if (b.teacherName && b.teacherName !== '미지정' && !registeredTeacherNames.has(b.teacherName)) {
             registeredTeacherNames.add(b.teacherName);
             teachersData.push({
               'No': teachersData.length + 1,
               '교사 성명': formatTeacherName(b.teacherName),
-              '담당 반': '차량 동승 지도',
+              '담당 반': '차량선생님',
               '이메일(아이디)': '미가입 (차량 동승 교사)',
               '동승 차량': b.busNumber || b.name,
               '가입 일시': '-'
@@ -3770,6 +3770,8 @@ const parseKindergartenExcelSheet = (sheet) => {
       const outLoc = studentForm.dropoffLocation?.trim() || studentForm.outLocation?.trim() || studentForm.address.trim();
 
       const payload = {
+        id: editingStudentId || undefined,
+        editingStudentId: editingStudentId || undefined,
         name: studentForm.name.trim(),
         address: studentForm.address.trim(),
         boardingLocation: inLoc,
@@ -3830,7 +3832,11 @@ const parseKindergartenExcelSheet = (sheet) => {
           setStudents(stateData.students);
         }
       } else if (resData.student) {
-        setStudents(prev => [...prev, resData.student]);
+        setStudents(prev =>
+          editingStudentId
+            ? prev.map(s => s.id === editingStudentId ? { ...s, ...resData.student } : s)
+            : [...prev, resData.student]
+        );
       }
 
       const busName = assignedBus?.name || (resData.student?.assignedBusId ? buses.find(b => b.id === resData.student.assignedBusId)?.name : '');
@@ -4683,7 +4689,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                         </div>
                         <div className={`p-2 rounded-xl border transition-colors ${bus.isTeacherResting || bus.substituteTeacher?.isActive ? 'bg-blue-50/80 border-blue-200' : 'bg-slate-50 border-slate-100'}`}>
                           <div className="flex items-center justify-between mb-0.5">
-                            <span className="text-slate-400 block text-[11px] font-medium">지도교사</span>
+                            <span className="text-slate-400 block text-[11px] font-medium">차량선생님</span>
                             {bus.isTeacherResting || bus.substituteTeacher?.isActive ? (
                               <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded border border-blue-200">
                                 휴식 중
@@ -5663,7 +5669,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                     <div className="min-w-0">
                       <div className="text-sm font-bold truncate">차량 스태프</div>
                       <div className={`text-xs ${authTab === 'STAFF' ? 'text-emerald-100' : 'text-slate-500'} truncate`}>
-                        기사님 & 동승 지도교사
+                        기사님 & 차량선생님
                       </div>
                     </div>
                   </div>
@@ -7678,11 +7684,11 @@ const parseKindergartenExcelSheet = (sheet) => {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-600 mb-1">지도교사님 성함</label>
-                  <input type="text" value={editingBus.teacherName || ''} onChange={e => setEditingBus({...editingBus, teacherName: e.target.value})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="교사 이름" />
+                  <label className="block text-xs font-bold text-slate-600 mb-1">차량선생님 성함</label>
+                  <input type="text" value={editingBus.teacherName || ''} onChange={e => setEditingBus({...editingBus, teacherName: e.target.value})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="차량선생님 성함" />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-600 mb-1">지도교사 연락처</label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">차량선생님 연락처</label>
                   <input type="text" value={editingBus.teacherPhone || ''} onChange={e => setEditingBus({...editingBus, teacherPhone: formatPhoneNumber(e.target.value)})} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="010-0000-0000" maxLength={13} />
                 </div>
               </div>
@@ -7780,7 +7786,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               </button>
             </div>
 
-            {/* Modal Tabs (기사님 대체 / 지도교사 대체) */}
+            {/* Modal Tabs (기사님 대체 / 차량선생님 대체) */}
             <div className="flex border-b border-slate-200 bg-slate-50/70 p-1.5 gap-1 shrink-0">
               <button
                 type="button"
@@ -7807,7 +7813,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                 }`}
               >
                 <span>👩‍🏫</span>
-                <span>지도교사 대체 및 휴식</span>
+                <span>차량선생님 대체 및 휴식</span>
                 {substituteForm.teacherIsActive && (
                   <span className="w-2 h-2 rounded-full bg-blue-600"></span>
                 )}
@@ -8035,17 +8041,17 @@ const parseKindergartenExcelSheet = (sheet) => {
                 </>
               ) : (
                 <>
-                  {/* 지도교사 대체 폼 */}
+                  {/* 차량선생님 대체 폼 */}
                   <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
                     <div>
-                      <span className="text-[11px] text-slate-500 font-semibold block">현재 배정된 정규 지도교사</span>
+                      <span className="text-[11px] text-slate-500 font-semibold block">현재 배정된 정규 차량선생님</span>
                       <span className="text-sm font-bold text-slate-800">{substituteModalBus.teacherName || '미등록'}</span>
                       <span className="text-xs text-slate-500 ml-2">({substituteModalBus.teacherPhone || '연락처 없음'})</span>
                     </div>
                     {substituteForm.teacherIsActive ? (
                       <span className="px-2.5 py-1 bg-blue-50 text-blue-800 border border-blue-200 font-bold rounded-lg flex items-center gap-1.5">
                         <span className="w-2 h-2 rounded-full bg-blue-600"></span>
-                        휴식 중 (대체 교사)
+                        휴식 중 (대체 차량선생님)
                       </span>
                     ) : (
                       <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 font-bold rounded-lg">
@@ -8239,7 +8245,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                         className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         <span>🔙</span>
-                        <span>원래 지도교사님 복귀 (대체 종료)</span>
+                        <span>원래 차량선생님 복귀 (대체 종료)</span>
                       </button>
                     ) : (
                       <button
@@ -8248,7 +8254,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                         className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         <span>🚀</span>
-                        <span>교사 휴식 처리 및 대체 교사 활성화</span>
+                        <span>차량선생님 휴식 처리 및 대체 교사 활성화</span>
                       </button>
                     )}
                   </div>

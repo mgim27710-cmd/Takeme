@@ -228,7 +228,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           user?.role == 'DRIVER'
                               ? '기사님'
                               : (user?.role == 'TEACHER'
-                                  ? '지도교사'
+                                  ? '차량선생님'
                                   : (user?.role == 'PARENT' ? '학부모' : '학생')),
                         ),
                       ],

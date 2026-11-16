@@ -46,21 +46,71 @@ export class ParentService {
     return inside;
   }
 
+  private async findStudentByEmailFallback(email: string, relations: any = {}): Promise<Student | null> {
+    if (!email) return null;
+    const cleanEmail = email.trim().toLowerCase();
+    const user = await this.userRepository.findOne({ where: { email: cleanEmail } });
+    const candidates = await this.studentRepository.find({
+      where: user?.academyId ? { academy: { id: user.academyId } } : {},
+      relations: { parentUser: true, studentUser: true, ...relations },
+    });
+    for (const s of candidates) {
+      if (s.parentUser?.email?.toLowerCase() === cleanEmail || s.studentUser?.email?.toLowerCase() === cleanEmail) {
+        return s;
+      }
+      let rawObj: any = s.raw;
+      if (typeof rawObj === 'string') {
+        try { rawObj = JSON.parse(rawObj); } catch (e) { rawObj = {}; }
+      }
+      if (rawObj && typeof rawObj === 'object' && String(rawObj.email || '').trim().toLowerCase() === cleanEmail) {
+        return s;
+      }
+    }
+    return null;
+  }
+
   async registerInfo(email: string, payload: any) {
-    // 1. Find or create student based on the user's email
-    // Wait, the parent registers their info. We need to find the User.
-    // We can find the student linked to this parent's email.
-    let student = await this.studentRepository.findOne({ where: { raw: { email } }, relations: { schedules: true } });
+    const user = await this.userRepository.findOne({ where: { email } });
+    let student = await this.studentRepository.createQueryBuilder('student')
+      .leftJoinAndSelect('student.parentUser', 'parentUser')
+      .leftJoinAndSelect('student.studentUser', 'studentUser')
+      .leftJoinAndSelect('student.schedules', 'schedules')
+      .where('parentUser.email = :email OR studentUser.email = :email', { email })
+      .getOne();
+
+    if (!student) {
+      student = await this.findStudentByEmailFallback(email, { schedules: true });
+    }
+
+    if (!student && payload?.name && user?.academyId) {
+      student = await this.studentRepository.findOne({
+        where: { name: payload.name.trim(), academy: { id: user.academyId } },
+        relations: { schedules: true, parentUser: true },
+      });
+    }
+
     if (!student) {
       student = new Student();
       student.name = payload.name;
+      student.adminDisplayName = payload.name;
       student.address = payload.address;
       student.raw = { ...payload, email };
+      if (user) {
+        if (user.role === 'STUDENT') student.studentUser = user;
+        else student.parentUser = user;
+      }
       student = await this.studentRepository.save(student);
     } else {
-      student.name = payload.name;
-      student.address = payload.address;
-      student.raw = { ...student.raw, ...payload };
+      if (payload.name) {
+        student.name = payload.name;
+        student.adminDisplayName = payload.name;
+      }
+      if (payload.address) student.address = payload.address;
+      const existingRaw = typeof student.raw === 'string' ? (() => { try { return JSON.parse(student.raw); } catch { return {}; } })() : (student.raw || {});
+      student.raw = { ...existingRaw, ...payload, email };
+      if (user && !student.parentUser && user.role === 'PARENT') {
+        student.parentUser = user;
+      }
       await this.studentRepository.save(student);
     }
 
@@ -356,10 +406,7 @@ export class ParentService {
     }
 
     if (!student) {
-      student = await this.studentRepository.findOne({
-        where: { raw: { email } },
-        relations: { assignedVehicle: true, academy: true }
-      });
+      student = await this.findStudentByEmailFallback(email, { assignedVehicle: true, academy: true });
     }
 
     if (!student || !student.assignedVehicle) {
@@ -530,7 +577,7 @@ export class ParentService {
     const receivers: User[] = [];
     if (activeVehicle) {
       if (targetRoles.includes('DRIVER') && activeVehicle.driverUser) receivers.push(activeVehicle.driverUser);
-      if (targetRoles.includes('TEACHER') && activeVehicle.teacherUser) receivers.push(activeVehicle.teacherUser);
+      if ((targetRoles.includes('TEACHER') || targetRoles.includes('SHUTTLE_TEACHER')) && activeVehicle.teacherUser) receivers.push(activeVehicle.teacherUser);
       if (targetRoles.includes('ACADEMY_ADMIN') && activeVehicle.academy?.owner) receivers.push(activeVehicle.academy.owner);
     }
 
@@ -655,10 +702,7 @@ export class ParentService {
       .getOne();
 
     if (!student) {
-      student = await this.studentRepository.findOne({
-        where: { raw: { email } },
-        relations: { assignedVehicle: true, academy: true }
-      });
+      student = await this.findStudentByEmailFallback(email, { assignedVehicle: true, academy: true });
     }
 
     if (!student) return null;
@@ -696,11 +740,8 @@ export class ParentService {
       .getMany();
 
     if (students.length === 0) {
-      const fallback = await this.studentRepository.find({
-        where: { raw: { email } },
-        relations: { assignedVehicle: true, academy: true }
-      });
-      students.push(...fallback);
+      const fb = await this.findStudentByEmailFallback(email, { assignedVehicle: true, academy: true });
+      if (fb) students.push(fb);
     }
 
     return students.map(s => {
@@ -733,9 +774,7 @@ export class ParentService {
       .getOne();
 
     if (!student) {
-      student = await this.studentRepository.findOne({
-        where: { raw: { email } }
-      });
+      student = await this.findStudentByEmailFallback(email);
     }
 
     if (!student) {
