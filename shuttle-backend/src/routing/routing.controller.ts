@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Param, Query, Res, Delete, Headers, Put, UseGuards, Req } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Query, Res, Delete, Headers, Put, UseGuards, Req, BadRequestException } from '@nestjs/common';
 import type { Response } from 'express';
 import { RoutingService } from './routing.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -604,5 +604,45 @@ export class RoutingController {
   ) {
     const { academyId, userId } = this.resolveAcademyContext(req, academyIdHeader || academyIdQuery, userIdHeader || userIdQuery);
     return this.routingService.getAcademyAttendance(academyId, userId, dateQuery);
+  }
+
+  // ==================== CLOUD DOCUMENTS & LEGAL EXPIRIES ====================
+  @Get('documents')
+  async getDocuments(
+    @Query('academyId') academyId?: string,
+    @Query('educationLevel') educationLevel?: string,
+  ) {
+    return this.routingService.getDocuments(academyId ? Number(academyId) : undefined, educationLevel);
+  }
+
+  @Post('documents/upload')
+  async uploadDocument(
+    @Body() body: any,
+    @Req() req: any,
+  ) {
+    const host = req.headers['host'];
+    return this.routingService.uploadDocument(body, host);
+  }
+
+  @Delete('documents/:id')
+  async deleteDocument(@Param('id') id: string) {
+    return this.routingService.deleteDocument(id);
+  }
+
+  @Get('legal-expiry')
+  async getLegalExpiries(
+    @Query('academyId') academyId?: string,
+    @Query('educationLevel') educationLevel?: string,
+  ) {
+    return this.routingService.getLegalExpiries(academyId ? Number(academyId) : undefined, educationLevel);
+  }
+
+  @Post('legal-expiry')
+  async saveLegalExpiry(
+    @Body() body: any,
+  ) {
+    const vehicleId = Number(body.vehicleId || body.busId);
+    if (!vehicleId) throw new BadRequestException('차량 ID(vehicleId)가 필요합니다.');
+    return this.routingService.saveLegalExpiry(vehicleId, body);
   }
 }

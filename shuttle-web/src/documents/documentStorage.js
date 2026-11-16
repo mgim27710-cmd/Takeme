@@ -1,4 +1,5 @@
-// IndexedDB storage utility for Takeme Document Management
+// Server Cloud & IndexedDB hybrid storage utility for Takeme Document Management
+import { API_BASE_URL } from '../config';
 
 const DB_NAME = 'TakemeDocumentDB';
 const DB_VERSION = 1;
@@ -6,6 +7,9 @@ const STORE_NAME = 'documents';
 
 function openDB() {
   return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') {
+      return resolve(null);
+    }
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = (event) => {
@@ -22,11 +26,45 @@ function openDB() {
   });
 }
 
-export async function saveDocument({ academyId, educationLevel, title, category, file, note = '', uploadedBy = '관리자' }) {
-  const db = await openDB();
-  const id = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  const currentEdu = educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
+export async function saveDocument({ academyId, educationLevel, title, category, file, note = '', uploadedBy = '관리자' }) {
+  const currentEdu = educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
+  let serverDoc = null;
+
+  // 1. Try uploading to backend cloud storage
+  try {
+    const fileBase64 = await fileToBase64(file);
+    const res = await fetch(`${API_BASE_URL}/routing/documents/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        academyId: academyId && academyId !== 'all' && academyId !== 'default' ? Number(academyId) : undefined,
+        educationLevel: currentEdu,
+        title: title || file.name,
+        category: category || '기타서류',
+        note,
+        uploadedBy,
+        fileName: file.name,
+        fileType: file.type || 'application/octet-stream',
+        fileBase64,
+      }),
+    });
+    if (res.ok) {
+      serverDoc = await res.json();
+    }
+  } catch (err) {
+    console.warn('Backend document upload failed, using local fallback:', err);
+  }
+
+  const id = serverDoc?.id || `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const docRecord = {
     id,
     academyId: academyId || 'default',
@@ -36,103 +74,182 @@ export async function saveDocument({ academyId, educationLevel, title, category,
     fileName: file.name,
     fileSize: file.size,
     fileType: file.type || 'application/octet-stream',
-    uploadedAt: new Date().toISOString(),
+    fileUrl: serverDoc?.fileUrl || '',
+    uploadedAt: serverDoc?.uploadedAt || new Date().toISOString(),
     uploadedBy,
     note,
     fileBlob: file, // IndexedDB natively supports storing File/Blob
   };
 
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const req = store.add(docRecord);
+  // 2. Cache in IndexedDB
+  try {
+    const db = await openDB();
+    if (db) {
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction([STORE_NAME], 'readwrite');
+        const store = transaction.objectStore(STORE_NAME);
+        const req = store.put(docRecord);
+        req.onsuccess = () => resolve(docRecord);
+        req.onerror = () => reject(req.error);
+      });
+    }
+  } catch (dbErr) {
+    console.warn('IndexedDB cache save failed:', dbErr);
+  }
 
-    req.onsuccess = () => {
-      window.dispatchEvent(new CustomEvent('takeme_docs_changed'));
-      resolve(docRecord);
-    };
-    req.onerror = () => reject(req.error);
-  });
+  window.dispatchEvent(new CustomEvent('takeme_docs_changed'));
+  return docRecord;
 }
 
 export async function getDocuments(academyId, educationLevel) {
-  const db = await openDB();
   const currentEdu = educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], 'readonly');
-    const store = transaction.objectStore(STORE_NAME);
-    const req = store.getAll();
 
-    req.onsuccess = () => {
-      const allDocs = req.result || [];
-      // 1. 교육 부문(educationLevel) 격리 필터
-      const eduFiltered = allDocs.filter(d => {
-        const docEdu = d.educationLevel || '유치원';
-        return docEdu === currentEdu;
-      });
+  // 1. Fetch from server cloud API
+  try {
+    const q = new URLSearchParams();
+    if (academyId && academyId !== 'all') q.set('academyId', String(academyId));
+    if (currentEdu) q.set('educationLevel', currentEdu);
 
-      // 2. 기관 ID(academyId) 필터
-      if (!academyId || academyId === 'all') {
-        resolve(eduFiltered.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)));
-      } else {
-        const filtered = eduFiltered.filter(d => String(d.academyId) === String(academyId) || d.academyId === 'default');
-        resolve(filtered.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)));
+    const res = await fetch(`${API_BASE_URL}/routing/documents?${q.toString()}`);
+    if (res.ok) {
+      const serverDocs = await res.json();
+      if (Array.isArray(serverDocs) && serverDocs.length > 0) {
+        // Cache to IndexedDB in background
+        openDB().then(db => {
+          if (!db) return;
+          const tx = db.transaction([STORE_NAME], 'readwrite');
+          const store = tx.objectStore(STORE_NAME);
+          serverDocs.forEach(sd => {
+            store.put({
+              ...sd,
+              id: sd.id,
+              educationLevel: sd.educationLevel || currentEdu,
+            });
+          });
+        }).catch(() => {});
+
+        return serverDocs.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
       }
-    };
-    req.onerror = () => reject(req.error);
-  });
+    }
+  } catch (netErr) {
+    console.warn('Failed to fetch documents from server, falling back to local DB:', netErr);
+  }
+
+  // 2. Fallback to local IndexedDB
+  try {
+    const db = await openDB();
+    if (db) {
+      return new Promise((resolve) => {
+        const transaction = db.transaction([STORE_NAME], 'readonly');
+        const store = transaction.objectStore(STORE_NAME);
+        const req = store.getAll();
+
+        req.onsuccess = () => {
+          const allDocs = req.result || [];
+          const eduFiltered = allDocs.filter(d => (d.educationLevel || '유치원') === currentEdu);
+          if (!academyId || academyId === 'all') {
+            resolve(eduFiltered.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)));
+          } else {
+            const filtered = eduFiltered.filter(d => String(d.academyId) === String(academyId) || d.academyId === 'default');
+            resolve(filtered.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)));
+          }
+        };
+        req.onerror = () => resolve([]);
+      });
+    }
+  } catch (err) {
+    console.warn('IndexedDB read failed:', err);
+  }
+
+  return [];
 }
 
 export async function deleteDocument(id) {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_NAME], 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    const req = store.delete(id);
+  // 1. Delete from server
+  try {
+    await fetch(`${API_BASE_URL}/routing/documents/${id}`, { method: 'DELETE' });
+  } catch (e) {
+    console.warn('Server delete failed, deleting locally:', e);
+  }
 
-    req.onsuccess = () => {
-      window.dispatchEvent(new CustomEvent('takeme_docs_changed'));
-      resolve(true);
-    };
-    req.onerror = () => reject(req.error);
-  });
+  // 2. Delete from IndexedDB
+  try {
+    const db = await openDB();
+    if (db) {
+      await new Promise((resolve) => {
+        const transaction = db.transaction([STORE_NAME], 'readwrite');
+        const store = transaction.objectStore(STORE_NAME);
+        const req = store.delete(id);
+        req.onsuccess = () => resolve(true);
+        req.onerror = () => resolve(false);
+      });
+    }
+  } catch (e) {}
+
+  window.dispatchEvent(new CustomEvent('takeme_docs_changed'));
+  return true;
 }
 
 export function downloadDocument(doc) {
-  if (!doc || !doc.fileBlob) {
-    alert('다운로드할 파일 데이터가 없습니다.');
+  if (!doc) {
+    alert('다운로드할 서류 정보가 없습니다.');
     return;
   }
-  const url = URL.createObjectURL(doc.fileBlob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = doc.fileName || `${doc.title}.pdf`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  if (doc.fileBlob) {
+    const url = URL.createObjectURL(doc.fileBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = doc.fileName || `${doc.title || '서류'}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return;
+  }
+  if (doc.fileUrl) {
+    const a = document.createElement('a');
+    a.href = doc.fileUrl;
+    a.target = '_blank';
+    a.download = doc.fileName || `${doc.title || '서류'}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return;
+  }
+  alert('다운로드할 파일 데이터가 없습니다.');
 }
 
 export function previewDocumentInNewTab(doc) {
-  if (!doc || !doc.fileBlob) {
-    alert('미리보기할 파일 데이터가 없습니다.');
+  if (!doc) {
+    alert('미리보기할 서류 정보가 없습니다.');
     return;
   }
-  const ext = (doc.fileName || '').split('.').pop().toLowerCase();
-  let blob = doc.fileBlob;
-  if (ext === 'pdf' && blob.type !== 'application/pdf') {
-    blob = new Blob([blob], { type: 'application/pdf' });
-  } else if (['jpg', 'jpeg'].includes(ext) && !blob.type.startsWith('image/')) {
-    blob = new Blob([blob], { type: 'image/jpeg' });
-  } else if (ext === 'png' && !blob.type.startsWith('image/')) {
-    blob = new Blob([blob], { type: 'image/png' });
+  if (doc.fileBlob) {
+    const ext = (doc.fileName || '').split('.').pop().toLowerCase();
+    let blob = doc.fileBlob;
+    if (ext === 'pdf' && blob.type !== 'application/pdf') {
+      blob = new Blob([blob], { type: 'application/pdf' });
+    } else if (['jpg', 'jpeg'].includes(ext) && !blob.type.startsWith('image/')) {
+      blob = new Blob([blob], { type: 'image/jpeg' });
+    } else if (ext === 'png' && !blob.type.startsWith('image/')) {
+      blob = new Blob([blob], { type: 'image/png' });
+    }
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, '_blank');
+    if (!win) {
+      alert('팝업 차단이 감지되었습니다. 브라우저에서 팝업을 허용해주세요.');
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return;
   }
-  const url = URL.createObjectURL(blob);
-  const win = window.open(url, '_blank');
-  if (!win) {
-    alert('팝업 차단이 감지되었습니다. 브라우저에서 팝업을 허용해주세요.');
+  if (doc.fileUrl) {
+    const win = window.open(doc.fileUrl, '_blank');
+    if (!win) {
+      alert('팝업 차단이 감지되었습니다. 브라우저에서 팝업을 허용해주세요.');
+    }
+    return;
   }
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  alert('미리보기할 파일 데이터가 없습니다.');
 }
 
 export function formatFileSize(bytes) {
@@ -144,7 +261,7 @@ export function formatFileSize(bytes) {
 }
 
 // --------------------------------------------------------------------------
-// 교육 · 보험 · 신고증명서 만료일 알림 관리 시스템
+// 교육 · 보험 · 신고증명서 만료일 알림 관리 시스템 (서버 동기화 지원)
 // --------------------------------------------------------------------------
 
 export function getExpiryStorageKey(educationLevel) {
@@ -152,17 +269,24 @@ export function getExpiryStorageKey(educationLevel) {
   return `takeme_legal_expiry_records_${currentEdu}`;
 }
 
-/**
- * 모든 호차의 만료일 레코드를 불러옵니다. (학제별 격리)
- */
 export function getExpiryRecords(educationLevel) {
   const key = getExpiryStorageKey(educationLevel);
+  const currentEdu = educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
+  
+  // Background sync with server
+  fetch(`${API_BASE_URL}/routing/legal-expiry?educationLevel=${encodeURIComponent(currentEdu)}`)
+    .then(r => r.json())
+    .then(serverRecords => {
+      if (serverRecords && typeof serverRecords === 'object' && Object.keys(serverRecords).length > 0) {
+        localStorage.setItem(key, JSON.stringify(serverRecords));
+      }
+    })
+    .catch(() => {});
+
   try {
     const raw = localStorage.getItem(key);
     if (!raw) {
-      const defaults = generateDefaultExpiryRecords();
-      localStorage.setItem(key, JSON.stringify(defaults));
-      return defaults;
+      return {};
     }
     return JSON.parse(raw);
   } catch (err) {
@@ -171,11 +295,10 @@ export function getExpiryRecords(educationLevel) {
   }
 }
 
-/**
- * 특정 호차의 만료일 레코드를 저장합니다. (학제별 격리)
- */
 export function saveExpiryRecord(busId, record, educationLevel) {
   const key = getExpiryStorageKey(educationLevel);
+  const currentEdu = educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
+  
   try {
     const records = getExpiryRecords(educationLevel);
     records[String(busId)] = {
@@ -185,6 +308,18 @@ export function saveExpiryRecord(busId, record, educationLevel) {
       updatedAt: new Date().toISOString(),
     };
     localStorage.setItem(key, JSON.stringify(records));
+
+    // Save to server DB
+    fetch(`${API_BASE_URL}/routing/legal-expiry`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        vehicleId: Number(busId),
+        educationLevel: currentEdu,
+        ...record,
+      }),
+    }).catch(e => console.warn('Server expiry sync failed:', e));
+
     window.dispatchEvent(new CustomEvent('takeme_expiry_changed'));
     return records[String(busId)];
   } catch (err) {
@@ -193,11 +328,6 @@ export function saveExpiryRecord(busId, record, educationLevel) {
   }
 }
 
-/**
- * D-Day 상태와 일수, 뱃지 색상을 과학적이고 명확하게 계산합니다.
- * @param {string} dateStr 'YYYY-MM-DD'
- * @returns {{ days: number|null, status: 'expired'|'urgent'|'warning'|'safe'|'empty', label: string, color: string, bg: string, border: string }}
- */
 export function calculateDday(dateStr) {
   if (!dateStr) {
     return {
@@ -231,7 +361,6 @@ export function calculateDday(dateStr) {
       badge: '만료',
     };
   }
-  // 1달 전(D-30 이하): 만료 임박 (urgent)
   if (diffDays <= 30) {
     return {
       days: diffDays,
@@ -243,7 +372,6 @@ export function calculateDday(dateStr) {
       badge: '만료 임박 (1달 이내)',
     };
   }
-  // 2달 전(D-60 이하): 주의 (warning)
   if (diffDays <= 60) {
     return {
       days: diffDays,
@@ -266,17 +394,14 @@ export function calculateDday(dateStr) {
   };
 }
 
-/**
- * 전체 호차의 만료 현황을 종합 분석합니다. (학제별 격리)
- */
 export function getOverallExpirySummary(buses = [], educationLevel) {
   const records = getExpiryRecords(educationLevel);
   const summary = {
     totalBuses: buses.length,
-    urgentCount: 0,   // 만료 또는 D-7 이내
-    warningCount: 0,  // D-30 이내
+    urgentCount: 0,
+    warningCount: 0,
     safeCount: 0,
-    urgentItems: [],  // 긴급 알림 배너에 노출할 항목들
+    urgentItems: [],
   };
 
   const fields = [
@@ -313,16 +438,10 @@ export function getOverallExpirySummary(buses = [], educationLevel) {
     });
   });
 
-  // 긴급 항목은 가장 촉박한 순으로 정렬
   summary.urgentItems.sort((a, b) => (a.dday.days ?? 999) - (b.dday.days ?? 999));
-
   return summary;
 }
 
-/**
- * 2달 전부터 주의, 1달 전 만료 임박, 2주 전 매일/2달~2주 주 1회 알림 규칙 판별
- * @param {string} dateStr 'YYYY-MM-DD'
- */
 export function getExpiryNotificationSchedule(dateStr) {
   const dday = calculateDday(dateStr);
   if (dday.status === 'empty') {
@@ -330,8 +449,6 @@ export function getExpiryNotificationSchedule(dateStr) {
   }
 
   const days = dday.days;
-
-  // 1. 만료 후 또는 만료 2주 전(14일 이내): 매일 알림
   if (days <= 14) {
     return {
       shouldNotify: true,
@@ -344,7 +461,6 @@ export function getExpiryNotificationSchedule(dateStr) {
     };
   }
 
-  // 2. 만료 2달 전부터 2주 전까지(15일 ~ 60일): 일주일에 1번 알림
   if (days <= 60) {
     return {
       shouldNotify: true,
@@ -357,7 +473,6 @@ export function getExpiryNotificationSchedule(dateStr) {
     };
   }
 
-  // 3. 2달 초과(61일 이상): 정상 (알림 미발송)
   return {
     shouldNotify: false,
     frequency: 'none',
@@ -371,11 +486,6 @@ export function getExpiryNotificationSchedule(dateStr) {
 
 const STAFF_NOTIFICATIONS_KEY = 'takeme_staff_notifications';
 
-/**
- * 호차 정보를 바탕으로 기사 및 교사 앱으로 발송될 알림 메시지를 생성하고 동기화합니다.
- * @param {Array} buses 호차 목록
- * @returns {{ driverNotifications: Array, teacherNotifications: Array, allCount: number }}
- */
 export function syncStaffExpiryNotifications(buses = [], educationLevel) {
   const records = getExpiryRecords(educationLevel);
   const driverNotifications = [];
@@ -490,9 +600,6 @@ export function syncStaffExpiryNotifications(buses = [], educationLevel) {
   };
 }
 
-/**
- * 기사용/교사용으로 생성된 만료 알림 목록을 조회합니다.
- */
 export function getStaffNotifications(role = 'all') {
   try {
     const raw = localStorage.getItem(STAFF_NOTIFICATIONS_KEY);
@@ -505,5 +612,3 @@ export function getStaffNotifications(role = 'all') {
     return [];
   }
 }
-
-

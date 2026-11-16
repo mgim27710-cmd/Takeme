@@ -243,7 +243,7 @@ export class AuthService {
     throw new BadRequestException('OTP 번호가 올바르지 않습니다.');
   }
 
-  async login(data: any) {
+  async login(data: any, clientIp?: string) {
     let { email, password, otpToken, clientType } = data;
     const cleanEmail = (email || '').trim().toLowerCase();
     let user = await this.usersRepository.findOne({ where: { email: cleanEmail } });
@@ -516,6 +516,9 @@ export class AuthService {
 
     const rawRefreshToken = crypto.randomBytes(32).toString('hex');
     user.refreshToken = await bcrypt.hash(rawRefreshToken, 10);
+    if (clientIp) {
+      user.lastLoginIp = clientIp;
+    }
     await this.usersRepository.save(user);
 
     // 승인까지 끝난 사용자에게만 토큰 발급 (승인 대기·OTP 미통과는 위에서 이미 return 됨)
@@ -525,6 +528,7 @@ export class AuthService {
       role: user.role,
       academyId,
       sessionId,
+      clientIp: clientIp || undefined,
     });
 
     const combinedMeta = `${academyName || ''} ${user.name || ''} ${user.email || ''}`.toLowerCase();

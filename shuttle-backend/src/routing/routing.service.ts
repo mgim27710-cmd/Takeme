@@ -35,6 +35,11 @@ import { getStudentClassName, hasAssignedClass, isSameClass, HOMEROOM_ROLE, kstD
 import { Attendance, AttendanceStatus } from '../entities/attendance.entity';
 import { AttendanceSubmission } from '../entities/attendance-submission.entity';
 import { formatTeacherName, cleanTeacherBaseName } from '../utils/teacher.util';
+import { CloudDocument } from '../entities/cloud-document.entity';
+import { LegalExpiry } from '../entities/legal-expiry.entity';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class RoutingService {
@@ -72,6 +77,10 @@ export class RoutingService {
     private attendanceRepository: Repository<Attendance>,
     @InjectRepository(AttendanceSubmission)
     private submissionRepository: Repository<AttendanceSubmission>,
+    @InjectRepository(CloudDocument)
+    private cloudDocumentRepository: Repository<CloudDocument>,
+    @InjectRepository(LegalExpiry)
+    private legalExpiryRepository: Repository<LegalExpiry>,
     private httpService: HttpService,
     private configService: ConfigService,
   ) {}
@@ -4164,5 +4173,142 @@ export class RoutingService {
       submissions,
       classes: classesList,
     };
+  }
+
+  // ==================== CLOUD DOCUMENTS & LEGAL EXPIRIES ====================
+  async getDocuments(academyId?: number, educationLevel?: string) {
+    const qb = this.cloudDocumentRepository.createQueryBuilder('doc');
+    if (academyId) {
+      qb.andWhere('(doc.academyId = :academyId OR doc.academyId IS NULL)', { academyId });
+    }
+    if (educationLevel && educationLevel !== 'ALL') {
+      qb.andWhere('doc.educationLevel = :educationLevel', { educationLevel });
+    }
+    qb.orderBy('doc.uploadedAt', 'DESC');
+    return qb.getMany();
+  }
+
+  async uploadDocument(body: {
+    academyId?: number;
+    educationLevel?: string;
+    title?: string;
+    category?: string;
+    note?: string;
+    uploadedBy?: string;
+    fileName: string;
+    fileType?: string;
+    fileBase64: string;
+  }, reqHost?: string) {
+    const { academyId, educationLevel, title, category, note, uploadedBy, fileName, fileType, fileBase64 } = body;
+    if (!fileBase64 || !fileName) {
+      throw new BadRequestException('파일 데이터와 파일명이 필요합니다.');
+    }
+
+    const base64Clean = fileBase64.replace(/^data:.*?;base64,/, '');
+    const buffer = Buffer.from(base64Clean, 'base64');
+    const MAX_SIZE = 30 * 1024 * 1024; // 30MB
+    if (buffer.length > MAX_SIZE) {
+      throw new BadRequestException('파일 크기는 30MB를 초과할 수 없습니다.');
+    }
+
+    const ext = fileName.split('.').pop()?.toLowerCase() || 'bin';
+    const randomName = `doc_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
+
+    const uploadsDir = path.join(process.cwd(), 'uploads', 'documents');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    const filePath = path.join(uploadsDir, randomName);
+    fs.writeFileSync(filePath, buffer);
+
+    const host = reqHost || '52.63.245.203.sslip.io';
+    const protocol = (host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':3000')) ? 'http' : 'https';
+    const fileUrl = `${protocol}://${host}/uploads/documents/${randomName}`;
+
+    const doc = this.cloudDocumentRepository.create({
+      academyId: academyId ? Number(academyId) : undefined,
+      educationLevel: educationLevel || '유치원',
+      title: title || fileName,
+      category: category || 'etc',
+      fileName,
+      fileSize: buffer.length,
+      fileType: fileType || 'application/octet-stream',
+      fileUrl,
+      uploadedBy: uploadedBy || '관리자',
+      note: note || '',
+    });
+
+    const saved = await this.cloudDocumentRepository.save(doc);
+    return saved;
+  }
+
+  async deleteDocument(id: string) {
+    const doc = await this.cloudDocumentRepository.findOne({ where: { id } });
+    if (!doc) {
+      throw new NotFoundException('해당 서류를 찾을 수 없습니다.');
+    }
+    try {
+      if (doc.fileUrl && doc.fileUrl.includes('/uploads/documents/')) {
+        const fname = doc.fileUrl.split('/uploads/documents/').pop();
+        if (fname) {
+          const p = path.join(process.cwd(), 'uploads', 'documents', fname);
+          if (fs.existsSync(p)) fs.unlinkSync(p);
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    await this.cloudDocumentRepository.delete(id);
+    return { success: true };
+  }
+
+  async getLegalExpiries(academyId?: number, educationLevel?: string) {
+    const qb = this.legalExpiryRepository.createQueryBuilder('exp')
+      .leftJoinAndSelect('exp.vehicle', 'vehicle');
+    if (academyId) {
+      qb.andWhere('(exp.academyId = :academyId OR vehicle.academyId = :academyId)', { academyId });
+    }
+    if (educationLevel && educationLevel !== 'ALL') {
+      qb.andWhere('exp.educationLevel = :educationLevel', { educationLevel });
+    }
+    const list = await qb.getMany();
+    const result: Record<string, any> = {};
+    for (const item of list) {
+      result[String(item.vehicleId)] = {
+        insuranceExpiry: item.insuranceExpiry || '',
+        inspectionExpiry: item.inspectionExpiry || '',
+        driverEduExpiry: item.driverEduExpiry || '',
+        companionEduExpiry: item.companionEduExpiry || '',
+      };
+    }
+    return result;
+  }
+
+  async saveLegalExpiry(vehicleId: number, data: {
+    insuranceExpiry?: string;
+    inspectionExpiry?: string;
+    driverEduExpiry?: string;
+    companionEduExpiry?: string;
+    academyId?: number;
+    educationLevel?: string;
+  }) {
+    let rec = await this.legalExpiryRepository.findOne({ where: { vehicleId } });
+    if (!rec) {
+      rec = this.legalExpiryRepository.create({
+        vehicleId,
+        academyId: data.academyId,
+        educationLevel: data.educationLevel || '유치원',
+      });
+    }
+    if (data.insuranceExpiry !== undefined) rec.insuranceExpiry = data.insuranceExpiry;
+    if (data.inspectionExpiry !== undefined) rec.inspectionExpiry = data.inspectionExpiry;
+    if (data.driverEduExpiry !== undefined) rec.driverEduExpiry = data.driverEduExpiry;
+    if (data.companionEduExpiry !== undefined) rec.companionEduExpiry = data.companionEduExpiry;
+    if (data.educationLevel) rec.educationLevel = data.educationLevel;
+    if (data.academyId) rec.academyId = data.academyId;
+
+    await this.legalExpiryRepository.save(rec);
+    return { success: true, record: rec };
   }
 }
