@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, Req, Param, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Req, Param, Headers, BadRequestException } from '@nestjs/common';
 import { ChatService } from './chat.service';
 
 @Controller('chat')
@@ -135,13 +135,23 @@ export class ChatController {
     @Body('roomId') roomId: number,
     @Body('text') text: string,
     @Body('senderEmail') senderEmail: string,
-    @Req() req: any,
+    @Body('type') type?: string,
+    @Body('payload') payload?: any,
+    @Req() req?: any,
   ) {
     const email = this.extractEmail(req, senderEmail);
     if (!email) {
       throw new BadRequestException('발신자 이메일 정보가 필요합니다.');
     }
-    return this.chatService.sendMessageAndBroadcast(Number(roomId), email, text);
+    return this.chatService.sendMessageAndBroadcast(Number(roomId), email, text, type, payload);
+  }
+
+  @Post('upload')
+  async uploadMedia(
+    @Body() body: { base64Data: string; filename?: string; mimeType?: string },
+    @Headers('host') host: string,
+  ) {
+    return this.chatService.uploadChatMedia(body, host);
   }
 
   // ============================================================

@@ -573,7 +573,7 @@ export class ChatService {
     });
   }
 
-  async sendMessageAndBroadcast(roomId: number, senderEmail: string, text: string) {
+  async sendMessageAndBroadcast(roomId: number, senderEmail: string, text: string, type: string = 'TEXT', payload?: any) {
     const user = await this.userRepo.findOne({ where: { email: senderEmail } });
     if (!user) throw new BadRequestException('사용자를 찾을 수 없습니다.');
 
@@ -587,8 +587,9 @@ export class ChatService {
     const message = this.messageRepo.create({
       room: { id: roomId },
       sender: user,
-      text: text.trim(),
-      type: 'TEXT',
+      text: (text || '').trim(),
+      type: type || 'TEXT',
+      payload: payload || null,
       readBy: [user.id],
     });
     const saved = await this.messageRepo.save(message);
@@ -1465,6 +1466,79 @@ export class ChatService {
       pushedAt: payload.parentPushedAt,
       pushText: notiText,
       hasParentAccount: !!student.parentUser,
+    };
+  }
+
+  async uploadChatMedia(data: { base64Data: string; filename?: string; mimeType?: string }, reqHost?: string) {
+    if (!data.base64Data) {
+      throw new BadRequestException('업로드할 이미지 데이터가 없습니다.');
+    }
+
+    const fs = require('fs');
+    const path = require('path');
+    const crypto = require('crypto');
+
+    let base64String = data.base64Data;
+    let ext = '';
+    let detectedMime = 'image/jpeg';
+
+    if (base64String.includes(';base64,')) {
+      const parts = base64String.split(';base64,');
+      const mime = parts[0].replace('data:', '');
+      detectedMime = mime;
+      if (mime.includes('png')) ext = 'png';
+      else if (mime.includes('webp')) ext = 'webp';
+      else if (mime.includes('gif')) ext = 'gif';
+      else if (mime.includes('jpeg') || mime.includes('jpg')) ext = 'jpg';
+      base64String = parts[1];
+    } else if (data.mimeType) {
+      detectedMime = data.mimeType;
+      if (data.mimeType.includes('png')) ext = 'png';
+      else if (data.mimeType.includes('webp')) ext = 'webp';
+      else if (data.mimeType.includes('gif')) ext = 'gif';
+      else if (data.mimeType.includes('jpeg') || data.mimeType.includes('jpg')) ext = 'jpg';
+    }
+
+    if (!ext && data.filename) {
+      const fileExt = path.extname(data.filename).toLowerCase().replace('.', '');
+      if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(fileExt)) {
+        ext = fileExt === 'jpeg' ? 'jpg' : fileExt;
+        if (ext === 'png') detectedMime = 'image/png';
+        else if (ext === 'webp') detectedMime = 'image/webp';
+        else if (ext === 'gif') detectedMime = 'image/gif';
+        else detectedMime = 'image/jpeg';
+      }
+    }
+
+    if (!['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) {
+      ext = 'jpg';
+    }
+
+    const buffer = Buffer.from(base64String, 'base64');
+    const MAX_SIZE = 15 * 1024 * 1024; // 15MB
+    if (buffer.length > MAX_SIZE) {
+      throw new BadRequestException('파일 크기는 15MB를 초과할 수 없습니다.');
+    }
+
+    const randomName = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${ext}`;
+    const uploadsDir = path.join(process.cwd(), 'uploads', 'chat');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    const filePath = path.join(uploadsDir, randomName);
+    fs.writeFileSync(filePath, buffer);
+
+    const host = reqHost || '52.63.245.203.sslip.io';
+    const protocol = (host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':3000')) ? 'http' : 'https';
+    const url = `${protocol}://${host}/uploads/chat/${randomName}`;
+
+    return {
+      success: true,
+      url,
+      filename: randomName,
+      size: buffer.length,
+      createdAt: new Date().toISOString(),
     };
   }
 }
