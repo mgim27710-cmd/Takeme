@@ -57,4 +57,13 @@ export class ChatGateway {
       return this.chatService.sendMessageAndBroadcast(data.roomId, data.senderEmail, data.text);
     }
   }
+
+  @SubscribeMessage('markAsRead')
+  async handleMarkAsRead(
+    @MessageBody() data: { roomId: number; userId: number },
+  ) {
+    if (data && data.roomId && data.userId) {
+      return this.chatService.markRoomMessagesRead(data.roomId, data.userId);
+    }
+  }
 }

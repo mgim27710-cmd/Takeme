@@ -4946,19 +4946,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               원아 등록 양식 다운로드
             </a>
 
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedPaymentStudent(null);
-                handleTabChange('messages');
-              }}
-              className="w-full py-2 mb-3 bg-gradient-to-r from-indigo-50 to-blue-50 hover:from-indigo-100 hover:to-blue-100 text-indigo-700 rounded-xl text-xs font-black border border-indigo-200 shadow-2xs transition-all flex items-center justify-center gap-1.5"
-            >
-              <svg className="w-3.5 h-3.5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-              </svg>
-              <span>상담 탑승지 등록 및 결재 신청</span>
-            </button>
+
 
             {students.length > 0 ? (
               <div className="mt-1 flex-1 flex flex-col min-h-0">
@@ -5158,20 +5146,6 @@ const parseKindergartenExcelSheet = (sheet) => {
                               </div>
                             </div>
                             <div className="flex items-center gap-1 shrink-0 ml-1">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedPaymentStudent(st);
-                                  handleTabChange('messages');
-                                }}
-                                className="w-5 h-5 flex items-center justify-center rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs transition-colors"
-                                title="상담 탑승지 등록 및 결재 신청 (지도 핀/주소 등록)"
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                                </svg>
-                              </button>
                               <button
                                 type="button"
                                 onClick={(e) => { e.stopPropagation(); handleOpenEditStudentModal(st); }}
@@ -7051,20 +7025,6 @@ const parseKindergartenExcelSheet = (sheet) => {
                     : (displayBusId ? `배차: ${buses.find(b=>b.id===displayBusId)?.name}` : '배차 없음 (구역 밖)')
                   }
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedPaymentStudent(st);
-                    handleTabChange('messages');
-                  }}
-                  className="w-full py-2 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-xs transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                  </svg>
-                  <span>이 원아 결재 신청 바로가기</span>
-                </button>
               </Popup>
             </Marker>
             );

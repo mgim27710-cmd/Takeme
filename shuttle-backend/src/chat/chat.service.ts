@@ -369,12 +369,19 @@ export class ChatService {
   }
 
   async getMessages(roomId: number, currentUserId?: number) {
+    const room = await this.roomRepo.findOne({
+      where: { id: roomId },
+      relations: { members: { user: true } },
+    });
+    const memberCount = room?.members?.length && room.members.length > 0 ? room.members.length : 2;
+
     const messages = await this.messageRepo.find({
       where: { room: { id: roomId } },
       order: { createdAt: 'ASC' },
       relations: { sender: true },
     });
 
+    const updatedIds: number[] = [];
     if (currentUserId) {
       for (const m of messages) {
         if (m.sender && m.sender.id !== currentUserId) {
@@ -383,12 +390,68 @@ export class ChatService {
             readByList.push(currentUserId);
             m.readBy = readByList;
             await this.messageRepo.save(m);
+            updatedIds.push(m.id);
           }
         }
       }
+      if (updatedIds.length > 0) {
+        this.chatGateway.server?.to(`chat_${roomId}`).emit('messagesRead', {
+          roomId,
+          userId: currentUserId,
+          messageIds: updatedIds,
+        });
+        this.chatGateway.server?.emit('roomUpdated', { roomId });
+      }
     }
 
-    return messages;
+    return messages.map(m => {
+      const readSet = new Set((m.readBy || []).map(Number));
+      if (m.sender?.id) readSet.add(m.sender.id);
+      const readCount = readSet.size;
+      const unreadCount = Math.max(0, memberCount - readCount);
+      return {
+        ...m,
+        memberCount,
+        unreadCount,
+      };
+    });
+  }
+
+  async markRoomMessagesRead(roomId: number, userId: number) {
+    if (!roomId || !userId) return { success: false, count: 0 };
+    const room = await this.roomRepo.findOne({
+      where: { id: roomId },
+      relations: { members: true },
+    });
+    if (!room) return { success: false, count: 0 };
+
+    const unreadMessages = await this.messageRepo
+      .createQueryBuilder('m')
+      .where('m.roomId = :roomId', { roomId })
+      .andWhere('(m.senderId != :userId OR m.senderId IS NULL)', { userId })
+      .getMany();
+
+    const updatedIds: number[] = [];
+    for (const m of unreadMessages) {
+      const readList = (m.readBy || []).map(Number);
+      if (!readList.includes(userId)) {
+        readList.push(userId);
+        m.readBy = readList;
+        await this.messageRepo.save(m);
+        updatedIds.push(m.id);
+      }
+    }
+
+    if (updatedIds.length > 0) {
+      this.chatGateway.server?.to(`chat_${roomId}`).emit('messagesRead', {
+        roomId,
+        userId,
+        messageIds: updatedIds,
+      });
+      this.chatGateway.server?.emit('roomUpdated', { roomId });
+    }
+
+    return { success: true, count: updatedIds.length };
   }
 
   async createRoomByEmail(name: string | undefined, type: string | undefined, userIds: number[], creatorEmail: string) {
@@ -462,6 +525,13 @@ export class ChatService {
     const user = await this.userRepo.findOne({ where: { email: senderEmail } });
     if (!user) throw new BadRequestException('사용자를 찾을 수 없습니다.');
 
+    const room = await this.roomRepo.findOne({
+      where: { id: roomId },
+      relations: { members: { user: true } },
+    });
+    const memberCount = room?.members?.length && room.members.length > 0 ? room.members.length : 2;
+    const initialUnreadCount = Math.max(0, memberCount - 1);
+
     const message = this.messageRepo.create({
       room: { id: roomId },
       sender: user,
@@ -479,17 +549,18 @@ export class ChatService {
     });
 
     if (fullMessage) {
-      this.chatGateway.broadcastMessageToRoom(roomId, fullMessage);
+      const payloadMessage = {
+        ...fullMessage,
+        memberCount,
+        unreadCount: initialUnreadCount,
+      };
+      this.chatGateway.broadcastMessageToRoom(roomId, payloadMessage);
     }
 
     // [교사/기사 앱 수신함 즉시 동기화]
     // 관리자(원장님) 또는 다른 사용자가 메시지를 보냈을 때,
     // 이 방의 다른 멤버들(교사, 기사 등)의 앱 수신함(ParentMessage)으로 자동 전달!
     try {
-      const room = await this.roomRepo.findOne({
-        where: { id: roomId },
-        relations: { members: { user: true } },
-      });
       if (room && room.members) {
         const isSenderAdmin = user.role === 'ACADEMY_ADMIN' || user.role === 'SUPER_ADMIN';
         const isDirect = room.type === ChatRoomType.DIRECT || room.members.length <= 2;
@@ -858,7 +929,16 @@ export class ChatService {
     });
 
     if (fullMessage) {
-      this.chatGateway.broadcastMessageToRoom(targetRoom.id, fullMessage);
+      const roomWithMembers = await this.roomRepo.findOne({
+        where: { id: targetRoom.id },
+        relations: { members: true },
+      });
+      const memberCount = roomWithMembers?.members?.length || 2;
+      this.chatGateway.broadcastMessageToRoom(targetRoom.id, {
+        ...fullMessage,
+        memberCount,
+        unreadCount: Math.max(0, memberCount - 1),
+      });
     }
 
     return fullMessage;

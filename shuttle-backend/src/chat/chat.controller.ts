@@ -94,6 +94,17 @@ export class ChatController {
     return this.chatService.getMessages(parseInt(roomId, 10), uid);
   }
 
+  @Post('rooms/:roomId/read')
+  async markRoomRead(
+    @Param('roomId') roomId: string,
+    @Body('userId') bodyUserId?: number,
+    @Req() req?: any,
+  ) {
+    const uid = this.extractUserId(req, bodyUserId);
+    if (!uid) return { success: false, message: '유저 정보를 확인할 수 없습니다.' };
+    return this.chatService.markRoomMessagesRead(parseInt(roomId, 10), uid);
+  }
+
   @Get('rooms/:roomId/messages')
   async getRoomMessagesAlias(
     @Param('roomId') roomId: string,

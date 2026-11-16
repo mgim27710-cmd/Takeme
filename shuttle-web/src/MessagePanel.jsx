@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { API_BASE_URL } from './config';
@@ -238,6 +238,30 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   const [counterNote, setCounterNote] = useState('');
   const [isSubmittingCounter, setIsSubmittingCounter] = useState(false);
 
+  // Absence / Attendance Form Modal State (채팅 타이핑 대신 결재형 창 띄우기)
+  const [isAbsenceModalOpen, setIsAbsenceModalOpen] = useState(false);
+  const [absenceFormType, setAbsenceFormType] = useState('ABSENCE'); // 'ABSENCE' | 'LATENESS' | 'EXTENDED_CARE' | 'PARENT_PICKUP'
+  const [absenceStudentId, setAbsenceStudentId] = useState('');
+  const [absenceStartDate, setAbsenceStartDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [absenceEndDate, setAbsenceEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [absenceReason, setAbsenceReason] = useState('감기 및 몸살로 인한 가정 요양');
+  const [absenceDetail, setAbsenceDetail] = useState('');
+  const [isSubmittingAbsence, setIsSubmittingAbsence] = useState(false);
+  const [absenceStudentSearch, setAbsenceStudentSearch] = useState('');
+
+  // Unread badge count helper (카카오톡 스타일 미확인 인원수: 1:1이면 1, 다자간이면 명수)
+  const getUnreadNumber = useCallback((msg) => {
+    if (!msg) return 0;
+    if (msg.unreadCount !== undefined && msg.unreadCount !== null) {
+      return Number(msg.unreadCount);
+    }
+    const totalMembers = (activeRoom?.members && activeRoom.members.length > 0) ? activeRoom.members.length : 2;
+    const readList = (msg.readBy || []).map(Number);
+    const readSet = new Set(readList);
+    if (msg.sender?.id) readSet.add(Number(msg.sender.id));
+    return Math.max(0, totalMembers - readSet.size);
+  }, [activeRoom]);
+
   const messagesEndRef = useRef(null);
   const activeRoomRef = useRef(null);
   activeRoomRef.current = activeRoom;
@@ -279,6 +303,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           return [...prev, newMsg];
         });
         scrollToBottom();
+
+        // 즉시 읽음 처리 통지 (상대방 화면에서 1이 바로 사라지도록 처리)
+        if (socket && myUser?.id) {
+          socket.emit('markAsRead', { roomId: msgRoomId, userId: myUser.id });
+        }
       }
 
       // Update room list latest message
@@ -307,12 +336,37 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       fetchRooms();
     };
 
+    const handleMessagesRead = ({ roomId, userId, messageIds }) => {
+      const currentActive = activeRoomRef.current;
+      if (currentActive && Number(currentActive.id) === Number(roomId)) {
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (!messageIds || messageIds.includes(m.id)) {
+              const readList = (m.readBy || []).map(Number);
+              if (!readList.includes(Number(userId))) {
+                readList.push(Number(userId));
+                const currentUnread = m.unreadCount !== undefined ? Math.max(0, m.unreadCount - 1) : undefined;
+                return {
+                  ...m,
+                  readBy: readList,
+                  unreadCount: currentUnread,
+                };
+              }
+            }
+            return m;
+          })
+        );
+      }
+    };
+
     socket.on('receiveMessage', handleReceiveMessage);
     socket.on('roomUpdated', handleRoomUpdated);
+    socket.on('messagesRead', handleMessagesRead);
 
     return () => {
       socket.off('receiveMessage', handleReceiveMessage);
       socket.off('roomUpdated', handleRoomUpdated);
+      socket.off('messagesRead', handleMessagesRead);
     };
   }, [socket]);
 
@@ -322,6 +376,9 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
     if (socket) {
       socket.emit('joinChatRoom', { roomId: activeRoom.id });
+      if (myUser?.id) {
+        socket.emit('markAsRead', { roomId: activeRoom.id, userId: myUser.id });
+      }
     }
 
     fetchMessages(activeRoom.id);
@@ -628,8 +685,145 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   };
 
   // ============================================================
+  // 원아 결석계 및 출결 변동 신청 모달 핸들러 (채팅 타이핑 대체)
+  // ============================================================
+  const handleOpenAbsenceModal = async (formType = 'ABSENCE') => {
+    setShowPlusMenu(false);
+    setAbsenceFormType(formType);
+    const todayStr = new Date().toISOString().split('T')[0];
+    setAbsenceStartDate(todayStr);
+    setAbsenceEndDate(todayStr);
+
+    if (formType === 'ABSENCE') {
+      setAbsenceReason('감기 및 몸살로 인한 가정 요양');
+    } else if (formType === 'LATENESS') {
+      setAbsenceReason('병원 진료 후 등원');
+    } else if (formType === 'EXTENDED_CARE') {
+      setAbsenceReason('학부모 야근으로 인한 연장 보육 신청');
+    } else if (formType === 'PARENT_PICKUP') {
+      setAbsenceReason('보호자 직접 픽업 (셔틀 미탑승)');
+    }
+    setAbsenceDetail('');
+
+    // paymentContext.students 가 비어있을 경우 자동 로드
+    if (!paymentContext.students || paymentContext.students.length === 0) {
+      try {
+        const q = new URLSearchParams();
+        if (targetAcademyId) q.append('academyId', String(targetAcademyId));
+        if (myUser?.email) q.append('email', myUser.email);
+        const res = await fetch(`${API_BASE_URL}/chat/payment-context?${q.toString()}`, {
+          headers: getAuthHeaders(),
+        });
+        if (res.ok) {
+          const ctx = await res.json();
+          setPaymentContext(ctx);
+          if (ctx.students && ctx.students.length > 0) {
+            setAbsenceStudentId(String(ctx.students[0].id));
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load students for absence', e);
+      }
+    } else if (paymentContext.students.length > 0 && !absenceStudentId) {
+      setAbsenceStudentId(String(paymentContext.students[0].id));
+    }
+
+    setIsAbsenceModalOpen(true);
+  };
+
+  const handleSubmitAbsenceForm = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!absenceStudentId) {
+      return alert('대상 원아를 선택해주세요.');
+    }
+    if (!activeRoom) {
+      return alert('전송할 대화방을 먼저 선택해주세요.');
+    }
+
+    const selectedStudent = (paymentContext.students || []).find(s => String(s.id) === String(absenceStudentId));
+    const studentName = selectedStudent?.name || '원아';
+    const className = selectedStudent?.className || selectedStudent?.raw?.['반명'] || selectedStudent?.raw?.['반'] || '';
+
+    const formTitleMap = {
+      ABSENCE: '원아 결석계 (결석원)',
+      LATENESS: '등원 지각 알림서',
+      EXTENDED_CARE: '연장 보육 신청서',
+      PARENT_PICKUP: '학부모 직접 픽업 신청서',
+    };
+    const formTitle = formTitleMap[absenceFormType] || '출결 변동 신청서';
+
+    const fullReason = absenceDetail.trim()
+      ? `${absenceReason} (${absenceDetail.trim()})`
+      : absenceReason;
+
+    setIsSubmittingAbsence(true);
+
+    try {
+      // 1. 캘린더 및 출결 오버라이드 시스템에 등록
+      try {
+        await fetch(`${API_BASE_URL}/approval/calendar/absence`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            studentId: Number(absenceStudentId),
+            startDate: absenceStartDate,
+            endDate: absenceEndDate,
+            reason: `[${formTitle}] ${fullReason}`,
+          }),
+        });
+      } catch (calErr) {
+        console.warn('Calendar sync error:', calErr);
+      }
+
+      // 2. 채팅 메시지로 정형화된 서식 카드 전송
+      const messageText = `[${formTitle}]
+- 대상 원아: ${studentName}${className ? ` (${className})` : ''}
+- 적용 기간: ${absenceStartDate === absenceEndDate ? absenceStartDate : `${absenceStartDate} ~ ${absenceEndDate}`}
+- 신청 사유: ${fullReason}`;
+
+      const payload = {
+        isAbsenceForm: true,
+        formType: absenceFormType,
+        formTitle,
+        studentId: Number(absenceStudentId),
+        studentName,
+        className,
+        startDate: absenceStartDate,
+        endDate: absenceEndDate,
+        reason: fullReason,
+        requesterName: myUser.name || myUser.email,
+        requesterRole: myUser.role,
+        appliedToCalendar: true,
+      };
+
+      const sendRes = await fetch(`${API_BASE_URL}/chat/messages`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          roomId: activeRoom.id,
+          text: messageText,
+          senderEmail: myUser.email,
+          type: 'ABSENCE_REQUEST',
+          payload,
+        }),
+      });
+
+      if (sendRes.ok) {
+        setIsAbsenceModalOpen(false);
+      } else {
+        alert('신청서 전송에 실패했습니다.');
+      }
+    } catch (err) {
+      alert('신청서 전송 중 오류가 발생했습니다.');
+    } finally {
+      setIsSubmittingAbsence(false);
+    }
+  };
+
+  // ============================================================
   // 결재 및 탑승 신청 관련 핸들러
   // ============================================================
+
 
   // Auto open modal when initialStudent prop is provided (e.g. from Director Dashboard consultation)
   useEffect(() => {
@@ -2014,13 +2208,89 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                             </div>
                           </div>
                         </div>
+                      ) : (payload.isAbsenceForm || msg.type === 'ABSENCE_REQUEST') ? (
+                        /* ABSENCE / ATTENDANCE FORM CARD */
+                        <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} my-2 animate-fade-in`}>
+                          <div className="flex items-center gap-1.5 mb-1 px-1">
+                            <span className="text-xs font-bold text-slate-800">{senderName}</span>
+                            {senderRole && getRoleBadge(senderRole)}
+                          </div>
+
+                          <div className="flex items-end gap-1.5">
+                            {isMine && (
+                              <div className="flex flex-col items-end pb-1 select-none">
+                                {getUnreadNumber(msg) > 0 && (
+                                  <span className="text-[11px] font-black text-amber-500 leading-tight">
+                                    {getUnreadNumber(msg)}
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-slate-500 font-medium">
+                                  {formatMessageTime(msg.createdAt)}
+                                </span>
+                              </div>
+                            )}
+
+                            <div className="bg-white rounded-2xl border-2 border-rose-200 p-4 shadow-sm max-w-sm w-full space-y-3">
+                              <div className="flex items-center justify-between pb-2 border-b border-rose-100">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                                  <span className="text-xs font-black text-rose-950">
+                                    {payload.formTitle || '원아 결석계 (결석원)'}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  출결/캘린더 반영
+                                </span>
+                              </div>
+
+                              <div className="space-y-1.5 text-xs">
+                                <div className="flex justify-between">
+                                  <span className="text-slate-400 font-bold">대상 원아</span>
+                                  <span className="font-black text-slate-800">
+                                    {payload.studentName} {payload.className && `(${payload.className})`}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-slate-400 font-bold">적용 일자</span>
+                                  <span className="font-bold text-rose-700">
+                                    {payload.startDate === payload.endDate ? payload.startDate : `${payload.startDate} ~ ${payload.endDate}`}
+                                  </span>
+                                </div>
+                                <div className="bg-rose-50/70 p-2.5 rounded-xl border border-rose-100 text-rose-900 mt-2">
+                                  <span className="text-[11px] font-bold block text-rose-800 mb-0.5">신청 사유</span>
+                                  <p className="whitespace-pre-wrap leading-relaxed">{payload.reason || msg.text}</p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {!isMine && (
+                              <div className="flex flex-col items-start pb-1 select-none">
+                                {getUnreadNumber(msg) > 0 && (
+                                  <span className="text-[11px] font-black text-amber-500 leading-tight">
+                                    {getUnreadNumber(msg)}
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-slate-500 font-medium">
+                                  {formatMessageTime(msg.createdAt)}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       ) : (
                         /* Standard Chat Bubble */
                         isMine ? (
                           <div className="flex justify-end items-end gap-1.5 animate-fade-in">
-                            <span className="text-[10px] text-slate-600 select-none pb-1 font-medium">
-                              {formatMessageTime(msg.createdAt)}
-                            </span>
+                            <div className="flex flex-col items-end pb-0.5 select-none">
+                              {getUnreadNumber(msg) > 0 && (
+                                <span className="text-[11px] font-black text-amber-500 leading-tight">
+                                  {getUnreadNumber(msg)}
+                                </span>
+                              )}
+                              <span className="text-[10px] text-slate-500 font-medium">
+                                {formatMessageTime(msg.createdAt)}
+                              </span>
+                            </div>
                             <div className="bg-blue-600 text-white px-3.5 py-2.5 rounded-2xl rounded-tr-xs text-xs font-medium max-w-[70%] break-words shadow-xs">
                               <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
                             </div>
@@ -2041,9 +2311,16 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                 <div className="bg-white text-slate-800 px-3.5 py-2.5 rounded-2xl rounded-tl-xs text-xs font-medium break-words shadow-xs border border-white/80">
                                   <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
                                 </div>
-                                <span className="text-[10px] text-slate-600 select-none pb-1 font-medium">
-                                  {formatMessageTime(msg.createdAt)}
-                                </span>
+                                <div className="flex flex-col items-start pb-0.5 select-none">
+                                  {getUnreadNumber(msg) > 0 && (
+                                    <span className="text-[11px] font-black text-amber-500 leading-tight">
+                                      {getUnreadNumber(msg)}
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] text-slate-500 font-medium">
+                                    {formatMessageTime(msg.createdAt)}
+                                  </span>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -2083,36 +2360,36 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     )}
                     <button
                       type="button"
-                      onClick={() => {
-                        setShowPlusMenu(false);
-                        setInputText('[원아 결석 알림]\n- 원아명: \n- 결석 일자: 오늘\n- 결석 사유: ');
-                      }}
+                      onClick={() => handleOpenAbsenceModal('ABSENCE')}
                       className="w-full text-left px-3 py-2 rounded-xl hover:bg-rose-50 text-rose-950 font-bold text-xs flex items-center gap-2 transition"
                     >
                       <span className="w-6 h-6 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center text-xs font-black">결</span>
-                      <span>원아 결석 알림서</span>
+                      <div>
+                        <div className="font-bold text-slate-800">원아 결석계 (결석원)</div>
+                        <div className="text-[10px] text-slate-400 font-normal">사유 선택형 결재 서식</div>
+                      </div>
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        setShowPlusMenu(false);
-                        setInputText('[등원 지각 알림]\n- 원아명: \n- 예상 등원 시간: \n- 지각 사유: ');
-                      }}
+                      onClick={() => handleOpenAbsenceModal('LATENESS')}
                       className="w-full text-left px-3 py-2 rounded-xl hover:bg-amber-50 text-amber-950 font-bold text-xs flex items-center gap-2 transition"
                     >
                       <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center text-xs font-black">지</span>
-                      <span>등원 지각 알림서</span>
+                      <div>
+                        <div className="font-bold text-slate-800">등원 지각 알림서</div>
+                        <div className="text-[10px] text-slate-400 font-normal">시간 및 병원 사유 선택</div>
+                      </div>
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        setShowPlusMenu(false);
-                        setInputText('[연장 보육 신청]\n- 원아명: \n- 신청 시간: ~ 19:30\n- 귀가 방식: 직접 픽업');
-                      }}
+                      onClick={() => handleOpenAbsenceModal('EXTENDED_CARE')}
                       className="w-full text-left px-3 py-2 rounded-xl hover:bg-purple-50 text-purple-950 font-bold text-xs flex items-center gap-2 transition"
                     >
                       <span className="w-6 h-6 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center text-xs font-black">연</span>
-                      <span>연장 보육 신청서</span>
+                      <div>
+                        <div className="font-bold text-slate-800">연장 보육 / 개별 하원 신청</div>
+                        <div className="text-[10px] text-slate-400 font-normal">직접 픽업 및 연장 보육</div>
+                      </div>
                     </button>
                   </div>
                 )}
@@ -2577,6 +2854,300 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* MODAL: 원아 결석계 및 출결 변동 신청서 (Absence Form Modal) */}
+      {/* ============================================================ */}
+      {isAbsenceModalOpen && (
+        <div className="fixed inset-0 z-[3200] bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-rose-200 w-full max-w-md overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
+            {/* Modal Header */}
+            <div className="px-5 py-4 bg-gradient-to-r from-rose-50 to-pink-50 border-b border-rose-100 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-rose-500 text-white flex items-center justify-center font-black text-sm">
+                  서
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-rose-950">원아 결석계 및 출결 변동 신청</h3>
+                  <p className="text-[11px] text-rose-600 font-medium">채팅 타이핑 없이 간편 선택으로 출결 및 캘린더에 즉시 등록합니다.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAbsenceModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleSubmitAbsenceForm} className="p-5 overflow-y-auto space-y-4 flex-1 text-xs">
+              {/* 1. 서식 종류 탭 */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">신청 서식 종류</label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAbsenceFormType('ABSENCE');
+                      setAbsenceReason('감기 및 몸살로 인한 가정 요양');
+                    }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                      absenceFormType === 'ABSENCE'
+                        ? 'bg-rose-50 border-rose-300 text-rose-700 shadow-2xs'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    결석계 (결석원)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAbsenceFormType('LATENESS');
+                      setAbsenceReason('병원 진료 후 등원');
+                    }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                      absenceFormType === 'LATENESS'
+                        ? 'bg-amber-50 border-amber-300 text-amber-700 shadow-2xs'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    등원 지각 알림
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAbsenceFormType('EXTENDED_CARE');
+                      setAbsenceReason('보호자 야근으로 인한 연장 보육 신청');
+                    }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                      absenceFormType === 'EXTENDED_CARE'
+                        ? 'bg-purple-50 border-purple-300 text-purple-700 shadow-2xs'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    연장 보육 신청
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAbsenceFormType('PARENT_PICKUP');
+                      setAbsenceReason('보호자 직접 픽업 (셔틀 미탑승)');
+                    }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                      absenceFormType === 'PARENT_PICKUP'
+                        ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-2xs'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    직접 픽업
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. 대상 원아 선택 */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                  대상 원아 선택 <span className="text-red-500">*</span>
+                </label>
+                <div className="space-y-1.5">
+                  <input
+                    type="text"
+                    placeholder="원아 이름 또는 반명 검색..."
+                    value={absenceStudentSearch}
+                    onChange={(e) => setAbsenceStudentSearch(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:border-rose-400"
+                  />
+                  <div className="max-h-32 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 bg-slate-50/50">
+                    {(paymentContext.students || [])
+                      .filter((s) => {
+                        if (!absenceStudentSearch.trim()) return true;
+                        const kw = absenceStudentSearch.toLowerCase();
+                        const name = (s.name || '').toLowerCase();
+                        const c = (s.className || s.raw?.['반명'] || s.raw?.['반'] || '').toLowerCase();
+                        return name.includes(kw) || c.includes(kw);
+                      })
+                      .map((st) => {
+                        const isSelected = String(st.id) === String(absenceStudentId);
+                        const cName = st.className || st.raw?.['반명'] || st.raw?.['반'] || '';
+                        return (
+                          <div
+                            key={st.id}
+                            onClick={() => setAbsenceStudentId(String(st.id))}
+                            className={`p-2.5 flex items-center justify-between cursor-pointer transition-colors ${
+                              isSelected ? 'bg-rose-100/70 text-rose-900 font-black' : 'hover:bg-white text-slate-700'
+                            }`}
+                          >
+                            <span className="font-bold">{st.name}</span>
+                            <span className="text-[11px] text-slate-500">{cName || '반 미지정'}</span>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. 일자 / 기간 선택 */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-slate-700">적용 일자 / 기간</label>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const t = new Date().toISOString().split('T')[0];
+                        setAbsenceStartDate(t);
+                        setAbsenceEndDate(t);
+                      }}
+                      className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-bold hover:bg-slate-200"
+                    >
+                      오늘
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const tom = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+                        setAbsenceStartDate(tom);
+                        setAbsenceEndDate(tom);
+                      }}
+                      className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-bold hover:bg-slate-200"
+                    >
+                      내일
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block mb-0.5">시작일</span>
+                    <input
+                      type="date"
+                      value={absenceStartDate}
+                      onChange={(e) => setAbsenceStartDate(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-medium"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block mb-0.5">종료일</span>
+                    <input
+                      type="date"
+                      value={absenceEndDate}
+                      onChange={(e) => setAbsenceEndDate(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-medium"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. 사유 간편 선택 칩 */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">신청 사유 빠른 선택</label>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {absenceFormType === 'ABSENCE' && (
+                    <>
+                      {['감기 및 몸살', '병원 진료/치료', '가정 체험 학습', '집안 경조사/개인사정', '수두/유행성 질환'].map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => setAbsenceReason(r)}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all ${
+                            absenceReason === r
+                              ? 'bg-rose-50 border-rose-300 text-rose-700'
+                              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {absenceFormType === 'LATENESS' && (
+                    <>
+                      {['병원 진료 후 등원', '가정 사정 / 늦잠', '교통 정체 / 차량 지연'].map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => setAbsenceReason(r)}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all ${
+                            absenceReason === r
+                              ? 'bg-amber-50 border-amber-300 text-amber-700'
+                              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {absenceFormType === 'EXTENDED_CARE' && (
+                    <>
+                      {['학부모 야근으로 인한 연장 보육', '직접 픽업 (셔틀 미탑승)', '보호자 대리 픽업'].map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => setAbsenceReason(r)}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all ${
+                            absenceReason === r
+                              ? 'bg-purple-50 border-purple-300 text-purple-700'
+                              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {absenceFormType === 'PARENT_PICKUP' && (
+                    <>
+                      {['보호자 직접 픽업 (셔틀 미탑승)', '조부모 대리 픽업', '하원 후 병원 이동'].map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => setAbsenceReason(r)}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all ${
+                            absenceReason === r
+                              ? 'bg-blue-50 border-blue-300 text-blue-700'
+                              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </div>
+                <textarea
+                  rows={2}
+                  placeholder="추가 특이사항이나 상세 사유가 있으면 입력해주세요 (선택사항)..."
+                  value={absenceDetail}
+                  onChange={(e) => setAbsenceDetail(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:border-rose-400"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAbsenceModalOpen(false)}
+                  className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingAbsence || !absenceStudentId}
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black shadow-xs transition-colors disabled:opacity-50"
+                >
+                  {isSubmittingAbsence ? '신청서 등록 중...' : '신청서 전송하기'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
