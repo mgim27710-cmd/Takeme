@@ -4563,7 +4563,6 @@ const parseKindergartenExcelSheet = (sheet) => {
         </button>
 
         <button 
-        <button 
           onClick={() => handleTabChange('photos')} 
           className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 mb-1 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'photos' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
           title="사진 보관함 (클라우드)"

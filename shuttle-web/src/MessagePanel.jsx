@@ -468,9 +468,6 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         );
       }
     };
-        );
-      }
-    };
 
     socket.on('receiveMessage', handleReceiveMessage);
     socket.on('roomUpdated', handleRoomUpdated);
