@@ -295,6 +295,13 @@ export default function DocumentSidebar({
                 <span>호차별 운행 노선표 및 시간표</span>
                 <span className="text-xs bg-emerald-50 text-emerald-700 group-hover:bg-emerald-500 group-hover:text-white px-2 py-0.5 rounded-md font-bold">인쇄</span>
               </button>
+              <button
+                onClick={() => handleDownloadTemplate('attendance-log')}
+                className="w-full py-2.5 px-3 bg-white hover:bg-indigo-600 text-[13px] font-bold text-slate-800 hover:text-white border border-slate-200 hover:border-indigo-600 rounded-xl transition-all shadow-2xs flex items-center justify-between group"
+              >
+                <span>교직원·셔틀 근태표 (월간 출근부)</span>
+                <span className="text-xs bg-indigo-50 text-indigo-700 group-hover:bg-indigo-500 group-hover:text-white px-2 py-0.5 rounded-md font-bold">인쇄</span>
+              </button>
             </div>
 
             <div className="space-y-1.5 pt-2 border-t border-blue-200/60">

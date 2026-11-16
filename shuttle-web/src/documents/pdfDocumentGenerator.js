@@ -1054,6 +1054,127 @@ export function openPrintDocument(type, data = {}) {
         </div>
       </div>
     `;
+  } else if (type === 'attendance-log' || type === 'attendance') {
+    title = `교직원_및_셔틀운행인력_월간근태표_${academyName}`;
+    const staffName = bus ? (bus.driverName && bus.driverName !== '미정' ? bus.driverName : (bus.teacherName && bus.teacherName !== '미정' ? bus.teacherName : '교직원 / 셔틀인력')) : '교직원 / 셔틀인력';
+    const staffRole = bus ? (bus.driverName ? '통학버스 운전기사' : '차량선생님(동승교사)') : '교직원 / 셔틀담당자';
+    const busText = bus ? `${bus.name} (${bus.plateNumber || '전용차량'})` : '원내 상주 / 셔틀 전담';
+
+    // Generate month day rows (1 to 31)
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+    let rowsHtml = '';
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dayDate = new Date(year, month - 1, d);
+      const dayOfWeek = dayNames[dayDate.getDay()];
+      const isWeekend = dayDate.getDay() === 0 || dayDate.getDay() === 6;
+      const rowBg = isWeekend ? 'background-color: #f8fafc; color: #94a3b8;' : '';
+
+      rowsHtml += `
+        <tr style="${rowBg}">
+          <td style="text-align: center; font-weight: bold;">${d}</td>
+          <td style="text-align: center; font-weight: ${isWeekend ? 'normal' : 'bold'}; ${dayOfWeek === '일' ? 'color: #ef4444;' : dayOfWeek === '토' ? 'color: #3b82f6;' : ''}">${dayOfWeek}</td>
+          <td style="text-align: center;">${isWeekend ? '-' : ''}</td>
+          <td style="text-align: center;">${isWeekend ? '-' : ''}</td>
+          <td style="text-align: center;">${isWeekend ? '-' : ''}</td>
+          <td style="text-align: center;">${isWeekend ? '-' : ''}</td>
+          <td style="text-align: center;">${isWeekend ? '휴무' : ''}</td>
+        </tr>
+      `;
+    }
+
+    bodyHtml = `
+      <div class="doc-container">
+        <div class="header-section">
+          <div class="title-wrap">
+            <h1>교직원 및 셔틀 운행인력 월간 근태표</h1>
+            <p class="sub-text">근로기준법 제41조 및 제42조 준수 표준 출근부 (주휴수당 및 셔틀 운행시간 산정)</p>
+          </div>
+          <table class="approval-table">
+            <tr>
+              <th rowspan="2" class="v-header">결<br>재</th>
+              <th>작성자</th>
+              <th>안전책임자</th>
+              <th>원 장</th>
+            </tr>
+            <tr>
+              <td class="sign-box"></td>
+              <td class="sign-box"></td>
+              <td class="sign-box"></td>
+            </tr>
+          </table>
+        </div>
+
+        <table class="info-table">
+          <tr>
+            <th style="width: 15%;">유치원·학원명</th>
+            <td style="width: 35%; font-weight: bold;">${academyName}</td>
+            <th style="width: 15%;">대상 연월</th>
+            <td style="width: 35%; font-weight: bold; color: #2563eb;">${year}년 ${String(month).padStart(2, '0')}월</td>
+          </tr>
+          <tr>
+            <th>성 명</th>
+            <td style="font-weight: bold;">${staffName}</td>
+            <th>직책 / 직무</th>
+            <td>${staffRole}</td>
+          </tr>
+          <tr>
+            <th>배정 호차</th>
+            <td>${busText}</td>
+            <th>소정 근로시간</th>
+            <td>일 8시간 (또는 셔틀 운행스케줄 기준)</td>
+          </tr>
+        </table>
+
+        <!-- Monthly Attendance Grid -->
+        <table class="grid-table" style="margin-top: 15px; font-size: 11px;">
+          <thead>
+            <tr style="background: #f1f5f9;">
+              <th style="width: 8%;">일자</th>
+              <th style="width: 8%;">요일</th>
+              <th style="width: 18%;">출근 시각</th>
+              <th style="width: 18%;">퇴근 시각</th>
+              <th style="width: 16%;">인정 근무시간</th>
+              <th style="width: 14%;">확인 (서명)</th>
+              <th style="width: 18%;">비고 (휴가/대체)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+
+        <!-- Monthly Summary Box -->
+        <table class="grid-table" style="margin-top: 15px; font-size: 12px; background: #fafafa;">
+          <tr style="font-weight: bold;">
+            <th style="width: 25%; background: #e2e8f0;">총 근무일수</th>
+            <td style="width: 25%; text-align: center;">_______ 일</td>
+            <th style="width: 25%; background: #e2e8f0;">연장 / 휴일 근무</th>
+            <td style="width: 25%; text-align: center;">_______ 시간</td>
+          </tr>
+          <tr style="font-weight: bold;">
+            <th style="background: #e2e8f0;">유급휴가(연차/반차)</th>
+            <td style="text-align: center;">_______ 일</td>
+            <th style="background: #e2e8f0;">결근 / 병가 / 공가</th>
+            <td style="text-align: center;">_______ 일</td>
+          </tr>
+        </table>
+
+        <div style="margin-top: 15px; padding: 10px; border: 1px dashed #cbd5e1; background: #f8fafc; border-radius: 6px; font-size: 11px; color: #64748b; line-height: 1.5;">
+          <strong>법적 효력 및 보존 안내</strong>: 본 출근부는 근로기준법상 3년간 보존 의무가 있는 법정 근태 대장입니다. 셔틀 운행 시작/종료 로그 및 GPS 탑승 기록을 기반으로 작성되며, 급여 계산 및 주 15시간 이상 주휴수당 적격 심사 자료로 활용됩니다.
+        </div>
+
+        <div class="footer-sign" style="margin-top: 25px;">
+          <div class="date-line">${autoDateKorean}</div>
+          <div class="sign-names" style="margin-top: 15px;">
+            근무자 성명: <span style="font-weight: bold; text-decoration: underline;">&nbsp;&nbsp;${staffName}&nbsp;&nbsp;</span> (인/서명)
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+            유치원·학원 대표자: <span style="font-weight: bold; text-decoration: underline;">&nbsp;&nbsp;${academyName} 원장&nbsp;&nbsp;</span> (직인)
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   const printWindow = window.open('', '_blank');

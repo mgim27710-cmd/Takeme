@@ -18,6 +18,7 @@ import { openPrintDocument } from './pdfDocumentGenerator';
 
 const CATEGORIES = [
   { id: 'all', label: '전체 서류' },
+  { id: 'attendance', label: '근태·출근부' },
   { id: 'registry', label: '학원·설립등록' },
   { id: 'shuttle_consent', label: '차량이용동의서' },
   { id: 'privacy', label: '개인정보동의서' },
@@ -1098,6 +1099,27 @@ export default function DocumentManager({
                     </div>
                   </div>
                   <span className="text-xs font-black text-emerald-700 bg-white group-hover:bg-emerald-600 group-hover:text-white px-3.5 py-1.5 rounded-xl border border-emerald-200 transition-colors shrink-0 shadow-2xs">
+                    인쇄 / PDF
+                  </span>
+                </button>
+
+                {/* 7. 근태표 (월간 출근부) */}
+                <button
+                  onClick={() => handleDownloadTemplate('attendance-log')}
+                  className="flex items-center justify-between p-5 bg-slate-50/60 hover:bg-indigo-50/60 border border-slate-200 hover:border-indigo-400 rounded-2xl transition-all text-left shadow-xs group md:col-span-2"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md">노무·근로기준법</span>
+                      <span className="text-sm font-extrabold text-slate-900 group-hover:text-indigo-700">
+                        교직원 및 셔틀 운행인력 근태표 (월간 출근부)
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-600 mt-1 font-medium">
+                      {activeBus ? `[${activeBus.name}] 기사(${activeBus.driverName || '기사'}) 및 차량선생님(${activeBus.teacherName || '담당교사'}) 출퇴근 시간 및 법정 근무기록부` : '교사, 기사, 차량선생님 출퇴근 시간 및 주휴수당·연장근로 산정용 표준 월간 출근부'}
+                    </div>
+                  </div>
+                  <span className="text-xs font-black text-indigo-700 bg-white group-hover:bg-indigo-600 group-hover:text-white px-3.5 py-1.5 rounded-xl border border-indigo-200 transition-colors shrink-0 shadow-2xs">
                     인쇄 / PDF
                   </span>
                 </button>

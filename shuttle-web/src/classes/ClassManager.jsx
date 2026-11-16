@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 
 import { formatTeacherName } from '../utils/teacherUtil';
 import { API_BASE_URL } from '../config';
@@ -37,6 +37,37 @@ export function getStudentGender(st) {
 }
 
 const AGE_OPTIONS = ['3세', '4세', '5세', '6세', '7세', '혼합반'];
+const WEEKDAY_OPTIONS = ['월', '화', '수', '목', '금', '토'];
+
+const DEFAULT_OPERATING_SESSIONS = [
+  {
+    id: 'reg_drop',
+    name: '정규하원',
+    startTime: '09:00',
+    endTime: '14:30',
+    isFullDay: false,
+    shuttleOffset: '반 시작 40분 전',
+    days: ['월', '화', '수', '목', '금'],
+  },
+  {
+    id: 'after_drop',
+    name: '방과후하원',
+    startTime: '14:30',
+    endTime: '16:30',
+    isFullDay: false,
+    shuttleOffset: '반 시작 30분 전',
+    days: ['월', '화', '수', '목', '금'],
+  },
+  {
+    id: 'fullday_drop',
+    name: '종일반하원',
+    startTime: '09:00',
+    endTime: '19:30',
+    isFullDay: true,
+    shuttleOffset: '반 시작 40분 전',
+    days: ['월', '화', '수', '목', '금'],
+  },
+];
 
 export default function ClassManager({
   academyId,
@@ -82,6 +113,41 @@ export default function ClassManager({
   // Staged changes: { [studentId]: targetClassName }
   // When targetClassName === '', it means unassigned.
   const [stagedAssignments, setStagedAssignments] = useState({});
+
+  // Operating schedule sessions state (정규하원, 방과후하원, 종일반)
+  const [scheduleSessions, setScheduleSessions] = useState(() => {
+    try {
+      const saved = localStorage.getItem('takeme_academy_schedule_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (_) {}
+    return DEFAULT_OPERATING_SESSIONS;
+  });
+
+  // Modal for editing operating schedule sessions
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [tempScheduleSessions, setTempScheduleSessions] = useState([]);
+
+  // Day filter state ('ALL', '월', '화', '수', '목', '금', '토')
+  const [selectedDayFilter, setSelectedDayFilter] = useState('ALL');
+
+  // Synchronize schedule settings if changed in other views
+  useEffect(() => {
+    const handleSync = (e) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setScheduleSessions(e.detail);
+      } else {
+        try {
+          const saved = localStorage.getItem('takeme_academy_schedule_settings');
+          if (saved) setScheduleSessions(JSON.parse(saved));
+        } catch (_) {}
+      }
+    };
+    window.addEventListener('takeme_schedule_settings_changed', handleSync);
+    return () => window.removeEventListener('takeme_schedule_settings_changed', handleSync);
+  }, []);
 
   // Class Age metadata: { [className]: '3세' | '4세' | '5세' | '6세' | '7세' | '혼합반' }
   const [classAgeMap, setClassAgeMap] = useState(() => {
@@ -213,13 +279,50 @@ export default function ClassManager({
     }
   }, [allClassNames, bulkTargetClass]);
 
-  // Effective Unassigned Students
+  // Determine if a student attends on a specific day
+  const isStudentAttendingOnDay = useCallback((st, day) => {
+    if (!day || day === 'ALL') return true;
+    const raw = typeof st?.raw === 'object' && st.raw ? st.raw : {};
+
+    // 1. Check explicit raw day column if present
+    const rawDayVal = raw['등원요일'] || raw['운영요일'] || raw['요일'] || raw['등하원요일'] || raw['출석요일'] || st?.operatingDays || '';
+    if (rawDayVal && String(rawDayVal).trim()) {
+      return String(rawDayVal).includes(day);
+    }
+
+    // 2. Check matching session based on departureType / 하원구분
+    const depType = String(st?.departureType || raw['하원구분'] || raw['구분'] || raw['반형태'] || raw['등하원구분'] || '').trim().toLowerCase();
+
+    let matchedSession = null;
+    if (depType.includes('종일')) {
+      matchedSession = scheduleSessions.find(s => s.isFullDay || (s.name && s.name.includes('종일')));
+    } else if (depType.includes('방과후')) {
+      matchedSession = scheduleSessions.find(s => s.id === 'after_drop' || (s.name && s.name.includes('방과후')));
+    } else if (depType.includes('정규')) {
+      matchedSession = scheduleSessions.find(s => s.id === 'reg_drop' || (s.name && s.name.includes('정규')));
+    }
+
+    if (matchedSession && Array.isArray(matchedSession.days) && matchedSession.days.length > 0) {
+      return matchedSession.days.includes(day);
+    }
+
+    // 3. Fallback: Standard Monday to Friday attendance
+    return ['월', '화', '수', '목', '금'].includes(day);
+  }, [scheduleSessions]);
+
+  // Day-filtered effective students
+  const dayFilteredStudents = useMemo(() => {
+    if (selectedDayFilter === 'ALL') return effectiveStudents;
+    return effectiveStudents.filter(st => isStudentAttendingOnDay(st, selectedDayFilter));
+  }, [effectiveStudents, selectedDayFilter, isStudentAttendingOnDay]);
+
+  // Effective Unassigned Students (day-filtered)
   const unassignedStudents = useMemo(() => {
-    return effectiveStudents.filter(st => {
+    return dayFilteredStudents.filter(st => {
       const cls = (st.raw?.['반명'] || st.raw?.['반'] || '').trim();
       return !cls || cls === '미배정' || !allClassNames.includes(cls);
     });
-  }, [effectiveStudents, allClassNames]);
+  }, [dayFilteredStudents, allClassNames]);
 
   // Filtered Unassigned Students by search keyword, age, and gender
   const filteredUnassignedStudents = useMemo(() => {
@@ -266,20 +369,20 @@ export default function ClassManager({
     return { male, female, ageCount };
   }, [unassignedStudents]);
 
-  // Group assigned students by class
+  // Group assigned students by class (day-filtered)
   const classStudentMap = useMemo(() => {
     const map = {};
     allClassNames.forEach(c => {
       map[c] = [];
     });
-    effectiveStudents.forEach(st => {
+    dayFilteredStudents.forEach(st => {
       const cls = (st.raw?.['반명'] || st.raw?.['반'] || '').trim();
       if (cls && map[cls]) {
         map[cls].push(st);
       }
     });
     return map;
-  }, [allClassNames, effectiveStudents]);
+  }, [allClassNames, dayFilteredStudents]);
 
   // Map of homeroom teacher for each class
   const classTeacherMap = useMemo(() => {
@@ -657,6 +760,22 @@ export default function ClassManager({
             <span className="text-slate-600">미배정 {teachers.filter(t => !t.assignedClass).length}명</span>
           </div>
 
+          {/* Operating Sessions & Schedule Setting Button */}
+          <button
+            type="button"
+            onClick={() => {
+              setTempScheduleSessions(JSON.parse(JSON.stringify(scheduleSessions)));
+              setIsScheduleModalOpen(true);
+            }}
+            className="px-3.5 py-2 rounded-xl text-xs font-black bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 shadow-2xs hover:border-slate-400 transition flex items-center gap-1.5 active:scale-95"
+            title="정규하원, 방과후하원, 종일반 시간표 및 차량 출발 시점 설정"
+          >
+            <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>운영 세션·시간표 설정</span>
+          </button>
+
           {/* Save Changes Button (Always present in top bar) */}
           <button
             type="button"
@@ -686,6 +805,101 @@ export default function ClassManager({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
+          )}
+        </div>
+      </div>
+
+      {/* Operating Sessions Summary Banner */}
+      <div className="bg-slate-50/90 backdrop-blur-xs px-8 py-2.5 border-b border-slate-200 shrink-0">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider">운영 세션</span>
+            <span className="text-[10px] text-slate-300">|</span>
+            <span className="text-xs text-slate-500 font-medium">설문 및 설정된 3개 하원 세션(시작/종료, 차량출발, 운영요일) 정보입니다.</span>
+          </div>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {scheduleSessions.map((session, idx) => (
+              <div
+                key={session.id || idx}
+                className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs text-xs"
+              >
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                  session.isFullDay ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+                }`}>
+                  {session.isFullDay ? '종일반' : '일반'}
+                </span>
+                <span className="font-extrabold text-slate-800">{session.name}</span>
+                <span className="text-slate-500 font-mono text-[11px]">
+                  {session.startTime} ~ {session.endTime}
+                </span>
+                <span className="text-slate-300">|</span>
+                <span className="text-[11px] text-slate-600 font-bold">
+                  {session.shuttleOffset || '반 시작 40분 전'}
+                </span>
+                <span className="text-slate-300">|</span>
+                <span className="text-[10px] font-extrabold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+                  {Array.isArray(session.days) && session.days.length > 0 ? session.days.join(',') : '월~금'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Sub-Bar: 등원 요일 선택 필터 (선택한 요일에 등원하는 학생만 미배정/반 컬럼에 표시) */}
+      <div className="bg-slate-100/80 px-8 py-2 border-b border-slate-200 flex items-center justify-between gap-4 shrink-0 text-xs">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <span className="text-[11px] font-black text-slate-700 flex items-center gap-1.5">
+            <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            등원 요일 선택:
+          </span>
+          <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs font-bold">
+            <button
+              type="button"
+              onClick={() => setSelectedDayFilter('ALL')}
+              className={`px-3 py-1 rounded-lg text-xs transition ${
+                selectedDayFilter === 'ALL'
+                  ? 'bg-blue-600 text-white font-black shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              전체 요일 ({effectiveStudents.length}명)
+            </button>
+            {WEEKDAY_OPTIONS.map(day => {
+              const count = effectiveStudents.filter(st => isStudentAttendingOnDay(st, day)).length;
+              const isSelected = selectedDayFilter === day;
+              return (
+                <button
+                  key={day}
+                  type="button"
+                  onClick={() => setSelectedDayFilter(day)}
+                  className={`px-2.5 py-1 rounded-lg text-xs transition flex items-center gap-1.5 ${
+                    isSelected
+                      ? 'bg-blue-600 text-white font-black shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>{day}요일</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                    isSelected ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="text-[11px] text-slate-500 font-medium hidden sm:block">
+          {selectedDayFilter === 'ALL' ? (
+            <span>전체 원아가 표시됩니다. 요일을 선택하면 해당 요일 등원 원아만 즉시 필터링됩니다.</span>
+          ) : (
+            <span className="font-bold text-blue-700">
+              [{selectedDayFilter}요일] 등원 원아 총 {dayFilteredStudents.length}명 필터링 표시 중 (미배정 {unassignedStudents.length}명 / 배정 {dayFilteredStudents.length - unassignedStudents.length}명)
+            </span>
           )}
         </div>
       </div>
@@ -1297,6 +1511,163 @@ export default function ClassManager({
           })}
         </div>
       </div>
+
+      {/* Operating Schedule Modal */}
+      {isScheduleModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-6 lg:p-7 border border-slate-200 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200 shrink-0">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">운영 세션 및 시간표 설정</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  정규하원, 방과후하원, 종일반의 시작·종료 시간, 차량 출발 시점, 종일반 여부 및 운영 요일을 설정합니다.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsScheduleModalOpen(false)}
+                className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center font-bold text-sm transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-4 space-y-4 pr-1">
+              {tempScheduleSessions.map((session, sIdx) => (
+                <div key={session.id || sIdx} className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-blue-900 bg-blue-100 px-2.5 py-1 rounded-lg">
+                        세션 {sIdx + 1}
+                      </span>
+                      <input
+                        type="text"
+                        value={session.name}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setTempScheduleSessions(prev => prev.map((s, idx) => idx === sIdx ? { ...s, name: val } : s));
+                        }}
+                        className="text-sm font-extrabold text-slate-800 bg-white border border-slate-300 rounded-lg px-2.5 py-1 focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                      <input
+                        type="checkbox"
+                        checked={session.isFullDay || false}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setTempScheduleSessions(prev => prev.map((s, idx) => idx === sIdx ? { ...s, isFullDay: checked } : s));
+                        }}
+                        className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                      />
+                      <span>종일반 여부</span>
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">반 시작시간</label>
+                      <input
+                        type="time"
+                        value={session.startTime}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setTempScheduleSessions(prev => prev.map((s, idx) => idx === sIdx ? { ...s, startTime: val } : s));
+                        }}
+                        className="w-full px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-xl bg-white shadow-2xs focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">반 종료시간</label>
+                      <input
+                        type="time"
+                        value={session.endTime}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setTempScheduleSessions(prev => prev.map((s, idx) => idx === sIdx ? { ...s, endTime: val } : s));
+                        }}
+                        className="w-full px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-xl bg-white shadow-2xs focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">차량 출발 시점</label>
+                      <input
+                        type="text"
+                        value={session.shuttleOffset || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setTempScheduleSessions(prev => prev.map((s, idx) => idx === sIdx ? { ...s, shuttleOffset: val } : s));
+                        }}
+                        placeholder="예: 반 시작 40분 전"
+                        className="w-full px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-xl bg-white shadow-2xs focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1.5">운영 요일 선택</label>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {WEEKDAY_OPTIONS.map(day => {
+                        const isChecked = Array.isArray(session.days) && session.days.includes(day);
+                        return (
+                          <button
+                            key={day}
+                            type="button"
+                            onClick={() => {
+                              setTempScheduleSessions(prev => prev.map((s, idx) => {
+                                if (idx !== sIdx) return s;
+                                const currentDays = Array.isArray(s.days) ? s.days : [];
+                                const updatedDays = currentDays.includes(day)
+                                  ? currentDays.filter(d => d !== day)
+                                  : [...currentDays, day];
+                                return { ...s, days: updatedDays };
+                              }));
+                            }}
+                            className={`px-3 py-1 rounded-xl text-xs font-bold transition border ${
+                              isChecked
+                                ? 'bg-blue-600 text-white border-blue-600 shadow-2xs font-black'
+                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {day}요일
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-200 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsScheduleModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setScheduleSessions(tempScheduleSessions);
+                  try {
+                    localStorage.setItem('takeme_academy_schedule_settings', JSON.stringify(tempScheduleSessions));
+                    window.dispatchEvent(new CustomEvent('takeme_schedule_settings_changed', { detail: tempScheduleSessions }));
+                  } catch (err) {
+                    console.error(err);
+                  }
+                  setIsScheduleModalOpen(false);
+                  alert('운영 세션 및 시간표 설정이 성공적으로 저장되었습니다.');
+                }}
+                className="px-5 py-2 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition"
+              >
+                설정 저장
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
