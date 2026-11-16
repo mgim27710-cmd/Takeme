@@ -1239,12 +1239,12 @@ export class TeacherService {
     const overrides = await this.getActiveOverridesForToday();
 
     const qb = this.studentRepository.createQueryBuilder('s')
-      .leftJoinAndSelect('s.assignedVehicle', 'vehicle')
-      .leftJoinAndSelect('s.parentUser', 'parentUser');
+      .leftJoinAndSelect('s.assignedVehicle', 'vehicle');
 
     if (academyId) {
       qb.where('s.academyId = :academyId', { academyId });
     }
+    qb.andWhere('(s.className = :assignedClass OR s.className IS NULL OR s.className = \'\')', { assignedClass });
 
     const allStudents = await qb.getMany();
 
@@ -1320,32 +1320,31 @@ export class TeacherService {
     const date = (dateInput && isValidDateString(dateInput)) ? dateInput : kstDateString();
     const academyId = user.academy?.id || user.academyId;
 
-    const submission = await this.submissionRepository.findOne({
-      where: {
-        academy: { id: academyId },
-        className: assignedClass,
-        date,
-      },
-    });
+    // 1) 제출 내역과 학생 목록 병렬 조회 (불필요한 parentUser 조인 제거 및 타 반 원천 배제로 성능 극대화)
+    const [submission, allStudents] = await Promise.all([
+      this.submissionRepository.findOne({
+        where: {
+          academy: { id: academyId },
+          className: assignedClass,
+          date,
+        },
+      }),
+      this.studentRepository.createQueryBuilder('s')
+        .leftJoinAndSelect('s.assignedVehicle', 'vehicle')
+        .where('s.academyId = :academyId', { academyId })
+        .andWhere('(s.className = :assignedClass OR s.className IS NULL OR s.className = \'\')', { assignedClass })
+        .getMany(),
+    ]);
 
-    const qb = this.studentRepository.createQueryBuilder('s')
-      .leftJoinAndSelect('s.assignedVehicle', 'vehicle')
-      .leftJoinAndSelect('s.parentUser', 'parentUser');
-
-    if (academyId) {
-      qb.where('s.academyId = :academyId', { academyId });
-    }
-
-    const allStudents = await qb.getMany();
     const classStudents = allStudents.filter(s => isSameClass(getStudentClassName(s), assignedClass));
 
     const studentIds = classStudents.map(s => s.id);
     let attendances: Attendance[] = [];
     if (studentIds.length > 0) {
-      attendances = await this.attendanceRepository.createQueryBuilder('att')
-        .leftJoinAndSelect('att.student', 'student')
-        .where('att.studentId IN (:...ids) AND att.date = :date', { ids: studentIds, date })
-        .getMany();
+      attendances = await this.attendanceRepository.find({
+        where: { student: { id: In(studentIds) }, date },
+        relations: { student: true },
+      });
     }
 
     const attendanceMap = new Map<number, Attendance>();

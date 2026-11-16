@@ -93,14 +93,34 @@ export default function TeacherDashboard({
   const [attendanceDate, setAttendanceDate] = useState(() => {
     return new Date().toISOString().slice(0, 10);
   });
-  const [attendanceData, setAttendanceData] = useState(null);
+  const [attendanceData, setAttendanceData] = useState(() => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const saved = localStorage.getItem(`takeme_attendance_cache_${today}`);
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return null;
+  });
   const [isAttendanceLoading, setIsAttendanceLoading] = useState(false);
   const [isSubmittingAttendance, setIsSubmittingAttendance] = useState(false);
 
   const fetchAttendance = useCallback(async (date) => {
     const targetDate = date || attendanceDate;
+    const cacheKey = `takeme_attendance_cache_${targetDate}`;
+
+    // 캐시가 있으면 스피너로 화면을 가리지 않고 즉시 화면에 노출 (0초 반응)
     try {
-      setIsAttendanceLoading(true);
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        setAttendanceData(JSON.parse(cached));
+      } else if (!attendanceData || attendanceData.date !== targetDate) {
+        setIsAttendanceLoading(true);
+      }
+    } catch (_) {
+      if (!attendanceData) setIsAttendanceLoading(true);
+    }
+
+    try {
       let token = localStorage.getItem('takeme_token');
       if (!token) {
         try {
@@ -116,13 +136,16 @@ export default function TeacherDashboard({
       if (res.ok) {
         const data = await res.json();
         setAttendanceData(data);
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(data));
+        } catch (_) {}
       }
     } catch (e) {
       console.error('Failed to fetch attendance:', e);
     } finally {
       setIsAttendanceLoading(false);
     }
-  }, [attendanceDate]);
+  }, [attendanceDate, attendanceData]);
 
   useEffect(() => {
     if (activeNavTab === 'attendance') {
@@ -132,18 +155,46 @@ export default function TeacherDashboard({
 
   const handleAttendanceStatusChange = (studentId, status) => {
     if (!attendanceData?.students) return;
-    setAttendanceData(prev => ({
-      ...prev,
-      students: prev.students.map(s => s.studentId === studentId ? { ...s, status } : s)
-    }));
+    setAttendanceData(prev => {
+      const updatedStudents = prev.students.map(s => s.studentId === studentId ? { ...s, status } : s);
+      const updated = {
+        ...prev,
+        students: updatedStudents,
+        summary: {
+          total: updatedStudents.length,
+          present: updatedStudents.filter(s => s.status === 'PRESENT').length,
+          absent: updatedStudents.filter(s => s.status === 'ABSENT').length,
+          late: updatedStudents.filter(s => s.status === 'LATE').length,
+          earlyLeave: updatedStudents.filter(s => s.status === 'EARLY_LEAVE').length,
+        }
+      };
+      try {
+        localStorage.setItem(`takeme_attendance_cache_${attendanceDate}`, JSON.stringify(updated));
+      } catch (_) {}
+      return updated;
+    });
   };
 
   const handleAllPresent = () => {
     if (!attendanceData?.students) return;
-    setAttendanceData(prev => ({
-      ...prev,
-      students: prev.students.map(s => ({ ...s, status: 'PRESENT' }))
-    }));
+    setAttendanceData(prev => {
+      const updatedStudents = prev.students.map(s => ({ ...s, status: 'PRESENT' }));
+      const updated = {
+        ...prev,
+        students: updatedStudents,
+        summary: {
+          total: updatedStudents.length,
+          present: updatedStudents.length,
+          absent: 0,
+          late: 0,
+          earlyLeave: 0,
+        }
+      };
+      try {
+        localStorage.setItem(`takeme_attendance_cache_${attendanceDate}`, JSON.stringify(updated));
+      } catch (_) {}
+      return updated;
+    });
   };
 
   const handleSubmitAttendance = async () => {
@@ -1584,7 +1635,7 @@ export default function TeacherDashboard({
 
             {/* Students List */}
             <div className="flex-1 overflow-y-auto p-5 sm:p-6">
-              {isAttendanceLoading ? (
+              {isAttendanceLoading && (!attendanceData?.students || attendanceData.students.length === 0) ? (
                 <div className="flex items-center justify-center py-20">
                   <div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                 </div>
