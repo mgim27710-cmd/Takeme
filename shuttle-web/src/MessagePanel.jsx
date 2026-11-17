@@ -1662,11 +1662,14 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           ) : (
             filteredRooms.map((room) => {
               const isSelected = activeRoom && activeRoom.id === room.id;
+              const isSystemAlert = room.type === 'SYSTEM' || room.type === 'SYSTEM_ALERT' || room.name === 'TakeMe 알림' || room.name === '실시간 알림' || Boolean(room.isSystem);
               const isPaymentSystem = room.type === 'PAYMENT_SYSTEM' || room.name === '결재 전용 채널' || room.name === '결제 시스템 방';
               const isNotificationSystem = room.type === 'NOTIFICATION_SYSTEM' || room.name === '실시간 알림 채널' || room.name === '공지사항';
-              const title = getRoomTitle(room);
+              const title = isSystemAlert ? (room.name || 'TakeMe 알림') : getRoomTitle(room);
               const isGroup = (room.members || []).length > 2 || room.type === 'GROUP';
-              const lastText = isPaymentSystem
+              const lastText = isSystemAlert
+                ? room.latestMessage?.text || '시스템 알림 채널입니다.'
+                : isPaymentSystem
                 ? room.latestMessage?.text || '신규 원생 탑승 및 결재 승인 요청 전용 채널입니다.'
                 : isNotificationSystem
                 ? room.latestMessage?.text || '실시간 출결 변동 및 결재 승인 완료 알림 채널입니다.'

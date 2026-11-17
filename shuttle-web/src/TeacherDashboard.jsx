@@ -902,6 +902,11 @@ export default function TeacherDashboard({
     return displayedStudents.filter(st => !changedStudents.some(cs => cs.id === st.id));
   }, [displayedStudents, changedStudents]);
 
+  // Card View용 정렬 (변동/신청 학생 우선 정렬)
+  const sortedDisplayedStudents = useMemo(() => {
+    return [...changedStudents, ...regularStudents];
+  }, [changedStudents, regularStudents]);
+
   // Group regular students by age and sort by gender (남, 여 살짝 띄워서)
   const groupedRegularStudents = useMemo(() => {
     const groups = {};

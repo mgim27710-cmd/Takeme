@@ -903,7 +903,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   // 지도 범례 클릭 핸들러: 만석 구역으로 포커스
   const handleFocusFullBusZone = () => {
     const fullBus = buses.find(b => {
-      const riders = getBusCapacityInfo(b.id, students);
+      const riders = getBusRiderDetails(b, students);
       return riders.isFull;
     });
 
