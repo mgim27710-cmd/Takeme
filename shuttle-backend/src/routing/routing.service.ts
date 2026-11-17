@@ -1167,53 +1167,29 @@ export class RoutingService {
           if (bestNeighbor) {
             bestNeighbor.assignedStudents.push(st);
           } else {
-            // 주변 5km 이내에 다른 배차 차량이 없어 증차 필요 상태
+            // 정원 초과 또는 주변 5km 이내 여유 차량 없음 -> 증차 필요 상태로 설정하고 배차 해제
             st.needsExtraBus = true;
             st.unassignedReason = 'SURPLUS_NO_NEIGHBOR_5KM';
-            await this.studentRepository.update(st.id, { assignedVehicle: null }).catch(() => {});
+            st.assignedVehicle = null;
+            st.assignedDepartureVehicle = null;
+            await this.studentRepository.update(st.id, { assignedVehicle: null, assignedDepartureVehicle: null }).catch(() => {});
           }
         }
       }
     }
 
-    // Now auto-expand each vehicle's zone to encompass all its assigned students!
-    // Buffer = 0.35km ensures tight envelope coverage while bisector clipping guarantees 0% overlap
-    const studentPointsList = vehicleStates.map(vs => {
+    // Now auto-expand each vehicle's zone to encompass ALL its assigned students!
+    // Using 0.45km service buffer ensures 100% of assigned students are strictly inside their vehicle's zone polygon.
+    for (let i = 0; i < vehicleStates.length; i++) {
+      const vs = vehicleStates[i];
       const studentPts = vs.assignedStudents.map(s => [Number(s.latitude), Number(s.longitude)] as [number, number]);
-      const basePts = vs.polygon.length > 0 ? vs.polygon : [];
-      return studentPts.length > 0 ? studentPts : basePts;
-    });
-
-    const expandedPolygons = this.partitionVehicleZones(studentPointsList, 0.35);
-
-    // Save expanded polygons to DB
-    for (let i = 0; i < vehicleStates.length; i++) {
-      const vs = vehicleStates[i];
-      const poly = expandedPolygons[i];
-      if (poly && poly.length >= 3) {
-        vs.vehicle.polygonCoordinates = poly;
-        await this.vehicleRepository.save(vs.vehicle);
+      if (studentPts.length > 0) {
+        vs.vehicle.polygonCoordinates = this.generateZonePolygon(studentPts, 0.45);
+      } else if (vs.polygon.length > 0) {
+        vs.vehicle.polygonCoordinates = vs.polygon;
       }
-    }
-
-    // Strict containment enforcement:
-    // Green zone has green students only, Pink zone has pink students only!
-    // Any student falling inside vehicle V's polygon is strictly assigned to vehicle V.
-    for (let i = 0; i < vehicleStates.length; i++) {
-      const vs = vehicleStates[i];
-      const poly = vs.vehicle.polygonCoordinates;
-      if (!poly || !Array.isArray(poly) || poly.length < 3) continue;
-
-      for (let j = 0; j < vehicleStates.length; j++) {
-        if (i === j) continue;
-        const otherVs = vehicleStates[j];
-        for (let k = otherVs.assignedStudents.length - 1; k >= 0; k--) {
-          const st = otherVs.assignedStudents[k];
-          if (this.isPointInPolygon([Number(st.latitude), Number(st.longitude)], poly)) {
-            otherVs.assignedStudents.splice(k, 1);
-            vs.assignedStudents.push(st);
-          }
-        }
+      if (vs.vehicle.polygonCoordinates && vs.vehicle.polygonCoordinates.length >= 3) {
+        await this.vehicleRepository.save(vs.vehicle);
       }
     }
 
@@ -1250,7 +1226,7 @@ export class RoutingService {
       busNumber: vs.vehicle.busNumber,
       studentCount: vs.assignedStudents.length,
       capacity: vs.vehicle.capacity || 25,
-      vertices: (expandedPolygons[idx] || []).length
+      vertices: Array.isArray(vs.vehicle.polygonCoordinates) ? vs.vehicle.polygonCoordinates.length : 0
     }));
 
     return {

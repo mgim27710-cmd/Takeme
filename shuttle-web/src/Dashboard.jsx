@@ -7057,45 +7057,30 @@ const parseKindergartenExcelSheet = (sheet) => {
               return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
             };
 
-            // 3. 증차 필요 판별: 25명 초과 또는 배차 없음 상태에서 주변 5km 내에 여유가 있는 다른 배차 차량이 없는 경우
+            // 3. 구역 내 포함 여부 및 증차/미배차 판별
+            // - 배정 차량이 있으면 해당 차량의 폴리곤 내부에 위치하는지 엄격히 검사
+            // - 구역 밖이거나, 배정 차량이 없거나, 정원(25명) 초과인 경우 '!' (증차 필요/미배차)로 표시
+            // - 구역 밖인 원아는 절대 차량 색상으로 구역 외부에 표시되지 않음!
+            const assignedBus = displayBusId ? buses.find(b => b.id === displayBusId) : null;
+            let isInsideAssignedZone = false;
+            if (assignedBus?.turfPolygon && !isNaN(displayLat) && !isNaN(displayLng)) {
+              try {
+                isInsideAssignedZone = turf.booleanPointInPolygon(turf.point([displayLng, displayLat]), assignedBus.turfPolygon);
+              } catch (_) {
+                isInsideAssignedZone = false;
+              }
+            }
+
+            const currentBusRiders = displayBusId
+              ? students.filter(s => (s.assignedBusId === displayBusId || s.assignedVehicle?.id === displayBusId) && !s.isNotRiding)
+              : [];
+            const isOverCapacity = currentBusRiders.length > (assignedBus?.capacity || 25);
+            const isUnassigned = !displayBusId;
+
             let needsExtraBus = Boolean(st.needsExtraBus);
-            if (!isPureNotRiding && !needsExtraBus) {
-              const currentBusRiders = displayBusId
-                ? students.filter(s => (s.assignedBusId === displayBusId || s.assignedVehicle?.id === displayBusId) && !s.isNotRiding)
-                : [];
-              const isOverCapacity = currentBusRiders.length > 25;
-              const isUnassigned = !displayBusId;
-
-              if (isUnassigned || isOverCapacity) {
-                // 주변 5km 이내에 다른 배차 차량(현재 버스 제외, 정원 25명 미만인 여유 차량) 탐색
-                const hasNeighborWithin5Km = buses.some(b => {
-                  if (b.id === displayBusId) return false;
-                  const busRiders = students.filter(s => (s.assignedBusId === b.id || s.assignedVehicle?.id === b.id) && !s.isNotRiding);
-                  if (busRiders.length >= 25) return false;
-
-                  let minD = Infinity;
-                  let poly = b.polygonCoordinates;
-                  while (typeof poly === 'string') {
-                    try { poly = JSON.parse(poly); } catch (e) { break; }
-                  }
-                  if (Array.isArray(poly) && poly.length > 0) {
-                    for (const pt of poly) {
-                      if (Array.isArray(pt) && pt.length >= 2) {
-                        const d = calcDistKm(displayLat, displayLng, pt[0], pt[1]);
-                        if (d < minD) minD = d;
-                      }
-                    }
-                  }
-                  if (b.latitude && b.longitude) {
-                    const d = calcDistKm(displayLat, displayLng, b.latitude, b.longitude);
-                    if (d < minD) minD = d;
-                  }
-                  return minD <= 5.0; // 5km 이내
-                });
-
-                if (!hasNeighborWithin5Km) {
-                  needsExtraBus = true;
-                }
+            if (!isPureNotRiding) {
+              if (isUnassigned || isOverCapacity || !isInsideAssignedZone) {
+                needsExtraBus = true;
               }
             }
 
@@ -7110,9 +7095,9 @@ const parseKindergartenExcelSheet = (sheet) => {
               ? NOT_RIDING_COLOR
               : isOneTimeStudent 
               ? ONE_TIME_COLOR 
-              : displayBusId 
-              ? (buses.find(b=>b.id===displayBusId)?.color || '#64748b') 
-              : '#64748b';
+              : (displayBusId && isInsideAssignedZone)
+              ? (assignedBus?.color || '#64748b') 
+              : EXTRA_BUS_COLOR;
 
             const isHighlighted = highlightedStudentId === st.id;
             const studentIcon = L.divIcon({
