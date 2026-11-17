@@ -1185,7 +1185,7 @@ export class RoutingService {
       return studentPts.length > 0 ? studentPts : basePts;
     });
 
-    const partitionedPolys = this.partitionVehicleZones(studentPointsList, 0.55);
+    const partitionedPolys = this.partitionVehicleZones(studentPointsList, 0.25);
 
     for (let i = 0; i < vehicleStates.length; i++) {
       const vs = vehicleStates[i];
@@ -1846,17 +1846,23 @@ export class RoutingService {
       : 37.8;
     const cosLat = Math.cos((avgLat * Math.PI) / 180);
 
-    // 2. Expand common territory covering all vehicle clusters
-    const allPts = vehiclePointsList.flat();
-    const basePolygon = this.generateZonePolygon(allPts.length > 0 ? allPts : (validCentroids as [number, number][]), bufferKm);
+    // 2. Generate tight polygon around each vehicle's actual student stops (default buffer 0.25km)
+    // Connecting actual student stops tightly without ballooning into empty terrain where no one rides
+    const initialPolygons = vehiclePointsList.map((pts, idx) => {
+      if (!pts || pts.length === 0) {
+        if (centroids[idx]) return this.generateZonePolygon([centroids[idx]!], bufferKm);
+        return [];
+      }
+      return this.generateZonePolygon(pts, bufferKm);
+    });
 
-    // 3. Clip each vehicle's polygon against the bisector half-planes of all other vehicles
+    // 3. Clip ONLY where adjacent vehicle polygons overlap along their shared bisector line
     // Mathematically guarantees:
     // - ZERO overlap between any two vehicle zones (interiors are disjoint)
     // - Adjacent zones TOUCH seamlessly along shared borderlines
     const clippedPolygons: [number, number][][] = [];
     for (let i = 0; i < n; i++) {
-      let poly = [...basePolygon];
+      let poly = [...initialPolygons[i]];
       const c1 = centroids[i];
       if (!c1 || poly.length < 3) {
         clippedPolygons.push(poly);
