@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../config.dart';
 import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
@@ -251,57 +252,49 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     }
   }
 
-  void _callOrCopyParentPhone(String studentName, String phone) {
+  /// 학부모 연락처로 전화 앱을 연다. 전화 앱을 열 수 없는 기기면 번호를 복사해 둔다.
+  Future<void> _callParentPhone(String studentName, String phone) async {
+    final digits = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+    var opened = false;
+    try {
+      opened = await launchUrl(Uri(scheme: 'tel', path: digits));
+    } catch (_) {
+      opened = false;
+    }
+    if (opened || !mounted) return;
     Clipboard.setData(ClipboardData(text: phone));
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('$studentName 학부모 연락처($phone)가 클립보드에 복사되었습니다.'),
+        content: Text('전화 앱을 열 수 없어 $studentName 학부모 연락처($phone)를 복사했습니다.'),
         backgroundColor: const Color(0xFF2563EB),
         duration: const Duration(seconds: 3),
       ),
     );
   }
 
-  void _handleManualBoard(StudentModel student) {
-    final reasonCtrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('${student.name} 원아 탑승 확인', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('수동 탑승 처리 사유를 입력해주세요 (선택):'),
-            const SizedBox(height: 10),
-            TextField(
-              controller: reasonCtrl,
-              decoration: InputDecoration(
-                hintText: '예: 교통카드 미소지, 직접 탑승 확인 등',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-            ),
-          ],
+  /// 탑승 처리: 이유를 묻지 않고 바로 처리한다.
+  Future<void> _handleManualBoard(StudentModel student) async {
+    final user = ApiService().currentUser;
+    if (user == null) return;
+    Map<String, dynamic> res;
+    try {
+      res = await ApiService().manualBoardStudent(user.email, student.id, '');
+    } catch (e) {
+      res = {'success': false, 'message': friendlyError(e)};
+    }
+    if (!mounted) return;
+    if (res['success'] == true) {
+      _loadAllData();
+      _flutterTts.speak('${student.name} 원아 탑승 완료');
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${student.name} 원아 탑승 처리에 실패했습니다. ${res['message'] ?? ''}'.trim()),
+          backgroundColor: Colors.red,
+          action: SnackBarAction(label: '다시 시도', textColor: Colors.white, onPressed: () => _handleManualBoard(student)),
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final user = ApiService().currentUser;
-              if (user == null) return;
-              final res = await ApiService().manualBoardStudent(user.email, student.id, reasonCtrl.text.trim());
-              if (res['success'] == true) {
-                _loadAllData();
-                _flutterTts.speak('${student.name} 원아 탑승 완료');
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2563EB)),
-            child: const Text('탑승 처리', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
+      );
+    }
   }
 
   void _handleUnboardStudent(StudentModel student) {
@@ -610,228 +603,308 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     }
   }
 
-  Widget _buildStudentCard(StudentModel st) {
-    final isChecked = _selectedStudentIds.contains(st.id);
-    final phone = _parentPhones[st.id] ?? '';
+  /// 원아 상태(색 + 문구 + 아이콘). 서버 상태값이 탑승 대기/탑승/결석 세 가지라 하차는 아직 표시하지 않는다.
+  ({String label, IconData icon, Color fg, Color bg, Color border}) _statusOf(StudentModel st) {
+    if (st.absent) {
+      return (label: '결석', icon: Icons.block, fg: const Color(0xFFB91C1C), bg: const Color(0xFFFEE2E2), border: const Color(0xFFFECACA));
+    }
+    if (st.boarded) {
+      return (label: '탑승', icon: Icons.check_circle, fg: const Color(0xFF15803D), bg: const Color(0xFFDCFCE7), border: const Color(0xFFBBF7D0));
+    }
+    return (label: '탑승 전', icon: Icons.schedule, fg: const Color(0xFF475569), bg: const Color(0xFFF1F5F9), border: const Color(0xFFE2E8F0));
+  }
 
+  Widget _statusChip(StudentModel st, {double fontSize = 14}) {
+    final s = _statusOf(st);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: st.boarded
-              ? const Color(0xFFBBF7D0)
-              : (st.absent ? const Color(0xFFFECACA) : const Color(0xFFE2E8F0)),
-          width: (st.boarded || st.absent) ? 1.5 : 1,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: s.bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: s.border),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Checkbox
-          Padding(
-            padding: const EdgeInsets.only(top: 2, right: 6),
-            child: SizedBox(
-              width: 22,
-              height: 22,
-              child: Checkbox(
-                value: isChecked,
-                onChanged: (v) {
-                  setState(() {
-                    if (v == true) {
-                      _selectedStudentIds.add(st.id);
-                    } else {
-                      _selectedStudentIds.remove(st.id);
-                    }
-                  });
-                },
-                activeColor: const Color(0xFF2563EB),
+          Icon(s.icon, size: fontSize + 2, color: s.fg),
+          const SizedBox(width: 4),
+          Text(s.label, style: TextStyle(color: s.fg, fontWeight: FontWeight.w800, fontSize: fontSize)),
+        ],
+      ),
+    );
+  }
+
+  bool _hasNote(StudentModel st) =>
+      st.allergies.isNotEmpty ||
+      (st.teacherMemo != null && st.teacherMemo!.isNotEmpty) ||
+      (st.parentMessage != null && st.parentMessage!.isNotEmpty);
+
+  /// 원아 목록 한 줄: 이름 · 정류장 · 상태만 보여준다. 연락처와 특이사항은 눌러서 여는 상세 화면에서만 보인다.
+  Widget _buildStudentCard(StudentModel st) {
+    final isChecked = _selectedStudentIds.contains(st.id);
+    final status = _statusOf(st);
+
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => _showStudentDetail(st),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 64),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: status.border,
+              width: (st.boarded || st.absent) ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              // 메시지 보내기 대상 선택 (터치 영역 48)
+              SizedBox(
+                width: 40,
+                height: 48,
+                child: Checkbox(
+                  value: isChecked,
+                  onChanged: (v) {
+                    setState(() {
+                      if (v == true) {
+                        _selectedStudentIds.add(st.id);
+                      } else {
+                        _selectedStudentIds.remove(st.id);
+                      }
+                    });
+                  },
+                  activeColor: const Color(0xFF2563EB),
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            st.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: Color(0xFF1E293B)),
+                          ),
+                        ),
+                        if (_hasNote(st)) ...[
+                          const SizedBox(width: 6),
+                          const Icon(Icons.error_outline, size: 18, color: Color(0xFFDC2626), semanticLabel: '특이사항 있음'),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      st.boardingLocation ?? st.address,
+                      style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              _statusChip(st),
+              const Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 원아 상세: 이름·성별·학부모 연락처(누르면 전화)·특이사항, 같은 화면에서 탑승/결석 처리
+  void _showStudentDetail(StudentModel st) {
+    final phone = _parentPhones[st.id] ?? '';
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        Widget actionButton({
+          required String label,
+          required IconData icon,
+          required Color color,
+          required VoidCallback onPressed,
+          bool outlined = false,
+        }) {
+          final child = Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 22, color: outlined ? color : Colors.white),
+              const SizedBox(width: 6),
+              Text(label, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: outlined ? color : Colors.white)),
+            ],
+          );
+          final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(12));
+          return SizedBox(
+            height: 56,
+            child: outlined
+                ? OutlinedButton(
+                    onPressed: onPressed,
+                    style: OutlinedButton.styleFrom(shape: shape, side: BorderSide(color: color, width: 1.5)),
+                    child: child,
+                  )
+                : ElevatedButton(
+                    onPressed: onPressed,
+                    style: ElevatedButton.styleFrom(backgroundColor: color, shape: shape, elevation: 0),
+                    child: child,
+                  ),
+          );
+        }
+
+        Widget noteBox(String text, Color fg, Color bg, IconData icon) => Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(icon, size: 20, color: fg),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(text, style: TextStyle(color: fg, fontSize: 16, fontWeight: FontWeight.w600))),
+                ],
+              ),
+            );
+
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + MediaQuery.of(ctx).viewInsets.bottom),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          st.name,
+                          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
+                        ),
+                      ),
+                      _statusChip(st, fontSize: 16),
+                    ],
+                  ),
+                  if (st.gender != null) ...[
+                    const SizedBox(height: 4),
+                    Text('성별: ${st.gender}', style: const TextStyle(fontSize: 16, color: Color(0xFF475569))),
+                  ],
+                  const SizedBox(height: 4),
+                  Text(
+                    st.boardingLocation ?? st.address,
+                    style: const TextStyle(fontSize: 15, color: Color(0xFF64748B)),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 학부모 연락처: 누르면 전화 걸기
+                  if (phone.isNotEmpty)
+                    SizedBox(
+                      width: double.infinity,
+                      height: 56,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _callParentPhone(st.name, phone),
+                        icon: const Icon(Icons.phone, size: 22),
+                        label: Text('학부모 전화  $phone', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF1D4ED8),
+                          side: const BorderSide(color: Color(0xFF93C5FD), width: 1.5),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    )
+                  else
+                    noteBox('등록된 학부모 연락처가 없습니다.', const Color(0xFF64748B), const Color(0xFFF1F5F9), Icons.phone_disabled),
+                  const SizedBox(height: 16),
+
+                  // 특이사항
+                  Row(
+                    children: [
+                      const Text('특이사항', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF1E293B))),
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _showStudentMemoDialog(st);
+                        },
+                        icon: const Icon(Icons.edit_note),
+                        label: const Text('메모 쓰기', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                        style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                      ),
+                    ],
+                  ),
+                  if (st.allergies.isNotEmpty)
+                    noteBox('알레르기: ${st.allergies}', const Color(0xFFB91C1C), const Color(0xFFFEF2F2), Icons.warning_amber_rounded),
+                  if (st.parentMessage != null && st.parentMessage!.isNotEmpty)
+                    noteBox('학부모 메시지: ${st.parentMessage}', const Color(0xFF1E40AF), const Color(0xFFEFF6FF), Icons.chat_bubble_outline),
+                  if (st.teacherMemo != null && st.teacherMemo!.isNotEmpty)
+                    noteBox('교사 메모: ${st.teacherMemo}', const Color(0xFF92400E), const Color(0xFFFFFBEB), Icons.sticky_note_2_outlined),
+                  if (!_hasNote(st))
+                    noteBox('등록된 특이사항이 없습니다.', const Color(0xFF64748B), const Color(0xFFF1F5F9), Icons.info_outline),
+                  const SizedBox(height: 16),
+
+                  // 처리 버튼: 상태마다 할 수 있는 동작만 보여준다
+                  if (!st.boarded && !st.absent)
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: actionButton(
+                            label: '탑승',
+                            icon: Icons.check_circle,
+                            color: const Color(0xFF10B981),
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _handleManualBoard(st);
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: actionButton(
+                            label: '결석',
+                            icon: Icons.block,
+                            color: const Color(0xFFDC2626),
+                            outlined: true,
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _handleSkipStudent(st);
+                            },
+                          ),
+                        ),
+                      ],
+                    )
+                  else if (st.boarded)
+                    SizedBox(
+                      width: double.infinity,
+                      child: actionButton(
+                        label: '탑승 취소',
+                        icon: Icons.undo,
+                        color: const Color(0xFFDC2626),
+                        outlined: true,
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _handleUnboardStudent(st);
+                        },
+                      ),
+                    )
+                  else
+                    noteBox('오늘 결석(미탑승) 처리된 원아입니다.', const Color(0xFFB91C1C), const Color(0xFFFEF2F2), Icons.block),
+                ],
               ),
             ),
           ),
-
-          // 2-row layout to prevent RenderFlex overflow
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 윗줄: 이름 · 알레르기 말줄임 · 학부모 전화번호 + 통화/복사 버튼
-                Row(
-                  children: [
-                    Text(
-                      st.name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
-                        color: Color(0xFF1E293B),
-                      ),
-                    ),
-                    if (st.allergies.isNotEmpty) ...[
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFEF2F2),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: const Color(0xFFFECACA)),
-                          ),
-                          child: Text(
-                            '알레르기: ${st.allergies}',
-                            style: const TextStyle(
-                              color: Color(0xFFDC2626),
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ),
-                    ],
-                    const Spacer(),
-                    // Parent Phone & Call Button
-                    if (phone.isNotEmpty)
-                      InkWell(
-                        onTap: () => _callOrCopyParentPhone(st.name, phone),
-                        borderRadius: BorderRadius.circular(6),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEFF6FF),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: const Color(0xFFDBEAFE)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.phone, size: 12, color: Color(0xFF2563EB)),
-                              const SizedBox(width: 3),
-                              Text(
-                                phone,
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF1D4ED8),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-
-                const SizedBox(height: 6),
-
-                // 아랫줄: 주소 · 메모 · 탑승/결석/취소 버튼
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        st.boardingLocation ?? st.address,
-                        style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-
-                    // Memo icon button
-                    InkWell(
-                      onTap: () => _showStudentMemoDialog(st),
-                      borderRadius: BorderRadius.circular(6),
-                      child: Padding(
-                        padding: const EdgeInsets.all(3),
-                        child: Icon(
-                          (st.teacherMemo != null && st.teacherMemo!.isNotEmpty) ||
-                                  (st.parentMessage != null && st.parentMessage!.isNotEmpty)
-                              ? Icons.error_outline
-                              : Icons.edit_note,
-                          size: 20,
-                          color: (st.teacherMemo != null && st.teacherMemo!.isNotEmpty)
-                              ? const Color(0xFFDC2626)
-                              : const Color(0xFF94A3B8),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(width: 4),
-
-                    // Action buttons
-                    if (!st.boarded && !st.absent) ...[
-                      SizedBox(
-                        height: 30,
-                        child: ElevatedButton(
-                          onPressed: () => _handleManualBoard(st),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF10B981),
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            elevation: 0,
-                          ),
-                          child: const Text('탑승', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      SizedBox(
-                        height: 30,
-                        child: OutlinedButton(
-                          onPressed: () => _handleSkipStudent(st),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            side: const BorderSide(color: Color(0xFFCBD5E1)),
-                          ),
-                          child: const Text('결석', style: TextStyle(color: Color(0xFF64748B), fontSize: 12)),
-                        ),
-                      ),
-                    ] else if (st.boarded) ...[
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFDCFCE7),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: const Text('탑승완료', style: TextStyle(color: Color(0xFF15803D), fontWeight: FontWeight.bold, fontSize: 11)),
-                      ),
-                      const SizedBox(width: 4),
-                      SizedBox(
-                        height: 28,
-                        child: TextButton(
-                          onPressed: () => _handleUnboardStudent(st),
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
-                            foregroundColor: const Color(0xFFDC2626),
-                          ),
-                          child: const Text('탑승 취소', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFDC2626))),
-                        ),
-                      ),
-                    ] else if (st.absent) ...[
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFEE2E2),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: const Text('미탑승', style: TextStyle(color: Color(0xFFB91C1C), fontWeight: FontWeight.bold, fontSize: 11)),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
