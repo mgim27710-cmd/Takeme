@@ -241,7 +241,7 @@ export class AuthService {
     let user = await this.usersRepository.findOne({ where: { email: cleanEmail } });
     
     // 교수님 평가/테스트용 유치원 관리자 계정
-    const isProfessorTestAccount = (cleanEmail === 'professor@takeme.com');
+    const isProfessorTestAccount = (cleanEmail === 'professor@takeme.com' || cleanEmail === 'director@takeme.com' || cleanEmail === 'director12@takeme.com');
     const isTeacherTest = (cleanEmail === 'teacher@takeme.com' || cleanEmail === 'teacher_prof@takeme.com');
     const isDriverTest = (cleanEmail === 'driver@takeme.com' || cleanEmail === 'driver_prof@takeme.com');
     const isParentTest = (cleanEmail === 'parent@takeme.com' || cleanEmail === 'parent_prof@takeme.com' || cleanEmail === 'parent_seoa@takeme.com');
@@ -360,14 +360,16 @@ export class AuthService {
     }
 
     if (user.role === UserRole.ACADEMY_ADMIN) {
-      if (user.isOtpEnabled || isProfessorTestAccount) {
+      if (isProfessorTestAccount) {
+        // 테스트 원장님 계정은 OTP 설정 없이 바로 로그인, OTP 전달 시 123456 통과
+        if (otpToken && otpToken !== '123456') {
+          throw new UnauthorizedException('OTP 번호가 올바르지 않습니다. (테스트 고정 OTP: 123456)');
+        }
+      } else if (user.isOtpEnabled) {
         if (!otpToken) return { success: false, requireOtp: true, userId: user.id };
         
         let verified = false;
-        // 오직 교수님 테스트 관리자 계정만 고정 OTP 123456 허용
-        if (isProfessorTestAccount && otpToken === '123456') {
-          verified = true;
-        } else if (user.otpSecret) {
+        if (user.otpSecret) {
           // 그 외 모든 일반 계정은 실제 Google Authenticator TOTP 정상 검증
           verified = speakeasy.totp.verify({
             secret: user.otpSecret,
