@@ -94,6 +94,8 @@ class ChatRoomModel {
   final ChatMessageModel? latestMessage;
   final int unreadCount;
   final DateTime? updatedAt;
+  /// 내 목록에서 맨 위 고정한 방인지
+  final bool isPinned;
 
   ChatRoomModel({
     required this.id,
@@ -103,6 +105,7 @@ class ChatRoomModel {
     this.latestMessage,
     required this.unreadCount,
     this.updatedAt,
+    this.isPinned = false,
   });
 
   factory ChatRoomModel.fromJson(Map<String, dynamic> json) {
@@ -133,6 +136,7 @@ class ChatRoomModel {
       latestMessage: latest,
       unreadCount: json['unreadCount'] as int? ?? 0,
       updatedAt: updated,
+      isPinned: json['isPinned'] == true,
     );
   }
 

@@ -122,7 +122,9 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     }
 
     // 원아 모델과 보호자 연락처를 같은 응답에서 만든다 (같은 목록을 두 번 요청하지 않는다)
-    final students = studentsJson.map((item) => StudentModel.fromJson(item)).toList();
+    // 원아 목록은 이름 가나다순으로 보여준다
+    final students = studentsJson.map((item) => StudentModel.fromJson(item)).toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
     for (final item in studentsJson) {
       final sid = item['id'] is int ? item['id'] as int : int.tryParse(item['id']?.toString() ?? '');
       final phone = item['parentPhone']?.toString() ?? '';

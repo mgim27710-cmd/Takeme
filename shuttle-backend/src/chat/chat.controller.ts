@@ -78,6 +78,22 @@ export class ChatController {
     return this.chatService.sendAcademyAnnouncement(user, title, content, this.resolveAcademyId(user, academyId));
   }
 
+  /** 내 목록에서 대화방 맨 위 고정/해제 */
+  @Post('rooms/:id/pin')
+  async pinRoom(
+    @AuthUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body('pinned') pinned: boolean,
+  ) {
+    return this.chatService.setRoomPinned(Number(id), user.sub, pinned !== false);
+  }
+
+  /** 내 목록에서 대화방 삭제 */
+  @Post('rooms/:id/hide')
+  async hideRoom(@AuthUser() user: JwtPayload, @Param('id') id: string) {
+    return this.chatService.hideRoom(Number(id), user.sub);
+  }
+
   @Post('rooms/:id/read')
   async markAsRead(
     @AuthUser() user: JwtPayload,
