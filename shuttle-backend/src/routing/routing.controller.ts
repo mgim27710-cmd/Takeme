@@ -470,8 +470,10 @@ export class RoutingController {
     @Param('id') id: string,
     @Body() body: any,
     @AuthUser() user?: JwtPayload,
+    @Req() req?: any,
   ) {
-    return this.routingService.updateBoardPost(Number(id), body, user?.sub, user?.role);
+    const { academyId, userId } = this.resolveAcademyContext(req);
+    return this.routingService.updateBoardPost(Number(id), body, userId || user?.sub, user?.role, academyId);
   }
 
   @Put('board/:id')
@@ -479,24 +481,30 @@ export class RoutingController {
     @Param('id') id: string,
     @Body() body: any,
     @AuthUser() user?: JwtPayload,
+    @Req() req?: any,
   ) {
-    return this.routingService.updateBoardPost(Number(id), body, user?.sub, user?.role);
+    const { academyId, userId } = this.resolveAcademyContext(req);
+    return this.routingService.updateBoardPost(Number(id), body, userId || user?.sub, user?.role, academyId);
   }
 
   @Delete('board/posts/:id')
   async deleteBoardPost(
     @Param('id') id: string,
     @AuthUser() user?: JwtPayload,
+    @Req() req?: any,
   ) {
-    return this.routingService.deleteBoardPost(Number(id), user?.sub, user?.role);
+    const { academyId, userId } = this.resolveAcademyContext(req);
+    return this.routingService.deleteBoardPost(Number(id), userId || user?.sub, user?.role, academyId);
   }
 
   @Delete('board/:id')
   async deleteBoardAlias(
     @Param('id') id: string,
     @AuthUser() user?: JwtPayload,
+    @Req() req?: any,
   ) {
-    return this.routingService.deleteBoardPost(Number(id), user?.sub, user?.role);
+    const { academyId, userId } = this.resolveAcademyContext(req);
+    return this.routingService.deleteBoardPost(Number(id), userId || user?.sub, user?.role, academyId);
   }
 
   @Post('board/posts/:id/like')

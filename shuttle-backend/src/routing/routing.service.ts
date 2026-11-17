@@ -2286,6 +2286,7 @@ export class RoutingService {
       parsedRaw['보호자 성함'] = data.parentName;
       parsedRaw['보호자성함'] = data.parentName;
       parsedRaw['학부모성함'] = data.parentName;
+      parsedRaw['보호자1 성함'] = data.parentName;
     }
     if (data.parentPhone !== undefined || data.phone !== undefined) {
       const ph = data.parentPhone !== undefined ? data.parentPhone : data.phone;
@@ -2294,6 +2295,25 @@ export class RoutingService {
       parsedRaw['보호자연락처'] = ph;
       parsedRaw['학부모연락처'] = ph;
       parsedRaw['연락처'] = ph;
+      parsedRaw['보호자1 연락처'] = ph;
+    }
+    if (data.parentRelation !== undefined) {
+      parsedRaw['보호자 관계'] = data.parentRelation;
+      parsedRaw['보호자1 관계'] = data.parentRelation;
+    }
+    if (data.parent2Name !== undefined) {
+      parsedRaw['보호자2 성함'] = data.parent2Name;
+      parsedRaw['보호자2성함'] = data.parent2Name;
+    }
+    if (data.parent2Phone !== undefined) {
+      parsedRaw['보호자2 연락처'] = data.parent2Phone;
+      parsedRaw['보호자2연락처'] = data.parent2Phone;
+      parsedRaw['부모연락처2'] = data.parent2Phone;
+      parsedRaw['비상연락처'] = data.parent2Phone;
+    }
+    if (data.parent2Relation !== undefined) {
+      parsedRaw['보호자2 관계'] = data.parent2Relation;
+      parsedRaw['보호자2관계'] = data.parent2Relation;
     }
     if (data.teacherName !== undefined) {
       parsedRaw['담임명'] = data.teacherName;
@@ -2547,8 +2567,15 @@ export class RoutingService {
       '학년': age,
       '성별': studentData.gender || studentData.raw?.['성별'] || '',
       '보호자 성함': studentData.parentName || studentData.raw?.['보호자 성함'] || '',
+      '보호자1 성함': studentData.parentName || studentData.raw?.['보호자1 성함'] || studentData.raw?.['보호자 성함'] || '',
+      '보호자 관계': studentData.parentRelation || studentData.raw?.['보호자 관계'] || '모',
+      '보호자1 관계': studentData.parentRelation || studentData.raw?.['보호자1 관계'] || '모',
       '부모연락처': parentPhone,
       '보호자연락처': parentPhone,
+      '보호자1 연락처': parentPhone,
+      '보호자2 성함': studentData.parent2Name || studentData.raw?.['보호자2 성함'] || '',
+      '보호자2 연락처': studentData.parent2Phone || studentData.raw?.['보호자2 연락처'] || studentData.raw?.['부모연락처2'] || studentData.raw?.['비상연락처'] || '',
+      '보호자2 관계': studentData.parent2Relation || studentData.raw?.['보호자2 관계'] || '부',
       '주소': studentData.address || '',
       '등원지': studentData.inLocation || studentData.boardingLocation || studentData.address || '',
       '하원지': studentData.outLocation || studentData.address || '',
@@ -3590,10 +3617,17 @@ export class RoutingService {
     visibility?: string;
     targetClass?: string;
     postType?: string;
-  }, userId?: number, userRole?: string) {
-    const post = await this.boardPostRepository.findOne({ where: { id } });
+  }, userId?: number, userRole?: string, academyId?: number) {
+    const post = await this.boardPostRepository.findOne({ where: { id }, relations: { academy: true } });
     if (!post) throw new BadRequestException('게시글을 찾을 수 없습니다.');
-    const isAdmin = userRole === 'ADMIN' || userRole === 'ACADEMY_ADMIN';
+    const isSuper = userRole === 'SUPER_ADMIN';
+    const isAdmin = isSuper || userRole === 'ADMIN' || userRole === 'ACADEMY_ADMIN';
+
+    // 테넌트 격리 검증: 타 기관 게시글 수정 원천 차단
+    if (!isSuper && academyId && post.academy?.id && post.academy.id !== academyId) {
+      throw new ForbiddenException('타 기관의 게시글은 수정할 수 없습니다.');
+    }
+
     if (!isAdmin && userId && post.authorUserId && post.authorUserId !== userId) {
       throw new ForbiddenException('작성자 본인 또는 기관 관리자만 수정할 수 있습니다.');
     }
@@ -3625,10 +3659,17 @@ export class RoutingService {
     return this.hydratePostMedia(saved);
   }
 
-  async deleteBoardPost(id: number, userId?: number, userRole?: string) {
-    const post = await this.boardPostRepository.findOne({ where: { id } });
+  async deleteBoardPost(id: number, userId?: number, userRole?: string, academyId?: number) {
+    const post = await this.boardPostRepository.findOne({ where: { id }, relations: { academy: true } });
     if (!post) throw new BadRequestException('게시글을 찾을 수 없습니다.');
-    const isAdmin = userRole === 'ADMIN' || userRole === 'ACADEMY_ADMIN';
+    const isSuper = userRole === 'SUPER_ADMIN';
+    const isAdmin = isSuper || userRole === 'ADMIN' || userRole === 'ACADEMY_ADMIN';
+
+    // 테넌트 격리 검증: 타 기관 게시글 삭제 원천 차단
+    if (!isSuper && academyId && post.academy?.id && post.academy.id !== academyId) {
+      throw new ForbiddenException('타 기관의 게시글은 삭제할 수 없습니다.');
+    }
+
     if (!isAdmin && userId && post.authorUserId && post.authorUserId !== userId) {
       throw new ForbiddenException('작성자 본인 또는 기관 관리자만 삭제할 수 있습니다.');
     }

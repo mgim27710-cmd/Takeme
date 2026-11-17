@@ -17,6 +17,7 @@ import { API_BASE_URL } from './config';
 import TeacherDashboard from './TeacherDashboard';
 import ClassManager from './classes/ClassManager';
 import AuthViewer from './auth/AuthViewer';
+import HelpManualCard from './settings/HelpManualCard';
 import { formatTeacherName, cleanTeacherBaseName } from './utils/teacherUtil';
 
 
@@ -797,6 +798,10 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     gender: '남',
     parentName: '',
     parentPhone: '',
+    parentRelation: '모',
+    parent2Name: '',
+    parent2Phone: '',
+    parent2Relation: '부',
     teacherName: '',
     departureType: '정규하원',
     assignedBusId: '',
@@ -3775,6 +3780,10 @@ const parseKindergartenExcelSheet = (sheet) => {
         gender: studentForm.gender,
         parentName: studentForm.parentName.trim(),
         parentPhone: studentForm.parentPhone.trim(),
+        parentRelation: studentForm.parentRelation?.trim() || '모',
+        parent2Name: studentForm.parent2Name?.trim() || '',
+        parent2Phone: studentForm.parent2Phone?.trim() || '',
+        parent2Relation: studentForm.parent2Relation?.trim() || '부',
         teacherName: formatTeacherName(studentForm.teacherName.trim()),
         departureType: studentForm.departureType || '정규하원',
         inLocation: inLoc,
@@ -3855,6 +3864,10 @@ const parseKindergartenExcelSheet = (sheet) => {
         gender: '남',
         parentName: '',
         parentPhone: '',
+        parentRelation: '모',
+        parent2Name: '',
+        parent2Phone: '',
+        parent2Relation: '부',
         teacherName: '',
         departureType: '정규하원',
         assignedBusId: '',
@@ -3892,6 +3905,10 @@ const parseKindergartenExcelSheet = (sheet) => {
       gender: '남',
       parentName: '',
       parentPhone: '',
+      parentRelation: '모',
+      parent2Name: '',
+      parent2Phone: '',
+      parent2Relation: '부',
       teacherName: '',
       departureType: '정규하원',
       assignedBusId: '',
@@ -3951,8 +3968,12 @@ const parseKindergartenExcelSheet = (sheet) => {
       kindergartenName: raw['유치원명'] || raw['소속원명'] || raw['학교명'] || academy?.name || '',
       age: raw['연령'] !== undefined && raw['연령'] !== null ? String(raw['연령']) : (raw['학년'] ? String(raw['학년']) : ''),
       gender: raw['성별'] || '남',
-      parentName: raw['보호자 성함'] || raw['학부모 성함'] || raw['학부모명'] || student.parentName || '',
-      parentPhone: raw['부모연락처'] || raw['보호자연락처'] || raw['보호자 연락처'] || student.parentPhone || '',
+      parentName: raw['보호자 성함'] || raw['학부모 성함'] || raw['학부모명'] || raw['보호자1 성함'] || student.parentName || '',
+      parentPhone: raw['부모연락처'] || raw['보호자연락처'] || raw['보호자 연락처'] || raw['보호자1 연락처'] || student.parentPhone || '',
+      parentRelation: raw['보호자 관계'] || raw['보호자1 관계'] || raw['관계'] || '모',
+      parent2Name: raw['보호자2 성함'] || raw['보호자2성함'] || raw['부보호자 성함'] || raw['비상연락인 성함'] || raw['아버지 성함'] || '',
+      parent2Phone: raw['보호자2 연락처'] || raw['보호자2연락처'] || raw['부모연락처2'] || raw['비상연락처'] || raw['아버지연락처'] || '',
+      parent2Relation: raw['보호자2 관계'] || raw['보호자2관계'] || raw['부보호자 관계'] || '부',
       teacherName: formatTeacherName(raw['담임명'] || raw['담임'] || raw['담임교사'] || raw['선생님'] || raw['교사'] || ''),
       departureType: raw['하원구분'] || raw['하원정보'] || '정규하원',
       assignedBusId: student.assignedBusId ? String(student.assignedBusId) : '',
@@ -4316,29 +4337,29 @@ const parseKindergartenExcelSheet = (sheet) => {
       )}
 
       {/* Bookmark Rail (Left Navigation) */}
-      <div className={`w-24 h-full max-h-screen shrink-0 ${terms.themeBg} flex flex-col items-center py-5 gap-2.5 z-20 shadow-xl transition-colors duration-300 overflow-y-auto overflow-x-hidden select-none [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-white/40`}>
-        <div className="text-white font-extrabold text-sm tracking-wider shrink-0 mb-0.5">Takeme</div>
-        <div className="text-[11px] text-white/90 text-center truncate max-w-[84px] mb-2 font-semibold shrink-0 px-1 py-0.5 rounded bg-black/20" title={currentUser.name}>
+      <div className={`w-28 h-full max-h-screen shrink-0 ${terms.themeBg} flex flex-col items-center py-5 gap-3.5 z-20 shadow-xl transition-colors duration-300 overflow-y-auto overflow-x-hidden select-none [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-white/40`}>
+        <div className="text-white font-black text-base tracking-wider shrink-0 mb-0.5">Takeme</div>
+        <div className="text-xs text-white/90 text-center truncate max-w-[96px] mb-2 font-bold shrink-0 px-1.5 py-0.5 rounded-md bg-black/20" title={currentUser.name}>
           {isSuperAdmin ? '플랫폼관리' : (currentUser.name ? `${currentUser.name} 관리자` : '관리자')}
         </div>
         <button 
           onClick={() => handleTabChange('status')} 
-          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'status' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
+          className={`w-[96px] py-3 px-1 rounded-2xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-2 ${activeTab === 'status' ? `bg-white ${terms.themeText} shadow-md scale-105 font-black` : 'text-white/90 hover:bg-white/15 hover:text-white font-semibold'}`} 
           title="차량 및 구역 관리"
         >
           {/* 차량 및 통학버스 아이콘 */}
-          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 17a2 2 0 100 4 2 2 0 000-4zm10 0a2 2 0 100 4 2 2 0 000-4zM4 6a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm0 5h16M9 6v5m6-5v5" />
           </svg>
-          <span className="text-[11px] font-bold tracking-tight">차량·구역</span>
+          <span className="text-[12.5px] font-black tracking-tight">차량·구역</span>
         </button>
         <button 
           onClick={() => handleTabChange('students')} 
-          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'students' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
-          title={`${terms.students} 정보`}
+          className={`w-[96px] py-3 px-1 rounded-2xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-2 ${activeTab === 'students' || activeTab === 'classes' ? `bg-white ${terms.themeText} shadow-md scale-105 font-black` : 'text-white/90 hover:bg-white/15 hover:text-white font-semibold'}`} 
+          title={`${terms.students} 및 ${terms.class} 관리`}
         >
           {/* 학생 아이콘 */}
-          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
             <ellipse cx="12" cy="4.9" rx="1.3" ry="0.7" />
             <path d="M5.2 14 C4.6 9.2 7.8 5.6 10.7 5.2 M13.3 5.2 C16.2 5.6 19.4 9.2 18.8 14" />
             <path d="M5.2 14 C8 16.2 16 16.2 18.8 14" />
@@ -4346,100 +4367,78 @@ const parseKindergartenExcelSheet = (sheet) => {
             <path d="M11.2 5.5 C9.8 8.8 8.8 12.2 8.5 15.8" />
             <path d="M12.8 5.5 C14.2 8.8 15.2 12.2 15.5 15.8" />
           </svg>
-          <span className="text-[11px] font-bold tracking-tight">{terms.student}정보</span>
-        </button>
-        <button 
-          onClick={() => handleTabChange('classes')} 
-          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'classes' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
-          title={`${terms.class} 관리`}
-        >
-          {/* 교실 학급 칠판 아이콘 */}
-          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <rect x="3" y="4" width="18" height="12" rx="2" strokeWidth={2} />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h5m-3 4v4m6-4v4m-8 0h10" />
-          </svg>
-          <span className="text-[11px] font-bold tracking-tight">{terms.class}관리</span>
+          <span className="text-[12.5px] font-black tracking-tight">{terms.student}·학급</span>
         </button>
         <button 
           onClick={() => handleTabChange('auth')} 
-          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'auth' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
+          className={`w-[96px] py-3 px-1 rounded-2xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-2 ${activeTab === 'auth' ? `bg-white ${terms.themeText} shadow-md scale-105 font-black` : 'text-white/90 hover:bg-white/15 hover:text-white font-semibold'}`} 
           title="가입 승인 및 인증 관리"
         >
           {/* 가입 승인 및 인증 방패 아이콘 */}
-          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
           </svg>
-          <span className="text-[11px] font-bold tracking-tight">가입승인</span>
+          <span className="text-[12.5px] font-black tracking-tight">가입승인</span>
         </button>
         <button 
           onClick={() => handleTabChange('log')} 
-          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'log' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
+          className={`w-[96px] py-3 px-1 rounded-2xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-2 ${activeTab === 'log' ? `bg-white ${terms.themeText} shadow-md scale-105 font-black` : 'text-white/90 hover:bg-white/15 hover:text-white font-semibold'}`} 
           title="캘린더 및 출석 일지"
         >
           {/* 캘린더 달력 아이콘 */}
-          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <rect x="3" y="4" width="18" height="18" rx="2" strokeWidth={2} />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 2v4M8 2v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01" />
           </svg>
-          <span className="text-[11px] font-bold tracking-tight">출석·일지</span>
+          <span className="text-[12.5px] font-black tracking-tight">출석·일지</span>
         </button>
         <button 
           onClick={() => { setUnreadAlertCount(0); handleTabChange('messages'); }} 
-          className={`relative w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'messages' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
-          title="대화 및 메세지함"
+          className={`relative w-[96px] py-3 px-1 rounded-2xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-2 ${activeTab === 'messages' || activeTab === 'board' ? `bg-white ${terms.themeText} shadow-md scale-105 font-black` : 'text-white/90 hover:bg-white/15 hover:text-white font-semibold'}`} 
+          title="소통 및 공지사항 (실시간 대화 / 공지·게시판)"
         >
-          {/* 대화 및 메시지함 아이콘 */}
-          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          {/* 대화 및 공지 아이콘 */}
+          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
-          <span className="text-[11px] font-bold tracking-tight">소통·대화</span>
+          <span className="text-[12.5px] font-black tracking-tight">소통·공지</span>
           {unreadAlertCount > 0 && (
-            <span className="absolute top-0.5 right-1.5 bg-amber-500 text-white text-[10px] font-black w-4.5 h-4.5 rounded-full flex items-center justify-center border-2 border-white shadow-sm">
+            <span className="absolute top-1 right-2 bg-amber-500 text-white text-[11px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-white shadow-sm">
               {unreadAlertCount > 99 ? '99+' : unreadAlertCount}
             </span>
           )}
         </button>
         <button 
           onClick={() => handleTabChange('documents')} 
-          className={`relative w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'documents' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
+          className={`relative w-[96px] py-3 px-1 rounded-2xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-2 ${activeTab === 'documents' ? `bg-white ${terms.themeText} shadow-md scale-105 font-black` : 'text-white/90 hover:bg-white/15 hover:text-white font-semibold'}`} 
           title="행정 및 안전 서류 관리"
         >
-          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
-          <span className="text-[11px] font-bold tracking-tight">안전서류</span>
+          <span className="text-[12.5px] font-black tracking-tight">안전서류</span>
           {urgentExpiryCount > 0 && (
-            <span className="absolute top-0.5 right-1.5 bg-red-600 text-white text-[10px] font-black w-4.5 h-4.5 rounded-full flex items-center justify-center border-2 border-white animate-pulse shadow-sm">
+            <span className="absolute top-1 right-2 bg-red-600 text-white text-[11px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-white animate-pulse shadow-sm">
               {urgentExpiryCount}
             </span>
           )}
         </button>
-        <button 
-          onClick={() => handleTabChange('board')} 
-          className={`relative w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'board' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
-          title={terms.board}
-        >
-          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-          <span className="text-[11px] font-bold tracking-tight">알림·게시</span>
-        </button>
 
         <button 
           onClick={() => handleTabChange('settings')} 
-          className={`w-20 py-2.5 px-1 rounded-xl transition-all mt-auto shrink-0 mb-1 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${activeTab === 'settings' ? `bg-white ${terms.themeText} shadow-md scale-105 font-extrabold` : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'}`} 
+          className={`w-[96px] py-3 px-1 rounded-2xl transition-all mt-auto shrink-0 mb-1 cursor-pointer flex flex-col items-center justify-center gap-2 ${activeTab === 'settings' ? `bg-white ${terms.themeText} shadow-md scale-105 font-black` : 'text-white/90 hover:bg-white/15 hover:text-white font-semibold'}`} 
           title="환경설정"
         >
-          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-          <span className="text-[11px] font-bold tracking-tight">환경설정</span>
+          <span className="text-[12.5px] font-black tracking-tight">환경설정</span>
         </button>
       </div>
 
       {/* Sidebar Content Panel */}
-      <div className={`bg-white shadow-lg z-10 flex flex-col w-[400px] shrink-0 break-keep ${activeTab === 'messages' ? 'hidden' : ''}`}>
+      <div className={`bg-white shadow-lg z-10 flex flex-col w-[450px] shrink-0 break-keep ${activeTab === 'messages' ? 'hidden' : ''}`}>
 
         {(activeTab === 'status' || activeTab === 'buses') && (
           <div className="p-6 h-full flex flex-col overflow-y-auto break-keep">
@@ -5016,105 +5015,90 @@ const parseKindergartenExcelSheet = (sheet) => {
                     : 'bg-white border border-slate-200 hover:border-blue-400 hover:shadow-xs shadow-2xs'
                 }`}
               >
-                {/* Row 1: Header (Dot + Name + Meta + Urgent Badges + Actions) */}
-                <div className="flex items-center justify-between gap-1 mb-1.5">
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                {/* Compact Row 1: Dot + Name + Class + Badges / Bus Badge + Toggle */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
                     <div 
-                      className="w-2.5 h-2.5 rounded-full shrink-0 shadow-2xs" 
-                      style={{ backgroundColor: needsAddress ? '#ef4444' : (st.color || bus?.color || '#64748b') }} 
+                      className="w-3 h-3 rounded-full shrink-0" 
+                      style={{ backgroundColor: needsAddress ? '#ef4444' : (st.color || bus?.color || '#3b82f6') }} 
                     />
-                    <span className="font-extrabold text-slate-900 text-sm shrink-0 tracking-tight">
+                    <span className="font-black text-slate-900 text-[16px] shrink-0 tracking-tight">
                       {st.name}
                     </span>
-                    {(rawClass || rawAge) && (
-                      <span className="text-[11px] text-slate-500 font-semibold truncate shrink-0">
-                        {rawClass}{rawClass && rawAge ? ' · ' : ''}{rawAge}
+                    {rawClass && (
+                      <span className="text-[13px] text-slate-600 font-bold truncate shrink-0">
+                        {rawClass}
                       </span>
                     )}
 
-                    {/* Urgent / Status Badges */}
-                    <div className="flex items-center gap-1 truncate">
-                      {st.boardStatus === 'ABSENT' && (
-                        <span className="text-[10px] bg-red-100 text-red-700 font-extrabold px-1.5 py-0.2 rounded border border-red-200 shrink-0">
-                          결석
-                        </span>
-                      )}
-                      {st.boardStatus === 'SELF_PICKUP' && (
-                        <span className="text-[10px] bg-blue-100 text-blue-700 font-extrabold px-1.5 py-0.2 rounded border border-blue-200 shrink-0">
-                          개별픽업
-                        </span>
-                      )}
-                      {(st.isOneTimeRide || (st.isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))) && (
-                        <span className="text-[10px] bg-rose-100 text-rose-700 font-extrabold px-1.5 py-0.2 rounded border border-rose-200 shrink-0 animate-pulse">
-                          당일1회
-                        </span>
-                      )}
-                      {needsAddress && (
-                        <span className="text-[10px] bg-red-500 text-white font-extrabold px-1.5 py-0.2 rounded shrink-0">
-                          주소필요
-                        </span>
-                      )}
-                      {hasAllergy && (
-                        <span 
-                          className="text-[10px] bg-amber-50 text-amber-700 font-bold px-1.5 py-0.2 rounded border border-amber-200 shrink-0 flex items-center gap-0.5" 
-                          title={`알레르기: ${st.allergies || st.raw['알레르기']}`}
-                        >
-                          ⚠️ 알레르기
-                        </span>
-                      )}
-                    </div>
+                    {/* Urgent Status Badges Only */}
+                    {st.boardStatus === 'ABSENT' && (
+                      <span className="text-[11px] bg-red-50 text-red-600 font-bold px-1.5 py-0.5 rounded border border-red-200 shrink-0">
+                        결석
+                      </span>
+                    )}
+                    {st.boardStatus === 'SELF_PICKUP' && (
+                      <span className="text-[11px] bg-blue-50 text-blue-600 font-bold px-1.5 py-0.5 rounded border border-blue-200 shrink-0">
+                        개별픽업
+                      </span>
+                    )}
+                    {needsAddress && (
+                      <span className="text-[11px] bg-red-500 text-white font-bold px-1.5 py-0.5 rounded shrink-0">
+                        주소필요
+                      </span>
+                    )}
+                    {hasAllergy && (
+                      <span 
+                        className="text-sm text-amber-600 font-bold shrink-0 cursor-help" 
+                        title={`알레르기: ${st.allergies || st.raw?.['알레르기']}`}
+                      >
+                        ⚠️
+                      </span>
+                    )}
                   </div>
 
-                  {/* Action Buttons: 수정 & 상세 토글 */}
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); handleOpenEditStudentModal(st); }}
-                      className="w-6 h-6 flex items-center justify-center rounded-lg bg-slate-50 hover:bg-blue-50 text-slate-500 hover:text-blue-600 transition-colors border border-slate-200"
-                      title="원아 정보 및 주소 수정"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                      </svg>
-                    </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {showBusBadge && (
+                      <span 
+                        className="font-black text-[12px] px-2.5 py-0.5 rounded-lg border shrink-0" 
+                        style={{ 
+                          color: isNotRiding ? '#64748b' : (needsAddress ? '#dc2626' : (st.color || bus?.color || '#2563eb')), 
+                          borderColor: isNotRiding ? '#cbd5e1' : (needsAddress ? '#fca5a5' : `${st.color || bus?.color || '#93c5fd'}80`), 
+                          backgroundColor: isNotRiding ? '#f1f5f9' : (needsAddress ? '#fee2e2' : `${st.color || bus?.color || '#dbeafe'}30`) 
+                        }}
+                      >
+                        {isNotRiding ? '미탑승' : (needsAddress ? '배정 대기' : (bus && depBus && bus.id !== depBus.id ? `등:${bus.name}/하:${depBus.name}` : (bus ? bus.name : (depBus ? `하원:${depBus.name}` : '배정 대기'))))}
+                      </span>
+                    )}
+
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); toggleStudentDetail(st.id); }}
-                      className={`w-6 h-6 flex items-center justify-center rounded-lg text-xs font-black transition-colors border ${
-                        isExpanded 
-                          ? 'bg-blue-600 text-white border-blue-600' 
-                          : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
-                      }`}
-                      title={isExpanded ? '상세 접기' : '상세 정보 더보기'}
+                      className="text-sm font-black text-slate-400 hover:text-blue-600 p-1 rounded transition-colors"
+                      title={isExpanded ? '상세 접기' : '상세 보기'}
                     >
-                      {isExpanded ? '−' : '+'}
+                      {isExpanded ? '▲' : '▼'}
                     </button>
                   </div>
                 </div>
 
-                {/* Row 2: Address or Need Address Warning */}
+                {/* Compact Row 2: Address (간결한 1줄) */}
                 {needsAddress ? (
-                  <div className="mb-1.5 p-1.5 bg-rose-50/80 rounded-lg border border-rose-200 flex items-center justify-between gap-1.5">
-                    <span className="text-[11px] text-rose-700 font-bold truncate">
-                      ⚠️ 도로명 주소 등록 필요 {st.raw?.['실패주소'] ? `(${st.raw['실패주소']})` : ''}
-                    </span>
+                  <div className="mt-1 text-[13px] text-rose-600 font-bold flex items-center justify-between">
+                    <span>도로명 주소 입력 필요</span>
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); handleOpenEditStudentModal(st); }}
-                      className="px-2 py-0.5 text-[10px] bg-rose-600 hover:bg-rose-700 text-white font-bold rounded shadow-2xs shrink-0"
+                      className="text-xs text-blue-600 underline font-bold cursor-pointer"
                     >
-                      주소 입력
+                      입력
                     </button>
                   </div>
-                ) : (
-                  <div className="text-xs text-slate-600 font-medium truncate mb-1 flex items-center gap-1" title={st.address}>
-                    <svg className="w-3 h-3 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                    <span className="truncate">{st.address || '주소 미등록'}</span>
+                ) : st.address ? (
+                  <div className="text-[13px] text-slate-600 font-medium truncate mt-1 pl-4" title={st.address}>
+                    {st.address}
                   </div>
-                )}
+                ) : null}
 
                 {/* Row 3: Guardian Phone & Bus Badge */}
                 <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-100">
@@ -5171,48 +5155,73 @@ const parseKindergartenExcelSheet = (sheet) => {
                   })()}
                 </div>
 
-                {/* Expandable Details via (+) */}
+                {/* Expandable Details */}
                 {isExpanded && (
-                  <div className="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-700 bg-slate-50 p-2.5 rounded-lg border border-slate-200 animate-fade-in space-y-1.5">
-                    <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
-                      {st.raw?.['유치원명'] && (
+                  <div className="mt-2.5 pt-2.5 border-t border-slate-100 text-xs text-slate-700 bg-slate-50 p-3 rounded-xl border border-slate-200 animate-fade-in space-y-2">
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-[12.5px]">
+                      <div className="col-span-2 flex flex-wrap items-center gap-x-4 gap-y-1 bg-white p-2 rounded-lg border border-slate-200/80">
                         <div>
-                          <span className="text-slate-400 font-medium">소속: </span>
-                          <span className="font-bold text-slate-800">{st.raw['유치원명']}</span>
+                          <span className="text-slate-500 font-medium">보호자1{st.raw?.['보호자 관계'] || st.raw?.['보호자1 관계'] ? `(${st.raw['보호자 관계'] || st.raw['보호자1 관계']})` : ''}: </span>
+                          <span className="font-bold text-slate-900">
+                            {st.raw?.['보호자 성함'] || st.raw?.['학부모 성함'] || st.parentName || '-'}
+                          </span>
+                          <span className="text-slate-600 font-semibold ml-1 text-xs">
+                            {maskPhoneNumber(st.raw?.['부모연락처'] || st.raw?.['보호자연락처'] || st.raw?.['보호자 연락처'] || st.phone || st.parentPhone)}
+                          </span>
+                        </div>
+                        {(st.raw?.['보호자2 성함'] || st.raw?.['보호자2 연락처']) && (
+                          <div className="border-l border-slate-200 pl-3">
+                            <span className="text-slate-500 font-medium">보호자2{st.raw?.['보호자2 관계'] ? `(${st.raw['보호자2 관계']})` : ''}: </span>
+                            <span className="font-bold text-slate-900">
+                              {st.raw['보호자2 성함'] || '-'}
+                            </span>
+                            <span className="text-slate-600 font-semibold ml-1 text-xs">
+                              {maskPhoneNumber(st.raw['보호자2 연락처'] || st.raw['부모연락처2'] || st.raw['비상연락처'])}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      {rawAge && (
+                        <div>
+                          <span className="text-slate-500 font-medium">연령/학년: </span>
+                          <span className="font-bold text-slate-900">{rawAge}</span>
                         </div>
                       )}
                       {st.raw?.['담임명'] && (
                         <div>
-                          <span className="text-slate-400 font-medium">담임: </span>
-                          <span className="font-bold text-slate-800">{formatTeacherName(st.raw['담임명'])}</span>
+                          <span className="text-slate-500 font-medium">담임: </span>
+                          <span className="font-bold text-slate-900">{formatTeacherName(st.raw['담임명'])}</span>
                         </div>
                       )}
                       {(st.boardingLocation || st.raw?.['등원지']) && (
                         <div className="col-span-2 truncate">
-                          <span className="text-slate-400 font-medium">등원지: </span>
-                          <span className="font-bold text-slate-800">{st.raw?.['등원지'] || st.boardingLocation}</span>
+                          <span className="text-slate-500 font-medium">등원지: </span>
+                          <span className="font-bold text-slate-900">{st.raw?.['등원지'] || st.boardingLocation}</span>
                         </div>
                       )}
                       {st.raw?.['하원지'] && (
                         <div className="col-span-2 truncate">
-                          <span className="text-slate-400 font-medium">하원지: </span>
-                          <span className="font-bold text-slate-800">{st.raw['하원지']}</span>
+                          <span className="text-slate-500 font-medium">하원지: </span>
+                          <span className="font-bold text-slate-900">{st.raw['하원지']}</span>
                         </div>
                       )}
                       {(st.raw?.['등원시간'] || st.raw?.['하원시간']) && (
                         <div className="col-span-2">
-                          <span className="text-slate-400 font-medium">등/하원시간: </span>
-                          <span className="font-bold text-slate-800">{st.raw?.['등원시간'] || '-'} / {st.raw?.['하원시간'] || '-'}</span>
+                          <span className="text-slate-500 font-medium">등/하원시간: </span>
+                          <span className="font-bold text-slate-900">{st.raw?.['등원시간'] || '-'} / {st.raw?.['하원시간'] || '-'}</span>
                         </div>
                       )}
                       {hasAllergy && (
-                        <div className="col-span-2 bg-amber-50 p-1.5 rounded border border-amber-200 text-amber-800">
-                          <span className="font-extrabold text-amber-900">⚠️ 알레르기 주의: </span>
+                        <div className="col-span-2 bg-amber-50 p-2.5 rounded-lg border border-amber-200 text-amber-900 text-xs">
+                          <span className="font-extrabold text-amber-950">[알레르기]: </span>
+                          <span className="font-bold">{st.allergies || st.raw['알레르기']}</span>
+                        </div>
+                      )}
                           <span className="font-bold">{st.allergies || st.raw['알레르기']}</span>
                         </div>
                       )}
                       {st.raw?.['비고'] && (
-                        <div className="col-span-2 text-slate-600 bg-white p-1.5 rounded border border-slate-200">
+                        <div className="col-span-2 text-slate-700 bg-white p-2.5 rounded-lg border border-slate-200 text-xs">
                           <span className="font-medium text-slate-400">비고: </span>
                           <span>{st.raw['비고']}</span>
                         </div>
@@ -5220,7 +5229,17 @@ const parseKindergartenExcelSheet = (sheet) => {
                     </div>
 
                     {/* Expanded Bottom Actions */}
-                    <div className="pt-2 border-t border-slate-200 flex items-center justify-between gap-1">
+                    <div className="pt-2 border-t border-slate-200 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleOpenEditStudentModal(st); }}
+                        className="text-xs font-bold text-blue-600 hover:text-blue-700 bg-white hover:bg-blue-50 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:border-blue-300 flex items-center gap-1 transition cursor-pointer"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                        </svg>
+                        <span>정보 수정</span>
+                      </button>
                       <button
                         type="button"
                         onClick={(e) => {
@@ -5266,6 +5285,32 @@ const parseKindergartenExcelSheet = (sheet) => {
                 <p className="text-xs text-slate-600 font-medium mt-1">
                   {terms.student}을 직접 추가하거나 엑셀 파일로 일괄 등록하고 통학 배차를 관리합니다.
                 </p>
+              </div>
+
+              {/* 원아 명단 <-> 반 관리 전환 탭 */}
+              <div className="flex p-1 bg-slate-100 rounded-xl mb-3 border border-slate-200/80 shrink-0 select-none shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => handleTabChange('students')}
+                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                    activeTab === 'students'
+                      ? 'bg-white text-blue-600 shadow-xs border border-slate-200'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  👶 {terms.student} 명단
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleTabChange('classes')}
+                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                    activeTab === 'classes'
+                      ? 'bg-white text-blue-600 shadow-xs border border-slate-200'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  🏫 {terms.class} 관리
+                </button>
               </div>
 
               <input 
@@ -5510,7 +5555,33 @@ const parseKindergartenExcelSheet = (sheet) => {
               </p>
             </div>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-4 text-xs space-y-2">
+            {/* 원아 명단 <-> 반 관리 전환 탭 */}
+              <div className="flex p-1 bg-slate-100 rounded-xl mb-3 border border-slate-200/80 shrink-0 select-none shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => handleTabChange('students')}
+                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                    activeTab === 'students'
+                      ? 'bg-white text-blue-600 shadow-xs border border-slate-200'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  👶 {terms.student} 명단
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleTabChange('classes')}
+                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                    activeTab === 'classes'
+                      ? 'bg-white text-blue-600 shadow-xs border border-slate-200'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  🏫 {terms.class} 관리
+                </button>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-4 text-xs space-y-2">
               <div className="flex justify-between font-bold">
                 <span className="text-blue-900">개설된 {terms.class}:</span>
                 <span className="text-blue-700">{availableClasses.length}개 {terms.class}</span>
@@ -6330,6 +6401,9 @@ const parseKindergartenExcelSheet = (sheet) => {
                 })()}
               </div>
 
+              {/* 시스템 이용 가이드 & FAQ 카드 */}
+              <HelpManualCard />
+
               <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 mt-auto space-y-2">
                 <h3 className="text-sm font-extrabold text-slate-800 mb-1">계정 관리</h3>
                 <button 
@@ -6374,20 +6448,43 @@ const parseKindergartenExcelSheet = (sheet) => {
               buses={buses}
               students={students}
               activeEducationLevel={activeEducationLevel}
+              terms={terms}
             />
           )}
 
           {activeTab === 'board' && (
-            <BoardSidebar 
-              selectedClass={boardSelectedClass}
-              setSelectedClass={setBoardSelectedClass}
-              availableClasses={availableClasses}
-              searchKeyword={boardSearchKeyword}
-              setSearchKeyword={setBoardSearchKeyword}
-              onOpenNewPost={() => setIsCreatingBoardPost(true)}
-              posts={boardPosts}
-              activeEducationLevel={activeEducationLevel}
-            />
+            <div className="flex flex-col h-full bg-white">
+              {/* 소통/공지 전환 탭 */}
+              <div className="p-3 bg-white border-b border-slate-200 shrink-0">
+                <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200/80 shrink-0 select-none shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => handleTabChange('messages')}
+                    className="flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer text-slate-500 hover:text-slate-800 flex items-center justify-center gap-1.5"
+                  >
+                    💬 실시간 대화
+                  </button>
+                  <button
+                    type="button"
+                    className="flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer bg-white text-blue-600 shadow-xs border border-slate-200 flex items-center justify-center gap-1.5"
+                  >
+                    📢 공지·게시판
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <BoardSidebar 
+                  selectedClass={boardSelectedClass}
+                  setSelectedClass={setBoardSelectedClass}
+                  availableClasses={availableClasses}
+                  searchKeyword={boardSearchKeyword}
+                  setSearchKeyword={setBoardSearchKeyword}
+                  onOpenNewPost={() => setIsCreatingBoardPost(true)}
+                  posts={boardPosts}
+                  activeEducationLevel={activeEducationLevel}
+                />
+              </div>
+            </div>
           )}
         </div>
 
@@ -6417,6 +6514,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             isClosing={isMessageClosing}
             activeEducationLevel={activeEducationLevel}
             initialRoomType={messageInitialRoomType}
+            onSwitchToBoard={() => handleTabChange('board')}
           />
         )}
 
@@ -7502,46 +7600,120 @@ const parseKindergartenExcelSheet = (sheet) => {
                 </div>
               </div>
 
-              {/* Section 2: 보호자 및 하원 구분 */}
-              <div className="pt-2 border-t border-slate-100">
-                <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
-                  보호자 및 하원 구분
-                </h4>
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">보호자 성함</label>
-                    <input
-                      type="text"
-                      placeholder="예: 김영희"
-                      value={studentForm.parentName}
-                      onChange={e => setStudentForm({ ...studentForm, parentName: e.target.value })}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    />
+              {/* Section 2: 학부모 (보호자 2인 등록) & 하원 구분 */}
+              <div className="pt-2.5 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                    학부모 (보호자 2인 정보)
+                  </h4>
+                  <span className="text-[11px] text-slate-500 font-medium">※ 비상 연락 및 하원 인계를 위해 2인 등록 지원</span>
+                </div>
+
+                {/* 보호자 1 (주보호자) */}
+                <div className="bg-slate-50/90 p-3 rounded-xl border border-slate-200/80 mb-2.5">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                      보호자 1 (주보호자)
+                    </span>
+                    <span className="text-[10px] text-blue-700 font-bold bg-blue-100/80 px-2 py-0.5 rounded border border-blue-200">
+                      주 연락망
+                    </span>
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">부모연락처</label>
-                    <input
-                      type="text"
-                      placeholder="010-0000-0000"
-                      value={studentForm.parentPhone}
-                      onChange={e => setStudentForm({ ...studentForm, parentPhone: formatPhoneNumber(e.target.value) })}
-                      maxLength={13}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    />
+                  <div className="grid grid-cols-5 gap-2.5">
+                    <div className="col-span-1">
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">관계</label>
+                      <input
+                        type="text"
+                        placeholder="예: 모, 부"
+                        value={studentForm.parentRelation}
+                        onChange={e => setStudentForm({ ...studentForm, parentRelation: e.target.value })}
+                        className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 bg-white font-medium"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">보호자 성함</label>
+                      <input
+                        type="text"
+                        placeholder="예: 김영희"
+                        value={studentForm.parentName}
+                        onChange={e => setStudentForm({ ...studentForm, parentName: e.target.value })}
+                        className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 bg-white font-medium"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">연락처</label>
+                      <input
+                        type="text"
+                        placeholder="010-0000-0000"
+                        value={studentForm.parentPhone}
+                        onChange={e => setStudentForm({ ...studentForm, parentPhone: formatPhoneNumber(e.target.value) })}
+                        maxLength={13}
+                        className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 bg-white font-medium"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">하원구분</label>
-                    <select
-                      value={studentForm.departureType}
-                      onChange={e => setStudentForm({ ...studentForm, departureType: e.target.value })}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white"
-                    >
-                      <option value="정규하원">정규하원</option>
-                      <option value="방과후하원">방과후하원</option>
-                      <option value="종일반하원">종일반하원</option>
-                    </select>
+                </div>
+
+                {/* 보호자 2 (부보호자 / 비상연락처) */}
+                <div className="bg-slate-50/90 p-3 rounded-xl border border-slate-200/80 mb-2.5">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                      보호자 2 (부보호자 / 비상연락)
+                    </span>
+                    <span className="text-[10px] text-slate-600 font-bold bg-white px-2 py-0.5 rounded border border-slate-200">
+                      비상 연락망
+                    </span>
                   </div>
+                  <div className="grid grid-cols-5 gap-2.5">
+                    <div className="col-span-1">
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">관계</label>
+                      <input
+                        type="text"
+                        placeholder="예: 부, 조모"
+                        value={studentForm.parent2Relation}
+                        onChange={e => setStudentForm({ ...studentForm, parent2Relation: e.target.value })}
+                        className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 bg-white font-medium"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">보호자2 성함</label>
+                      <input
+                        type="text"
+                        placeholder="예: 홍판서"
+                        value={studentForm.parent2Name}
+                        onChange={e => setStudentForm({ ...studentForm, parent2Name: e.target.value })}
+                        className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 bg-white font-medium"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-[11px] font-semibold text-slate-600 mb-1">연락처2</label>
+                      <input
+                        type="text"
+                        placeholder="010-0000-0000"
+                        value={studentForm.parent2Phone}
+                        onChange={e => setStudentForm({ ...studentForm, parent2Phone: formatPhoneNumber(e.target.value) })}
+                        maxLength={13}
+                        className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 bg-white font-medium"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 하원 구분 */}
+                <div className="pt-1">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">하원구분</label>
+                  <select
+                    value={studentForm.departureType}
+                    onChange={e => setStudentForm({ ...studentForm, departureType: e.target.value })}
+                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 bg-white font-bold text-slate-800"
+                  >
+                    <option value="정규하원">정규하원</option>
+                    <option value="방과후하원">방과후하원</option>
+                    <option value="종일반하원">종일반하원</option>
+                  </select>
                 </div>
               </div>
 
