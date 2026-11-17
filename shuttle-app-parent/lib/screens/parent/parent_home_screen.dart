@@ -41,6 +41,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   double? _busLat;
   double? _busLng;
   DateTime? _lastBusUpdate;
+  // 기사 앱이 올린 실제 도로 경로(전체)와 지나온 위치. 없으면 정류장끼리 이은 선으로 대신 그린다.
+  List<dynamic>? _roadPath;
+  int _roadProgress = 0;
   bool _isLoading = true;
   String? _loadError; // 홈 데이터 일부 불러오기 실패 이유 (null 이면 정상)
   bool _isScanning = false;
@@ -143,6 +146,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
 
       if (mounted) {
         setState(() {
+          if (_routeData?.vehicleId != route?.vehicleId) {
+            // 차량이 바뀌면(등원↔하원 차량 등) 이전 차량의 도로 경로를 지운다
+            _roadPath = null;
+            _roadProgress = 0;
+          }
           _routeData = route;
           _todaySchedule = schedule;
           _loadError = loadProblem;
@@ -157,6 +165,30 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
               SocketService().leaveVehicleRoom(_routeData!.vehicleId!);
             }
             SocketService().joinVehicleRoom(route!.vehicleId!);
+            final routeVehicleId = route.vehicleId!;
+            // 실제 도로 경로: 처음 한 번 불러오고, 기사 앱이 경로를 바꾸면 실시간으로 받는다
+            ApiService().getParentRoutePath().then((data) {
+              if (!mounted || data == null) return;
+              final path = data['path'];
+              if (path is List && path.isNotEmpty) {
+                setState(() {
+                  _roadPath = path;
+                  _roadProgress = (data['progressIndex'] as num?)?.toInt() ?? 0;
+                });
+              }
+            });
+            SocketService().onRoutePathUpdated((data) {
+              if (!mounted) return;
+              final vid = (data['vehicleId'] as num?)?.toInt();
+              if (vid != null && vid != routeVehicleId) return;
+              final path = data['path'];
+              if (path is List && path.isNotEmpty) {
+                setState(() {
+                  _roadPath = path;
+                  _roadProgress = (data['progressIndex'] as num?)?.toInt() ?? 0;
+                });
+              }
+            });
             SocketService().onLocationUpdated((data) {
               if (mounted && data['lat'] != null && data['lng'] != null) {
                 setState(() {
@@ -1269,6 +1301,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                       isGohome: _activeTab == 'gohome',
                       stops: _routeData?.stops ?? [],
                       routePoints: _routeData?.routePoints ?? [],
+                      actualRoadPath: _roadPath,
+                      progressIndex: _roadProgress,
                       busLat: _busLat,
                       busLng: _busLng,
                       academyLat: _routeData?.academyLat,

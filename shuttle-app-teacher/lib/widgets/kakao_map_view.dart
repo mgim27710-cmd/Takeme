@@ -341,17 +341,34 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           }
         };
 
-        window.updateRoutePath = function(roadPath, progIdx) {
-          if (polyline) {
-            map.removeLayer(polyline);
-            polyline = null;
-          }
-          if (roadPath && roadPath.length) {
-            var active = roadPath.slice(progIdx || 0);
-            if (active.length) {
-              polyline = L.polyline(active, { color: '#2563eb', weight: 5, opacity: 0.85 }).addTo(map);
+        // 기사 앱처럼 전체 경로를 그린다: 지나온 구간은 회색, 남은 구간은 파란색
+        var routeLayer = L.layerGroup().addTo(map);
+        function drawRoute(roadPath, progIdx, fallbackPoints) {
+          routeLayer.clearLayers();
+          polyline = null;
+          if (roadPath && roadPath.length > 1) {
+            var idx = Math.max(0, Math.min(progIdx || 0, roadPath.length - 1));
+            if (idx > 0) {
+              L.polyline(roadPath.slice(0, idx + 1), { color: '#94a3b8', weight: 6, opacity: 0.9 }).addTo(routeLayer);
             }
+            var remain = roadPath.slice(idx);
+            if (remain.length > 1) {
+              L.polyline(remain, { color: '#1d4ed8', weight: 9, opacity: 0.85 }).addTo(routeLayer);
+              polyline = L.polyline(remain, { color: '#3b82f6', weight: 5, opacity: 1.0 }).addTo(routeLayer);
+            }
+            return roadPath;
           }
+          // 기사 앱이 아직 도로 경로를 올리지 않았으면 정류장끼리 이은 점선으로 대신 보여준다
+          if (fallbackPoints && fallbackPoints.length > 1) {
+            polyline = L.polyline(fallbackPoints, { color: '#3b82f6', weight: 4, opacity: 0.8, dashArray: '8 8' }).addTo(routeLayer);
+            return fallbackPoints;
+          }
+          return [];
+        }
+        var lastFallbackPoints = [];
+
+        window.updateRoutePath = function(roadPath, progIdx) {
+          drawRoute(roadPath, progIdx, lastFallbackPoints);
         };
 
         window.initData = function(stops, points, acLat, acLng, acName, bLat, bLng, roadPath, progIdx) {
@@ -408,12 +425,8 @@ class _KakaoMapViewState extends State<KakaoMapView> {
             });
           }
 
-          var activeRoute = (roadPath && roadPath.length) ? roadPath.slice(progIdx || 0) : (points || []);
-          if (activeRoute && activeRoute.length) {
-            if (polyline) map.removeLayer(polyline);
-            polyline = L.polyline(activeRoute, { color: '#2563eb', weight: 5, opacity: 0.85 }).addTo(map);
-            activeRoute.forEach(function(p) { pts.push(p); });
-          }
+          lastFallbackPoints = points || [];
+          drawRoute(roadPath, progIdx, lastFallbackPoints).forEach(function(p) { pts.push(p); });
 
           if (bLat && bLng) {
             window.updateBus(bLat, bLng);

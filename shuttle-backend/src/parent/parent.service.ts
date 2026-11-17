@@ -483,8 +483,9 @@ export class ParentService {
       });
     }
 
+    // 경로선용 좌표만 보낸다. 다른 원아의 이름은 학부모에게 보내지 않는다.
     stops.forEach(s => {
-      routePoints.push({ latitude: s.latitude, longitude: s.longitude, title: s.name });
+      routePoints.push({ latitude: s.latitude, longitude: s.longitude });
     });
 
     if (academy && academy.latitude && academy.longitude && stops.length > 0) {

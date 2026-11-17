@@ -12,7 +12,6 @@ import '../../models/route_model.dart';
 import '../../widgets/kakao_map_view.dart';
 import '../settings_screen.dart';
 import '../chat/chat_room_list_screen.dart';
-import '../media/photo_gallery_screen.dart';
 
 class StaffDashboardScreen extends StatefulWidget {
   const StaffDashboardScreen({super.key});
@@ -28,7 +27,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
 
   bool _isLoading = true;
   bool _isDriverOperating = false;
-  int? _vehicleId;
   String? _escortName;
   String? _escortConfirmedAt;
   bool _isCheckingIn = false;
@@ -165,7 +163,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
       final vid = vehicle?['id'];
       if (vid != null) {
         final vehicleId = int.tryParse(vid.toString()) ?? 0;
-        _vehicleId = vehicleId;
         SocketService().joinVehicleRoom(vehicleId);
 
         SocketService().onLocationUpdated((data) {
@@ -972,20 +969,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                 ),
             ],
           ),
-          IconButton(
-            icon: const Icon(Icons.cloud_outlined, color: Color(0xFF475569)),
-            tooltip: '사진 보관함',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => PhotoGalleryScreen(
-                    initialVehicleId: _vehicleId,
-                  ),
-                ),
-              );
-            },
-          ),
+          // 사진 보관함(클라우드)은 담임교사 화면에만 둔다. 지도교사 화면에는 없다.
           IconButton(
             icon: const Icon(Icons.settings_outlined, color: Color(0xFF475569)),
             onPressed: () {

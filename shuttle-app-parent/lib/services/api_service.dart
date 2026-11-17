@@ -433,6 +433,22 @@ class ApiService {
     return null;
   }
 
+  /// 내 아이 차량의 실제 도로 경로(기사 앱이 올린 길찾기 경로)와 진행 위치.
+  /// 기사 앱이 아직 경로를 만들지 않았으면 path 가 비어 있다.
+  Future<Map<String, dynamic>?> getParentRoutePath() async {
+    try {
+      final res = await getWithAuth(Uri.parse('${AppConfig.apiHost}/parent/route-path'))
+          .timeout(const Duration(seconds: 6));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+        if (decoded is Map<String, dynamic>) return decoded;
+      }
+    } catch (e) {
+      debugPrint('[ApiService] getParentRoutePath error: $e');
+    }
+    return null;
+  }
+
   Future<StudentModel?> getMyChild(String email, {bool throwOnError = false}) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/parent/my-child?email=${Uri.encodeComponent(email)}');
