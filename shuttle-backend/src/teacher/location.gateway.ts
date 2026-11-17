@@ -454,9 +454,9 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       });
     }
 
-    // 도착 5분 전 알림 체크 로직
+    // 도착 2분 전 / 유치원 도착 알림 (학부모 TakeMe 알림은 routingService 가 보낸다. 여기서는 실시간 화면용 소켓만)
     try {
-      const notificationsToEmit = await this.routingService.checkArrivalAndNotify(vehicleId, lat, lng);
+      const notificationsToEmit = await this.routingService.checkArrivalAndNotify(vehicleId, lat, lng, data?.speedKmh ?? null);
       // 원아 이름이 담긴 접근 알림은 그 원아의 학부모 개인 방에만 보낸다(예전에는 차량 방·기관 방에 학부모 이메일까지 보냈다).
       for (const noti of notificationsToEmit) {
         const { parentUserId, ...rest } = noti as any;
