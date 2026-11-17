@@ -241,36 +241,52 @@ export default function TeacherDashboard({
     }
   };
 
-  // Temporary Cloud Storage State
-  const cloudStorageKey = `takeme_teacher_cloud_${currentUser?.id || 'default'}`;
+  // Temporary Cloud Storage State (동기화 키 통일)
+  const cloudStorageKey = 'takeme_teacher_cloud_photos';
   const [cloudPhotos, setCloudPhotos] = useState(() => {
     try {
-      const saved = localStorage.getItem(cloudStorageKey);
+      const saved = localStorage.getItem(cloudStorageKey) || localStorage.getItem(`takeme_teacher_cloud_${currentUser?.id || 'default'}`);
       if (saved) return JSON.parse(saved);
     } catch (e) {
       console.error(e);
     }
-    return [
-      {
-        id: 'sample-1',
-        name: '가을 소풍 단체 활동.jpg',
-        url: 'https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?w=800&auto=format&fit=crop&q=80',
-        size: '1.40 MB',
-        uploadedAt: '오늘 10:30'
-      },
-      {
-        id: 'sample-2',
-        name: '미술 시간 블록 쌓기.jpg',
-        url: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=800&auto=format&fit=crop&q=80',
-        size: '2.10 MB',
-        uploadedAt: '어제 15:40'
-      }
-    ];
+    return [];
   });
 
   const [isUploadingToCloud, setIsUploadingToCloud] = useState(false);
   const [isDraggingOverCloud, setIsDraggingOverCloud] = useState(false);
   const cloudFileInputRef = useRef(null);
+
+  // 서버 미디어 보관함(/routing/media)과 실시간 동기화
+  const fetchCloudPhotos = async () => {
+    try {
+      const token = localStorage.getItem('takeme_token');
+      if (!token) return;
+      const res = await fetch(`${API_BASE_URL}/routing/media`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          const formatted = data.map(item => ({
+            id: item.id,
+            name: item.filename || '활동_사진.jpg',
+            url: item.url,
+            size: item.size ? `${(item.size / (1024 * 1024)).toFixed(2)} MB` : '-',
+            uploadedAt: new Date(item.createdAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+          }));
+          setCloudPhotos(formatted);
+          localStorage.setItem(cloudStorageKey, JSON.stringify(formatted));
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch from media API', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchCloudPhotos();
+  }, [activeNavTab]);
 
   useEffect(() => {
     try {
@@ -284,6 +300,7 @@ export default function TeacherDashboard({
     if (!files || files.length === 0) return;
     setIsUploadingToCloud(true);
 
+    const token = localStorage.getItem('takeme_token');
     const newPhotos = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -302,26 +319,52 @@ export default function TeacherDashboard({
         });
 
         let finalUrl = base64Data;
+        let createdId = `${Date.now()}-${i}-${Math.random().toString(36).substring(2, 7)}`;
+
         try {
-          const res = await fetch(`${API_BASE_URL}/routing/board/upload`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              base64Data,
-              filename: file.name,
-              mimeType: file.type
-            })
-          });
-          const data = await res.json();
-          if (res.ok && data.url) {
-            finalUrl = data.url;
+          if (token) {
+            const res = await fetch(`${API_BASE_URL}/routing/media`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                photos: [{
+                  base64Data,
+                  filename: file.name,
+                  mimeType: file.type,
+                  className: teacherClass || undefined
+                }]
+              })
+            });
+            if (res.ok) {
+              const resData = await res.json();
+              const item = Array.isArray(resData) ? resData[0] : resData;
+              if (item?.url) finalUrl = item.url;
+              if (item?.id) createdId = item.id;
+            }
+          } else {
+            const res = await fetch(`${API_BASE_URL}/routing/board/upload`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                base64Data,
+                filename: file.name,
+                mimeType: file.type
+              })
+            });
+            const data = await res.json();
+            if (res.ok && data.url) {
+              finalUrl = data.url;
+            }
           }
         } catch (netErr) {
           console.warn('Server upload fallback to local data', netErr);
         }
 
         newPhotos.unshift({
-          id: `${Date.now()}-${i}-${Math.random().toString(36).substring(2, 7)}`,
+          id: createdId,
           name: file.name,
           url: finalUrl,
           size: (file.size / (1024 * 1024)).toFixed(2) + ' MB',
@@ -333,7 +376,11 @@ export default function TeacherDashboard({
     }
 
     if (newPhotos.length > 0) {
-      setCloudPhotos(prev => [...newPhotos, ...prev]);
+      setCloudPhotos(prev => {
+        const updated = [...newPhotos, ...prev];
+        localStorage.setItem(cloudStorageKey, JSON.stringify(updated));
+        return updated;
+      });
     }
     setIsUploadingToCloud(false);
   };
@@ -343,9 +390,24 @@ export default function TeacherDashboard({
     e.target.value = '';
   };
 
-  const handleDeleteCloudPhoto = (photoId) => {
+  const handleDeleteCloudPhoto = async (photoId) => {
     if (window.confirm('이 사진을 임시 보관함에서 삭제하시겠습니까?')) {
-      setCloudPhotos(prev => prev.filter(p => p.id !== photoId));
+      if (typeof photoId === 'number' || !isNaN(Number(photoId))) {
+        try {
+          const token = localStorage.getItem('takeme_token');
+          if (token) {
+            await fetch(`${API_BASE_URL}/routing/media/${photoId}`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${token}` }
+            });
+          }
+        } catch (_) {}
+      }
+      setCloudPhotos(prev => {
+        const next = prev.filter(p => p.id !== photoId);
+        localStorage.setItem(cloudStorageKey, JSON.stringify(next));
+        return next;
+      });
     }
   };
 

@@ -2,10 +2,13 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import '../../config.dart';
+import '../../models/user_model.dart';
 import '../../services/api_service.dart';
 
 class TeacherBoardView extends StatefulWidget {
-  const TeacherBoardView({super.key});
+  final String? initialCategory;
+  const TeacherBoardView({super.key, this.initialCategory});
 
   @override
   State<TeacherBoardView> createState() => _TeacherBoardViewState();
@@ -16,20 +19,25 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
   bool _isLoading = true;
   String _searchKeyword = '';
   String _selectedClassFilter = 'ALL';
+  String _selectedPostTypeFilter = 'ALL'; // 'ALL', 'NOTICE', 'POST'
   final _searchController = TextEditingController();
 
-  final List<String> _classList = const [
-    'ALL',
-    '햇살반',
-    '열매반',
-    '풀잎반',
-    '새싹반',
-    '심화B반',
-  ];
+  /// 반 필터 칩: 코드에 고정된 반 이름 대신, 불러온 글에 실제로 등장하는 반으로 구성한다
+  List<String> get _classList {
+    final classes = <String>{};
+    for (final p in _posts) {
+      final c = p['targetClass']?.toString().trim() ?? '';
+      if (c.isNotEmpty) classes.add(c);
+    }
+    return ['ALL', ...(classes.toList()..sort())];
+  }
 
   @override
   void initState() {
     super.initState();
+    if (widget.initialCategory != null) {
+      _selectedPostTypeFilter = widget.initialCategory!;
+    }
     _loadPosts();
   }
 
@@ -39,12 +47,202 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
     super.dispose();
   }
 
+  String _resolveImageUrl(String? url) {
+    if (url == null || url.trim().isEmpty) return '';
+    final trimmed = url.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+    final host = AppConfig.apiHost.endsWith('/')
+        ? AppConfig.apiHost.substring(0, AppConfig.apiHost.length - 1)
+        : AppConfig.apiHost;
+    if (trimmed.startsWith('/')) {
+      return '$host$trimmed';
+    }
+    return '$host/$trimmed';
+  }
+
+  void _openImageViewer(BuildContext context, String imageUrl, String title) {
+    final fullUrl = _resolveImageUrl(imageUrl);
+    if (fullUrl.isEmpty) return;
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.9),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(
+          children: [
+            Center(
+              child: InteractiveViewer(
+                minScale: 0.8,
+                maxScale: 4.0,
+                child: Image.network(
+                  fullUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (c, e, s) => const Center(
+                    child: Text('이미지를 불러올 수 없습니다.', style: TextStyle(color: Colors.white)),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: MediaQuery.of(ctx).padding.top + 10,
+              right: 16,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                onPressed: () => Navigator.pop(ctx),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCloudPhotoPicker({
+    required BuildContext context,
+    required List<dynamic> mediaList,
+    required Function(List<String>) onSelected,
+  }) {
+    final Set<String> selectedUrls = {};
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (context, setPickerState) {
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.7,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      '클라우드 보관함 사진 선택',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Color(0xFF64748B)),
+                      onPressed: () => Navigator.pop(sheetCtx),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '게시물에 첨부할 사진을 선택하세요. (${selectedUrls.length}장 선택됨)',
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: mediaList.isEmpty
+                      ? const Center(child: Text('보관함에 등록된 사진이 없습니다.', style: TextStyle(color: Color(0xFF94A3B8))))
+                      : GridView.builder(
+                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 3,
+                            crossAxisSpacing: 8,
+                            mainAxisSpacing: 8,
+                          ),
+                          itemCount: mediaList.length,
+                          itemBuilder: (context, i) {
+                            final item = mediaList[i];
+                            final rawUrl = item['url']?.toString() ?? '';
+                            final fullUrl = _resolveImageUrl(rawUrl);
+                            final isSelected = selectedUrls.contains(fullUrl);
+
+                            return GestureDetector(
+                              onTap: () {
+                                setPickerState(() {
+                                  if (isSelected) {
+                                    selectedUrls.remove(fullUrl);
+                                  } else {
+                                    selectedUrls.add(fullUrl);
+                                  }
+                                });
+                              },
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Image.network(
+                                      fullUrl,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (c, e, s) => Container(
+                                        color: const Color(0xFFF1F5F9),
+                                        child: const Icon(Icons.broken_image_outlined, color: Color(0xFF94A3B8)),
+                                      ),
+                                    ),
+                                  ),
+                                  if (isSelected)
+                                    Container(
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF2563EB).withOpacity(0.35),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: const Color(0xFF2563EB), width: 2.5),
+                                      ),
+                                    ),
+                                  Positioned(
+                                    top: 6,
+                                    right: 6,
+                                    child: Container(
+                                      width: 22,
+                                      height: 22,
+                                      decoration: BoxDecoration(
+                                        color: isSelected ? const Color(0xFF2563EB) : Colors.black.withOpacity(0.4),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(color: Colors.white, width: 1.5),
+                                      ),
+                                      child: isSelected
+                                          ? const Icon(Icons.check, size: 14, color: Colors.white)
+                                          : null,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+                const SizedBox(height: 12),
+                ElevatedButton(
+                  onPressed: selectedUrls.isEmpty
+                      ? null
+                      : () {
+                          onSelected(selectedUrls.toList());
+                          Navigator.pop(sheetCtx);
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text(
+                    '선택한 사진 ${selectedUrls.length}장 추가하기',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _loadPosts() async {
     setState(() => _isLoading = true);
     final user = ApiService().currentUser;
     final posts = await ApiService().getBoardPosts(
       academyId: user?.academyId,
       search: _searchKeyword.isNotEmpty ? _searchKeyword : null,
+      postType: _selectedPostTypeFilter == 'ALL' ? null : _selectedPostTypeFilter,
     );
     if (mounted) {
       setState(() {
@@ -55,22 +253,93 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
   }
 
   List<Map<String, dynamic>> get _filteredPosts {
-    if (_selectedClassFilter == 'ALL') {
-      return _posts;
+    final user = ApiService().currentUser;
+    var list = _posts;
+    if (_selectedPostTypeFilter != 'ALL') {
+      list = list.where((p) => (p['postType'] ?? 'POST') == _selectedPostTypeFilter).toList();
     }
-    return _posts.where((p) {
+    if (user?.role == 'HOMEROOM_TEACHER') {
+      return list;
+    }
+    if (_selectedClassFilter == 'ALL') {
+      return list;
+    }
+    return list.where((p) {
       if (p['visibility'] == 'ALL') return true;
       final target = p['targetClass']?.toString() ?? '';
       return target == _selectedClassFilter;
     }).toList();
   }
 
+  bool _canEditPost(Map<String, dynamic> post) {
+    final user = ApiService().currentUser;
+    if (user == null) return false;
+    if (user.role == 'ADMIN' || user.role == 'ACADEMY_ADMIN') return true;
+    if (post['authorUserId'] != null && post['authorUserId'] == user.id) return true;
+    if (post['authorName'] == user.name) return true;
+    return false;
+  }
+
+  void _confirmDeletePost(int postId) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('게시글 삭제', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+        content: const Text('이 게시글을 정말 삭제하시겠습니까?\n삭제된 게시글과 댓글은 복구할 수 없습니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('취소', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final res = await ApiService().deleteBoardPost(postId);
+              if (res['success'] == true && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('게시글이 삭제되었습니다.')),
+                );
+                _loadPosts();
+              } else if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('삭제에 실패했습니다. 권한을 확인해주세요.')),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626)),
+            child: const Text('삭제', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 공개 범위 선택지. '나의 반'은 담임(반이 배정된 경우)만 고를 수 있다.
+  List<(String, String)> _visibilityOptions(bool canUseMyClass) => [
+        if (canUseMyClass) ('CLASS', '나의 반'),
+        ('ALL', '전체 공개'),
+      ];
+
+  bool get _canUseMyClass {
+    final u = ApiService().currentUser;
+    final cls = u?.assignedClass;
+    return u?.role == 'HOMEROOM_TEACHER' && cls != null && cls.isNotEmpty && cls != '미배정';
+  }
+
   void _showCreatePostModal() {
+    final currentUser = ApiService().currentUser;
+    final isHomeroom = currentUser?.role == 'HOMEROOM_TEACHER';
+    final hasClass = currentUser?.assignedClass != null &&
+        currentUser!.assignedClass!.isNotEmpty &&
+        currentUser.assignedClass != '미배정';
     final titleCtrl = TextEditingController();
     final contentCtrl = TextEditingController();
-    String visibility = 'ALL';
-    String selectedClass = '햇살반';
+    String? selectedCategory;
+    final canUseMyClass = isHomeroom && hasClass;
+    String visibility = canUseMyClass ? 'CLASS' : 'ALL';
+    final String selectedClass = hasClass ? currentUser.assignedClass! : '';
     final List<XFile> pickedImages = [];
+    final List<String> selectedCloudUrls = [];
     bool isUploading = false;
 
     showModalBottomSheet(
@@ -82,13 +351,14 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
       ),
       builder: (ctx) => StatefulBuilder(
         builder: (context, setModalState) {
-          final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+          final viewInsets = MediaQuery.of(context).viewInsets;
+          final viewPadding = MediaQuery.of(context).viewPadding;
           return Padding(
             padding: EdgeInsets.only(
               left: 20,
               right: 20,
               top: 24,
-              bottom: bottomInset + 24,
+              bottom: viewInsets.bottom + viewPadding.bottom + 24,
             ),
             child: SingleChildScrollView(
               child: Column(
@@ -98,9 +368,13 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        '알림장 / 게시글 작성',
-                        style: TextStyle(
+                      Text(
+                        selectedCategory == 'NOTICE'
+                            ? '알림장 작성'
+                            : selectedCategory == 'POST'
+                                ? '게시물 작성'
+                                : '알림장 / 게시글 작성',
+                        style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
                           color: Color(0xFF0F172A),
@@ -112,53 +386,114 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 12),
 
-                  // Visibility & Target Class Selector
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          initialValue: visibility,
-                          decoration: InputDecoration(
-                            labelText: '공개 범위',
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          items: const [
-                            DropdownMenuItem(value: 'ALL', child: Text('전체 공개')),
-                            DropdownMenuItem(value: 'CLASS', child: Text('특정 반 전용')),
-                          ],
-                          onChanged: (val) {
-                            if (val != null) {
-                              setModalState(() => visibility = val);
-                            }
-                          },
-                        ),
-                      ),
-                      if (visibility == 'CLASS') ...[
-                        const SizedBox(width: 10),
+                  // Category Selector (NOTICE vs POST)
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
                         Expanded(
-                          child: DropdownButtonFormField<String>(
-                            initialValue: selectedClass,
-                            decoration: InputDecoration(
-                              labelText: '대상 학급',
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          child: GestureDetector(
+                            onTap: () => setModalState(() => selectedCategory = 'NOTICE'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: selectedCategory == 'NOTICE' ? const Color(0xFFEA580C) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                boxShadow: selectedCategory == 'NOTICE'
+                                    ? [BoxShadow(color: const Color(0xFFEA580C).withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2))]
+                                    : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.campaign_outlined,
+                                    size: 16,
+                                    color: selectedCategory == 'NOTICE' ? Colors.white : const Color(0xFF64748B),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '알림장',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: selectedCategory == 'NOTICE' ? Colors.white : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                            items: _classList
-                                .where((c) => c != 'ALL')
-                                .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                                .toList(),
-                            onChanged: (val) {
-                              if (val != null) {
-                                setModalState(() => selectedClass = val);
-                              }
-                            },
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setModalState(() => selectedCategory = 'POST'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: selectedCategory == 'POST' ? const Color(0xFF2563EB) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                boxShadow: selectedCategory == 'POST'
+                                    ? [BoxShadow(color: const Color(0xFF2563EB).withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2))]
+                                    : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.article_outlined,
+                                    size: 16,
+                                    color: selectedCategory == 'POST' ? Colors.white : const Color(0xFF64748B),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '게시물',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: selectedCategory == 'POST' ? Colors.white : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ],
-                    ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // 공개 범위: 나의 반 / 전체 공개 (반 이름을 고르지 않는다)
+                  DropdownButtonFormField<String>(
+                    initialValue: _visibilityOptions(canUseMyClass).any((o) => o.$1 == visibility)
+                        ? visibility
+                        : 'ALL',
+                    decoration: InputDecoration(
+                      labelText: '공개 범위',
+                      helperText: visibility == 'CLASS'
+                          ? '내가 맡은 반 학부모에게만 보입니다.'
+                          : '우리 기관의 모든 학부모에게 보입니다.',
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    items: _visibilityOptions(canUseMyClass)
+                        .map((o) => DropdownMenuItem(value: o.$1, child: Text(o.$2)))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setModalState(() => visibility = val);
+                      }
+                    },
                   ),
                   const SizedBox(height: 12),
 
@@ -231,6 +566,97 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                         ),
                       ),
 
+                      // Cloud Photos Button (클라우드 보관함 사진 가져오기)
+                      InkWell(
+                        onTap: isUploading
+                            ? null
+                            : () async {
+                                final mediaList = await ApiService().getMediaAssets();
+                                if (!ctx.mounted) return;
+                                if (mediaList.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('클라우드 보관함에 저장된 사진이 없습니다.')),
+                                  );
+                                  return;
+                                }
+                                _showCloudPhotoPicker(
+                                  context: ctx,
+                                  mediaList: mediaList,
+                                  onSelected: (selectedUrls) {
+                                    setModalState(() {
+                                      for (final u in selectedUrls) {
+                                        if (!selectedCloudUrls.contains(u)) {
+                                          selectedCloudUrls.add(u);
+                                        }
+                                      }
+                                    });
+                                  },
+                                );
+                              },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEFF6FF),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFBFDBFE), style: BorderStyle.solid),
+                          ),
+                          child: const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.cloud_download_outlined, color: Color(0xFF1D4ED8), size: 24),
+                              SizedBox(height: 4),
+                              Text('클라우드', style: TextStyle(fontSize: 10, color: Color(0xFF1D4ED8), fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      // Selected Cloud Images Previews
+                      ...selectedCloudUrls.asMap().entries.map((entry) {
+                        final idx = entry.key;
+                        final url = entry.value;
+                        return Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Container(
+                              width: 72,
+                              height: 72,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFF93C5FD)),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: Image.network(
+                                _resolveImageUrl(url),
+                                fit: BoxFit.cover,
+                                errorBuilder: (ctx, err, stack) => const Icon(Icons.broken_image, color: Color(0xFF94A3B8)),
+                              ),
+                            ),
+                            Positioned(
+                              top: -6,
+                              right: -6,
+                              child: InkWell(
+                                onTap: () {
+                                  setModalState(() {
+                                    selectedCloudUrls.removeAt(idx);
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFDC2626),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.close, color: Colors.white, size: 14),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }),
+
                       // Image Previews
                       ...pickedImages.asMap().entries.map((entry) {
                         final idx = entry.key;
@@ -290,6 +716,12 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             final title = titleCtrl.text.trim();
                             final content = contentCtrl.text.trim();
 
+                            if (selectedCategory == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('카테고리(알림장 또는 게시물)를 선택해주세요.')),
+                              );
+                              return;
+                            }
                             if (title.isEmpty) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(content: Text('제목을 입력해주세요.')),
@@ -321,17 +753,22 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             }
 
                             final user = ApiService().currentUser;
-                            final authorName = user?.name ?? '차량선생님';
+                            final authorName = user?.name.isNotEmpty == true
+                                ? user!.name
+                                : (user?.role == 'HOMEROOM_TEACHER' ? '담임교사' : '차량선생님');
+                            final authorRole = user?.role == 'HOMEROOM_TEACHER' ? 'HOMEROOM_TEACHER' : (user?.role ?? 'TEACHER');
 
+                            final allImages = [...selectedCloudUrls, ...uploadedCloudUrls];
                             final res = await ApiService().createBoardPost(
                               title: title,
                               content: content,
                               visibility: visibility,
                               targetClass: visibility == 'CLASS' ? selectedClass : null,
-                              imageUrl: uploadedCloudUrls.isNotEmpty ? uploadedCloudUrls.first : null,
-                              images: uploadedCloudUrls,
+                              postType: selectedCategory,
+                              imageUrl: allImages.isNotEmpty ? allImages.first : null,
+                              images: allImages,
                               authorName: authorName,
-                              authorRole: 'TEACHER',
+                              authorRole: authorRole,
                               academyId: user?.academyId,
                             );
 
@@ -343,11 +780,14 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             if (!mounted) return;
                             if (res['success'] == true) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('알림장 및 게시글이 등록되었습니다. 학부모 및 관리자 웹과 실시간 공유됩니다.'),
-                                  backgroundColor: Color(0xFF10B981),
+                                SnackBar(
+                                  content: Text('${selectedCategory == 'NOTICE' ? '알림장' : '게시물'}이 등록되었습니다. 학부모 및 관리자 웹과 실시간 공유됩니다.'),
+                                  backgroundColor: const Color(0xFF10B981),
                                 ),
                               );
+                              setState(() {
+                                _selectedPostTypeFilter = selectedCategory!;
+                              });
                               _loadPosts();
                             } else {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -359,7 +799,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             }
                           },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2563EB),
+                      backgroundColor: selectedCategory == 'NOTICE' ? const Color(0xFFEA580C) : const Color(0xFF2563EB),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
@@ -369,13 +809,469 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             children: [
                               SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
                               SizedBox(width: 10),
-                              Text('게시글 업로드 중...', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                              Text('등록 중...', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                             ],
                           )
-                        : const Text(
-                            '게시글 등록하기',
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                        : Text(
+                            selectedCategory == 'NOTICE'
+                                ? '알림장 등록하기'
+                                : selectedCategory == 'POST'
+                                    ? '게시물 등록하기'
+                                    : '등록하기',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
                           ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showEditPostModal(Map<String, dynamic> post) {
+    final postId = post['id'] as int;
+    final titleCtrl = TextEditingController(text: post['title']?.toString() ?? '');
+    final contentCtrl = TextEditingController(text: post['content']?.toString() ?? '');
+    String selectedCategory = post['postType'] == 'NOTICE' ? 'NOTICE' : 'POST';
+    final canUseMyClass = _canUseMyClass;
+    String visibility = post['visibility']?.toString() == 'CLASS' ? 'CLASS' : 'ALL';
+    // '나의 반'은 서버가 담임의 반으로 고정한다. 화면에서는 반을 고르지 않는다.
+    final String selectedClass = post['targetClass']?.toString() ?? ApiService().currentUser?.assignedClass ?? '';
+    final existingImages = List<String>.from((post['images'] as List?)?.map((e) => e.toString()) ??
+        (post['imageUrl'] != null ? [post['imageUrl'].toString()] : []));
+    final List<XFile> newlyPickedImages = [];
+    bool isSaving = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          final viewInsets = MediaQuery.of(context).viewInsets;
+          final viewPadding = MediaQuery.of(context).viewPadding;
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 24,
+              bottom: viewInsets.bottom + viewPadding.bottom + 24,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        selectedCategory == 'NOTICE' ? '알림장 수정' : '게시물 수정',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Color(0xFF64748B)),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Category Selector (NOTICE vs POST)
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setModalState(() => selectedCategory = 'NOTICE'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: selectedCategory == 'NOTICE' ? const Color(0xFFEA580C) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                boxShadow: selectedCategory == 'NOTICE'
+                                    ? [BoxShadow(color: const Color(0xFFEA580C).withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2))]
+                                    : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.campaign_outlined,
+                                    size: 16,
+                                    color: selectedCategory == 'NOTICE' ? Colors.white : const Color(0xFF64748B),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '알림장',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: selectedCategory == 'NOTICE' ? Colors.white : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => setModalState(() => selectedCategory = 'POST'),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: selectedCategory == 'POST' ? const Color(0xFF2563EB) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                boxShadow: selectedCategory == 'POST'
+                                    ? [BoxShadow(color: const Color(0xFF2563EB).withValues(alpha: 0.25), blurRadius: 4, offset: const Offset(0, 2))]
+                                    : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.article_outlined,
+                                    size: 16,
+                                    color: selectedCategory == 'POST' ? Colors.white : const Color(0xFF64748B),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '게시물',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: selectedCategory == 'POST' ? Colors.white : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // 공개 범위: 나의 반 / 전체 공개 (반 이름을 고르지 않는다)
+                  DropdownButtonFormField<String>(
+                    initialValue: _visibilityOptions(canUseMyClass).any((o) => o.$1 == visibility)
+                        ? visibility
+                        : 'ALL',
+                    decoration: InputDecoration(
+                      labelText: '공개 범위',
+                      helperText: visibility == 'CLASS'
+                          ? '내가 맡은 반 학부모에게만 보입니다.'
+                          : '우리 기관의 모든 학부모에게 보입니다.',
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    items: _visibilityOptions(canUseMyClass)
+                        .map((o) => DropdownMenuItem(value: o.$1, child: Text(o.$2)))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setModalState(() => visibility = val);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Title Input
+                  TextField(
+                    controller: titleCtrl,
+                    decoration: InputDecoration(
+                      labelText: '제목',
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Content Input
+                  TextField(
+                    controller: contentCtrl,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      labelText: '내용',
+                      contentPadding: const EdgeInsets.all(12),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Photo management
+                  const Text(
+                    '활동 사진 관리',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+                  ),
+                  const SizedBox(height: 8),
+
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      InkWell(
+                        onTap: isSaving
+                            ? null
+                            : () async {
+                                final picker = ImagePicker();
+                                final List<XFile> images = await picker.pickMultiImage(imageQuality: 80);
+                                if (images.isNotEmpty) {
+                                  setModalState(() {
+                                    newlyPickedImages.addAll(images);
+                                  });
+                                }
+                              },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFCBD5E1)),
+                          ),
+                          child: const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.add_a_photo_outlined, color: Color(0xFF2563EB), size: 24),
+                              SizedBox(height: 4),
+                              Text('사진 추가', style: TextStyle(fontSize: 10, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      ),
+                      // Cloud Photos Button (클라우드 보관함 사진 가져오기)
+                      InkWell(
+                        onTap: isSaving
+                            ? null
+                            : () async {
+                                final mediaList = await ApiService().getMediaAssets();
+                                if (!ctx.mounted) return;
+                                if (mediaList.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('클라우드 보관함에 저장된 사진이 없습니다.')),
+                                  );
+                                  return;
+                                }
+                                _showCloudPhotoPicker(
+                                  context: ctx,
+                                  mediaList: mediaList,
+                                  onSelected: (selectedUrls) {
+                                    setModalState(() {
+                                      for (final u in selectedUrls) {
+                                        if (!existingImages.contains(u)) {
+                                          existingImages.add(u);
+                                        }
+                                      }
+                                    });
+                                  },
+                                );
+                              },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEFF6FF),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFBFDBFE)),
+                          ),
+                          child: const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.cloud_download_outlined, color: Color(0xFF1D4ED8), size: 24),
+                              SizedBox(height: 4),
+                              Text('클라우드', style: TextStyle(fontSize: 10, color: Color(0xFF1D4ED8), fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      ),
+                      // Existing images
+                      ...existingImages.asMap().entries.map((entry) {
+                        final idx = entry.key;
+                        final url = entry.value;
+                        return Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Container(
+                              width: 72,
+                              height: 72,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: Image.network(_resolveImageUrl(url), fit: BoxFit.cover, errorBuilder: (ctx, err, stack) => const Icon(Icons.broken_image)),
+                            ),
+                            Positioned(
+                              top: -6,
+                              right: -6,
+                              child: InkWell(
+                                onTap: () {
+                                  setModalState(() {
+                                    existingImages.removeAt(idx);
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFDC2626),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.close, color: Colors.white, size: 14),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }),
+                      // Newly picked images
+                      ...newlyPickedImages.asMap().entries.map((entry) {
+                        final idx = entry.key;
+                        final img = entry.value;
+                        return Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Container(
+                              width: 72,
+                              height: 72,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFF2563EB), width: 1.5),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: FutureBuilder<Uint8List>(
+                                future: img.readAsBytes(),
+                                builder: (context, snapshot) {
+                                  if (snapshot.hasData) {
+                                    return Image.memory(snapshot.data!, fit: BoxFit.cover);
+                                  }
+                                  return const Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)));
+                                },
+                              ),
+                            ),
+                            Positioned(
+                              top: -6,
+                              right: -6,
+                              child: InkWell(
+                                onTap: () {
+                                  setModalState(() {
+                                    newlyPickedImages.removeAt(idx);
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFDC2626),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.close, color: Colors.white, size: 14),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Save Button
+                  ElevatedButton(
+                    onPressed: isSaving
+                        ? null
+                        : () async {
+                            final title = titleCtrl.text.trim();
+                            final content = contentCtrl.text.trim();
+                            if (title.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('제목을 입력해주세요.')),
+                              );
+                              return;
+                            }
+                            if (content.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('내용을 입력해주세요.')),
+                              );
+                              return;
+                            }
+
+                            setModalState(() => isSaving = true);
+
+                            // Upload newly picked images
+                            final List<String> allImages = List<String>.from(existingImages);
+                            for (final file in newlyPickedImages) {
+                              final bytes = await file.readAsBytes();
+                              final mimeType = file.name.endsWith('.png') ? 'image/png' : 'image/jpeg';
+                              final upRes = await ApiService().uploadBoardImage(
+                                bytes: bytes,
+                                filename: file.name,
+                                mimeType: mimeType,
+                              );
+                              if (upRes['success'] == true && upRes['url'] != null) {
+                                allImages.add(upRes['url'] as String);
+                              }
+                            }
+
+                            final res = await ApiService().updateBoardPost(
+                              postId,
+                              title: title,
+                              content: content,
+                              visibility: visibility,
+                              targetClass: visibility == 'CLASS' ? selectedClass : null,
+                              postType: selectedCategory,
+                              images: allImages,
+                            );
+
+                            setModalState(() => isSaving = false);
+
+                            if (!ctx.mounted) return;
+                            Navigator.pop(ctx);
+
+                            if (res['success'] == true) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('${selectedCategory == 'NOTICE' ? '알림장' : '게시물'}이 수정되었습니다.')),
+                              );
+                              _loadPosts();
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text(res['message'] ?? '게시글 수정에 실패했습니다.')),
+                              );
+                            }
+                          },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: selectedCategory == 'NOTICE' ? const Color(0xFFEA580C) : const Color(0xFF2563EB),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: isSaving
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Text('수정 완료', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                   ),
                 ],
               ),
@@ -420,11 +1316,17 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => StatefulBuilder(
         builder: (context, setCommentState) {
-          final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+          final viewInsets = MediaQuery.of(context).viewInsets;
+          final viewPadding = MediaQuery.of(context).viewPadding;
           return Padding(
-            padding: EdgeInsets.only(left: 16, right: 16, top: 16, bottom: bottomInset + 16),
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 16,
+              bottom: viewInsets.bottom + viewPadding.bottom + 12,
+            ),
             child: SizedBox(
-              height: 440,
+              height: MediaQuery.of(context).size.height * 0.65,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -510,20 +1412,23 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                           commentCtrl.clear();
 
                           final user = ApiService().currentUser;
-                          final authorName = user?.name ?? '차량선생님';
+                          final authorName = user?.name.isNotEmpty == true
+                              ? user!.name
+                              : (user?.role == 'HOMEROOM_TEACHER' ? '담임교사' : '차량선생님');
+                          final authorRole = user?.role == 'HOMEROOM_TEACHER' ? 'HOMEROOM_TEACHER' : (user?.role ?? 'TEACHER');
 
                           final res = await ApiService().addPostComment(
                             postId,
                             content: text,
                             authorName: authorName,
-                            authorRole: 'TEACHER',
+                            authorRole: authorRole,
                           );
 
                           if (res['success'] == true) {
                             final newComment = {
                               'id': DateTime.now().millisecondsSinceEpoch,
                               'authorName': authorName,
-                              'authorRole': 'TEACHER',
+                              'authorRole': authorRole,
                               'content': text,
                               'createdAt': DateTime.now().toIso8601String(),
                             };
@@ -555,6 +1460,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
 
   @override
   Widget build(BuildContext context) {
+    final user = ApiService().currentUser;
     final displayPosts = _filteredPosts;
 
     return Column(
@@ -606,31 +1512,84 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   ),
                 ],
               ),
+              // Category Filter Chips: 전체 · 알림장 · 게시물
               const SizedBox(height: 8),
-
-              // Filter Chips
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: _classList.map((c) {
-                    final isSelected = _selectedClassFilter == c;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: ChoiceChip(
-                        label: Text(c == 'ALL' ? '전체 학급' : c),
-                        selected: isSelected,
-                        onSelected: (_) => setState(() => _selectedClassFilter = c),
-                        selectedColor: const Color(0xFF2563EB),
-                        labelStyle: TextStyle(
-                          color: isSelected ? Colors.white : const Color(0xFF475569),
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
+              Row(
+                children: [
+                  ChoiceChip(
+                    label: const Text('전체'),
+                    selected: _selectedPostTypeFilter == 'ALL',
+                    onSelected: (_) {
+                      setState(() => _selectedPostTypeFilter = 'ALL');
+                      _loadPosts();
+                    },
+                    selectedColor: const Color(0xFF0F172A),
+                    labelStyle: TextStyle(
+                      color: _selectedPostTypeFilter == 'ALL' ? Colors.white : const Color(0xFF475569),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  ChoiceChip(
+                    avatar: Icon(Icons.campaign, size: 14, color: _selectedPostTypeFilter == 'NOTICE' ? Colors.white : const Color(0xFFEA580C)),
+                    label: const Text('알림장'),
+                    selected: _selectedPostTypeFilter == 'NOTICE',
+                    onSelected: (_) {
+                      setState(() => _selectedPostTypeFilter = 'NOTICE');
+                      _loadPosts();
+                    },
+                    selectedColor: const Color(0xFFEA580C),
+                    labelStyle: TextStyle(
+                      color: _selectedPostTypeFilter == 'NOTICE' ? Colors.white : const Color(0xFFEA580C),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  ChoiceChip(
+                    avatar: Icon(Icons.article, size: 14, color: _selectedPostTypeFilter == 'POST' ? Colors.white : const Color(0xFF2563EB)),
+                    label: const Text('게시물'),
+                    selected: _selectedPostTypeFilter == 'POST',
+                    onSelected: (_) {
+                      setState(() => _selectedPostTypeFilter = 'POST');
+                      _loadPosts();
+                    },
+                    selectedColor: const Color(0xFF2563EB),
+                    labelStyle: TextStyle(
+                      color: _selectedPostTypeFilter == 'POST' ? Colors.white : const Color(0xFF2563EB),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
               ),
+              // Filter Chips (Hidden for Homeroom Teacher since they only see their assigned class)
+              if (user?.role != 'HOMEROOM_TEACHER') ...[
+                const SizedBox(height: 8),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: _classList.map((c) {
+                      final isSelected = _selectedClassFilter == c;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: ChoiceChip(
+                          label: Text(c == 'ALL' ? '전체 학급' : c),
+                          selected: isSelected,
+                          onSelected: (_) => setState(() => _selectedClassFilter = c),
+                          selectedColor: const Color(0xFF2563EB),
+                          labelStyle: TextStyle(
+                            color: isSelected ? Colors.white : const Color(0xFF475569),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -711,22 +1670,46 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                               Row(
                                                 children: [
                                                   Text(
-                                                    post['authorName'] ?? '원장선생님',
+                                                    post['authorName'] ?? '기관 관리자',
                                                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E293B)),
                                                   ),
                                                   const SizedBox(width: 6),
                                                   Container(
                                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                     decoration: BoxDecoration(
-                                                      color: post['authorRole'] == 'ADMIN' ? const Color(0xFFEFF6FF) : const Color(0xFFF0FDF4),
+                                                      color: post['postType'] == 'NOTICE' ? const Color(0xFFFFF7ED) : const Color(0xFFEFF6FF),
                                                       borderRadius: BorderRadius.circular(4),
+                                                      border: Border.all(
+                                                        color: post['postType'] == 'NOTICE' ? const Color(0xFFFDBA74) : const Color(0xFFBFDBFE),
+                                                        width: 0.8,
+                                                      ),
                                                     ),
                                                     child: Text(
-                                                      post['authorRole'] == 'ADMIN' ? '원장님' : '차량선생님',
+                                                      post['postType'] == 'NOTICE' ? '알림장' : '게시물',
                                                       style: TextStyle(
                                                         fontSize: 10,
                                                         fontWeight: FontWeight.bold,
-                                                        color: post['authorRole'] == 'ADMIN' ? const Color(0xFF2563EB) : const Color(0xFF16A34A),
+                                                        color: post['postType'] == 'NOTICE' ? const Color(0xFFEA580C) : const Color(0xFF2563EB),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                    decoration: BoxDecoration(
+                                                      color: post['authorRole'] == 'ADMIN' || post['authorRole'] == 'ACADEMY_ADMIN'
+                                                          ? const Color(0xFFEFF6FF)
+                                                          : const Color(0xFFF0FDF4),
+                                                      borderRadius: BorderRadius.circular(4),
+                                                    ),
+                                                    child: Text(
+                                                      UserModel.getRoleKorean(post['authorRole']),
+                                                      style: TextStyle(
+                                                        fontSize: 10,
+                                                        fontWeight: FontWeight.bold,
+                                                        color: post['authorRole'] == 'ADMIN' || post['authorRole'] == 'ACADEMY_ADMIN'
+                                                            ? const Color(0xFF2563EB)
+                                                            : const Color(0xFF16A34A),
                                                       ),
                                                     ),
                                                   ),
@@ -744,17 +1727,59 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                         ],
                                       ),
 
-                                      // Class badge
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFF1F5F9),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: Text(
-                                          post['targetClass'] ?? (post['visibility'] == 'ALL' ? '전체 공개' : '반공개'),
-                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
-                                        ),
+                                      // Class badge & 3-dots Menu
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFF1F5F9),
+                                              borderRadius: BorderRadius.circular(8),
+                                            ),
+                                            child: Text(
+                                              post['visibility'] == 'CLASS' ? '나의 반' : '전체 공개',
+                                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+                                            ),
+                                          ),
+                                          if (_canEditPost(post)) ...[
+                                            const SizedBox(width: 4),
+                                            PopupMenuButton<String>(
+                                              icon: const Icon(Icons.more_vert, size: 20, color: Color(0xFF64748B)),
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(),
+                                              onSelected: (val) {
+                                                if (val == 'edit') {
+                                                  _showEditPostModal(post);
+                                                } else if (val == 'delete') {
+                                                  _confirmDeletePost(post['id'] as int);
+                                                }
+                                              },
+                                              itemBuilder: (ctx) => [
+                                                const PopupMenuItem(
+                                                  value: 'edit',
+                                                  child: Row(
+                                                    children: [
+                                                      Icon(Icons.edit_outlined, size: 18, color: Color(0xFF2563EB)),
+                                                      SizedBox(width: 8),
+                                                      Text('수정'),
+                                                    ],
+                                                  ),
+                                                ),
+                                                const PopupMenuItem(
+                                                  value: 'delete',
+                                                  child: Row(
+                                                    children: [
+                                                      Icon(Icons.delete_outline, size: 18, color: Color(0xFFEF4444)),
+                                                      SizedBox(width: 8),
+                                                      Text('삭제', style: TextStyle(color: Color(0xFFEF4444))),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ],
                                       ),
                                     ],
                                   ),
@@ -791,20 +1816,23 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                       separatorBuilder: (ctx, idx) => const SizedBox(width: 8),
                                       itemBuilder: (context, imgIdx) {
                                         final imgUrl = images[imgIdx];
-                                        return Container(
-                                          width: 240,
-                                          decoration: BoxDecoration(
-                                            borderRadius: BorderRadius.circular(12),
-                                            border: Border.all(color: const Color(0xFFE2E8F0)),
-                                          ),
-                                          clipBehavior: Clip.antiAlias,
-                                          child: Image.network(
-                                            imgUrl,
-                                            fit: BoxFit.cover,
-                                            errorBuilder: (ctx, err, stack) => Container(
-                                              color: const Color(0xFFF1F5F9),
-                                              child: const Center(
-                                                child: Icon(Icons.broken_image_outlined, color: Color(0xFF94A3B8)),
+                                        return GestureDetector(
+                                          onTap: () => _openImageViewer(context, imgUrl, post['title'] ?? '활동사진'),
+                                          child: Container(
+                                            width: 240,
+                                            decoration: BoxDecoration(
+                                              borderRadius: BorderRadius.circular(12),
+                                              border: Border.all(color: const Color(0xFFE2E8F0)),
+                                            ),
+                                            clipBehavior: Clip.antiAlias,
+                                            child: Image.network(
+                                              _resolveImageUrl(imgUrl),
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (ctx, err, stack) => Container(
+                                                color: const Color(0xFFF1F5F9),
+                                                child: const Center(
+                                                  child: Icon(Icons.broken_image_outlined, color: Color(0xFF94A3B8)),
+                                                ),
                                               ),
                                             ),
                                           ),

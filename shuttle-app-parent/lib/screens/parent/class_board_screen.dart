@@ -1,5 +1,6 @@
 import '../../widgets/load_error_view.dart';
 import 'package:flutter/material.dart';
+import '../../config.dart';
 import '../../services/api_service.dart';
 
 class ClassBoardScreen extends StatefulWidget {
@@ -48,6 +49,19 @@ class _ClassBoardScreenState extends State<ClassBoardScreen> {
         });
       }
     }
+  }
+
+  String _resolveImageUrl(String? url) {
+    if (url == null || url.trim().isEmpty) return '';
+    final trimmed = url.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+    final host = AppConfig.apiHost.endsWith('/')
+        ? AppConfig.apiHost.substring(0, AppConfig.apiHost.length - 1)
+        : AppConfig.apiHost;
+    if (trimmed.startsWith('/')) {
+      return '$host$trimmed';
+    }
+    return '$host/$trimmed';
   }
 
   String _formatDate(dynamic dateVal) {
@@ -242,7 +256,7 @@ class _ClassBoardScreenState extends State<ClassBoardScreen> {
                                     ClipRRect(
                                       borderRadius: BorderRadius.circular(10),
                                       child: Image.network(
-                                        thumbUrl,
+                                        _resolveImageUrl(thumbUrl),
                                         width: 72,
                                         height: 72,
                                         fit: BoxFit.cover,
@@ -272,6 +286,19 @@ class ClassBoardDetailScreen extends StatelessWidget {
 
   const ClassBoardDetailScreen({super.key, required this.post});
 
+  String _resolveImageUrl(String? url) {
+    if (url == null || url.trim().isEmpty) return '';
+    final trimmed = url.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+    final host = AppConfig.apiHost.endsWith('/')
+        ? AppConfig.apiHost.substring(0, AppConfig.apiHost.length - 1)
+        : AppConfig.apiHost;
+    if (trimmed.startsWith('/')) {
+      return '$host$trimmed';
+    }
+    return '$host/$trimmed';
+  }
+
   String _formatDate(dynamic dateVal) {
     if (dateVal == null) return '';
     try {
@@ -300,7 +327,7 @@ class ClassBoardDetailScreen extends StatelessWidget {
               minScale: 0.8,
               maxScale: 4.0,
               child: Image.network(
-                imageUrl,
+                _resolveImageUrl(imageUrl),
                 fit: BoxFit.contain,
                 errorBuilder: (ctx, err, stack) => const Center(
                   child: Text('이미지를 불러올 수 없습니다.', style: TextStyle(color: Colors.white)),
@@ -433,7 +460,7 @@ class ClassBoardDetailScreen extends StatelessWidget {
                         alignment: Alignment.bottomRight,
                         children: [
                           Image.network(
-                            imgUrl,
+                            _resolveImageUrl(imgUrl),
                             width: double.infinity,
                             fit: BoxFit.cover,
                             errorBuilder: (c, e, s) => Container(

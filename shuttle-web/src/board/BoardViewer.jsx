@@ -207,15 +207,49 @@ export default function BoardViewer({
     }
   }, [initialPostType]);
 
-  const cloudStoredPhotos = useMemo(() => {
+  const [cloudStoredPhotos, setCloudStoredPhotos] = useState(() => {
     try {
-      const saved = localStorage.getItem('takeme_teacher_cloud_photos');
+      const saved = localStorage.getItem('takeme_teacher_cloud_photos') || localStorage.getItem(`takeme_teacher_cloud_${currentUser?.id || 'default'}`);
       if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error(e);
-    }
+    } catch (_) {}
     return [];
-  }, [isCreatingPost]);
+  });
+
+  const loadCloudStoredPhotos = async () => {
+    try {
+      let photos = [];
+      const saved = localStorage.getItem('takeme_teacher_cloud_photos') || localStorage.getItem(`takeme_teacher_cloud_${currentUser?.id || 'default'}`);
+      if (saved) photos = JSON.parse(saved);
+
+      const token = localStorage.getItem('takeme_token');
+      if (token) {
+        const res = await fetch(`${API_BASE_URL}/routing/media`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            const serverPhotos = data.map(item => ({
+              id: item.id,
+              name: item.filename || '활동_사진.jpg',
+              url: item.url,
+              size: item.size ? `${(item.size / (1024 * 1024)).toFixed(2)} MB` : '-',
+              uploadedAt: new Date(item.createdAt).toLocaleString('ko-KR')
+            }));
+            photos = serverPhotos;
+            localStorage.setItem('takeme_teacher_cloud_photos', JSON.stringify(photos));
+          }
+        }
+      }
+      setCloudStoredPhotos(photos);
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    if (isCreatingPost || editingPost) {
+      loadCloudStoredPhotos();
+    }
+  }, [isCreatingPost, editingPost]);
 
   // Keyboard navigation for multi-photo Lightbox
   useEffect(() => {
@@ -517,6 +551,21 @@ export default function BoardViewer({
           images: updatedImages,
           imageUrl: prev.imageUrl && !isPresetOnly ? prev.imageUrl : updatedImages[0]
         };
+      });
+
+      const uploadedCloudItems = newImageUrls.map((url, i) => ({
+        id: `upload-${Date.now()}-${i}`,
+        name: files[i]?.name || '활동사진.jpg',
+        url,
+        size: files[i] ? `${(files[i].size / (1024 * 1024)).toFixed(2)} MB` : '-',
+        uploadedAt: '방금 전'
+      }));
+      setCloudStoredPhotos(prev => {
+        const updated = [...uploadedCloudItems, ...prev];
+        try {
+          localStorage.setItem('takeme_teacher_cloud_photos', JSON.stringify(updated));
+        } catch (_) {}
+        return updated;
       });
     }
 
