@@ -1373,6 +1373,7 @@ export class RoutingService {
         lat: (override && override.latitude) ? Number(override.latitude) : st.latitude,
         lng: (override && override.longitude) ? Number(override.longitude) : st.longitude,
         isNotRiding,
+        boardingType: parsedRaw['탑승구분'] || (isNotRiding ? 'NONE' : (st.assignedDepartureVehicle && !st.assignedVehicle ? 'AFTERNOON_ONLY' : (!st.assignedDepartureVehicle && st.assignedVehicle ? 'MORNING_ONLY' : 'BOTH'))),
         isOneTimeRide,
         oneTimeType: override?.overrideType || (parsedRaw.isTemporaryLocation ? 'CHANGE_LOCATION' : (isOneTimeBoarding ? 'ONE_TIME_BOARDING' : null)),
         addressNeedsInput: needsAddress,
@@ -1725,42 +1726,46 @@ export class RoutingService {
     return lower.concat(upper);
   }
 
-  public generateZonePolygon(points: [number, number][], bufferKm: number = 1.8): [number, number][] {
+  public generateZonePolygon(points: [number, number][], bufferKm: number = 0): [number, number][] {
     if (!points || points.length === 0) return [];
 
     // Deduplicate points
     const pointMap = new Map<string, [number, number]>();
     for (const p of points) {
       if (Array.isArray(p) && p.length >= 2 && !isNaN(p[0]) && !isNaN(p[1])) {
-        pointMap.set(`${p[0].toFixed(5)},${p[1].toFixed(5)}`, [p[0], p[1]]);
+        pointMap.set(`${p[0].toFixed(6)},${p[1].toFixed(6)}`, [p[0], p[1]]);
       }
     }
     const uniquePoints = Array.from(pointMap.values());
     if (uniquePoints.length === 0) return [];
-
-    // Generous service buffer around student stops (~1.8km radius for realistic neighborhood sector)
-    // 1 deg lat ≈ 111.0 km, 1 deg lng ≈ 111.0 * cos(lat) ≈ 88.0 km in Korea
-    const avgLat = uniquePoints.reduce((s, p) => s + p[0], 0) / uniquePoints.length;
-    const dLat = bufferKm / 111.0;
-    const cosLat = Math.cos((avgLat * Math.PI) / 180);
-    const dLng = bufferKm / (111.0 * (cosLat > 0.1 ? cosLat : 0.8));
-
-    const expandedPoints: [number, number][] = [];
-    for (const p of uniquePoints) {
-      const lat = p[0];
-      const lng = p[1];
-      // 12-direction expansion for smooth natural perimeter
-      for (let a = 0; a < 12; a++) {
-        const rad = (a * 2 * Math.PI) / 12;
-        expandedPoints.push([
-          lat + dLat * Math.sin(rad),
-          lng + dLng * Math.cos(rad)
-        ]);
-      }
+    if (uniquePoints.length === 1) {
+      const [lat, lng] = uniquePoints[0];
+      const d = 0.0008;
+      return [
+        [lat - d, lng - d],
+        [lat - d, lng + d],
+        [lat + d, lng + d],
+        [lat + d, lng - d]
+      ];
+    }
+    if (uniquePoints.length === 2) {
+      const [p1, p2] = uniquePoints;
+      const dy = p2[0] - p1[0];
+      const dx = p2[1] - p1[1];
+      const len = Math.sqrt(dy * dy + dx * dx) || 1e-6;
+      const d = 0.0007; // ~70m corridor half-width along the route
+      const perpY = (-dx / len) * d;
+      const perpX = (dy / len) * d;
+      return [
+        [p1[0] + perpY, p1[1] + perpX],
+        [p2[0] + perpY, p2[1] + perpX],
+        [p2[0] - perpY, p2[1] - perpX],
+        [p1[0] - perpY, p1[1] - perpX]
+      ];
     }
 
-    const hull = this.computeConvexHull(expandedPoints);
-    return hull && hull.length >= 3 ? hull : expandedPoints.slice(0, 4);
+    const hull = this.computeConvexHull(uniquePoints);
+    return hull && hull.length >= 3 ? hull : uniquePoints.slice(0, 4);
   }
 
   // Sutherland-Hodgman polygon clipping against a perpendicular bisector half-plane
@@ -2307,16 +2312,46 @@ export class RoutingService {
       parsedRaw['비고'] = data.note;
     }
 
-    if (data.isNotRiding !== undefined) {
+    if (data.boardingType !== undefined) {
+      parsedRaw['탑승구분'] = data.boardingType;
+      if (data.boardingType === 'NONE') {
+        student.isNotRiding = true;
+        parsedRaw['차량미탑승'] = true;
+        parsedRaw['미탑승'] = true;
+        delete parsedRaw['주소입력필요'];
+        delete parsedRaw['실패주소'];
+        student.assignedVehicle = null as any;
+        student.assignedDepartureVehicle = null as any;
+      } else {
+        student.isNotRiding = false;
+        parsedRaw['차량미탑승'] = false;
+        parsedRaw['미탑승'] = false;
+        if (data.boardingType === 'MORNING_ONLY') {
+          student.assignedDepartureVehicle = null as any;
+          delete parsedRaw['하원차량'];
+        } else if (data.boardingType === 'AFTERNOON_ONLY') {
+          student.assignedVehicle = null as any;
+          delete parsedRaw['등원차량'];
+          delete parsedRaw['호차'];
+          delete parsedRaw['차량'];
+        }
+      }
+    } else if (data.isNotRiding !== undefined) {
       student.isNotRiding = Boolean(data.isNotRiding);
       parsedRaw['차량미탑승'] = student.isNotRiding;
       parsedRaw['미탑승'] = student.isNotRiding;
       if (student.isNotRiding) {
+        parsedRaw['탑승구분'] = 'NONE';
         delete parsedRaw['주소입력필요'];
         delete parsedRaw['실패주소'];
         student.assignedVehicle = null as any;
         student.assignedDepartureVehicle = null as any;
       }
+    }
+
+    if (data.weeklySchedules !== undefined) {
+      parsedRaw['요일별일정'] = data.weeklySchedules;
+      parsedRaw.weeklySchedules = data.weeklySchedules;
     }
 
     if (data.dropoffLocation !== undefined || data.outLocation !== undefined) {

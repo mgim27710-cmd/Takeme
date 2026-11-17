@@ -301,6 +301,13 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   // Participant list popover state
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
 
+  // Section refs for Category Navigation in New Chat Modal
+  const driversSectionRef = useRef(null);
+  const teachersSectionRef = useRef(null);
+  const studentsSectionRef = useRef(null);
+  const parentsSectionRef = useRef(null);
+  const adminsSectionRef = useRef(null);
+
   // Payment / Boarding Request Modal State
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isLoadingPaymentContext, setIsLoadingPaymentContext] = useState(false);
@@ -659,6 +666,14 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         return Array.from(next);
       }
     });
+  };
+
+  // 역할별 일괄 선택/해제 토글 및 해당 섹션으로 스크롤 이동
+  const handleToggleSelectRoleAndScroll = (userList, sectionRef) => {
+    handleToggleSelectRole(userList);
+    if (sectionRef?.current) {
+      sectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   // 관련 인원 전체 선택/해제 토글
@@ -2886,43 +2901,112 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             </div>
 
             {/* Quick Role Select Toolbar (역할별 및 관련인원 전체 선택 툴바) */}
-            <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-1 flex-wrap">
+            <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-1.5 flex-wrap">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
                   onClick={handleToggleSelectAllUsers}
-                  className="px-2.5 py-1 text-xs font-black rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition shadow-2xs cursor-pointer"
+                  className="px-3 py-1.5 text-xs font-black rounded-xl bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition shadow-2xs border border-blue-700 cursor-pointer"
                 >
                   관련인원 전체 {selectedUserIds.length === (filteredDrivers.length + filteredTeachers.length + filteredParents.length + filteredAdmins.length) && selectedUserIds.length > 0 ? '해제' : '선택'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleToggleSelectRole(filteredTeachers)}
-                  className="px-2 py-1 text-xs font-bold rounded-lg bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition cursor-pointer"
+                  onClick={() => handleToggleSelectRoleAndScroll(filteredTeachers, teachersSectionRef)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                    filteredTeachers.length > 0 && filteredTeachers.every(u => selectedUserIds.includes(u.id))
+                      ? 'bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700 font-black'
+                      : 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-50 hover:border-emerald-400'
+                  }`}
+                  title="교사 전체 선택 및 교사 목록으로 이동"
                 >
-                  교사 전체 ({filteredTeachers.length})
+                  <span>교사 전체</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                    filteredTeachers.length > 0 && filteredTeachers.every(u => selectedUserIds.includes(u.id))
+                      ? 'bg-emerald-700 text-white'
+                      : 'bg-emerald-100 text-emerald-800'
+                  }`}>
+                    {filteredTeachers.length}
+                  </span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleToggleSelectRole(filteredDrivers)}
-                  className="px-2 py-1 text-xs font-bold rounded-lg bg-blue-100 text-blue-800 hover:bg-blue-200 transition cursor-pointer"
+                  onClick={() => handleToggleSelectRoleAndScroll(filteredDrivers, driversSectionRef)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                    filteredDrivers.length > 0 && filteredDrivers.every(u => selectedUserIds.includes(u.id))
+                      ? 'bg-blue-600 text-white border-blue-700 hover:bg-blue-700 font-black'
+                      : 'bg-white text-blue-800 border-blue-300 hover:bg-blue-50 hover:border-blue-400'
+                  }`}
+                  title="기사 전체 선택 및 기사 목록으로 이동"
                 >
-                  기사 전체 ({filteredDrivers.length})
+                  <span>기사 전체</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                    filteredDrivers.length > 0 && filteredDrivers.every(u => selectedUserIds.includes(u.id))
+                      ? 'bg-blue-700 text-white'
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {filteredDrivers.length}
+                  </span>
                 </button>
+                {!isKindergarten && filteredStudents.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleToggleSelectRoleAndScroll(filteredStudents, studentsSectionRef)}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                      filteredStudents.length > 0 && filteredStudents.every(u => selectedUserIds.includes(u.id))
+                        ? 'bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700 font-black'
+                        : 'bg-white text-indigo-800 border-indigo-300 hover:bg-indigo-50 hover:border-indigo-400'
+                    }`}
+                    title="학생 전체 선택 및 학생 목록으로 이동"
+                  >
+                    <span>학생 전체</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                      filteredStudents.length > 0 && filteredStudents.every(u => selectedUserIds.includes(u.id))
+                        ? 'bg-indigo-700 text-white'
+                        : 'bg-indigo-100 text-indigo-800'
+                    }`}>
+                      {filteredStudents.length}
+                    </span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => handleToggleSelectRole(filteredParents)}
-                  className="px-2 py-1 text-xs font-bold rounded-lg bg-amber-100 text-amber-800 hover:bg-amber-200 transition cursor-pointer"
+                  onClick={() => handleToggleSelectRoleAndScroll(filteredParents, parentsSectionRef)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                    filteredParents.length > 0 && filteredParents.every(u => selectedUserIds.includes(u.id))
+                      ? 'bg-amber-600 text-white border-amber-700 hover:bg-amber-700 font-black'
+                      : 'bg-white text-amber-800 border-amber-300 hover:bg-amber-50 hover:border-amber-400'
+                  }`}
+                  title="학부모 전체 선택 및 학부모 목록으로 이동"
                 >
-                  학부모 전체 ({filteredParents.length})
+                  <span>학부모 전체</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                    filteredParents.length > 0 && filteredParents.every(u => selectedUserIds.includes(u.id))
+                      ? 'bg-amber-700 text-white'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {filteredParents.length}
+                  </span>
                 </button>
                 {filteredAdmins.length > 0 && (
                   <button
                     type="button"
-                    onClick={() => handleToggleSelectRole(filteredAdmins)}
-                    className="px-2 py-1 text-xs font-bold rounded-lg bg-purple-100 text-purple-800 hover:bg-purple-200 transition cursor-pointer"
+                    onClick={() => handleToggleSelectRoleAndScroll(filteredAdmins, adminsSectionRef)}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                      filteredAdmins.length > 0 && filteredAdmins.every(u => selectedUserIds.includes(u.id))
+                        ? 'bg-purple-600 text-white border-purple-700 hover:bg-purple-700 font-black'
+                        : 'bg-white text-purple-800 border-purple-300 hover:bg-purple-50 hover:border-purple-400'
+                    }`}
+                    title="관리자 전체 선택 및 관리자 목록으로 이동"
                   >
-                    관리자 전체 ({filteredAdmins.length})
+                    <span>관리자 전체</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                      filteredAdmins.length > 0 && filteredAdmins.every(u => selectedUserIds.includes(u.id))
+                        ? 'bg-purple-700 text-white'
+                        : 'bg-purple-100 text-purple-800'
+                    }`}>
+                      {filteredAdmins.length}
+                    </span>
                   </button>
                 )}
               </div>
@@ -2947,8 +3031,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 <>
                   {/* Category 1: 기사 (Drivers) */}
                   {filteredDrivers.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-black text-blue-700 bg-blue-50/80 px-2.5 py-1.5 rounded-lg border border-blue-100">
+                    <div ref={driversSectionRef} className="space-y-1.5 scroll-mt-2">
+                      <div className="flex items-center justify-between text-xs font-black text-blue-700 bg-blue-50/80 px-3 py-2 rounded-xl border border-blue-100 shadow-2xs">
                         <div className="flex items-center gap-1.5">
                           <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
@@ -2958,7 +3042,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         <button
                           type="button"
                           onClick={() => handleToggleSelectRole(filteredDrivers)}
-                          className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                          className={`px-3 py-1 text-xs font-bold rounded-lg border transition-all shadow-2xs cursor-pointer active:scale-95 flex items-center gap-1 ${
+                            filteredDrivers.every(u => selectedUserIds.includes(u.id))
+                              ? 'bg-blue-600 text-white border-blue-700 hover:bg-blue-700 font-black'
+                              : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50 hover:border-blue-300'
+                          }`}
                         >
                           기사 전체 {filteredDrivers.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
                         </button>
@@ -2995,8 +3083,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
                   {/* Category 2: 교사 (Teachers) */}
                   {filteredTeachers.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-black text-emerald-700 bg-emerald-50/80 px-2.5 py-1.5 rounded-lg border border-emerald-100">
+                    <div ref={teachersSectionRef} className="space-y-1.5 scroll-mt-2">
+                      <div className="flex items-center justify-between text-xs font-black text-emerald-700 bg-emerald-50/80 px-3 py-2 rounded-xl border border-emerald-100 shadow-2xs">
                         <div className="flex items-center gap-1.5">
                           <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
@@ -3006,7 +3094,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         <button
                           type="button"
                           onClick={() => handleToggleSelectRole(filteredTeachers)}
-                          className="text-[11px] font-bold text-emerald-600 hover:text-emerald-800 hover:underline cursor-pointer"
+                          className={`px-3 py-1 text-xs font-bold rounded-lg border transition-all shadow-2xs cursor-pointer active:scale-95 flex items-center gap-1 ${
+                            filteredTeachers.every(u => selectedUserIds.includes(u.id))
+                              ? 'bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700 font-black'
+                              : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-300'
+                          }`}
                         >
                           교사 전체 {filteredTeachers.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
                         </button>
@@ -3043,8 +3135,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
                   {/* Category 3: 학생 (Students) - 유치원이 아닐 때(초등부, 중·고등부)만 노출 */}
                   {!isKindergarten && filteredStudents.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-black text-indigo-800 bg-indigo-50/80 px-2.5 py-1.5 rounded-lg border border-indigo-100">
+                    <div ref={studentsSectionRef} className="space-y-1.5 scroll-mt-2">
+                      <div className="flex items-center justify-between text-xs font-black text-indigo-800 bg-indigo-50/80 px-3 py-2 rounded-xl border border-indigo-100 shadow-2xs">
                         <div className="flex items-center gap-1.5">
                           <svg className="w-3.5 h-3.5 text-indigo-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l9-5-9-5-9 5 9 5z" />
@@ -3055,7 +3147,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         <button
                           type="button"
                           onClick={() => handleToggleSelectRole(filteredStudents)}
-                          className="text-[11px] font-bold text-indigo-800 hover:text-indigo-950 hover:underline cursor-pointer"
+                          className={`px-3 py-1 text-xs font-bold rounded-lg border transition-all shadow-2xs cursor-pointer active:scale-95 flex items-center gap-1 ${
+                            filteredStudents.every(u => selectedUserIds.includes(u.id))
+                              ? 'bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700 font-black'
+                              : 'bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50 hover:border-indigo-300'
+                          }`}
                         >
                           학생 전체 {filteredStudents.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
                         </button>
@@ -3092,8 +3188,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
                   {/* Category 4: 학부모 (Parents) - 유치원, 초등부, 중·고등부 모두 노출 */}
                   {filteredParents.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-black text-amber-800 bg-amber-50/80 px-2.5 py-1.5 rounded-lg border border-amber-100">
+                    <div ref={parentsSectionRef} className="space-y-1.5 scroll-mt-2">
+                      <div className="flex items-center justify-between text-xs font-black text-amber-800 bg-amber-50/80 px-3 py-2 rounded-xl border border-amber-100 shadow-2xs">
                         <div className="flex items-center gap-1.5">
                           <svg className="w-3.5 h-3.5 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -3103,7 +3199,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         <button
                           type="button"
                           onClick={() => handleToggleSelectRole(filteredParents)}
-                          className="text-[11px] font-bold text-amber-800 hover:text-amber-950 hover:underline cursor-pointer"
+                          className={`px-3 py-1 text-xs font-bold rounded-lg border transition-all shadow-2xs cursor-pointer active:scale-95 flex items-center gap-1 ${
+                            filteredParents.every(u => selectedUserIds.includes(u.id))
+                              ? 'bg-amber-600 text-white border-amber-700 hover:bg-amber-700 font-black'
+                              : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-50 hover:border-amber-300'
+                          }`}
                         >
                           학부모 전체 {filteredParents.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
                         </button>
@@ -3138,10 +3238,10 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     </div>
                   )}
 
-                  {/* Category 4: 관리자 (Admins) */}
+                  {/* Category 5: 관리자 (Admins) */}
                   {filteredAdmins.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-black text-purple-700 bg-purple-50/80 px-2.5 py-1.5 rounded-lg border border-purple-100">
+                    <div ref={adminsSectionRef} className="space-y-1.5 scroll-mt-2">
+                      <div className="flex items-center justify-between text-xs font-black text-purple-700 bg-purple-50/80 px-3 py-2 rounded-xl border border-purple-100 shadow-2xs">
                         <div className="flex items-center gap-1.5">
                           <svg className="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
@@ -3151,7 +3251,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         <button
                           type="button"
                           onClick={() => handleToggleSelectRole(filteredAdmins)}
-                          className="text-[11px] font-bold text-purple-600 hover:text-purple-800 hover:underline cursor-pointer"
+                          className={`px-3 py-1 text-xs font-bold rounded-lg border transition-all shadow-2xs cursor-pointer active:scale-95 flex items-center gap-1 ${
+                            filteredAdmins.every(u => selectedUserIds.includes(u.id))
+                              ? 'bg-purple-600 text-white border-purple-700 hover:bg-purple-700 font-black'
+                              : 'bg-white text-purple-700 border-purple-200 hover:bg-purple-50 hover:border-purple-300'
+                          }`}
                         >
                           관리자 전체 {filteredAdmins.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
                         </button>

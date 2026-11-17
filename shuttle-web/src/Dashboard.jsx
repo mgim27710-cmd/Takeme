@@ -44,15 +44,39 @@ const formatBusinessNumber = (value) => {
   return `${nums.slice(0, 3)}-${nums.slice(3, 5)}-${nums.slice(5, 10)}`;
 };
 
+export const getStudentBoardingType = (st) => {
+  if (!st) return 'BOTH';
+  if (st.boardingType) return st.boardingType;
+  if (st.raw && typeof st.raw === 'object') {
+    const rawType = st.raw['탑승구분'];
+    if (rawType === 'MORNING_ONLY' || rawType === '등원만' || rawType === '등원만 탑승') return 'MORNING_ONLY';
+    if (rawType === 'AFTERNOON_ONLY' || rawType === '하원만' || rawType === '하원만 탑승') return 'AFTERNOON_ONLY';
+    if (rawType === 'NONE' || rawType === '미탑승') return 'NONE';
+    if (rawType === 'BOTH' || rawType === '등·하원') return 'BOTH';
+  }
+  if (st.isNotRiding || st.raw?.['미탑승'] || st.raw?.['차량미탑승']) return 'NONE';
+  if (st.assignedBusId && !st.assignedDepartureBusId) return 'MORNING_ONLY';
+  if (!st.assignedBusId && st.assignedDepartureBusId) return 'AFTERNOON_ONLY';
+  return 'BOTH';
+};
+
 // 차량별 정규 탑승자와 당일 1회 탑승자 분류 및 총 탑승 인원 산출 헬퍼
-export const getBusRiderDetails = (bus, studentList = []) => {
+export const getBusRiderDetails = (bus, studentList = [], operationMode = 'ALL', selectedDay = 'ALL') => {
   if (!bus || !Array.isArray(studentList)) {
     return { totalRiders: [], regularStudents: [], oneTimeStudents: [], isFull: false, totalCount: 0, capacity: 25 };
   }
   const capacity = Number(bus.capacity) || 25;
 
   const totalRiders = studentList.filter(st => {
-    if (st.assignedBusId !== bus.id) return false;
+    // 요일 필터가 선택된 경우 해당 요일 미등교(enabled: false) 원아는 탑승 명단 및 인원에서 제외
+    if (selectedDay !== 'ALL') {
+      const weekly = st.raw?.['요일별일정'] || st.raw?.weeklySchedules;
+      if (weekly && weekly[selectedDay] && weekly[selectedDay].enabled === false) {
+        return false;
+      }
+    }
+
+    const bType = getStudentBoardingType(st);
     const isOneTime = Boolean(
       st.isOneTimeRide ||
       st.oneTimeType ||
@@ -61,7 +85,23 @@ export const getBusRiderDetails = (bus, studentList = []) => {
       st.raw?.isTemporaryLocation ||
       (st.isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))
     );
-    return isOneTime || !st.isNotRiding;
+
+    if (bType === 'NONE' && !isOneTime) return false;
+
+    if (operationMode === 'MORNING') {
+      if (bType === 'AFTERNOON_ONLY') return false;
+      return st.assignedBusId === bus.id;
+    } else if (operationMode === 'AFTERNOON') {
+      if (bType === 'MORNING_ONLY') return false;
+      const depBusId = st.assignedDepartureBusId || st.assignedBusId;
+      return depBusId === bus.id;
+    } else {
+      // 'ALL'
+      const matchesMorning = st.assignedBusId === bus.id && bType !== 'AFTERNOON_ONLY';
+      const depBusId = st.assignedDepartureBusId || st.assignedBusId;
+      const matchesAfternoon = depBusId === bus.id && bType !== 'MORNING_ONLY';
+      return matchesMorning || matchesAfternoon;
+    }
   });
 
   const oneTimeStudents = totalRiders.filter(st => {
@@ -671,10 +711,11 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const [isLoadingYearlyMappings, setIsLoadingYearlyMappings] = useState(false);
   
   // Log Viewer State
-  const [logTab, setLogTab] = useState('ALL'); // 'LOG', 'ABSENCE', 'HOLIDAY'
+  const [logTab, setLogTab] = useState('ABSENCE_VARIABLE');
 
   // Day Filter State
   const [selectedDay, setSelectedDay] = useState('ALL'); // 'ALL', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'
+  const [operationMode, setOperationMode] = useState('ALL'); // 'ALL', 'MORNING', 'AFTERNOON'
 
   const [busLocations, setBusLocations] = useState({});
   const [operatingBuses, setOperatingBuses] = useState({}); // { [busId]: boolean }
@@ -760,13 +801,23 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     departureType: '정규하원',
     assignedBusId: '',
     assignedDepartureBusId: '',
+    boardingType: 'BOTH',
     isNotRiding: false,
     dropoffLocation: '',
-    inTime: '',
-    outTime: '',
+    inTime: '08:30',
+    outTime: '17:00',
     allergies: '',
-    note: ''
+    note: '',
+    weeklySchedules: {
+      MON: { enabled: true, inLocation: '', outLocation: '', inTime: '08:30', outTime: '17:00' },
+      TUE: { enabled: true, inLocation: '', outLocation: '', inTime: '08:30', outTime: '17:00' },
+      WED: { enabled: true, inLocation: '', outLocation: '', inTime: '08:30', outTime: '17:00' },
+      THU: { enabled: true, inLocation: '', outLocation: '', inTime: '08:30', outTime: '17:00' },
+      FRI: { enabled: true, inLocation: '', outLocation: '', inTime: '08:30', outTime: '17:00' },
+    }
   });
+
+  const [scheduleDayTab, setScheduleDayTab] = useState('MON');
 
   // Student Filter & Grouping Accordion State
   const [studentFilterMode, setStudentFilterMode] = useState('ALL'); // 'ALL', 'CLASS', 'AGE', 'BUS'
@@ -902,7 +953,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   // 지도 범례 클릭 핸들러: 만석 구역으로 포커스
   const handleFocusFullBusZone = () => {
     const fullBus = buses.find(b => {
-      const riders = getBusRiderDetails(b, students);
+      const riders = getBusRiderDetails(b, students, operationMode, selectedDay);
       return riders.isFull;
     });
 
@@ -1731,173 +1782,6 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     }
   };
 
-
-  /**
-   * 25인승 차량 만석 시, 신규 원아 1명을 포함한 총 26명 후보군을 기준으로
-   * 지리적 중심점(Centroid)을 계산하고, 중심점으로부터 가장 먼 최외곽 원아를 산출하여
-   * 잔여 좌석이 있는 인접 여유 호차로 분산 배정하는 알고리즘
-   */
-  const rebalanceFullBusWith26Pool = (fullBus, newCandidateStudent = null, currentStudentsList = students, currentBusesList = buses) => {
-    if (!fullBus) return null;
-    const capacity = Number(fullBus.capacity) || 25;
-
-    // 1. 현재 해당 호차에 탑승하는 원아 목록 (정규 탑승자 + 당일 1회 탑승자)
-    const busDetails = getBusRiderDetails(fullBus, currentStudentsList);
-    const assignedStudents = busDetails.totalRiders;
-
-    // 2. 신규 원아 포함 총 후보군 풀(Pool) 형성 (25명 + 1명 = 최대 26명)
-    const pool = [...assignedStudents];
-    if (newCandidateStudent && !pool.some(s => (s.id && s.id === newCandidateStudent.id) || (s.name === newCandidateStudent.name && s.address === newCandidateStudent.address))) {
-      pool.push(newCandidateStudent);
-    }
-
-    if (pool.length < 2) return null;
-
-    // 3. 유효한 좌표를 가진 원아들 필터링 및 중심점(Centroid) 계산
-    const validCoordsStudents = pool.filter(
-      s => s.lat != null && s.lng != null && !isNaN(Number(s.lat)) && !isNaN(Number(s.lng))
-    );
-
-    let centroidPt = null;
-    if (validCoordsStudents.length > 0) {
-      const avgLat = validCoordsStudents.reduce((sum, s) => sum + Number(s.lat), 0) / validCoordsStudents.length;
-      const avgLng = validCoordsStudents.reduce((sum, s) => sum + Number(s.lng), 0) / validCoordsStudents.length;
-      centroidPt = turf.point([avgLng, avgLat]);
-    }
-
-    // 4. 중심점으로부터 각 원아의 거리 계산 및 최외곽(가장 먼) 원아 산출
-    let furthestStudent = pool[pool.length - 1];
-    let maxDistance = -1;
-
-    pool.forEach(st => {
-      let dist = 0;
-      if (centroidPt && st.lat != null && st.lng != null && !isNaN(Number(st.lat)) && !isNaN(Number(st.lng))) {
-        const pt = turf.point([Number(st.lng), Number(st.lat)]);
-        dist = turf.distance(centroidPt, pt, { units: 'kilometers' });
-      } else {
-        dist = 0;
-      }
-      if (dist > maxDistance) {
-        maxDistance = dist;
-        furthestStudent = st;
-      }
-    });
-
-    // 5. 정원 미달인 인접 여유 호차 탐색 (정규 + 1회 탑승자 합산 기준)
-    const candidateBuses = currentBusesList.filter(b => {
-      if (b.id === fullBus.id) return false;
-      const details = getBusRiderDetails(b, currentStudentsList);
-      return details.totalCount < details.capacity;
-    });
-
-    if (candidateBuses.length === 0) {
-      return {
-        canRebalance: false,
-        originalBus: fullBus,
-        message: '다른 모든 통학 차량도 만석이어서 분산 배정할 수 있는 여유 차량이 없습니다.'
-      };
-    }
-
-    // 6. 최외곽 원아와 가장 인접한 대체 호차 선택 (구역 폴리곤 포함 여부 최우선, 운행 지점 최소 거리 차선)
-    let targetAltBus = candidateBuses[0];
-    let minAltDist = Infinity;
-
-    if (furthestStudent && furthestStudent.lat != null && furthestStudent.lng != null && !isNaN(Number(furthestStudent.lat)) && !isNaN(Number(furthestStudent.lng))) {
-      const fPt = turf.point([Number(furthestStudent.lng), Number(furthestStudent.lat)]);
-      for (const altBus of candidateBuses) {
-        if (altBus.turfPolygon && turf.booleanPointInPolygon(fPt, altBus.turfPolygon)) {
-          targetAltBus = altBus;
-          minAltDist = 0;
-          break;
-        }
-        if (altBus.points && altBus.points.length > 0) {
-          for (const pt of altBus.points) {
-            const pNode = turf.point([pt[1], pt[0]]);
-            const d = turf.distance(fPt, pNode, { units: 'kilometers' });
-            if (d < minAltDist) {
-              minAltDist = d;
-              targetAltBus = altBus;
-            }
-          }
-        }
-      }
-    }
-
-    const isNewStudentFurthest = Boolean(
-      newCandidateStudent && 
-      (furthestStudent === newCandidateStudent || 
-       (furthestStudent.id && furthestStudent.id === newCandidateStudent.id) || 
-       (furthestStudent.name === newCandidateStudent.name && furthestStudent.address === newCandidateStudent.address))
-    );
-
-    return {
-      canRebalance: true,
-      originalBus: fullBus,
-      furthestStudent,
-      maxDistance: maxDistance > 0 ? maxDistance : 0,
-      targetAltBus,
-      isNewStudentFurthest,
-      poolSize: pool.length
-    };
-  };
-
-  // Auto-rebalance suggestion when bus is at or over capacity (26명 클러스터 기준 외곽 원아 분산 배차)
-  const handleAutoRebalance = async (fullBus) => {
-    const { totalRiders, regularStudents, oneTimeStudents, capacity, totalCount } = getBusRiderDetails(fullBus, students);
-
-    if (totalCount === 0) {
-      alert(`[${fullBus.name}]에 배정된 탑승 원아가 없습니다.`);
-      return;
-    }
-
-    const result = rebalanceFullBusWith26Pool(fullBus, null, students, buses);
-    if (!result || !result.canRebalance) {
-      alert(result?.message || '분산 배정할 수 있는 여유 차량이 없습니다.');
-      return;
-    }
-
-    const { furthestStudent, targetAltBus, maxDistance } = result;
-
-    const confirmMsg = 
-      `[${fullBus.name}] 탑승 현황 (총 ${totalCount}명 / 정원 ${capacity}명)\n` +
-      `• 정규 탑승자: ${regularStudents.length}명\n` +
-      `• 당일 1회 탑승자: ${oneTimeStudents.length}명\n\n` +
-      `26명(전체 탑승 원아) 좌표 클러스터 기준 중심점에서 가장 먼 최외곽 원아:\n` +
-      `• 대상 원아: [${furthestStudent.name}] (중심 거리: ${maxDistance.toFixed(2)}km)\n` +
-      `• 이동 추천 차량: [${targetAltBus.name}] (잔여 좌석 여유)\n\n` +
-      `[${furthestStudent.name}] 원아를 [${targetAltBus.name}]으로 분산 재배정하시겠습니까?`;
-
-    if (window.confirm(confirmMsg)) {
-      try {
-        const token = localStorage.getItem('takeme_token');
-        const activeAcadId = selectedAcademyId || currentUser?.academyId;
-
-        // DB 즉시 동기화
-        await fetch(`${API_BASE_URL}/routing/students/batch-update`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-          },
-          body: JSON.stringify({
-            academyId: activeAcadId,
-            students: [{
-              id: furthestStudent.id,
-              inBusId: targetAltBus.id,
-              outBusId: targetAltBus.id
-            }]
-          })
-        });
-
-        setStudents(prev => prev.map(s => s.id === furthestStudent.id ? { ...s, assignedBusId: targetAltBus.id } : s));
-        alert(`[${furthestStudent.name}] 원아가 [${targetAltBus.name}]으로 안전하게 재배정 및 저장되었습니다.`);
-      } catch (err) {
-        console.error(err);
-        setStudents(prev => prev.map(s => s.id === furthestStudent.id ? { ...s, assignedBusId: targetAltBus.id } : s));
-        alert(`[${furthestStudent.name}] 원아가 로컬 상태에서 [${targetAltBus.name}]으로 재배정되었습니다.\n상단의 [변경사항 저장] 버튼을 눌러 확정해주세요.`);
-      }
-    }
-  };
 
   // Explicit Save All Changes Handler
   const [isSavingAll, setIsSavingAll] = useState(false);
@@ -3188,7 +3072,6 @@ const parseKindergartenExcelSheet = (sheet) => {
         buses.forEach(b => {
           busLoadTracker[b.id] = students.filter(s => s.assignedBusId === b.id && !s.isNotRiding).length;
         });
-        const rebalanceLogs = [];
 
         addressMap.forEach((item, idx) => {
           const trimmedAddr = (item.address || '').trim();
@@ -3244,42 +3127,15 @@ const parseKindergartenExcelSheet = (sheet) => {
               }
             }
 
-            // 4. 만석 검사 및 신규 원아 포함 26명 클러스터 기준 외곽 원아 분산 배차
+            // 4. 만석 검사 (정원 도달 시 추가 배정 없이 미배차/증차 필요 유지)
             if (assignedBus) {
               const capacity = Number(assignedBus.capacity) || 25;
               const currentBusCount = busLoadTracker[assignedBus.id] || 0;
               if (currentBusCount >= capacity) {
-                const newCandidate = {
-                  id: idx + 1,
-                  name: item.name,
-                  address: address,
-                  lat: lat,
-                  lng: lng
-                };
-                const currentPool = [
-                  ...students.filter(s => s.assignedBusId === assignedBus.id && !s.isNotRiding),
-                  ...newStudents.filter(s => s.assignedBusId === assignedBus.id && !s.isNotRiding)
-                ];
-                const rebalanceRes = rebalanceFullBusWith26Pool(assignedBus, newCandidate, [...students, ...newStudents], buses);
-                if (rebalanceRes && rebalanceRes.canRebalance) {
-                  if (rebalanceRes.isNewStudentFurthest) {
-                    assignedBus = rebalanceRes.targetAltBus;
-                    rebalanceLogs.push(`신규 원아 [${item.name}]: [${rebalanceRes.originalBus.name}] 만석(${capacity}명) -> 26명 중 최외곽으로 [${assignedBus.name}] 분산 배정`);
-                  } else if (rebalanceRes.furthestStudent) {
-                    const moved = rebalanceRes.furthestStudent;
-                    const altBus = rebalanceRes.targetAltBus;
-                    const existingInNew = newStudents.find(s => s.id === moved.id);
-                    if (existingInNew) {
-                      existingInNew.assignedBusId = altBus.id;
-                      existingInNew.color = altBus.color || '#64748b';
-                    }
-                    busLoadTracker[assignedBus.id] = (busLoadTracker[assignedBus.id] || 1) - 1;
-                    busLoadTracker[altBus.id] = (busLoadTracker[altBus.id] || 0) + 1;
-                    rebalanceLogs.push(`기존 외곽 원아 [${moved.name}]: [${assignedBus.name}] 만석 -> [${altBus.name}] 이동 (신규 [${item.name}] 본 차량 배정)`);
-                  }
-                }
+                assignedBus = null;
+              } else {
+                busLoadTracker[assignedBus.id] = currentBusCount + 1;
               }
-              busLoadTracker[assignedBus.id] = (busLoadTracker[assignedBus.id] || 0) + 1;
             }
           } else {
             // Geocoding failed: keep address text intact, mark for coordinate input if necessary
@@ -3341,15 +3197,10 @@ const parseKindergartenExcelSheet = (sheet) => {
           setStudents(newStudents);
         }
         
-        const rebalanceSummary = rebalanceLogs.length > 0
-          ? `\n\n[만석 스마트 분산 배차 내역 (${rebalanceLogs.length}건)]\n` + rebalanceLogs.slice(0, 5).join('\n') + (rebalanceLogs.length > 5 ? `\n...외 ${rebalanceLogs.length - 5}건` : '')
-          : '';
-
         alert(
           `총 ${newStudents.length}명의 원아 등록이 완료되었습니다!\n\n` +
           `• 정상 배차: ${successCount}명\n` +
-          `• 주소 수동 입력 필요: ${failedCount}명` +
-          rebalanceSummary + `\n\n` +
+          `• 주소 수동 입력 필요: ${failedCount}명\n\n` +
           (failedCount > 0 
             ? '※ 주소 읽기에 실패한 원아는 목록에 [빨간색 테두리]로 표시됩니다. 클릭하여 올바른 도로명 주소를 수동으로 입력해 주세요.'
             : '모든 원아의 주소가 정상적으로 지도 구역에 배차되었습니다.')
@@ -3849,13 +3700,18 @@ const parseKindergartenExcelSheet = (sheet) => {
         }
       }
 
-      let assignedBusId = studentForm.isNotRiding ? null : (studentForm.assignedBusId ? Number(studentForm.assignedBusId) : null);
-      let assignedDepartureBusId = studentForm.isNotRiding ? null : (studentForm.assignedDepartureBusId ? Number(studentForm.assignedDepartureBusId) : null);
+      const bType = studentForm.boardingType || (studentForm.isNotRiding ? 'NONE' : 'BOTH');
+      const isNone = bType === 'NONE';
+      const isMorningOnly = bType === 'MORNING_ONLY';
+      const isAfternoonOnly = bType === 'AFTERNOON_ONLY';
+
+      let assignedBusId = (isNone || isAfternoonOnly) ? null : (studentForm.assignedBusId ? Number(studentForm.assignedBusId) : null);
+      let assignedDepartureBusId = (isNone || isMorningOnly) ? null : (studentForm.assignedDepartureBusId ? Number(studentForm.assignedDepartureBusId) : null);
       let assignedBus = buses.find(b => b.id === assignedBusId);
       let assignedDepartureBus = buses.find(b => b.id === assignedDepartureBusId);
 
       // 2. Auto-assign vehicle by zone polygon if not manually selected
-      if (!studentForm.isNotRiding && !assignedBusId && coords) {
+      if (!isNone && !isAfternoonOnly && !assignedBusId && coords) {
         const pt = turf.point([coords.lng, coords.lat]);
         let minDistance = Infinity;
 
@@ -3879,68 +3735,25 @@ const parseKindergartenExcelSheet = (sheet) => {
         }
       }
 
-      // 만석 차량(25인승 기준) 검사 및 신규 원아 포함 26명 클러스터 기준 최외곽 원아 분산 배차
+      // 만석 차량(25인승 기준) 검사 (정원 도달 시 미배차/증차 필요 상태로 등록)
       let rebalanceNotice = '';
-      if (!studentForm.isNotRiding && assignedBus) {
+      if (!isNone && !isAfternoonOnly && assignedBus) {
         const capacity = Number(assignedBus.capacity) || 25;
         const currentBusStudents = students.filter(st => st.assignedBusId === assignedBus.id && !st.isNotRiding && st.id !== editingStudentId);
         
         if (currentBusStudents.length >= capacity) {
-          const newStudentCandidate = {
-            id: editingStudentId || 999999,
-            name: studentForm.name.trim(),
-            address: studentForm.address.trim(),
-            lat: coords ? coords.lat : undefined,
-            lng: coords ? coords.lng : undefined
-          };
-          
-          const rebalanceResult = rebalanceFullBusWith26Pool(assignedBus, newStudentCandidate, students, buses);
-          if (rebalanceResult && rebalanceResult.canRebalance) {
-            if (rebalanceResult.isNewStudentFurthest) {
-              // 신규 학생이 26명 중 중심점에서 가장 먼 경우: 신규 원아를 대체 호차로 배정
-              const altBus = rebalanceResult.targetAltBus;
-              assignedBus = altBus;
-              assignedBusId = altBus.id;
-              rebalanceNotice = `\n\n[26명 기준 외곽 원아 분산 배차 안내]\n기존 배정 구역 차량인 [${rebalanceResult.originalBus.name}]이(가) 정원(${capacity}명) 만석입니다.\n신규 원아를 포함한 26명의 위치를 분석한 결과, 신규 등록 원아 [${studentForm.name}]이(가) 최외곽으로 산출되어 여유 좌석이 있는 [${altBus.name}]으로 자동 분산 배정되었습니다.`;
-            } else if (rebalanceResult.furthestStudent) {
-              // 기존 탑승 원아가 26명 중 가장 먼 경우: 기존 외곽 원아를 대체 호차로 이동하고, 신규 학생은 본 차량에 배정
-              const altBus = rebalanceResult.targetAltBus;
-              const movedStudent = rebalanceResult.furthestStudent;
-              
-              // 기존 외곽 원아 DB 업데이트
-              try {
-                const token = localStorage.getItem('takeme_token');
-                fetch(`${API_BASE_URL}/routing/students/batch-update`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-                  },
-                  body: JSON.stringify({
-                    academyId: targetAcademyId,
-                    students: [{
-                      id: movedStudent.id,
-                      inBusId: altBus.id,
-                      outBusId: altBus.id
-                    }]
-                  })
-                }).catch(err => console.error('Failed to move furthest student:', err));
-                
-                // 로컬 상태 동기화
-                setStudents(prev => prev.map(s => s.id === movedStudent.id ? { ...s, assignedBusId: altBus.id } : s));
-              } catch (rebalanceErr) {
-                console.error('Failed to move furthest student:', rebalanceErr);
-              }
-              
-              rebalanceNotice = `\n\n[26명 기준 외곽 원아 분산 배차 안내]\n[${assignedBus.name}]이(가) 정원(${capacity}명) 만석 상태에서 신규 원아 [${studentForm.name}]이(가) 추가되었습니다.\n26명(기존 25명 + 신규 1명) 기준 중심점에서 가장 먼 기존 최외곽 원아 [${movedStudent.name}] 원아를 여유 차량인 [${altBus.name}]으로 이동 배정하고, 신규 원아를 [${assignedBus.name}]에 안전하게 배정하였습니다.`;
-            }
-          }
+          assignedBusId = null;
+          assignedBus = null;
+          rebalanceNotice = `\n\n[만석 차량 안내]\n배정 구역의 차량이 이미 정원(${capacity}명) 만석 상태입니다. 해당 원아는 미배차(! 증차 필요) 상태로 등록됩니다.`;
         }
       }
 
       // 3. Prepare payload matching all 17 Excel columns
-      const inLoc = studentForm.inLocation?.trim() || studentForm.address.trim();
-      const outLoc = studentForm.dropoffLocation?.trim() || studentForm.outLocation?.trim() || studentForm.address.trim();
+      const monSched = studentForm.weeklySchedules?.MON || {};
+      const inLoc = monSched.inLocation?.trim() || studentForm.inLocation?.trim() || studentForm.address.trim();
+      const outLoc = monSched.outLocation?.trim() || studentForm.dropoffLocation?.trim() || studentForm.outLocation?.trim() || studentForm.address.trim();
+      const inTime = monSched.inTime?.trim() || studentForm.inTime?.trim() || '';
+      const outTime = monSched.outTime?.trim() || studentForm.outTime?.trim() || '';
 
       const payload = {
         id: editingStudentId || undefined,
@@ -3953,7 +3766,8 @@ const parseKindergartenExcelSheet = (sheet) => {
         lng: coords ? coords.lng : undefined,
         assignedBusId: assignedBusId,
         assignedDepartureBusId: assignedDepartureBusId,
-        isNotRiding: Boolean(studentForm.isNotRiding),
+        boardingType: bType,
+        isNotRiding: isNone,
         className: studentForm.className.trim(),
         kindergartenName: studentForm.kindergartenName?.trim() || academy?.name || '',
         schoolName: studentForm.kindergartenName?.trim() || academy?.name || '',
@@ -3965,12 +3779,13 @@ const parseKindergartenExcelSheet = (sheet) => {
         departureType: studentForm.departureType || '정규하원',
         inLocation: inLoc,
         outLocation: outLoc,
-        inBus: studentForm.isNotRiding ? '' : (assignedBus?.name || ''),
-        outBus: studentForm.isNotRiding ? '' : (assignedDepartureBus?.name || assignedBus?.name || ''),
-        inTime: studentForm.inTime.trim(),
-        outTime: studentForm.outTime.trim(),
+        inBus: (isNone || isAfternoonOnly) ? '' : (assignedBus?.name || ''),
+        outBus: (isNone || isMorningOnly) ? '' : (assignedDepartureBus?.name || assignedBus?.name || ''),
+        inTime: inTime,
+        outTime: outTime,
         allergies: studentForm.allergies.trim(),
         note: studentForm.note.trim(),
+        weeklySchedules: studentForm.weeklySchedules,
         academyId: targetAcademyId
       };
 
@@ -4002,13 +3817,19 @@ const parseKindergartenExcelSheet = (sheet) => {
           setBuses(computePolygons(stateData.buses));
         }
         if (Array.isArray(stateData.students)) {
-          setStudents(stateData.students);
+          setStudents(stateData.students.map(s => {
+            if (s.id === (editingStudentId || resData.student?.id)) {
+              const rawObj = { ...(s.raw || {}), '요일별일정': studentForm.weeklySchedules, weeklySchedules: studentForm.weeklySchedules };
+              return { ...s, boardingType: bType, isNotRiding: isNone, raw: rawObj };
+            }
+            return s;
+          }));
         }
       } else if (resData.student) {
         setStudents(prev =>
           editingStudentId
-            ? prev.map(s => s.id === editingStudentId ? { ...s, ...resData.student } : s)
-            : [...prev, resData.student]
+            ? prev.map(s => s.id === editingStudentId ? { ...s, ...resData.student, boardingType: bType, isNotRiding: isNone, raw: { ...(s.raw || {}), '요일별일정': studentForm.weeklySchedules, weeklySchedules: studentForm.weeklySchedules } } : s)
+            : [...prev, { ...resData.student, boardingType: bType, isNotRiding: isNone, raw: { ...(resData.student?.raw || {}), '요일별일정': studentForm.weeklySchedules, weeklySchedules: studentForm.weeklySchedules } }]
         );
       }
 
@@ -4052,6 +3873,14 @@ const parseKindergartenExcelSheet = (sheet) => {
 
   const handleOpenAddStudentModal = () => {
     setEditingStudentId(null);
+    setScheduleDayTab('MON');
+    const defaultWeekly = {
+      MON: { enabled: true, inLocation: '', outLocation: '', inTime: '08:30', outTime: '17:00' },
+      TUE: { enabled: true, inLocation: '', outLocation: '', inTime: '08:30', outTime: '17:00' },
+      WED: { enabled: true, inLocation: '', outLocation: '', inTime: '08:30', outTime: '17:00' },
+      THU: { enabled: true, inLocation: '', outLocation: '', inTime: '08:30', outTime: '17:00' },
+      FRI: { enabled: true, inLocation: '', outLocation: '', inTime: '08:30', outTime: '17:00' }
+    };
     setStudentForm({
       name: '',
       address: '',
@@ -4067,24 +3896,57 @@ const parseKindergartenExcelSheet = (sheet) => {
       departureType: '정규하원',
       assignedBusId: '',
       assignedDepartureBusId: '',
+      boardingType: 'BOTH',
       isNotRiding: false,
       dropoffLocation: '',
-      inTime: '',
-      outTime: '',
+      inTime: '08:30',
+      outTime: '17:00',
       allergies: '',
-      note: ''
+      note: '',
+      weeklySchedules: defaultWeekly
     });
     setShowAddStudentModal(true);
   };
 
   const handleOpenEditStudentModal = (student) => {
     setEditingStudentId(student.id);
+    setScheduleDayTab('MON');
     const raw = student.raw || {};
+    const bType = getStudentBoardingType(student);
+    const baseInLoc = student.boardingLocation || raw['등원지'] || raw['탑승지'] || student.address || '';
+    const baseOutLoc = student.dropoffLocation || raw['하원지'] || raw['하차지'] || student.boardingLocation || student.address || '';
+    const baseInTime = raw['등원시간'] || '08:30';
+    const baseOutTime = raw['하원시간'] || '17:00';
+    const existingWeekly = raw['요일별일정'] || raw.weeklySchedules || null;
+
+    const initialWeekly = {};
+    ['MON', 'TUE', 'WED', 'THU', 'FRI'].forEach(d => {
+      if (existingWeekly && existingWeekly[d]) {
+        initialWeekly[d] = {
+          enabled: existingWeekly[d].enabled !== undefined ? Boolean(existingWeekly[d].enabled) : true,
+          inLocation: existingWeekly[d].inLocation ?? baseInLoc,
+          outLocation: existingWeekly[d].outLocation ?? baseOutLoc,
+          inTime: existingWeekly[d].inTime ?? baseInTime,
+          outTime: existingWeekly[d].outTime ?? baseOutTime
+        };
+      } else {
+        const dbBoarding = student.schedules?.find(s => s.dayOfWeek === d && s.type === 'BOARDING');
+        const dbAlighting = student.schedules?.find(s => s.dayOfWeek === d && s.type === 'ALIGHTING');
+        initialWeekly[d] = {
+          enabled: true,
+          inLocation: dbBoarding?.address || baseInLoc,
+          outLocation: dbAlighting?.address || baseOutLoc,
+          inTime: baseInTime,
+          outTime: baseOutTime
+        };
+      }
+    });
+
     setStudentForm({
       name: student.realName || student.name || '',
       address: student.address || raw['주소'] || raw['실패주소'] || '',
-      inLocation: student.boardingLocation || raw['등원지'] || raw['탑승지'] || student.address || '',
-      outLocation: raw['하원지'] || student.boardingLocation || student.address || '',
+      inLocation: initialWeekly.MON.inLocation || baseInLoc,
+      outLocation: initialWeekly.MON.outLocation || baseOutLoc,
       className: raw['반명'] || raw['반'] || '',
       kindergartenName: raw['유치원명'] || raw['소속원명'] || raw['학교명'] || academy?.name || '',
       age: raw['연령'] !== undefined && raw['연령'] !== null ? String(raw['연령']) : (raw['학년'] ? String(raw['학년']) : ''),
@@ -4095,12 +3957,14 @@ const parseKindergartenExcelSheet = (sheet) => {
       departureType: raw['하원구분'] || raw['하원정보'] || '정규하원',
       assignedBusId: student.assignedBusId ? String(student.assignedBusId) : '',
       assignedDepartureBusId: student.assignedDepartureBusId ? String(student.assignedDepartureBusId) : '',
-      isNotRiding: Boolean(student.isNotRiding || raw['미탑승'] || raw['차량미탑승']),
-      dropoffLocation: student.dropoffLocation || raw['하차지'] || raw['하원지'] || '',
-      inTime: raw['등원시간'] || '',
-      outTime: raw['하원시간'] || '',
+      boardingType: bType,
+      isNotRiding: bType === 'NONE',
+      dropoffLocation: initialWeekly.MON.outLocation || student.dropoffLocation || raw['하차지'] || raw['하원지'] || '',
+      inTime: initialWeekly.MON.inTime || baseInTime,
+      outTime: initialWeekly.MON.outTime || baseOutTime,
       allergies: student.allergies || raw['알레르기'] || '',
-      note: raw['비고'] || ''
+      note: raw['비고'] || '',
+      weeklySchedules: initialWeekly
     });
     setShowAddStudentModal(true);
   };
@@ -4796,6 +4660,34 @@ const parseKindergartenExcelSheet = (sheet) => {
               )}
             </div>
 
+            {/* Operation Mode Selector & Bus Cards Header */}
+            <div className="mb-2 p-2 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-1.5 shrink-0">
+              <span className="text-xs font-black text-slate-700">운행 모드</span>
+              <div className="flex items-center bg-white p-0.5 rounded-lg border border-slate-200 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setOperationMode('ALL')}
+                  className={`px-2.5 py-1 rounded text-xs font-extrabold transition-all ${operationMode === 'ALL' ? 'bg-slate-900 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
+                >
+                  전체
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOperationMode('MORNING')}
+                  className={`px-2.5 py-1 rounded text-xs font-extrabold transition-all ${operationMode === 'MORNING' ? 'bg-amber-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
+                >
+                  등원
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOperationMode('AFTERNOON')}
+                  className={`px-2.5 py-1 rounded text-xs font-extrabold transition-all ${operationMode === 'AFTERNOON' ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'}`}
+                >
+                  하원
+                </button>
+              </div>
+            </div>
+
             {/* Bus Cards List */}
             <div className="space-y-3.5 overflow-y-auto pr-0.5 flex-1">
               {sortedBuses.length === 0 ? (
@@ -4803,7 +4695,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               ) : (
                 sortedBuses.map(bus => {
                   const isSelected = selectedBusId === bus.id;
-                  const { totalRiders, regularStudents, oneTimeStudents, isFull, totalCount, capacity: busCapacity } = getBusRiderDetails(bus, students);
+                  const { totalRiders, regularStudents, oneTimeStudents, isFull, totalCount, capacity: busCapacity } = getBusRiderDetails(bus, students, operationMode, selectedDay);
 
                   return (
                     <div 
@@ -4811,8 +4703,6 @@ const parseKindergartenExcelSheet = (sheet) => {
                       className={`p-4 border rounded-2xl transition-all shadow-xs ${
                         isSelected 
                           ? 'border-blue-500 bg-blue-50/20 ring-2 ring-blue-100' 
-                          : isFull 
-                          ? 'border-rose-300 bg-rose-50/15 hover:border-rose-400' 
                           : 'border-slate-200 bg-white hover:border-slate-300'
                       }`}
                     >
@@ -4837,8 +4727,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                                 </span>
                               )}
                               {isFull && (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-700 border border-rose-300 shadow-2xs">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-300 shadow-2xs">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
                                   만석
                                 </span>
                               )}
@@ -4929,7 +4819,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                         <div className="flex items-center justify-between text-xs mb-1.5">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="font-extrabold text-slate-800">탑승 인원</span>
-                            <span className={`font-black px-1.5 py-0.2 rounded text-xs ${isFull ? 'bg-rose-100 text-rose-800 border border-rose-300' : 'bg-blue-100 text-blue-800 border border-blue-200'}`}>
+                            <span className={`font-bold px-1.5 py-0.2 rounded text-xs ${isFull ? 'bg-slate-100 text-slate-700 border border-slate-300' : 'bg-blue-100 text-blue-800 border border-blue-200'}`}>
                               {totalCount}/{busCapacity}명 {isFull ? '(만석)' : ''}
                             </span>
                             <span className="text-[11px] text-slate-500 font-medium">
@@ -4947,29 +4837,11 @@ const parseKindergartenExcelSheet = (sheet) => {
                         {/* Visual Progress Gauge */}
                         <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
                           <div 
-                            className={`h-full rounded-full transition-all duration-300 ${isFull ? 'bg-rose-500' : 'bg-blue-600'}`}
+                            className={`h-full rounded-full transition-all duration-300 ${isFull ? 'bg-slate-600' : 'bg-blue-600'}`}
                             style={{ width: `${Math.min(100, Math.round((totalCount / (busCapacity || 25)) * 100))}%` }}
                           ></div>
                         </div>
                       </div>
-
-                      {/* 26명 기준 외곽 원아 분산 배차 버튼 (만석 시 노출) */}
-                      {isFull && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleAutoRebalance(bus);
-                          }}
-                          className="w-full mt-2 py-1.5 px-3 bg-gradient-to-r from-rose-50 to-amber-50 hover:from-rose-100 hover:to-amber-100 border border-rose-200 text-rose-800 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
-                          title="26명(탑승 원아 클러스터) 기준 최외곽 원아를 인접 여유 호차로 분산 배차합니다."
-                        >
-                          <svg className="w-3.5 h-3.5 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                          </svg>
-                          <span>26명 기준 외곽 원아 분산 배차</span>
-                        </button>
-                      )}
 
                       {/* Expandable Students List */}
                       {isSelected && (
@@ -5012,17 +4884,39 @@ const parseKindergartenExcelSheet = (sheet) => {
                               </div>
                             )}
                             <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
-                              {regularStudents.map(st => (
-                                <div key={st.id} className="text-xs flex justify-between items-center bg-slate-50 p-2 rounded-xl border border-slate-200">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className="px-1.5 py-0.2 bg-slate-200 text-slate-800 rounded text-[11px] font-bold">정규</span>
-                                    <span className="font-extrabold text-slate-900 truncate">{st.name}</span>
+                              {regularStudents.map(st => {
+                                const bType = getStudentBoardingType(st);
+                                const dayKey = selectedDay !== 'ALL' ? selectedDay : null;
+                                const weekly = st.raw?.['요일별일정'] || st.raw?.weeklySchedules || st.weeklySchedules;
+                                const daySched = dayKey && weekly ? weekly[dayKey] : null;
+                                const dayStop = daySched
+                                  ? (operationMode === 'AFTERNOON' ? (daySched.outLocation || daySched.inLocation) : (daySched.inLocation || daySched.outLocation))
+                                  : null;
+                                const dayTime = daySched
+                                  ? (operationMode === 'AFTERNOON' ? daySched.outTime : daySched.inTime)
+                                  : (operationMode === 'AFTERNOON' ? st.dropoffTime : st.boardingTime);
+                                const stopName = dayStop || (operationMode === 'AFTERNOON' ? (st.dropoffLocation || st.address) : (st.boardingLocation || st.address)) || '위치 미등록';
+                                return (
+                                  <div key={st.id} className="text-xs flex justify-between items-center bg-slate-50 p-2 rounded-xl border border-slate-200">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                      <span className={`px-1.5 py-0.2 rounded text-[10px] font-extrabold ${
+                                        bType === 'MORNING_ONLY'
+                                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                          : bType === 'AFTERNOON_ONLY'
+                                          ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                                          : 'bg-slate-200 text-slate-800'
+                                      }`}>
+                                        {bType === 'MORNING_ONLY' ? '등원만' : bType === 'AFTERNOON_ONLY' ? '하원만' : '등·하원'}
+                                      </span>
+                                      <span className="font-extrabold text-slate-900 truncate">{st.name}</span>
+                                    </div>
+                                    <span className="text-slate-600 font-medium text-xs truncate max-w-[140px]" title={`${stopName}${dayTime ? ` (${dayTime})` : ''}`}>
+                                      {stopName}
+                                      {dayTime ? <span className="text-blue-600 font-bold ml-1 text-[11px]">({dayTime})</span> : null}
+                                    </span>
                                   </div>
-                                  <span className="text-slate-600 font-medium text-xs truncate max-w-[140px]" title={st.address || st.boardingLocation}>
-                                    {st.boardingLocation || st.address || '위치 미등록'}
-                                  </span>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         </div>
@@ -5232,18 +5126,49 @@ const parseKindergartenExcelSheet = (sheet) => {
                     </span>
                   </span>
 
-                  {showBusBadge && (
-                    <span 
-                      className="font-extrabold text-[10px] px-1.5 py-0.5 rounded border shrink-0" 
-                      style={{ 
-                        color: isNotRiding ? '#475569' : (needsAddress ? '#dc2626' : (st.color || bus?.color || '#475569')), 
-                        borderColor: isNotRiding ? '#cbd5e1' : (needsAddress ? '#fca5a5' : `${st.color || bus?.color || '#94a3b8'}50`), 
-                        backgroundColor: isNotRiding ? '#f1f5f9' : (needsAddress ? '#fee2e2' : `${st.color || bus?.color || '#64748b'}15`) 
-                      }}
-                    >
-                      {isNotRiding ? '미탑승(도보/자차)' : (needsAddress ? '배정 대기' : (bus && depBus && bus.id !== depBus.id ? `등:${bus.name} / 하:${depBus.name}` : (bus ? bus.name : (depBus ? `하원:${depBus.name}` : '배정 대기'))))}
-                    </span>
-                  )}
+                  {showBusBadge && (() => {
+                    const bType = getStudentBoardingType(st);
+                    if (bType === 'NONE') {
+                      return (
+                        <span className="font-extrabold text-[10px] px-1.5 py-0.5 rounded border border-slate-300 bg-slate-100 text-slate-600 shrink-0">
+                          미탑승(도보/자차)
+                        </span>
+                      );
+                    }
+                    if (needsAddress) {
+                      return (
+                        <span className="font-extrabold text-[10px] px-1.5 py-0.5 rounded border border-red-200 bg-red-50 text-red-600 shrink-0">
+                          배정 대기
+                        </span>
+                      );
+                    }
+                    if (bType === 'MORNING_ONLY') {
+                      return (
+                        <span className="font-extrabold text-[10px] px-1.5 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-800 shrink-0">
+                          등원만: {bus ? bus.name : '배정대기'}
+                        </span>
+                      );
+                    }
+                    if (bType === 'AFTERNOON_ONLY') {
+                      return (
+                        <span className="font-extrabold text-[10px] px-1.5 py-0.5 rounded border border-indigo-300 bg-indigo-50 text-indigo-800 shrink-0">
+                          하원만: {depBus ? depBus.name : (bus ? bus.name : '배정대기')}
+                        </span>
+                      );
+                    }
+                    return (
+                      <span 
+                        className="font-extrabold text-[10px] px-1.5 py-0.5 rounded border shrink-0" 
+                        style={{ 
+                          color: st.color || bus?.color || '#475569', 
+                          borderColor: `${st.color || bus?.color || '#94a3b8'}50`, 
+                          backgroundColor: `${st.color || bus?.color || '#64748b'}15` 
+                        }}
+                      >
+                        {bus && depBus && bus.id !== depBus.id ? `등:${bus.name} / 하:${depBus.name}` : (bus ? bus.name : (depBus ? `하원:${depBus.name}` : '배정 대기'))}
+                      </span>
+                    );
+                  })()}
                 </div>
 
                 {/* Expandable Details via (+) */}
@@ -6434,10 +6359,9 @@ const parseKindergartenExcelSheet = (sheet) => {
                 <p className="text-xs text-slate-500 font-medium">원생의 출결과 로그를 확인하세요.</p>
               </div>
               <div className="p-4 flex flex-col gap-2.5">
-                <button onClick={() => setLogTab('ALL')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'ALL' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>전체 일정 (변수 & 행사)</button>
-                <button onClick={() => setLogTab('EVENT_HOLIDAY')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'EVENT_HOLIDAY' ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>행사 및 휴업일</button>
-                <button onClick={() => setLogTab('ABSENCE_VARIABLE')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'ABSENCE_VARIABLE' ? 'bg-rose-500 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>원아 결석 및 통학 변동</button>
+                <button onClick={() => setLogTab('ABSENCE_VARIABLE')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'ABSENCE_VARIABLE' || logTab === 'ALL' || logTab === 'EVENT_HOLIDAY' ? 'bg-rose-500 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>원아 결석 및 통학 변동</button>
                 <button onClick={() => setLogTab('LOG')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'LOG' ? 'bg-slate-800 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>차량 운행 일지</button>
+                <button onClick={() => setLogTab('PAYMENT_APPROVAL')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'PAYMENT_APPROVAL' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>호차별 결재함</button>
               </div>
             </div>
           )}
@@ -6698,6 +6622,34 @@ const parseKindergartenExcelSheet = (sheet) => {
             </div>
           )}
 
+          {/* 운행 모드 (전체 / 등원 / 하원) */}
+          <div className="flex bg-white rounded-lg shadow-lg border border-slate-300 overflow-hidden text-xs font-bold divide-x divide-slate-200">
+            <div className="px-2.5 py-2 bg-slate-50 text-slate-500 font-extrabold flex items-center select-none">
+              운행:
+            </div>
+            <button
+              type="button"
+              onClick={() => setOperationMode('ALL')}
+              className={`px-3 py-2 transition-colors ${operationMode === 'ALL' ? 'bg-slate-900 text-white font-black shadow-xs' : 'hover:bg-slate-100 text-slate-700'}`}
+            >
+              전체
+            </button>
+            <button
+              type="button"
+              onClick={() => setOperationMode('MORNING')}
+              className={`px-3 py-2 transition-colors ${operationMode === 'MORNING' ? 'bg-amber-600 text-white font-black shadow-xs' : 'hover:bg-slate-100 text-slate-700'}`}
+            >
+              등원 (오전)
+            </button>
+            <button
+              type="button"
+              onClick={() => setOperationMode('AFTERNOON')}
+              className={`px-3 py-2 transition-colors ${operationMode === 'AFTERNOON' ? 'bg-indigo-600 text-white font-black shadow-xs' : 'hover:bg-slate-100 text-slate-700'}`}
+            >
+              하원 (오후)
+            </button>
+          </div>
+
           <div className="flex bg-white rounded-lg shadow-lg border border-slate-300 overflow-hidden text-sm font-bold">
             {[
               { id: 'ALL', label: '전체' },
@@ -6912,7 +6864,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             const isEditingThis = isZoneEditingMode && editingZoneBusId === bus.id;
             const polygonPoints = isEditingThis ? editingPolygon : bus.polygon;
             
-            const { totalRiders, regularStudents, oneTimeStudents, isFull, totalCount, capacity: busCapacity } = getBusRiderDetails(bus, students);
+            const { totalRiders, regularStudents, oneTimeStudents, isFull, totalCount, capacity: busCapacity } = getBusRiderDetails(bus, students, operationMode, selectedDay);
 
             return (
             <Fragment key={bus.id}>
@@ -6923,9 +6875,9 @@ const parseKindergartenExcelSheet = (sheet) => {
                     pathOptions={{ 
                       color: bus.color, 
                       fillColor: isFull ? `url(#stripe-pattern-${bus.id})` : bus.color, 
-                      fillOpacity: isFull ? 1 : (isEditingThis ? 0.1 : 0.3),
-                      weight: isFull ? 3.5 : (isEditingThis ? 3 : 2),
-                      dashArray: isEditingThis ? '5, 10' : (isFull ? '6, 6' : null)
+                      fillOpacity: isFull ? 0.25 : (isEditingThis ? 0.1 : 0.3),
+                      weight: isEditingThis ? 3 : 2,
+                      dashArray: isEditingThis ? '5, 10' : null
                     }} 
                   >
                     <Popup>
@@ -6948,13 +6900,13 @@ const parseKindergartenExcelSheet = (sheet) => {
                         </div>
 
                         {isFull ? (
-                          <div className="mt-2 p-2 bg-rose-50 border border-rose-300 rounded-xl text-rose-800 text-xs font-bold flex flex-col items-center justify-center gap-1 shadow-2xs">
+                          <div className="mt-2 p-2 bg-slate-100 border border-slate-300 rounded-xl text-slate-700 text-xs font-bold flex flex-col items-center justify-center gap-1 shadow-2xs">
                             <div className="flex items-center gap-1.5 text-[11px] font-black">
-                              <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
-                              <span>만석 구역 (대각선 빗금 표시)</span>
+                              <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                              <span>만석 구역</span>
                             </div>
-                            <p className="text-[10px] text-rose-700 font-normal leading-tight">
-                              25명 필수 배치 완료(정규 {regularStudents.length}명 + 1회 {oneTimeStudents.length}명). 신규 원아 진입 시 26명 중 최외곽 원아가 인접 호차로 자동 분산 배정됩니다.
+                            <p className="text-[10px] text-slate-600 font-normal leading-tight">
+                              25명 정원 도달 완료(정규 {regularStudents.length}명 + 1회 {oneTimeStudents.length}명). 만석 차량입니다.
                             </p>
                           </div>
                         ) : (
@@ -7012,13 +6964,35 @@ const parseKindergartenExcelSheet = (sheet) => {
           )})}
 
           {/* Draw New Students */}
-          {(selectedBusId ? students.filter(s => s.assignedBusId === selectedBusId) : students).map(st => {
+          {(selectedBusId ? students.filter(s => {
+            const bType = getStudentBoardingType(s);
+            if (operationMode === 'MORNING') {
+              return s.assignedBusId === selectedBusId && bType !== 'AFTERNOON_ONLY';
+            } else if (operationMode === 'AFTERNOON') {
+              const depId = s.assignedDepartureBusId || s.assignedBusId;
+              return depId === selectedBusId && bType !== 'MORNING_ONLY';
+            }
+            return s.assignedBusId === selectedBusId || s.assignedDepartureBusId === selectedBusId;
+          }) : students).map(st => {
+            const bType = getStudentBoardingType(st);
+
+            // Filter out students who don't ride during the selected operation mode
+            if (operationMode === 'MORNING' && bType === 'AFTERNOON_ONLY') return null;
+            if (operationMode === 'AFTERNOON' && bType === 'MORNING_ONLY') return null;
+
             let displayLat = st.lat;
             let displayLng = st.lng;
-            let displayBusId = st.assignedBusId;
+            let displayBusId = (operationMode === 'AFTERNOON')
+              ? (st.assignedDepartureBusId || st.assignedBusId)
+              : st.assignedBusId;
             let showStudent = true;
 
             if (selectedDay !== 'ALL') {
+              // 요일별 일정에서 해당 요일 등교/운행 여부(enabled) 확인
+              const weekly = st.raw?.['요일별일정'] || st.raw?.weeklySchedules || st.weeklySchedules;
+              if (weekly && weekly[selectedDay] && weekly[selectedDay].enabled === false) {
+                return null;
+              }
               // Check if they have a schedule for this day
               const sched = st.schedules?.find(s => s.dayOfWeek === selectedDay);
               if (sched && sched.latitude && sched.longitude) {
@@ -7043,7 +7017,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             );
 
             // 2. 미탑승 원아 판별 (도보 등원, 자가 픽업 등 - 회색 표시)
-            const isPureNotRiding = Boolean(st.isNotRiding && !isOneTimeStudent);
+            const isPureNotRiding = Boolean((st.isNotRiding || bType === 'NONE') && !isOneTimeStudent);
 
             // 거리 계산 헬퍼 (Km 단위)
             const calcDistKm = (lat1, lon1, lat2, lon2) => {
@@ -7072,7 +7046,19 @@ const parseKindergartenExcelSheet = (sheet) => {
             }
 
             const currentBusRiders = displayBusId
-              ? students.filter(s => (s.assignedBusId === displayBusId || s.assignedVehicle?.id === displayBusId) && !s.isNotRiding)
+              ? students.filter(s => {
+                  const sBType = getStudentBoardingType(s);
+                  if (sBType === 'NONE') return false;
+                  if (operationMode === 'MORNING') {
+                    if (sBType === 'AFTERNOON_ONLY') return false;
+                    return s.assignedBusId === displayBusId || s.assignedVehicle?.id === displayBusId;
+                  } else if (operationMode === 'AFTERNOON') {
+                    if (sBType === 'MORNING_ONLY') return false;
+                    const sDep = s.assignedDepartureBusId || s.assignedBusId;
+                    return sDep === displayBusId;
+                  }
+                  return (s.assignedBusId === displayBusId || s.assignedDepartureBusId === displayBusId || s.assignedVehicle?.id === displayBusId);
+                })
               : [];
             const isOverCapacity = currentBusRiders.length > (assignedBus?.capacity || 25);
             const isUnassigned = !displayBusId;
@@ -7191,9 +7177,25 @@ const parseKindergartenExcelSheet = (sheet) => {
 
                 <div className="bg-slate-50 p-2 rounded border border-slate-100 text-xs mb-2">
                   <div className="mb-1"><b>주소:</b> {st.address}</div>
-                  {st.boardingLocation && st.boardingLocation !== st.address && (
-                    <div className="mb-1 text-rose-600 font-bold"><b>탑승지:</b> {st.boardingLocation}</div>
-                  )}
+                  {(() => {
+                    const weekly = st.raw?.['요일별일정'] || st.raw?.weeklySchedules || st.weeklySchedules;
+                    const dayKey = selectedDay !== 'ALL' ? selectedDay : null;
+                    const daySched = dayKey && weekly ? weekly[dayKey] : null;
+                    const curLoc = daySched 
+                      ? (operationMode === 'AFTERNOON' ? (daySched.outLocation || daySched.inLocation) : (daySched.inLocation || daySched.outLocation))
+                      : (operationMode === 'AFTERNOON' ? (st.dropoffLocation || st.boardingLocation) : st.boardingLocation);
+                    const curTime = daySched
+                      ? (operationMode === 'AFTERNOON' ? daySched.outTime : daySched.inTime)
+                      : (operationMode === 'AFTERNOON' ? st.dropoffTime : st.boardingTime);
+                    return curLoc ? (
+                      <div className="mb-1 text-blue-600 font-bold">
+                        <b>{operationMode === 'AFTERNOON' ? '하차지:' : '탑승지:'}</b> {curLoc} {curTime ? `(${curTime})` : ''}
+                      </div>
+                    ) : null;
+                  })()}
+                  <div className="mb-1">
+                    <b>탑승구분:</b> {bType === 'MORNING_ONLY' ? '등원만 탑승' : bType === 'AFTERNOON_ONLY' ? '하원만 탑승' : bType === 'NONE' ? '차량 미탑승' : '등·하원 모두 탑승'}
+                  </div>
                   <div className="mb-1"><b>학부모:</b> {st.raw?.['보호자 성함']} ({maskPhoneNumber(st.raw?.['보호자연락처'])})</div>
                   <div><b>담임:</b> {formatTeacherName(st.raw?.['담임명'])}</div>
                 </div>
@@ -7296,20 +7298,20 @@ const parseKindergartenExcelSheet = (sheet) => {
               onClick={handleFocusFullBusZone}
               role="button"
               title="클릭 시 만석 통학차량 구역으로 지도를 이동합니다"
-              className="flex items-center gap-2 p-1.5 rounded-lg bg-amber-50/80 hover:bg-amber-100/90 border border-amber-200 text-amber-900 cursor-pointer transition-all active:scale-[0.98] select-none group"
+              className="flex items-center gap-2 p-1.5 rounded-lg bg-slate-50/90 hover:bg-slate-100 border border-slate-200 text-slate-800 cursor-pointer transition-all active:scale-[0.98] select-none group"
             >
               <div 
-                className="w-5 h-5 rounded-md border border-amber-400 shrink-0 shadow-2xs group-hover:scale-105 transition-transform"
+                className="w-5 h-5 rounded-md border border-slate-300 shrink-0 shadow-2xs group-hover:scale-105 transition-transform"
                 style={{
-                  background: 'repeating-linear-gradient(45deg, #d97706 0, #d97706 2.5px, #fef3c7 2.5px, #fef3c7 6px)'
+                  background: 'repeating-linear-gradient(45deg, #64748b 0, #64748b 2px, #f1f5f9 2px, #f1f5f9 5px)'
                 }}
               ></div>
               <div className="flex-1 min-w-0">
                 <div className="text-[11px] font-black leading-tight flex items-center justify-between">
-                  <span>만석 구역 (빗금 표시)</span>
-                  <span className="text-[10px] text-amber-600 font-bold opacity-0 group-hover:opacity-100 transition-opacity">이동 →</span>
+                  <span>정원 충원 (빗금 표시)</span>
+                  <span className="text-[10px] text-slate-500 font-bold opacity-0 group-hover:opacity-100 transition-opacity">이동 →</span>
                 </div>
-                <div className="text-[10px] text-amber-700 font-normal">25인승 정원 도달 · 26명 외곽 분산 배차</div>
+                <div className="text-[10px] text-slate-500 font-normal">25인승 정원 충원 완료</div>
               </div>
             </div>
 
@@ -7545,30 +7547,67 @@ const parseKindergartenExcelSheet = (sheet) => {
 
               {/* Section 3: 주소 및 탑승 장소 */}
               <div className="pt-2 border-t border-slate-100">
-                <div className="flex items-center justify-between mb-2.5">
+                <div className="flex items-center justify-between mb-2.5 flex-wrap gap-1.5">
                   <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
                     주소 및 승하차 위치
                   </h4>
-                  <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 cursor-pointer select-none bg-slate-50 px-2 py-1 rounded border border-slate-200 hover:bg-slate-100">
-                    <input
-                      type="checkbox"
-                      checked={studentForm.isNotRiding}
-                      onChange={e => setStudentForm({ ...studentForm, isNotRiding: e.target.checked })}
-                      className="w-3.5 h-3.5 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
-                    />
-                    차량 미탑승 (도보/자차)
-                  </label>
+                  <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setStudentForm({ ...studentForm, boardingType: 'BOTH', isNotRiding: false })}
+                      className={`px-2 py-1 rounded text-xs font-bold transition-all ${
+                        (studentForm.boardingType === 'BOTH' || (!studentForm.boardingType && !studentForm.isNotRiding))
+                          ? 'bg-blue-600 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                      }`}
+                    >
+                      등·하원 모두 탑승
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStudentForm({ ...studentForm, boardingType: 'MORNING_ONLY', isNotRiding: false })}
+                      className={`px-2 py-1 rounded text-xs font-bold transition-all ${
+                        studentForm.boardingType === 'MORNING_ONLY'
+                          ? 'bg-amber-600 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                      }`}
+                    >
+                      등원만 탑승
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStudentForm({ ...studentForm, boardingType: 'AFTERNOON_ONLY', isNotRiding: false })}
+                      className={`px-2 py-1 rounded text-xs font-bold transition-all ${
+                        studentForm.boardingType === 'AFTERNOON_ONLY'
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                      }`}
+                    >
+                      하원만 탑승
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStudentForm({ ...studentForm, boardingType: 'NONE', isNotRiding: true })}
+                      className={`px-2 py-1 rounded text-xs font-bold transition-all ${
+                        (studentForm.boardingType === 'NONE' || studentForm.isNotRiding)
+                          ? 'bg-slate-700 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                      }`}
+                    >
+                      차량 미탑승
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    도로명 주소 {!studentForm.isNotRiding && <span className="text-red-500">*</span>}
+                    도로명 주소 {!(studentForm.boardingType === 'NONE' || studentForm.isNotRiding) && <span className="text-red-500">*</span>}
                   </label>
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      required={!studentForm.isNotRiding}
-                      placeholder={studentForm.isNotRiding ? "도보/자차 등원생 (주소 선택사항)" : "주소 검색 버튼을 눌러 도로명 주소를 선택하세요"}
+                      required={!(studentForm.boardingType === 'NONE' || studentForm.isNotRiding)}
+                      placeholder={(studentForm.boardingType === 'NONE' || studentForm.isNotRiding) ? "도보/자차 등원생 (주소 선택사항)" : "주소 검색 버튼을 눌러 도로명 주소를 선택하세요"}
                       value={studentForm.address}
                       onChange={e => setStudentForm({ ...studentForm, address: e.target.value })}
                       className="flex-1 px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
@@ -7583,33 +7622,212 @@ const parseKindergartenExcelSheet = (sheet) => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 mt-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      등원 탑승지 (미입력 시 도로명 주소 적용)
-                    </label>
-                    <input
-                      type="text"
-                      disabled={studentForm.isNotRiding}
-                      placeholder={studentForm.isNotRiding ? "미탑승" : "예: 101동 앞 정문"}
-                      value={studentForm.inLocation}
-                      onChange={e => setStudentForm({ ...studentForm, inLocation: e.target.value })}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
-                    />
+                {/* 요일별 승하차지 및 탑승/하차 시간 설정 */}
+                <div className="mt-3 p-3 bg-slate-50/90 rounded-xl border border-slate-200">
+                  <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-slate-200 flex-wrap gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-black text-slate-800">등교 요일 및 승하차 상세</span>
+                      <span className="text-[11px] text-slate-500 font-medium">(요일별 승하차지 및 시간)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const mon = studentForm.weeklySchedules?.MON || {};
+                        setStudentForm(prev => {
+                          const nextWeekly = { ...prev.weeklySchedules };
+                          ['TUE', 'WED', 'THU', 'FRI'].forEach(d => {
+                            nextWeekly[d] = {
+                              ...nextWeekly[d],
+                              inLocation: mon.inLocation || '',
+                              outLocation: mon.outLocation || '',
+                              inTime: mon.inTime || '',
+                              outTime: mon.outTime || '',
+                              enabled: mon.enabled !== false
+                            };
+                          });
+                          return {
+                            ...prev,
+                            weeklySchedules: nextWeekly
+                          };
+                        });
+                        alert('월요일의 승하차지 및 승하차 시간이 화~금요일에 일괄 복사되었습니다.');
+                      }}
+                      className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold border border-blue-200 flex items-center gap-1 transition shadow-2xs cursor-pointer active:scale-95"
+                      title="월요일에 작성된 승차지/하차지/탑승시간/하차시간을 화~금요일에 일괄 복사합니다"
+                    >
+                      <span>월요일 일정 화~금 일괄 복사</span>
+                    </button>
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      하원 하차지 (미입력 시 도로명 주소 적용)
-                    </label>
-                    <input
-                      type="text"
-                      disabled={studentForm.isNotRiding}
-                      placeholder={studentForm.isNotRiding ? "미탑승" : "예: 101동 앞 정문"}
-                      value={studentForm.dropoffLocation || studentForm.outLocation}
-                      onChange={e => setStudentForm({ ...studentForm, dropoffLocation: e.target.value, outLocation: e.target.value })}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
-                    />
+
+                  {/* Day Buttons / Tabs: 월, 화, 수, 목, 금 */}
+                  <div className="flex items-center gap-1 mb-3 bg-white p-1 rounded-lg border border-slate-200 shadow-2xs">
+                    {[
+                      { key: 'MON', label: '월요일' },
+                      { key: 'TUE', label: '화요일' },
+                      { key: 'WED', label: '수요일' },
+                      { key: 'THU', label: '목요일' },
+                      { key: 'FRI', label: '금요일' }
+                    ].map(day => {
+                      const dayData = studentForm.weeklySchedules?.[day.key] || {};
+                      const isCurrent = scheduleDayTab === day.key;
+                      const isEnabled = dayData.enabled !== false;
+                      return (
+                        <button
+                          key={day.key}
+                          type="button"
+                          onClick={() => setScheduleDayTab(day.key)}
+                          className={`flex-1 py-1.5 px-2 rounded-md text-xs font-extrabold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                            isCurrent
+                              ? 'bg-blue-600 text-white shadow-xs'
+                              : isEnabled
+                              ? 'text-slate-700 hover:bg-slate-100'
+                              : 'text-slate-400 bg-slate-100 line-through'
+                          }`}
+                        >
+                          <span>{day.label}</span>
+                          {!isEnabled && <span className="text-[10px] text-rose-500 font-bold">(미등교)</span>}
+                        </button>
+                      );
+                    })}
                   </div>
+
+                  {/* Active Day Content */}
+                  {(() => {
+                    const curDay = studentForm.weeklySchedules?.[scheduleDayTab] || {};
+                    const isMon = scheduleDayTab === 'MON';
+                    const isMorningDisabled = studentForm.boardingType === 'AFTERNOON_ONLY' || studentForm.boardingType === 'NONE' || studentForm.isNotRiding || curDay.enabled === false;
+                    const isAfternoonDisabled = studentForm.boardingType === 'MORNING_ONLY' || studentForm.boardingType === 'NONE' || studentForm.isNotRiding || curDay.enabled === false;
+
+                    const updateDay = (field, val) => {
+                      setStudentForm(prev => {
+                        const curObj = prev.weeklySchedules?.[scheduleDayTab] || {};
+                        const nextCur = { ...curObj, [field]: val };
+                        const nextWeekly = { ...prev.weeklySchedules, [scheduleDayTab]: nextCur };
+
+                        // 월요일 수정 시 아직 개별 수정되지 않았거나 비어있는 화~금에 자동 동기화
+                        if (isMon) {
+                          const oldVal = curObj[field] || '';
+                          ['TUE', 'WED', 'THU', 'FRI'].forEach(d => {
+                            const dObj = prev.weeklySchedules?.[d] || {};
+                            if (!dObj[field] || dObj[field] === oldVal) {
+                              nextWeekly[d] = { ...dObj, [field]: val };
+                            }
+                          });
+                        }
+
+                        return {
+                          ...prev,
+                          weeklySchedules: nextWeekly,
+                          ...(isMon ? { [field]: val } : {})
+                        };
+                      });
+                    };
+
+                    return (
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={curDay.enabled !== false}
+                              onChange={e => updateDay('enabled', e.target.checked)}
+                              className="w-3.5 h-3.5 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
+                            />
+                            <span>{scheduleDayTab === 'MON' ? '월' : scheduleDayTab === 'TUE' ? '화' : scheduleDayTab === 'WED' ? '수' : scheduleDayTab === 'THU' ? '목' : '금'}요일 등교 및 운행</span>
+                          </label>
+                          {isMon && (
+                            <span className="text-[11px] text-blue-600 font-bold">
+                              월요일 작성 시 화~금 자동 반영 (다른 요일 탭에서 개별 변경 가능)
+                            </span>
+                          )}
+                        </div>
+
+                        {curDay.enabled === false ? (
+                          <div className="p-3 text-center text-xs font-bold text-slate-500 bg-slate-100 rounded-lg border border-slate-200">
+                            해당 요일은 등원/하원 차량 운행을 하지 않는 날입니다 (미등교).
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-3">
+                            {/* 등원 컬럼 */}
+                            <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-extrabold text-amber-700">등원 (승차)</span>
+                                {studentForm.address && (
+                                  <button
+                                    type="button"
+                                    onClick={() => updateDay('inLocation', studentForm.address)}
+                                    className="text-[10px] text-slate-500 hover:text-blue-600 underline cursor-pointer"
+                                  >
+                                    도로명 주소 복사
+                                  </button>
+                                )}
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">승차지 위치</label>
+                                <input
+                                  type="text"
+                                  disabled={isMorningDisabled}
+                                  placeholder={isMorningDisabled ? "등원 미탑승" : "예: 101동 앞 정문"}
+                                  value={curDay.inLocation || ''}
+                                  onChange={e => updateDay('inLocation', e.target.value)}
+                                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">탑승 시간</label>
+                                <input
+                                  type="text"
+                                  disabled={isMorningDisabled}
+                                  placeholder="예: 08:30"
+                                  value={curDay.inTime || ''}
+                                  onChange={e => updateDay('inTime', e.target.value)}
+                                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
+                                />
+                              </div>
+                            </div>
+
+                            {/* 하원 컬럼 */}
+                            <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-extrabold text-indigo-700">하원 (하차)</span>
+                                {studentForm.address && (
+                                  <button
+                                    type="button"
+                                    onClick={() => updateDay('outLocation', studentForm.address)}
+                                    className="text-[10px] text-slate-500 hover:text-blue-600 underline cursor-pointer"
+                                  >
+                                    도로명 주소 복사
+                                  </button>
+                                )}
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">하차지 위치</label>
+                                <input
+                                  type="text"
+                                  disabled={isAfternoonDisabled}
+                                  placeholder={isAfternoonDisabled ? "하원 미탑승" : "예: 101동 앞 정문"}
+                                  value={curDay.outLocation || ''}
+                                  onChange={e => updateDay('outLocation', e.target.value)}
+                                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">하차 시간</label>
+                                <input
+                                  type="text"
+                                  disabled={isAfternoonDisabled}
+                                  placeholder="예: 17:00"
+                                  value={curDay.outTime || ''}
+                                  onChange={e => updateDay('outTime', e.target.value)}
+                                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-400"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -7617,18 +7835,24 @@ const parseKindergartenExcelSheet = (sheet) => {
               <div className="pt-2 border-t border-slate-100">
                 <h4 className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
-                  배차 및 운행 일정 {studentForm.isNotRiding && <span className="text-xs text-slate-400 font-normal">(도보/자차 등원생 - 배차 제외)</span>}
+                  배차 및 운행 일정 {(studentForm.boardingType === 'NONE' || studentForm.isNotRiding) ? (
+                    <span className="text-xs text-slate-400 font-normal">(도보/자차 등원생 - 배차 제외)</span>
+                  ) : studentForm.boardingType === 'MORNING_ONLY' ? (
+                    <span className="text-xs text-amber-600 font-normal">(등원 전용 탑승)</span>
+                  ) : studentForm.boardingType === 'AFTERNOON_ONLY' ? (
+                    <span className="text-xs text-indigo-600 font-normal">(하원 전용 탑승)</span>
+                  ) : null}
                 </h4>
                 <div className="grid grid-cols-2 gap-3 mb-3">
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">등원 배정 차량</label>
                     <select
-                      disabled={studentForm.isNotRiding}
+                      disabled={studentForm.boardingType === 'AFTERNOON_ONLY' || studentForm.boardingType === 'NONE' || studentForm.isNotRiding}
                       value={studentForm.assignedBusId}
                       onChange={e => setStudentForm({ ...studentForm, assignedBusId: e.target.value })}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white disabled:bg-slate-100 disabled:text-slate-400"
                     >
-                      <option value="">자동 배정 (구역 기반)</option>
+                      <option value="">{studentForm.boardingType === 'AFTERNOON_ONLY' ? '등원 미탑승' : '자동 배정 (구역 기반)'}</option>
                       {sortedBuses.map(b => (
                         <option key={b.id} value={b.id}>{b.name}</option>
                       ))}
@@ -7637,39 +7861,16 @@ const parseKindergartenExcelSheet = (sheet) => {
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">하원 배정 차량</label>
                     <select
-                      disabled={studentForm.isNotRiding}
+                      disabled={studentForm.boardingType === 'MORNING_ONLY' || studentForm.boardingType === 'NONE' || studentForm.isNotRiding}
                       value={studentForm.assignedDepartureBusId}
                       onChange={e => setStudentForm({ ...studentForm, assignedDepartureBusId: e.target.value })}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white disabled:bg-slate-100 disabled:text-slate-400"
                     >
-                      <option value="">등원 차량과 동일 (또는 자동 배정)</option>
+                      <option value="">{studentForm.boardingType === 'MORNING_ONLY' ? '하원 미탑승' : '등원 차량과 동일 (또는 자동 배정)'}</option>
                       {sortedBuses.map(b => (
                         <option key={b.id} value={b.id}>{b.name}</option>
                       ))}
                     </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">등원 시간</label>
-                    <input
-                      type="text"
-                      placeholder="예: 08:30"
-                      value={studentForm.inTime}
-                      onChange={e => setStudentForm({ ...studentForm, inTime: e.target.value })}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">하원 시간</label>
-                    <input
-                      type="text"
-                      placeholder="예: 17:00"
-                      value={studentForm.outTime}
-                      onChange={e => setStudentForm({ ...studentForm, outTime: e.target.value })}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    />
                   </div>
                 </div>
 

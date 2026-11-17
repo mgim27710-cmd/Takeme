@@ -69,10 +69,20 @@ export class TeacherService {
     });
   }
 
-  private async getTodayStudentsForVehicle(vehicleId: number): Promise<Student[]> {
+  private async getTodayStudentsForVehicle(vehicleId: number, mode?: string): Promise<Student[]> {
+    const nowKst = new Date(Date.now() + 9 * 3600 * 1000);
+    const dayMap = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+    const todayDayKey = dayMap[nowKst.getUTCDay()];
+    const isMorning = mode ? (mode === 'MORNING') : (nowKst.getUTCHours() < 12);
+
     const defaultStudents = await this.studentRepository.find({ 
-      where: { assignedVehicle: { id: vehicleId } },
-      relations: { parentUser: true }
+      where: isMorning 
+        ? { assignedVehicle: { id: vehicleId } }
+        : [
+            { assignedDepartureVehicle: { id: vehicleId } },
+            { assignedVehicle: { id: vehicleId } }
+          ],
+      relations: { parentUser: true, assignedVehicle: true, assignedDepartureVehicle: true }
     });
     const overrides = await this.getActiveOverridesForToday();
     
@@ -84,7 +94,27 @@ export class TeacherService {
     ];
 
     // Students originally in this vehicle
-    const currentStudents = defaultStudents.map(s => {
+    const currentStudents = defaultStudents
+      .filter(s => {
+        const raw = s.raw || {};
+        const weekly = raw['요일별일정'] || raw.weeklySchedules;
+        if (weekly && weekly[todayDayKey] && weekly[todayDayKey].enabled === false) {
+          return false;
+        }
+
+        const bType = raw['탑승구분'] || (s.isNotRiding ? 'NONE' : 'BOTH');
+        if (s.isNotRiding || bType === 'NONE') return false;
+
+        if (isMorning) {
+          if (bType === 'AFTERNOON_ONLY' || bType === '하원만') return false;
+          return s.assignedVehicle?.id === vehicleId;
+        } else {
+          if (bType === 'MORNING_ONLY' || bType === '등원만') return false;
+          const depVehId = s.assignedDepartureVehicle?.id || s.assignedVehicle?.id;
+          return depVehId === vehicleId;
+        }
+      })
+      .map(s => {
       const override = overrides.find(o => o.student?.id === s.id);
       if (override) {
         if (absentTypes.includes(override.overrideType)) {
@@ -294,7 +324,7 @@ export class TeacherService {
       });
   }
 
-  async getRoute(email: string) {
+  async getRoute(email: string, mode?: string) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
 
@@ -305,22 +335,42 @@ export class TeacherService {
     const vehicle = await this.findAssignedVehicle(user.id, { academy: true });
     if (!vehicle) return { stops: [], routePoints: [], academy: null, vehicleId: null };
 
-    const students = await this.getTodayStudentsForVehicle(vehicle.id);
+    const students = await this.getTodayStudentsForVehicle(vehicle.id, mode);
     
+    const nowKst = new Date(Date.now() + 9 * 3600 * 1000);
+    const dayMap = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+    const todayDayKey = dayMap[nowKst.getUTCDay()];
+    const isMorning = mode ? (mode === 'MORNING') : (nowKst.getUTCHours() < 12);
+
     // Convert to route stops
     let stops = students
       .filter(s => s.boardStatus === 'WAITING' && s.latitude && s.longitude)
-      .map(s => ({
-        id: s.id,
-        name: s.adminDisplayName || s.name,
-        address: s.address,
-        latitude: parseFloat(s.latitude as any),
-        longitude: parseFloat(s.longitude as any),
-        expectedTime: s.raw ? s.raw['예상탑승시간'] || '15:30' : '15:30',
-        isOneTimeBoarding: (s as any).isOneTimeBoarding || false,
-        isOverride: (s as any).isOverride || false,
-        overrideType: (s as any).overrideType || null,
-      }));
+      .map(s => {
+        const raw = s.raw || {};
+        const weekly = raw['요일별일정'] || raw.weeklySchedules;
+        const daySched = weekly ? weekly[todayDayKey] : null;
+
+        const mornStop = daySched?.inLocation || s.boardingLocation || raw['등원지'] || raw['탑승지'] || s.address;
+        const aftStop = daySched?.outLocation || s.dropoffLocation || raw['하차지'] || raw['하원지'] || s.address;
+        const stopAddress = (!isMorning && aftStop) ? aftStop : mornStop;
+
+        const defaultTime = isMorning ? '08:30' : '17:00';
+        const expectedTime = isMorning
+          ? (daySched?.inTime || raw['등원시간'] || raw['예상탑승시간'] || defaultTime)
+          : (daySched?.outTime || raw['하원시간'] || raw['예상탑승시간'] || defaultTime);
+
+        return {
+          id: s.id,
+          name: s.adminDisplayName || s.name,
+          address: stopAddress,
+          latitude: parseFloat(s.latitude as any),
+          longitude: parseFloat(s.longitude as any),
+          expectedTime,
+          isOneTimeBoarding: (s as any).isOneTimeBoarding || false,
+          isOverride: (s as any).isOverride || false,
+          overrideType: (s as any).overrideType || null,
+        };
+      });
 
     // TSP Optimization (Nearest Neighbor)
     const sortedStops = [];
