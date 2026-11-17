@@ -39,6 +39,12 @@ export function getStudentGender(st) {
 const AGE_OPTIONS = ['3세', '4세', '5세', '6세', '7세', '혼합반'];
 const WEEKDAY_OPTIONS = ['월', '화', '수', '목', '금', '토'];
 
+export const CLASS_TYPE_OPTIONS = [
+  { id: 'MORNING', name: '오전(정규)반', time: '09:00 ~ 14:30', desc: '정규 하원 세션 기준', badgeClass: 'bg-blue-100 text-blue-800 border-blue-200' },
+  { id: 'FULL_DAY', name: '종일반', time: '09:00 ~ 19:30', desc: '종일반 하원 세션 기준', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' },
+  { id: 'AFTERNOON', name: '방과후반', time: '14:30 ~ 16:30', desc: '방과후 하원 세션 기준', badgeClass: 'bg-purple-100 text-purple-800 border-purple-200' },
+];
+
 const DEFAULT_OPERATING_SESSIONS = [
   {
     id: 'reg_drop',
@@ -178,6 +184,77 @@ export default function ClassManager({
     });
   };
 
+  // Class Type metadata: { [className]: 'MORNING' | 'FULL_DAY' | 'AFTERNOON' }
+  const [classTypeMap, setClassTypeMap] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`takeme_class_types_${academyId || 'default'}`);
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return {
+      '새싹반': 'MORNING',
+      '풀잎반': 'MORNING',
+      '햇살반': 'MORNING',
+      '열매반': 'FULL_DAY',
+      '바다반': 'FULL_DAY',
+      '하늘반': 'AFTERNOON',
+    };
+  });
+
+  const updateClassType = (className, type) => {
+    setClassTypeMap(prev => {
+      const updated = { ...prev, [className]: type };
+      try {
+        localStorage.setItem(`takeme_class_types_${academyId || 'default'}`, JSON.stringify(updated));
+      } catch (err) {
+        console.error(err);
+      }
+      return updated;
+    });
+  };
+
+  // Filter tabs for Class Type
+  const [selectedClassTypeTab, setSelectedClassTypeTab] = useState('ALL'); // 'ALL' | 'MORNING' | 'FULL_DAY' | 'AFTERNOON'
+
+  // Dedicated Card Cell Modal for Creating and Editing Classes
+  const [classModal, setClassModal] = useState({
+    isOpen: false,
+    mode: 'CREATE', // 'CREATE' | 'EDIT'
+    targetClassName: '',
+    name: '',
+    age: '5세',
+    type: 'MORNING',
+    teacherId: '',
+  });
+
+  const openCreateClassModal = () => {
+    setClassModal({
+      isOpen: true,
+      mode: 'CREATE',
+      targetClassName: '',
+      name: '',
+      age: '5세',
+      type: 'MORNING',
+      teacherId: '',
+    });
+  };
+
+  const openEditClassModal = (className) => {
+    const teacher = (teachers || []).find(t => t.assignedClass && t.assignedClass.trim() === className.trim());
+    setClassModal({
+      isOpen: true,
+      mode: 'EDIT',
+      targetClassName: className,
+      name: className,
+      age: classAgeMap[className] || '5세',
+      type: classTypeMap[className] || 'MORNING',
+      teacherId: teacher?.id ? String(teacher.id) : '',
+    });
+  };
+
+  const closeClassModal = () => {
+    setClassModal(prev => ({ ...prev, isOpen: false }));
+  };
+
   // Combine custom classes and any classes found in students or teachers
   const allClassNames = useMemo(() => {
     const set = new Set();
@@ -246,7 +323,7 @@ export default function ClassManager({
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [hasUnsavedChanges]);
 
-  // Filtered Class Names by search keyword and Age category tab
+  // Filtered Class Names by search keyword, Age category tab, and Class Type tab
   const filteredClassNames = useMemo(() => {
     return allClassNames.filter(c => {
       if (classSearchKeyword.trim()) {
@@ -257,9 +334,13 @@ export default function ClassManager({
         const age = classAgeMap[c] || '혼합반';
         if (age !== selectedClassAgeTab) return false;
       }
+      if (selectedClassTypeTab !== 'ALL') {
+        const type = classTypeMap[c] || 'MORNING';
+        if (type !== selectedClassTypeTab) return false;
+      }
       return true;
     });
-  }, [allClassNames, classSearchKeyword, selectedClassAgeTab, classAgeMap]);
+  }, [allClassNames, classSearchKeyword, selectedClassAgeTab, selectedClassTypeTab, classAgeMap, classTypeMap]);
 
   // Search filter for students
   const matchesStudentSearch = (st) => {
@@ -419,6 +500,145 @@ export default function ClassManager({
 
     setNewClassName('');
     alert(`[${trimmed}] (${newClassAge}반)이(가) 성공적으로 개설되었습니다.`);
+  };
+
+  // Dedicated Card Cell Modal Save Handler (creates or edits class)
+  const handleSaveClassModal = async (e) => {
+    e?.preventDefault();
+    const trimmedName = (classModal.name || '').trim();
+    if (!trimmedName) {
+      alert('반 명칭을 입력해 주세요.');
+      return;
+    }
+
+    const { mode, targetClassName, age, type, teacherId } = classModal;
+
+    if (mode === 'CREATE') {
+      if (allClassNames.includes(trimmedName)) {
+        alert(`이미 존재하는 반 이름입니다: [${trimmedName}]`);
+        return;
+      }
+
+      // Add to custom classes
+      const updated = Array.from(new Set([...customClasses, trimmedName]));
+      setCustomClasses(updated);
+      try {
+        localStorage.setItem(`takeme_custom_classes_${academyId || 'default'}`, JSON.stringify(updated));
+      } catch (err) {
+        console.error(err);
+      }
+
+      // Save Age & Type
+      updateClassAge(trimmedName, age || '5세');
+      updateClassType(trimmedName, type || 'MORNING');
+
+      // Assign Teacher if selected
+      if (teacherId) {
+        await handleAssignTeacherToClass(trimmedName, teacherId);
+      }
+
+      closeClassModal();
+      alert(`[${trimmedName}] 반이 성공적으로 개설되었습니다.`);
+    } else {
+      // EDIT MODE
+      setIsProcessing(true);
+      try {
+        // Did name change?
+        if (targetClassName !== trimmedName) {
+          if (allClassNames.includes(trimmedName)) {
+            alert(`이미 존재하는 다른 반 이름입니다: [${trimmedName}]`);
+            setIsProcessing(false);
+            return;
+          }
+
+          // Rename in custom classes
+          const updatedCustom = customClasses.map(c => (c === targetClassName ? trimmedName : c));
+          if (!updatedCustom.includes(trimmedName)) updatedCustom.push(trimmedName);
+          setCustomClasses(updatedCustom);
+          try {
+            localStorage.setItem(`takeme_custom_classes_${academyId || 'default'}`, JSON.stringify(updatedCustom));
+          } catch (err) {
+            console.error(err);
+          }
+
+          // Migrate age and type maps
+          setClassAgeMap(prev => {
+            const next = { ...prev };
+            delete next[targetClassName];
+            next[trimmedName] = age || '5세';
+            try {
+              localStorage.setItem(`takeme_class_ages_${academyId || 'default'}`, JSON.stringify(next));
+            } catch (_) {}
+            return next;
+          });
+
+          setClassTypeMap(prev => {
+            const next = { ...prev };
+            delete next[targetClassName];
+            next[trimmedName] = type || 'MORNING';
+            try {
+              localStorage.setItem(`takeme_class_types_${academyId || 'default'}`, JSON.stringify(next));
+            } catch (_) {}
+            return next;
+          });
+
+          // Move existing students from targetClassName to trimmedName in backend & state
+          const studentsInTarget = (students || []).filter(s => {
+            const c = (s.raw?.['반명'] || s.raw?.['반'] || '').trim();
+            return c === targetClassName;
+          });
+
+          if (studentsInTarget.length > 0) {
+            const sIds = studentsInTarget.map(s => s.id);
+            await fetch(`${API_BASE_URL}/routing/students/assign-class`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ studentIds: sIds, className: trimmedName })
+            }).catch(e => console.warn(e));
+
+            setStudents(prev => prev.map(st => {
+              if (sIds.includes(st.id)) {
+                const rawObj = typeof st.raw === 'object' && st.raw ? { ...st.raw } : {};
+                rawObj['반명'] = trimmedName;
+                rawObj['반'] = trimmedName;
+                return { ...st, raw: rawObj, className: trimmedName };
+              }
+              return st;
+            }));
+          }
+
+          // Move staged assignments from targetClassName to trimmedName
+          setStagedAssignments(prev => {
+            const next = { ...prev };
+            Object.keys(next).forEach(k => {
+              if (next[k] === targetClassName) next[k] = trimmedName;
+            });
+            return next;
+          });
+
+          // Update teacher assignment
+          await handleAssignTeacherToClass(trimmedName, teacherId);
+        } else {
+          // Name unchanged: just update age, type, teacher
+          updateClassAge(trimmedName, age || '5세');
+          updateClassType(trimmedName, type || 'MORNING');
+          const currentTeacher = classTeacherMap[trimmedName];
+          const currId = currentTeacher?.id ? String(currentTeacher.id) : '';
+          if (currId !== String(teacherId || '')) {
+            await handleAssignTeacherToClass(trimmedName, teacherId);
+          }
+        }
+
+        closeClassModal();
+        alert(`[${trimmedName}] 반 정보가 성공적으로 수정되었습니다.`);
+        if (onRefreshData) onRefreshData();
+      } catch (err) {
+        console.error('Update class error:', err);
+        alert('반 정보 수정 중 오류가 발생했습니다.');
+      } finally {
+        setIsProcessing(false);
+      }
+    }
   };
 
   // 2. Delete Class
@@ -721,62 +941,77 @@ export default function ClassManager({
         </div>
       )}
 
-      {/* Top Bar Header */}
-      <div className="bg-white px-8 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4 shadow-xs shrink-0 z-10">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-black text-slate-800">
-              반 관리 및 분반 / 교사 배정
-            </h1>
-            <span className="text-xs font-bold px-3 py-1 bg-blue-50 text-blue-700 rounded-full border border-blue-200">
-              총 {allClassNames.length}개 반 개설됨
-            </span>
-            {hasUnsavedChanges && (
-              <span className="text-xs font-extrabold px-3 py-1 bg-amber-100 text-amber-800 rounded-full border border-amber-300">
-                변경 대기 {unsavedCount}건
+      {/* ================= TIER 1: MAIN HEADER & PRIMARY ACTIONS ================= */}
+      <div className="bg-white px-6 py-3.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 shadow-xs shrink-0 z-10">
+        <div className="flex items-center gap-4 flex-wrap">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-xl font-black text-slate-800 tracking-tight">
+                반 관리 및 분반 / 교사 배정
+              </h1>
+              <span className="text-[11px] font-extrabold px-2.5 py-0.5 bg-blue-50 text-blue-700 rounded-full border border-blue-200">
+                총 {allClassNames.length}개 반
               </span>
-            )}
+              {hasUnsavedChanges && (
+                <span className="text-[11px] font-black px-2.5 py-0.5 bg-amber-100 text-amber-800 rounded-full border border-amber-300 animate-pulse">
+                  저장 대기 {unsavedCount}건
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
+              원아들을 원하는 반으로 드래그하여 배정하고, 반별 운영 형태(종일반/오전반)와 담임교사를 설정합니다.
+            </p>
           </div>
-          <p className="text-xs text-slate-500 mt-1">
-            원아들을 나이별·성별로 분류하고, 원하는 반으로 드래그하여 배정한 후 <strong>[변경사항 저장]</strong> 버튼을 눌러 확정하세요.
-          </p>
+
+          {/* Quick Stat Badges */}
+          <div className="hidden xl:flex items-center gap-2 bg-slate-50/90 px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
+            <span className="text-slate-400 font-bold text-[11px]">원아:</span>
+            <span className="font-extrabold text-blue-700">배정 {effectiveStudents.length - unassignedStudents.length}명</span>
+            <span className="text-slate-300">/</span>
+            <span className="font-extrabold text-amber-700">미배정 {unassignedStudents.length}명</span>
+            <span className="text-slate-400 text-[11px] font-medium">(남 {unassignedStats.male} · 여 {unassignedStats.female})</span>
+            <span className="text-slate-300 mx-1">|</span>
+            <span className="text-slate-400 font-bold text-[11px]">교사:</span>
+            <span className="font-extrabold text-emerald-700">담임 {teachers.filter(t => t.assignedClass).length}명</span>
+            <span className="text-slate-300">/</span>
+            <span className="font-extrabold text-slate-600">미배정 {teachers.filter(t => !t.assignedClass).length}명</span>
+          </div>
         </div>
 
-        {/* Quick Stats Pills & Actions */}
-        <div className="flex items-center gap-3">
-          <div className="hidden md:flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold">
-            <span className="text-slate-500">원아 현황:</span>
-            <span className="text-blue-700">배정 {effectiveStudents.length - unassignedStudents.length}명</span>
-            <span className="text-slate-300">|</span>
-            <span className="text-amber-700">미배정 {unassignedStudents.length}명</span>
-            <span className="text-slate-300">|</span>
-            <span className="text-slate-600 font-normal">남 {unassignedStats.male} / 여 {unassignedStats.female}</span>
-          </div>
-
-          <div className="hidden lg:flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 text-xs font-bold">
-            <span className="text-slate-500">교사 현황:</span>
-            <span className="text-emerald-700">담임 배정 {teachers.filter(t => t.assignedClass).length}명</span>
-            <span className="text-slate-300">|</span>
-            <span className="text-slate-600">미배정 {teachers.filter(t => !t.assignedClass).length}명</span>
-          </div>
-
-          {/* Operating Sessions & Schedule Setting Button */}
+        {/* Action Buttons */}
+        <div className="flex items-center gap-2">
+          {/* Operating Sessions Button (with active chip overview) */}
           <button
             type="button"
             onClick={() => {
               setTempScheduleSessions(JSON.parse(JSON.stringify(scheduleSessions)));
               setIsScheduleModalOpen(true);
             }}
-            className="px-3.5 py-2 rounded-xl text-xs font-black bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 shadow-2xs hover:border-slate-400 transition flex items-center gap-1.5 active:scale-95"
-            title="정규하원, 방과후하원, 종일반 시간표 및 차량 출발 시점 설정"
+            className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-300 shadow-2xs hover:border-slate-400 transition flex items-center gap-1.5 active:scale-95"
+            title="운영 세션(정규/방과후/종일반) 시작·종료 시간 및 차량 출발 시점 설정"
           >
-            <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <span>운영 세션·시간표 설정</span>
+            <span className="text-[10px] font-black bg-blue-100 text-blue-700 px-1.5 py-0.2 rounded-full">
+              {scheduleSessions.length}개
+            </span>
           </button>
 
-          {/* Save Changes Button (Always present in top bar) */}
+          {/* New Class Modal Trigger Button */}
+          <button
+            type="button"
+            onClick={openCreateClassModal}
+            className="px-3.5 py-2 rounded-xl text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs hover:shadow-indigo-500/20 transition flex items-center gap-1.5 active:scale-95"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+            </svg>
+            <span>+ 새 반 개설</span>
+          </button>
+
+          {/* Save Changes Button */}
           <button
             type="button"
             onClick={handleSaveAllChanges}
@@ -809,63 +1044,27 @@ export default function ClassManager({
         </div>
       </div>
 
-      {/* Operating Sessions Summary Banner */}
-      <div className="bg-slate-50/90 backdrop-blur-xs px-8 py-2.5 border-b border-slate-200 shrink-0">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider">운영 세션</span>
-            <span className="text-[10px] text-slate-300">|</span>
-            <span className="text-xs text-slate-500 font-medium">설문 및 설정된 3개 하원 세션(시작/종료, 차량출발, 운영요일) 정보입니다.</span>
-          </div>
-          <div className="flex items-center gap-2.5 flex-wrap">
-            {scheduleSessions.map((session, idx) => (
-              <div
-                key={session.id || idx}
-                className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs text-xs"
-              >
-                <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
-                  session.isFullDay ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
-                }`}>
-                  {session.isFullDay ? '종일반' : '일반'}
-                </span>
-                <span className="font-extrabold text-slate-800">{session.name}</span>
-                <span className="text-slate-500 font-mono text-[11px]">
-                  {session.startTime} ~ {session.endTime}
-                </span>
-                <span className="text-slate-300">|</span>
-                <span className="text-[11px] text-slate-600 font-bold">
-                  {session.shuttleOffset || '반 시작 40분 전'}
-                </span>
-                <span className="text-slate-300">|</span>
-                <span className="text-[10px] font-extrabold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
-                  {Array.isArray(session.days) && session.days.length > 0 ? session.days.join(',') : '월~금'}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Sub-Bar: 등원 요일 선택 필터 (선택한 요일에 등원하는 학생만 미배정/반 컬럼에 표시) */}
-      <div className="bg-slate-100/80 px-8 py-2 border-b border-slate-200 flex items-center justify-between gap-4 shrink-0 text-xs">
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <span className="text-[11px] font-black text-slate-700 flex items-center gap-1.5">
+      {/* ================= TIER 2: UNIFIED FILTER & SEARCH CONTROL STRIP ================= */}
+      <div className="bg-slate-50/95 backdrop-blur-xs px-6 py-2 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0 text-xs shadow-2xs">
+        {/* Left: Operating Day Filter Pills */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-black text-slate-700 flex items-center gap-1 shrink-0">
             <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
-            등원 요일 선택:
+            등원 요일:
           </span>
           <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs font-bold">
             <button
               type="button"
               onClick={() => setSelectedDayFilter('ALL')}
-              className={`px-3 py-1 rounded-lg text-xs transition ${
+              className={`px-2.5 py-1 rounded-lg text-xs transition ${
                 selectedDayFilter === 'ALL'
                   ? 'bg-blue-600 text-white font-black shadow-xs'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
-              전체 요일 ({effectiveStudents.length}명)
+              전체 ({effectiveStudents.length})
             </button>
             {WEEKDAY_OPTIONS.map(day => {
               const count = effectiveStudents.filter(st => isStudentAttendingOnDay(st, day)).length;
@@ -875,15 +1074,15 @@ export default function ClassManager({
                   key={day}
                   type="button"
                   onClick={() => setSelectedDayFilter(day)}
-                  className={`px-2.5 py-1 rounded-lg text-xs transition flex items-center gap-1.5 ${
+                  className={`px-2 py-1 rounded-lg text-xs transition flex items-center gap-1 ${
                     isSelected
                       ? 'bg-blue-600 text-white font-black shadow-xs'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                   }`}
                 >
-                  <span>{day}요일</span>
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                    isSelected ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-600'
+                  <span>{day}</span>
+                  <span className={`text-[10px] px-1 py-0.2 rounded-full font-bold ${
+                    isSelected ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-500'
                   }`}>
                     {count}
                   </span>
@@ -891,124 +1090,113 @@ export default function ClassManager({
               );
             })}
           </div>
-        </div>
 
-        <div className="text-[11px] text-slate-500 font-medium hidden sm:block">
-          {selectedDayFilter === 'ALL' ? (
-            <span>전체 원아가 표시됩니다. 요일을 선택하면 해당 요일 등원 원아만 즉시 필터링됩니다.</span>
-          ) : (
-            <span className="font-bold text-blue-700">
-              [{selectedDayFilter}요일] 등원 원아 총 {dayFilteredStudents.length}명 필터링 표시 중 (미배정 {unassignedStudents.length}명 / 배정 {dayFilteredStudents.length - unassignedStudents.length}명)
-            </span>
-          )}
-        </div>
-      </div>
+          <div className="h-4 w-px bg-slate-300 mx-1 hidden lg:block" />
 
-      {/* Action Sub-Bar: 새 반 개설 폼 (반 대상 나이 선택) & 반 나이별 탭 & 검색 */}
-      <div className="bg-white/90 backdrop-blur-xs px-8 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4 shrink-0 shadow-2xs">
-        
-        {/* 새 반 만들기 (반 이름 + 나이 설정 버튼) */}
-        <form onSubmit={handleCreateClass} className="flex flex-wrap items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
-          <div className="relative w-44">
-            <input
-              type="text"
-              value={newClassName}
-              onChange={(e) => setNewClassName(e.target.value)}
-              placeholder="새 반 이름 (예: 햇살반)..."
-              className="w-full pl-8 pr-3 py-1.5 text-xs font-bold bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-            />
-            <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
+          {/* Class Type Filter Tabs (반 구분: 전체, 오전(정규)반, 종일반, 방과후반) */}
+          <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs font-bold">
+            <span className="text-[11px] text-slate-400 px-1 font-bold">운영:</span>
+            <button
+              type="button"
+              onClick={() => setSelectedClassTypeTab('ALL')}
+              className={`px-2.5 py-1 rounded-lg text-xs transition ${
+                selectedClassTypeTab === 'ALL'
+                  ? 'bg-slate-800 text-white font-black shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              전체
+            </button>
+            {CLASS_TYPE_OPTIONS.map(opt => {
+              const count = allClassNames.filter(c => (classTypeMap[c] || 'MORNING') === opt.id).length;
+              const isSelected = selectedClassTypeTab === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setSelectedClassTypeTab(opt.id)}
+                  className={`px-2 py-1 rounded-lg text-xs transition flex items-center gap-1 ${
+                    isSelected
+                      ? 'bg-slate-800 text-white font-black shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>{opt.name}</span>
+                  {count > 0 && (
+                    <span className={`text-[10px] px-1 py-0.2 rounded-full font-bold ${
+                      isSelected ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
-          {/* 반 대상 나이 선택 버튼 그룹 */}
-          <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200">
-            <span className="text-[10px] font-bold text-slate-400 px-1">나이:</span>
-            {AGE_OPTIONS.map(opt => (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => setNewClassAge(opt)}
-                className={`px-2 py-1 rounded-lg text-[11px] font-black transition-all ${
-                  newClassAge === opt
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {opt}
-              </button>
-            ))}
+          <div className="h-4 w-px bg-slate-300 mx-1 hidden lg:block" />
+
+          {/* Class Age Filter Tabs (반 연령: 전체, 3세~7세, 혼합반) */}
+          <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs font-bold">
+            <span className="text-[11px] text-slate-400 px-1 font-bold">연령:</span>
+            <button
+              type="button"
+              onClick={() => setSelectedClassAgeTab('ALL')}
+              className={`px-2.5 py-1 rounded-lg text-xs transition ${
+                selectedClassAgeTab === 'ALL'
+                  ? 'bg-blue-600 text-white font-black shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              전체
+            </button>
+            {AGE_OPTIONS.map(opt => {
+              const count = allClassNames.filter(c => (classAgeMap[c] || '혼합반') === opt).length;
+              const isSelected = selectedClassAgeTab === opt;
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => setSelectedClassAgeTab(opt)}
+                  className={`px-2 py-1 rounded-lg text-xs transition flex items-center gap-1 ${
+                    isSelected
+                      ? 'bg-blue-600 text-white font-black shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>{opt}</span>
+                  {count > 0 && (
+                    <span className={`text-[10px] px-1 py-0.2 rounded-full font-bold ${
+                      isSelected ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-500'
+                    }`}>
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
-
-          <button
-            type="submit"
-            disabled={!newClassName.trim() || isProcessing}
-            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-xs transition flex items-center gap-1 disabled:opacity-50 shrink-0"
-          >
-            <span>+ 개설</span>
-          </button>
-        </form>
-
-        {/* 반 나이별 필터 탭 (Class Age Filter Tabs) */}
-        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200 text-xs font-bold">
-          <span className="text-[11px] text-slate-400 px-2 font-bold">반 분류:</span>
-          <button
-            type="button"
-            onClick={() => setSelectedClassAgeTab('ALL')}
-            className={`px-3 py-1.5 rounded-xl transition ${
-              selectedClassAgeTab === 'ALL'
-                ? 'bg-white text-blue-900 font-black shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            전체 반 ({allClassNames.length})
-          </button>
-          {AGE_OPTIONS.map(opt => {
-            const count = allClassNames.filter(c => (classAgeMap[c] || '혼합반') === opt).length;
-            return (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => setSelectedClassAgeTab(opt)}
-                className={`px-2.5 py-1.5 rounded-xl transition flex items-center gap-1 ${
-                  selectedClassAgeTab === opt
-                    ? 'bg-white text-blue-900 font-black shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <span>{opt}반</span>
-                {count > 0 && (
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                    selectedClassAgeTab === opt ? 'bg-blue-100 text-blue-800' : 'bg-slate-200 text-slate-600'
-                  }`}>
-                    {count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
         </div>
 
-        {/* Search Inputs */}
+        {/* Right: Class & Student Search */}
         <div className="flex items-center gap-2">
-          {/* 반 이름 검색 */}
-          <div className="relative w-44">
+          {/* 반 검색 */}
+          <div className="relative w-36">
             <input
               type="text"
               value={classSearchKeyword}
               onChange={(e) => setClassSearchKeyword(e.target.value)}
-              placeholder="반 검색..."
-              className="w-full pl-7 pr-6 py-1.5 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
+              placeholder="반 이름 검색..."
+              className="w-full pl-7 pr-5 py-1 text-xs font-bold bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition shadow-2xs"
             />
-            <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             {classSearchKeyword && (
               <button
                 type="button"
                 onClick={() => setClassSearchKeyword('')}
-                className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                className="absolute right-2 top-1 text-slate-400 hover:text-slate-600 text-xs font-bold"
               >
                 ×
               </button>
@@ -1016,22 +1204,22 @@ export default function ClassManager({
           </div>
 
           {/* 원아 검색 */}
-          <div className="relative w-52">
+          <div className="relative w-44">
             <input
               type="text"
               value={globalStudentSearch}
               onChange={(e) => setGlobalStudentSearch(e.target.value)}
               placeholder="원아 검색 (이름/연락처)..."
-              className="w-full pl-7 pr-6 py-1.5 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
+              className="w-full pl-7 pr-5 py-1 text-xs font-bold bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition shadow-2xs"
             />
-            <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
             </svg>
             {globalStudentSearch && (
               <button
                 type="button"
                 onClick={() => setGlobalStudentSearch('')}
-                className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                className="absolute right-2 top-1 text-slate-400 hover:text-slate-600 text-xs font-bold"
               >
                 ×
               </button>
@@ -1323,33 +1511,63 @@ export default function ClassManager({
                 }`}
               >
                 {/* Class Column Header */}
-                <div className="p-4 bg-slate-50/90 rounded-t-3xl border-b border-slate-200 shrink-0 space-y-3">
+                <div className="p-3.5 bg-slate-50/90 rounded-t-3xl border-b border-slate-200 shrink-0 space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="w-3 h-3 rounded-full bg-blue-600"></span>
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <h3 className="font-black text-slate-900 text-base">{className}</h3>
-                          
-                          {/* Class Target Age Selector Dropdown */}
-                          <select
-                            value={currentClassAge}
-                            onChange={(e) => updateClassAge(className, e.target.value)}
-                            className="text-[11px] font-black bg-blue-50 border border-blue-200 text-blue-800 rounded-lg px-1.5 py-0.5 cursor-pointer hover:bg-blue-100 transition"
-                            title="반 대상 나이 변경"
-                          >
-                            {AGE_OPTIONS.map(opt => (
-                              <option key={opt} value={opt}>{opt}반</option>
-                            ))}
-                          </select>
+                    <div
+                      onClick={() => openEditClassModal(className)}
+                      className="flex items-center gap-2 cursor-pointer group flex-1 min-w-0 pr-2"
+                      title="클릭하여 반 명칭, 종일/오전 운영 유형, 연령, 담임교사 수정"
+                    >
+                      <span className={`w-3 h-3 rounded-full shrink-0 ${
+                        (classTypeMap[className] || 'MORNING') === 'FULL_DAY'
+                          ? 'bg-amber-500 ring-2 ring-amber-200'
+                          : (classTypeMap[className] || 'MORNING') === 'AFTERNOON'
+                          ? 'bg-purple-500 ring-2 ring-purple-200'
+                          : 'bg-blue-600 ring-2 ring-blue-200'
+                      }`} />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h3 className="font-black text-slate-900 text-sm group-hover:text-blue-600 transition flex items-center gap-1 truncate">
+                            <span>{className}</span>
+                            <svg className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-600 opacity-60 group-hover:opacity-100 transition shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                          </h3>
+
+                          {/* Class Type Badge */}
+                          {(() => {
+                            const cType = classTypeMap[className] || 'MORNING';
+                            const opt = CLASS_TYPE_OPTIONS.find(o => o.id === cType) || CLASS_TYPE_OPTIONS[0];
+                            return (
+                              <span className={`text-[10px] font-black px-1.5 py-0.2 rounded-md border shrink-0 ${opt.badgeClass}`}>
+                                {opt.name}
+                              </span>
+                            );
+                          })()}
+
+                          {/* Class Age Badge */}
+                          <span className="text-[10px] font-extrabold px-1.5 py-0.2 bg-slate-100 text-slate-700 rounded-md border border-slate-200 shrink-0">
+                            {currentClassAge}반
+                          </span>
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 shrink-0">
                       <span className="text-xs font-black bg-blue-100 text-blue-800 px-2.5 py-0.5 rounded-full border border-blue-200">
                         {classStudents.length}명
                       </span>
+                      <button
+                        type="button"
+                        onClick={() => openEditClassModal(className)}
+                        className="p-1 hover:bg-slate-200 text-slate-400 hover:text-slate-700 rounded-lg transition"
+                        title="반 정보 및 설정 수정"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        </svg>
+                      </button>
                       <button
                         type="button"
                         onClick={() => handleDeleteClass(className)}
@@ -1665,6 +1883,201 @@ export default function ClassManager({
                 설정 저장
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= CLASS CREATE / EDIT APPROVAL-STYLE CARD CELL MODAL ================= */}
+      {classModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden flex flex-col">
+            
+            {/* Modal Header */}
+            <div className="px-6 py-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center border border-white/20">
+                  <svg className="w-5 h-5 text-indigo-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-base font-black tracking-tight">
+                    {classModal.mode === 'CREATE' ? '새 반 개설 신청 / 등록' : `반 정보 및 운영 설정 수정 [${classModal.targetClassName}]`}
+                  </h3>
+                  <p className="text-[11px] text-slate-300 mt-0.5 font-medium">
+                    {classModal.mode === 'CREATE'
+                      ? '반 명칭, 종일반/오전반 운영 유형, 대상 연령 및 담임 교사를 지정합니다.'
+                      : '반의 운영 형태, 대상 연령, 명칭 및 배정 교사를 변경합니다.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeClassModal}
+                className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center transition font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body Form */}
+            <form onSubmit={handleSaveClassModal} className="p-6 space-y-5 overflow-y-auto max-h-[75vh]">
+              
+              {/* Field 1: 반 명칭 */}
+              <div>
+                <label className="block text-xs font-black text-slate-700 mb-1.5">
+                  반 명칭 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={classModal.name}
+                  onChange={(e) => setClassModal(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="예: 햇살반, 풀잎반, 사과반"
+                  className="w-full px-3.5 py-2.5 text-sm font-bold border border-slate-300 rounded-xl bg-white shadow-2xs focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+                  autoFocus
+                />
+              </div>
+
+              {/* Field 2: 반 운영 유형 (종일반 vs 오전(정규)반 vs 방과후반) - Card Cells */}
+              <div>
+                <label className="block text-xs font-black text-slate-700 mb-1.5">
+                  운영 세션 유형 선택 <span className="text-red-500">*</span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {CLASS_TYPE_OPTIONS.map(opt => {
+                    const isSelected = classModal.type === opt.id;
+                    return (
+                      <div
+                        key={opt.id}
+                        onClick={() => setClassModal(prev => ({ ...prev, type: opt.id }))}
+                        className={`p-3 rounded-2xl border-2 cursor-pointer transition-all flex flex-col justify-between ${
+                          isSelected
+                            ? opt.id === 'FULL_DAY'
+                              ? 'border-amber-500 bg-amber-50/60 ring-2 ring-amber-200'
+                              : opt.id === 'AFTERNOON'
+                              ? 'border-purple-500 bg-purple-50/60 ring-2 ring-purple-200'
+                              : 'border-blue-500 bg-blue-50/60 ring-2 ring-blue-200'
+                            : 'border-slate-200 bg-slate-50/50 hover:border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className={`text-xs font-black ${
+                            isSelected
+                              ? opt.id === 'FULL_DAY' ? 'text-amber-900' : opt.id === 'AFTERNOON' ? 'text-purple-900' : 'text-blue-900'
+                              : 'text-slate-700'
+                          }`}>
+                            {opt.name}
+                          </span>
+                          <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black ${
+                            isSelected ? 'bg-indigo-600 text-white' : 'border border-slate-300 bg-white'
+                          }`}>
+                            {isSelected && '✓'}
+                          </span>
+                        </div>
+                        <div className="font-mono text-[11px] font-extrabold text-slate-600 mb-1">
+                          {opt.time}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-medium">
+                          {opt.desc}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Field 3: 대상 연령 선택 */}
+              <div>
+                <label className="block text-xs font-black text-slate-700 mb-1.5">
+                  대상 연령 그룹 선택
+                </label>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {AGE_OPTIONS.map(opt => {
+                    const isSelected = classModal.age === opt;
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => setClassModal(prev => ({ ...prev, age: opt }))}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition border ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {opt}반
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Field 4: 담당 담임교사 배정 */}
+              <div>
+                <label className="block text-xs font-black text-slate-700 mb-1.5">
+                  담당 담임교사 배정
+                </label>
+                <select
+                  value={classModal.teacherId}
+                  onChange={(e) => setClassModal(prev => ({ ...prev, teacherId: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 text-xs font-bold border border-slate-300 rounded-xl bg-white shadow-2xs focus:ring-2 focus:ring-indigo-500 outline-none"
+                >
+                  <option value="">-- 미지정 (추후 배정) --</option>
+                  {teachers.map(t => {
+                    const isAssignedElsewhere = t.assignedClass && t.assignedClass !== classModal.targetClassName;
+                    return (
+                      <option key={t.id} value={t.id}>
+                        {formatTeacherName(t.name)} {isAssignedElsewhere ? `(${t.assignedClass} 담임 중)` : t.assignedClass ? '(현재 담임)' : '(미배정)'}
+                      </option>
+                    );
+                  })}
+                </select>
+                <p className="text-[11px] text-slate-400 mt-1 font-medium">
+                  다른 반의 담임교사를 선택할 경우 해당 교사의 이전 반 배정은 자동으로 해제됩니다.
+                </p>
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex items-center justify-between pt-4 border-t border-slate-200">
+                <div>
+                  {classModal.mode === 'EDIT' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeClassModal();
+                        handleDeleteClass(classModal.targetClassName);
+                      }}
+                      className="px-3 py-2 text-xs font-bold text-red-600 hover:text-red-700 hover:bg-red-50 rounded-xl transition flex items-center gap-1"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                      <span>반 삭제</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={closeClassModal}
+                    className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!classModal.name.trim() || isProcessing}
+                    className="px-5 py-2 rounded-xl text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs hover:shadow-indigo-500/20 transition disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>{classModal.mode === 'CREATE' ? '반 개설 확정' : '변경사항 저장'}</span>
+                  </button>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       )}
