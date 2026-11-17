@@ -763,7 +763,7 @@ export class TeacherService {
       // 유치원 방에 escortStarted 전송 (관리자 웹 알림용)
       const academyId = vehicle.academy?.id || (vehicle as any).academyId;
       if (academyId) {
-        this.locationGateway.server.to(`academy_${academyId}`).emit('escortStarted', {
+        this.locationGateway.server.to(`academy_staff_${academyId}`).emit('escortStarted', {
           vehicleId: vehicle.id,
           vehicleName: vehicle.busNumber,
           escortName,
@@ -1315,7 +1315,8 @@ export class TeacherService {
     const driverName = vehicle.driverUser?.name || user.name || '기사님';
 
     if (this.locationGateway?.server) {
-      this.locationGateway.server.to(`academy_${academyId}`).emit('emergencyAlert', {
+      // 기관 교직원 방(원장·데스크·기사·교사)에만 보낸다
+      this.locationGateway.server.to(`academy_staff_${academyId}`).emit('emergencyAlert', {
         vehicleId: vehicle.id,
         vehicleName: vehicle.busNumber,
         driverName,

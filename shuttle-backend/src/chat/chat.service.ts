@@ -504,8 +504,10 @@ export class ChatService {
       };
 
       if (academyId && this.chatGateway?.server) {
-        this.chatGateway.server.to(`academy_${academyId}`).emit('directorAlert', alertPayload);
-        this.chatGateway.server.to(`academy_${academyId}`).emit('notificationReceived', {
+        // 원장·데스크 방(academy_admin_{id}, LocationGateway에서 역할별로 입장)에만 보낸다.
+        // 기관 전체 방(academy_{id})에는 학부모·학생도 있으므로 보내지 않는다.
+        this.chatGateway.server.to(`academy_admin_${academyId}`).emit('directorAlert', alertPayload);
+        this.chatGateway.server.to(`academy_admin_${academyId}`).emit('notificationReceived', {
           type: 'DIRECTOR_ALERT',
           data: alertPayload,
         });

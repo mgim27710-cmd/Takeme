@@ -101,7 +101,7 @@ export class RoutingService {
           notifications.push({
             studentId: student.id,
             studentName: student.name,
-            parentEmail: student.parentUser?.email,
+            parentUserId: student.parentUser?.id,
             message: `${student.name} 학생 승하차 지점 부근에 차량이 접근 중입니다.`
           });
         }

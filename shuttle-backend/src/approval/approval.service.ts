@@ -652,6 +652,9 @@ export class ApprovalService {
         request: {
           id: req.id,
           decision,
+          // 기사 앱(지도교사 모드)은 status/type 으로 승인 여부와 종류를 읽어 경로를 새로고침한다
+          status: decision,
+          type: req.type,
           typeKr,
           studentName: student.adminDisplayName || student.name,
           targetDate,
