@@ -5217,9 +5217,6 @@ const parseKindergartenExcelSheet = (sheet) => {
                           <span className="font-bold">{st.allergies || st.raw['알레르기']}</span>
                         </div>
                       )}
-                          <span className="font-bold">{st.allergies || st.raw['알레르기']}</span>
-                        </div>
-                      )}
                       {st.raw?.['비고'] && (
                         <div className="col-span-2 text-slate-700 bg-white p-2.5 rounded-lg border border-slate-200 text-xs">
                           <span className="font-medium text-slate-400">비고: </span>
