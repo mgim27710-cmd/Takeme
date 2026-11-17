@@ -835,9 +835,35 @@ export class ParentService {
       email: user.email,
       name: user.name || (child ? child.name : ''),
       phone: user.phone || '',
+      emergencyContactName: user.emergencyContactName || '',
+      emergencyContactPhone: user.emergencyContactPhone || '',
       role: user.role,
       childName: child?.name || null,
       academyName: child?.academyName || null
+    };
+  }
+
+  /** 비상연락망 저장 (이름·전화번호 둘 다 비우면 삭제) */
+  async updateEmergencyContact(email: string, name: string, phone: string) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('사용자를 찾을 수 없습니다.');
+    const cleanName = (name || '').trim();
+    const cleanPhone = (phone || '').trim();
+    if (cleanName && !cleanPhone) throw new BadRequestException('비상연락망 전화번호를 입력해 주세요.');
+    if (cleanPhone && !/^[0-9+\-\s()]{8,20}$/.test(cleanPhone)) {
+      throw new BadRequestException('전화번호 형식을 확인해 주세요.');
+    }
+    if (cleanPhone && user.phone && cleanPhone.replace(/\D/g, '') === user.phone.replace(/\D/g, '')) {
+      throw new BadRequestException('비상연락망은 내 번호와 다른 번호로 입력해 주세요.');
+    }
+    user.emergencyContactName = cleanName || null;
+    user.emergencyContactPhone = cleanPhone || null;
+    await this.userRepository.save(user);
+    return {
+      success: true,
+      message: cleanPhone ? '비상연락망이 저장되었습니다.' : '비상연락망을 삭제했습니다.',
+      emergencyContactName: user.emergencyContactName || '',
+      emergencyContactPhone: user.emergencyContactPhone || '',
     };
   }
 

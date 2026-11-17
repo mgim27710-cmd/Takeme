@@ -760,6 +760,32 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
           );
         }
 
+        Widget callButton(String label, String number, Color fg, Color border) => SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: OutlinedButton(
+                onPressed: () => _callParentPhone(st.name, number),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: fg,
+                  side: BorderSide(color: border, width: 1.5),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.phone, size: 22),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    ),
+                    const Spacer(),
+                    Text(number, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                  ],
+                ),
+              ),
+            );
+
         Widget noteBox(String text, Color fg, Color bg, IconData icon) => Container(
               width: double.infinity,
               margin: const EdgeInsets.only(bottom: 8),
@@ -805,24 +831,21 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // 학부모 연락처: 누르면 전화 걸기
+                  // 보호자 연락처: 누르면 전화 걸기. 주보호자가 안 받으면 비상연락망으로
                   if (phone.isNotEmpty)
-                    SizedBox(
-                      width: double.infinity,
-                      height: 56,
-                      child: OutlinedButton.icon(
-                        onPressed: () => _callParentPhone(st.name, phone),
-                        icon: const Icon(Icons.phone, size: 22),
-                        label: Text('학부모 전화  $phone', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF1D4ED8),
-                          side: const BorderSide(color: Color(0xFF93C5FD), width: 1.5),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
+                    callButton('주보호자', phone, const Color(0xFF1D4ED8), const Color(0xFF93C5FD))
+                  else
+                    noteBox('등록된 주보호자 연락처가 없습니다.', const Color(0xFF64748B), const Color(0xFFF1F5F9), Icons.phone_disabled),
+                  const SizedBox(height: 8),
+                  if (st.emergencyContactPhone.isNotEmpty)
+                    callButton(
+                      st.emergencyContactName.isNotEmpty ? '비상 · ${st.emergencyContactName}' : '비상연락망',
+                      st.emergencyContactPhone,
+                      const Color(0xFFB45309),
+                      const Color(0xFFFCD34D),
                     )
                   else
-                    noteBox('등록된 학부모 연락처가 없습니다.', const Color(0xFF64748B), const Color(0xFFF1F5F9), Icons.phone_disabled),
+                    noteBox('등록된 비상연락망이 없습니다.', const Color(0xFF64748B), const Color(0xFFF1F5F9), Icons.phone_disabled),
                   const SizedBox(height: 16),
 
                   // 특이사항

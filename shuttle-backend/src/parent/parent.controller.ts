@@ -185,6 +185,17 @@ export class ParentController {
     return this.parentService.getProfile(email);
   }
 
+  /** 비상연락망(주보호자 연락이 안 될 때 연락할 사람) 저장 — 로그인한 본인 것만 */
+  @Post('update-emergency-contact')
+  async updateEmergencyContact(
+    @AuthEmail() authEmail: string,
+    @Body('name') name: string,
+    @Body('phone') phone: string,
+  ) {
+    if (!authEmail) throw new BadRequestException('로그인이 필요합니다.');
+    return this.parentService.updateEmergencyContact(authEmail, name, phone);
+  }
+
   @Post('update-phone')
   async updatePhone(
     @AuthEmail() authEmail: string,

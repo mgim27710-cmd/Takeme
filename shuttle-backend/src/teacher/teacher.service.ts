@@ -212,6 +212,9 @@ export class TeacherService {
             expectedTime: s.raw ? s.raw['예상탑승시간'] || '15:30' : '15:30',
             allergies: s.allergies || (s.raw ? s.raw['알레르기'] : '') || '',
             parentPhone,
+            emergencyContactName: s.parentUser?.emergencyContactName || '',
+            emergencyContactPhone: s.parentUser?.emergencyContactPhone || '',
+            gender: s.gender || null,
             className: user.assignedClass,
           };
         });
@@ -287,6 +290,10 @@ export class TeacherService {
           overrideType: (s as any).overrideType || null,
           overrideReason: (s as any).overrideReason || null,
           parentPhone,
+          // 주보호자 연락이 안 될 때 연락할 비상연락망 (학부모가 앱 설정에서 입력)
+          emergencyContactName: s.parentUser?.emergencyContactName || '',
+          emergencyContactPhone: s.parentUser?.emergencyContactPhone || '',
+          gender: s.gender || null,
         };
       });
   }

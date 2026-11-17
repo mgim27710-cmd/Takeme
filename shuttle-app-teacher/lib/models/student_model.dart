@@ -7,7 +7,10 @@ class StudentModel {
   final double? latitude;
   final double? longitude;
   final String allergies;
-  final String? gender; // 서버가 보내줄 때만 표시 (현재 교사용 원아 API에는 없음)
+  final String? gender;
+  /// 주보호자가 연락이 안 될 때 연락할 비상연락망 (학부모가 앱 설정에서 입력)
+  final String emergencyContactName;
+  final String emergencyContactPhone; // 서버가 보내줄 때만 표시 (현재 교사용 원아 API에는 없음)
   final bool boarded;
   final bool absent;
   final String expectedTime;
@@ -31,6 +34,8 @@ class StudentModel {
     this.longitude,
     this.allergies = '',
     this.gender,
+    this.emergencyContactName = '',
+    this.emergencyContactPhone = '',
     this.boarded = false,
     this.absent = false,
     this.expectedTime = '15:30',
@@ -61,6 +66,8 @@ class StudentModel {
       latitude: parseCoord(json['latitude'] ?? json['lat']),
       longitude: parseCoord(json['longitude'] ?? json['lng']),
       allergies: json['allergies'] ?? '',
+      emergencyContactName: json['emergencyContactName']?.toString() ?? '',
+      emergencyContactPhone: json['emergencyContactPhone']?.toString() ?? '',
       gender: (json['gender']?.toString().trim().isEmpty ?? true) ? null : json['gender'].toString().trim(),
       boarded: json['boarded'] == true || json['boardStatus'] == 'BOARDED',
       absent: json['absent'] == true || json['boardStatus'] == 'ABSENT',

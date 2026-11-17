@@ -559,6 +559,25 @@ class ApiService {
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message'] ?? '전화번호가 저장되었습니다.'};
   }
 
+  /// 비상연락망 저장 (이름·전화번호를 비우면 삭제)
+  Future<Map<String, dynamic>> updateEmergencyContact(String name, String phone) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/parent/update-emergency-contact');
+      final res = await postWithAuth(url, jsonEncode({'name': name, 'phone': phone}));
+      final data = res.bodyBytes.isEmpty ? <String, dynamic>{} : jsonDecode(utf8.decode(res.bodyBytes));
+      final ok = res.statusCode == 200 || res.statusCode == 201;
+      final msg = data is Map ? data['message'] : null;
+      return {
+        'success': ok,
+        'message': msg is List ? msg.join(', ') : msg,
+        'emergencyContactName': data is Map ? data['emergencyContactName'] : null,
+        'emergencyContactPhone': data is Map ? data['emergencyContactPhone'] : null,
+      };
+    } catch (e) {
+      return {'success': false, 'message': friendlyError(e)};
+    }
+  }
+
   Future<Map<String, dynamic>> changeParentPassword(String currentPassword, String newPassword) async {
     final email = currentUser?.email;
     if (email == null) return {'success': false, 'message': '로그인이 필요합니다.'};
