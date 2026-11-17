@@ -130,7 +130,7 @@ function ComparisonLocationMap({ original, suggested }) {
   );
 }
 
-export default function MessagePanel({ currentUser, selectedAcademyId, socket, isClosing, initialStudent, onClearInitialStudent, activeEducationLevel, initialRoomType }) {
+export default function MessagePanel({ currentUser, selectedAcademyId, socket, isClosing, initialStudent, onClearInitialStudent, activeEducationLevel, initialRoomType, onSwitchToBoard }) {
   const currentEducationLevel = activeEducationLevel || currentUser?.educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
   const isKindergarten = currentEducationLevel === '유치원';
   const isElementary = currentEducationLevel === '초등부';
@@ -1603,7 +1603,28 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       {/* ============================================================ */}
       {/* LEFT COLUMN: 채팅방 목록 (Kakao Style Room List) */}
       {/* ============================================================ */}
-      <div className="w-96 h-full border-r border-slate-200 flex flex-col bg-white overflow-hidden flex-shrink-0 shadow-sm">
+      <div className="w-[450px] h-full border-r border-slate-200 flex flex-col bg-white overflow-hidden flex-shrink-0 shadow-sm">
+        {/* Sub Navigation Tabs: 실시간 대화 <-> 공지·게시판 */}
+        {onSwitchToBoard && (
+          <div className="p-3 bg-white border-b border-slate-200 shrink-0">
+            <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200/80 shrink-0 select-none shadow-2xs">
+              <button
+                type="button"
+                className="flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer bg-white text-blue-600 shadow-xs border border-slate-200 flex items-center justify-center gap-1.5"
+              >
+                💬 실시간 대화
+              </button>
+              <button
+                type="button"
+                onClick={onSwitchToBoard}
+                className="flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer text-slate-500 hover:text-slate-800 flex items-center justify-center gap-1.5"
+              >
+                📢 공지·게시판
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Top Header */}
         <div className="p-4 border-b border-slate-200 bg-white flex items-center justify-between">
           <div className="flex items-center gap-2">

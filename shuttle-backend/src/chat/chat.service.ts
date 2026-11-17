@@ -708,6 +708,21 @@ export class ChatService {
       where: { id: roomId },
       relations: { members: { user: true } },
     });
+    if (!room) {
+      throw new BadRequestException('채팅방을 찾을 수 없습니다.');
+    }
+
+    // 테넌트 격리 및 인가 검증: 참여자가 아닌 경우 조회 차단 (SUPER_ADMIN 제외)
+    if (currentUserId) {
+      const isMember = room.members?.some(m => m.user?.id === currentUserId);
+      if (!isMember) {
+        const user = await this.userRepo.findOne({ where: { id: currentUserId } });
+        if (user && user.role !== UserRole.SUPER_ADMIN) {
+          throw new ForbiddenException('해당 채팅방에 참여 중인 사용자만 메시지를 조회할 수 있습니다.');
+        }
+      }
+    }
+
     const memberCount = room?.members?.length && room.members.length > 0 ? room.members.length : 2;
 
     const messages = await this.messageRepo.find({
@@ -831,6 +846,14 @@ export class ChatService {
     }
 
     const targetUsers = await this.userRepo.find({ where: { id: In(userIds) } });
+    if (creator.academyId && creator.role !== UserRole.SUPER_ADMIN) {
+      const otherUsers = targetUsers.filter(u => u.id !== creator.id);
+      for (const u of otherUsers) {
+        if (u.academyId && u.academyId !== creator.academyId) {
+          throw new ForbiddenException('타 유치원 소속 사용자는 채팅방에 초대할 수 없습니다.');
+        }
+      }
+    }
     let roomName = name?.trim();
     if (!roomName) {
       const otherNames = targetUsers.filter(u => u.id !== creator.id).map(u => u.name || u.email);
@@ -876,11 +899,18 @@ export class ChatService {
       where: { id: roomId },
       relations: { members: { user: true } },
     });
-    if (room?.type === ChatRoomType.NOTIFICATION_SYSTEM) {
+    if (!room) throw new BadRequestException('채팅방을 찾을 수 없습니다.');
+
+    if (room.type === ChatRoomType.NOTIFICATION_SYSTEM) {
       const isAdmin = user.role === UserRole.ACADEMY_ADMIN || user.role === UserRole.SUPER_ADMIN;
       if (room.name === PERSONAL_NOTI_ROOM_NAME || !isAdmin) {
         throw new ForbiddenException('알림 채널에는 답장을 보낼 수 없습니다.');
       }
+    }
+
+    const isMember = room.members?.some(m => m.user?.id === user.id);
+    if (!isMember && user.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('해당 채팅방에 참여 중인 멤버만 메시지를 전송할 수 있습니다.');
     }
     const memberCount = room?.members?.length && room.members.length > 0 ? room.members.length : 2;
     const initialUnreadCount = Math.max(0, memberCount - 1);

@@ -30,7 +30,7 @@ export default function BoardSidebar({
   return (
     <div className="flex flex-col h-full bg-white select-none">
       {/* Header */}
-      <div className="p-5 border-b border-slate-100 bg-white">
+      <div className="p-4 border-b border-slate-200 bg-white">
         <div className="flex items-center justify-between mb-1.5">
           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
             <span>{titleText}</span>
