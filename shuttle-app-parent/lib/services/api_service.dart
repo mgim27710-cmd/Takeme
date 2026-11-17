@@ -21,6 +21,8 @@ class ApiException implements Exception {
 
 /// 예외를 사용자가 이해할 수 있는 한 줄 안내로 바꾼다 (기술적인 오류 문구를 그대로 보여주지 않는다)
 String friendlyError(Object e) {
+  // 화면에는 쉬운 문구만 보여주므로, 원인 확인용으로 실제 오류를 개발 로그에 남긴다
+  debugPrint('[friendlyError] ${e.runtimeType}: $e');
   if (e is ApiException) return e.message;
   final t = e.toString();
   if (t.contains('SocketException') ||
@@ -607,6 +609,8 @@ class ApiService {
       final url = Uri.parse('${AppConfig.apiHost}/parent/today-schedule?email=${Uri.encodeComponent(email)}');
       final res = await getWithAuth(url).timeout(const Duration(seconds: 6));
       if (throwOnError) throwIfServerError(res);
+      // 오늘 일정이 없으면 서버가 빈 응답(null)을 보낸다. 오류가 아니라 "일정 없음"이다.
+      if (res.statusCode == 200 && res.bodyBytes.isEmpty) return null;
       if (res.statusCode == 200) {
         final decoded = jsonDecode(utf8.decode(res.bodyBytes));
         if (decoded is Map<String, dynamic>) {
