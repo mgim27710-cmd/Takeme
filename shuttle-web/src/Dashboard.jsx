@@ -18,6 +18,7 @@ import TeacherDashboard from './TeacherDashboard';
 import ClassManager from './classes/ClassManager';
 import AuthViewer from './auth/AuthViewer';
 import HelpManualCard from './settings/HelpManualCard';
+import AdminMainHome from './home/AdminMainHome';
 import { formatTeacherName, cleanTeacherBaseName } from './utils/teacherUtil';
 
 
@@ -43,6 +44,34 @@ const formatBusinessNumber = (value) => {
   if (nums.length <= 3) return nums;
   if (nums.length <= 5) return `${nums.slice(0, 3)}-${nums.slice(3)}`;
   return `${nums.slice(0, 3)}-${nums.slice(3, 5)}-${nums.slice(5, 10)}`;
+};
+
+// 주어진 호차 색상의 톤을 유지하면서 살짝 더 진한 동계열 색상을 계산 (만석 빗금 패턴용 - 검정 느낌 없이 선명한 색상 유지)
+export const getDarkerColor = (color, percent = 26) => {
+  if (!color || typeof color !== 'string') return '#1e3a8a';
+  let hex = color.trim();
+  if (hex.startsWith('#')) {
+    hex = hex.slice(1);
+    if (hex.length === 3) {
+      hex = hex.split('').map(c => c + c).join('');
+    }
+    if (hex.length === 6) {
+      const num = parseInt(hex, 16);
+      const r = Math.max(0, Math.floor(((num >> 16) & 255) * (1 - percent / 100)));
+      const g = Math.max(0, Math.floor(((num >> 8) & 255) * (1 - percent / 100)));
+      const b = Math.max(0, Math.floor((num & 255) * (1 - percent / 100)));
+      return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+    }
+  } else if (hex.startsWith('rgb')) {
+    const parts = hex.match(/\d+/g);
+    if (parts && parts.length >= 3) {
+      const r = Math.max(0, Math.floor(parseInt(parts[0], 10) * (1 - percent / 100)));
+      const g = Math.max(0, Math.floor(parseInt(parts[1], 10) * (1 - percent / 100)));
+      const b = Math.max(0, Math.floor(parseInt(parts[2], 10) * (1 - percent / 100)));
+      return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+    }
+  }
+  return color;
 };
 
 export const getStudentBoardingType = (st) => {
@@ -202,10 +231,12 @@ function MapPatternDefs({ buses }) {
         let innerContent = '';
         (buses || []).forEach(bus => {
           const busColor = bus.color || '#2563eb';
+          const darkStripeColor = getDarkerColor(busColor, 26);
           innerContent += `
             <pattern id="stripe-pattern-${bus.id}" patternUnits="userSpaceOnUse" width="16" height="16" patternTransform="rotate(45 0 0)">
               <rect width="16" height="16" fill="${busColor}" fill-opacity="0.22" />
-              <line x1="0" y1="0" x2="0" y2="16" stroke="${busColor}" stroke-width="4.5" stroke-opacity="0.85" stroke-linecap="square" />
+              <line x1="0" y1="0" x2="0" y2="16" stroke="${darkStripeColor}" stroke-width="4" stroke-opacity="0.95" stroke-linecap="square" />
+              <line x1="16" y1="0" x2="16" y2="16" stroke="${darkStripeColor}" stroke-width="4" stroke-opacity="0.95" stroke-linecap="square" />
             </pattern>
           `;
         });
@@ -346,7 +377,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const [buses, setBuses] = useState([]);
   const [students, setStudents] = useState([]); // Array of { name, address, lat, lng, assignedBusId, color }
   const [selectedBusId, setSelectedBusId] = useState(null);
-  const [activeTab, setActiveTab] = useState('status'); // 'status', 'buses', 'students', 'classes', 'auth', 'log', 'messages', 'documents', 'board', 'settings'
+  const [activeTab, setActiveTab] = useState('home'); // 'home', 'status', 'buses', 'students', 'classes', 'auth', 'log', 'messages', 'documents', 'board', 'settings'
   const [isLogClosing, setIsLogClosing] = useState(false);
   const [isMessageClosing, setIsMessageClosing] = useState(false);
   const [isDocumentsClosing, setIsDocumentsClosing] = useState(false);
@@ -540,6 +571,22 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const [unreadAlertCount, setUnreadAlertCount] = useState(0);
   const [messageInitialRoomType, setMessageInitialRoomType] = useState(null);
 
+  // Map Legend Visibility Toggle State (항목 클릭 시 보이기/숨기기)
+  const [legendVisibility, setLegendVisibility] = useState({
+    extraBus: true,   // 증차 필요 (!)
+    fullBus: true,    // 정원 충원 (빗금 표시)
+    oneTime: true,    // 당일 1회 탑승 (1)
+    notRiding: true,  // 셔틀 미탑승 (회색)
+    unassigned: true, // 정규 미배정 (구역 밖)
+  });
+
+  const toggleLegendItem = (key) => {
+    setLegendVisibility(prev => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
   const playAlertChime = () => {
     try {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -590,8 +637,11 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   }, [directorAlertToast]);
 
 
-  const handleTabChange = (newTab) => {
+  const handleTabChange = (newTab, subTab) => {
     const targetTab = newTab === 'buses' ? 'status' : newTab;
+    if (subTab && targetTab === 'log') {
+      setLogTab(subTab);
+    }
 
     if (activeTab === 'classes' && targetTab !== 'classes' && hasUnsavedClassChanges) {
       const confirmLeave = window.confirm(
@@ -4343,6 +4393,17 @@ const parseKindergartenExcelSheet = (sheet) => {
           {isSuperAdmin ? '플랫폼관리' : (currentUser.name ? `${currentUser.name} 관리자` : '관리자')}
         </div>
         <button 
+          onClick={() => handleTabChange('home')} 
+          className={`w-[96px] py-3 px-1 rounded-2xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-2 ${activeTab === 'home' ? `bg-white ${terms.themeText} shadow-md scale-105 font-black` : 'text-white/90 hover:bg-white/15 hover:text-white font-semibold'}`} 
+          title="대시보드 메인 홈"
+        >
+          {/* 홈 아이콘 */}
+          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+          </svg>
+          <span className="text-[12.5px] font-black tracking-tight">메인홈</span>
+        </button>
+        <button 
           onClick={() => handleTabChange('status')} 
           className={`w-[96px] py-3 px-1 rounded-2xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-2 ${activeTab === 'status' ? `bg-white ${terms.themeText} shadow-md scale-105 font-black` : 'text-white/90 hover:bg-white/15 hover:text-white font-semibold'}`} 
           title="차량 및 구역 관리"
@@ -4438,7 +4499,7 @@ const parseKindergartenExcelSheet = (sheet) => {
       </div>
 
       {/* Sidebar Content Panel */}
-      <div className={`bg-white shadow-lg z-10 flex flex-col w-[450px] shrink-0 break-keep ${activeTab === 'messages' ? 'hidden' : ''}`}>
+      <div className={`bg-white shadow-lg z-10 flex flex-col w-[450px] shrink-0 break-keep ${activeTab === 'messages' || activeTab === 'home' ? 'hidden' : ''}`}>
 
         {(activeTab === 'status' || activeTab === 'buses') && (
           <div className="p-6 h-full flex flex-col overflow-y-auto break-keep">
@@ -6488,6 +6549,22 @@ const parseKindergartenExcelSheet = (sheet) => {
       {/* Map Area */}
       <div className="flex-1 relative z-0 overflow-hidden">
         
+        {activeTab === 'home' && (
+          <AdminMainHome 
+            academy={academy}
+            currentUser={currentUser}
+            buses={buses}
+            students={students}
+            activeEducationLevel={activeEducationLevel}
+            terms={terms}
+            onNavigateTab={handleTabChange}
+            setSelectedBusId={setSelectedBusId}
+            operationMode={operationMode}
+            selectedDay={selectedDay}
+            urgentExpiryCount={urgentExpiryCount}
+          />
+        )}
+
         {activeTab === 'log' && (
           <LogViewer 
             buses={buses} 
@@ -6624,7 +6701,7 @@ const parseKindergartenExcelSheet = (sheet) => {
         )}
 
         {/* Top Active Operating Status Pill Banner */}
-        {Object.entries(operatingBuses).some(([_, isOp]) => isOp) && (
+        {(activeTab === 'status' || activeTab === 'buses') && Object.entries(operatingBuses).some(([_, isOp]) => isOp) && (
           <div className="absolute top-4 left-16 z-[1000] bg-emerald-600/95 backdrop-blur-sm text-white px-4 py-2 rounded-xl shadow-xl flex items-center gap-2 border border-emerald-400 text-xs font-bold animate-pulse">
             <span className="w-2.5 h-2.5 rounded-full bg-white animate-ping"></span>
             <span>
@@ -6639,6 +6716,7 @@ const parseKindergartenExcelSheet = (sheet) => {
         )}
 
         {/* Top-Right Controls: SuperAdmin Switcher & Day Filter */}
+        {(activeTab === 'status' || activeTab === 'buses') && (
         <div className="absolute top-4 right-4 z-[1000] flex items-center gap-2 flex-wrap">
           {/* Explicit Save Changes Button */}
           <button
@@ -6767,6 +6845,7 @@ const parseKindergartenExcelSheet = (sheet) => {
           </div>
 
         </div>
+        )}
 
         {/* 해당 부문에 등록된 기관이 없을 때의 데이터 격리 안내 오버레이 */}
         {isSuperAdmin && visibleAcademies.length === 0 && (
@@ -6802,12 +6881,17 @@ const parseKindergartenExcelSheet = (sheet) => {
         {/* Universal SVG Hatch Pattern Defs for Leaflet Polygons */}
         <svg style={{ position: 'absolute', width: 0, height: 0, pointerEvents: 'none', opacity: 0 }} aria-hidden="true">
           <defs>
-            {buses.map(bus => (
-              <pattern key={`global-stripe-${bus.id}`} id={`stripe-pattern-${bus.id}`} patternUnits="userSpaceOnUse" width="16" height="16" patternTransform="rotate(45 0 0)">
-                <rect width="16" height="16" fill={bus.color || '#2563eb'} fillOpacity="0.22" />
-                <line x1="0" y1="0" x2="0" y2="16" stroke={bus.color || '#2563eb'} strokeWidth="4.5" strokeOpacity="0.85" strokeLinecap="square" />
-              </pattern>
-            ))}
+            {buses.map(bus => {
+              const busColor = bus.color || '#2563eb';
+              const darkStripeColor = getDarkerColor(busColor, 26);
+              return (
+                <pattern key={`global-stripe-${bus.id}`} id={`stripe-pattern-${bus.id}`} patternUnits="userSpaceOnUse" width="16" height="16" patternTransform="rotate(45 0 0)">
+                  <rect width="16" height="16" fill={busColor} fillOpacity="0.22" />
+                  <line x1="0" y1="0" x2="0" y2="16" stroke={darkStripeColor} strokeWidth="4" strokeOpacity="0.95" strokeLinecap="square" />
+                  <line x1="16" y1="0" x2="16" y2="16" stroke={darkStripeColor} strokeWidth="4" strokeOpacity="0.95" strokeLinecap="square" />
+                </pattern>
+              );
+            })}
           </defs>
         </svg>
 
@@ -6969,9 +7053,9 @@ const parseKindergartenExcelSheet = (sheet) => {
                     positions={polygonPoints} 
                     pathOptions={{ 
                       color: bus.color, 
-                      fillColor: isFull ? `url(#stripe-pattern-${bus.id})` : bus.color, 
-                      fillOpacity: isFull ? 0.25 : (isEditingThis ? 0.1 : 0.3),
-                      weight: isEditingThis ? 3 : 2,
+                      fillColor: (isFull && legendVisibility.fullBus) ? `url(#stripe-pattern-${bus.id})` : bus.color, 
+                      fillOpacity: (isFull && legendVisibility.fullBus) ? 0.95 : (isEditingThis ? 0.1 : 0.3),
+                      weight: isEditingThis ? 3 : 2.5,
                       dashArray: isEditingThis ? '5, 10' : null
                     }} 
                   >
@@ -7164,6 +7248,12 @@ const parseKindergartenExcelSheet = (sheet) => {
                 needsExtraBus = true;
               }
             }
+
+            // 범례 항목 숨김 여부 필터링 (항목 토글 시 다시 누를 때까지 마커 비표시)
+            if (!legendVisibility.extraBus && needsExtraBus) return null;
+            if (!legendVisibility.oneTime && isOneTimeStudent) return null;
+            if (!legendVisibility.notRiding && isPureNotRiding) return null;
+            if (!legendVisibility.unassigned && isUnassigned && !needsExtraBus && !isPureNotRiding && !isOneTimeStudent) return null;
 
             // 마커 색상 결정
             const ONE_TIME_COLOR = '#f43f5e'; // 핫핑크 (당일 1회)
@@ -7370,81 +7460,194 @@ const parseKindergartenExcelSheet = (sheet) => {
         </MapContainer>
 
         {/* Floating Map Legend (지도 고대비 범례 안내 - 클릭 시 해당 구역/위치로 이동) */}
-        <div className="absolute bottom-6 left-6 z-[1000] bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200 p-3.5 max-w-xs transition-all pointer-events-auto">
-          <div className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-2 flex items-center justify-between">
-            <span>지도 표시 범례</span>
-            <span className="text-[10px] text-blue-600 font-extrabold flex items-center gap-0.5">
-              클릭 시 구역 이동 ↗
+        {(activeTab === 'status' || activeTab === 'buses') && (
+        <div className="absolute bottom-6 left-6 z-[1000] bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200 p-2.5 max-w-[240px] transition-all pointer-events-auto">
+          <div className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-2 flex items-center justify-between px-1">
+            <span className="flex items-center gap-1.5">
+              <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+              </svg>
+              <span>지도 범례</span>
             </span>
+            <span className="text-[10px] text-blue-600 font-extrabold">ON/OFF</span>
           </div>
-          <div className="space-y-1.5 text-xs font-bold text-slate-700">
-            {/* Needs Extra Bus indicator */}
-            <div className="flex items-center gap-2 p-1.5 rounded-lg bg-orange-50/90 border border-orange-200 text-orange-950">
-              <div className="relative w-5 h-5 flex items-center justify-center shrink-0">
-                <span className="w-4 h-4 rounded-full bg-orange-600 text-white text-[10px] font-black flex items-center justify-center border border-white shadow-2xs">!</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[11px] font-black leading-tight">증차 필요 (주변 5KM 내 배차 없음)</div>
-                <div className="text-[10px] text-orange-700 font-normal">25명 초과 또는 대체 가능 호차 부재</div>
-              </div>
-            </div>
-            {/* Full vehicle hatched pattern indicator */}
-            <div 
-              onClick={handleFocusFullBusZone}
-              role="button"
-              title="클릭 시 만석 통학차량 구역으로 지도를 이동합니다"
-              className="flex items-center gap-2 p-1.5 rounded-lg bg-slate-50/90 hover:bg-slate-100 border border-slate-200 text-slate-800 cursor-pointer transition-all active:scale-[0.98] select-none group"
+          <div className="space-y-1 text-xs font-bold text-slate-700">
+            {/* Needs Extra Bus indicator (!) */}
+            <button
+              type="button"
+              onClick={() => toggleLegendItem('extraBus')}
+              title={legendVisibility.extraBus ? "클릭 시 증차 필요(!) 아이콘 숨김" : "클릭 시 증차 필요(!) 아이콘 표시"}
+              className={`w-full text-left flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border transition-all cursor-pointer select-none active:scale-[0.98] ${
+                legendVisibility.extraBus
+                  ? 'bg-orange-50/90 border-orange-200 text-orange-950 hover:bg-orange-100/80 shadow-2xs'
+                  : 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-50'
+              }`}
             >
-              <div 
-                className="w-5 h-5 rounded-md border border-slate-300 shrink-0 shadow-2xs group-hover:scale-105 transition-transform"
-                style={{
-                  background: 'repeating-linear-gradient(45deg, #64748b 0, #64748b 2px, #f1f5f9 2px, #f1f5f9 5px)'
-                }}
-              ></div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[11px] font-black leading-tight flex items-center justify-between">
-                  <span>정원 충원 (빗금 표시)</span>
-                  <span className="text-[10px] text-slate-500 font-bold opacity-0 group-hover:opacity-100 transition-opacity">이동 →</span>
-                </div>
-                <div className="text-[10px] text-slate-500 font-normal">25인승 정원 충원 완료</div>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className={`w-4 h-4 rounded-full text-[10px] font-black flex items-center justify-center border border-white shadow-2xs shrink-0 ${
+                  legendVisibility.extraBus ? 'bg-orange-600 text-white' : 'bg-slate-400 text-slate-100'
+                }`}>!</span>
+                <span className={`text-[11px] font-black truncate ${!legendVisibility.extraBus ? 'line-through text-slate-400' : ''}`}>
+                  증차 필요
+                </span>
+              </div>
+              <span className={`shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
+                legendVisibility.extraBus ? 'bg-orange-100 text-orange-800 border-orange-300' : 'bg-slate-200 text-slate-500 border-slate-300'
+              }`}>
+                {legendVisibility.extraBus ? '표시' : '숨김'}
+              </span>
+            </button>
+
+            {/* Full vehicle hatched pattern indicator (빗금) */}
+            <div 
+              onClick={() => toggleLegendItem('fullBus')}
+              role="button"
+              title={legendVisibility.fullBus ? "클릭 시 만석(빗금) 패턴 숨김" : "클릭 시 만석(빗금) 패턴 표시"}
+              className={`w-full flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border transition-all cursor-pointer select-none active:scale-[0.98] ${
+                legendVisibility.fullBus
+                  ? 'bg-slate-50/90 hover:bg-slate-100 border-slate-200 text-slate-800 shadow-2xs'
+                  : 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-50'
+              }`}
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <div 
+                  className={`w-4 h-4 rounded border shrink-0 shadow-2xs ${legendVisibility.fullBus ? 'border-slate-500' : 'border-slate-300 opacity-40'}`}
+                  style={{
+                    background: legendVisibility.fullBus
+                      ? 'repeating-linear-gradient(45deg, #059669 0, #059669 2px, #ecfdf5 2px, #ecfdf5 5px)'
+                      : '#e2e8f0'
+                  }}
+                ></div>
+                <span className={`text-[11px] font-black truncate ${!legendVisibility.fullBus ? 'line-through text-slate-400' : ''}`}>
+                  정원 만석 (빗금)
+                </span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleFocusFullBusZone();
+                  }}
+                  title="만석 구역으로 이동"
+                  className="text-[9px] font-bold text-slate-600 hover:text-blue-600 px-1 py-0.5 rounded hover:bg-slate-200 transition-colors"
+                >
+                  이동
+                </button>
+                <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
+                  legendVisibility.fullBus ? 'bg-slate-200 text-slate-800 border-slate-300' : 'bg-slate-200 text-slate-500 border-slate-300'
+                }`}>
+                  {legendVisibility.fullBus ? '표시' : '숨김'}
+                </span>
               </div>
             </div>
 
-            {/* One-time rider indicator */}
+            {/* One-time rider indicator (1) */}
             <div 
-              onClick={handleFocusOneTimeRiders}
+              onClick={() => toggleLegendItem('oneTime')}
               role="button"
-              title="클릭 시 당일 1회 탑승 원아 위치로 지도를 이동합니다"
-              className="flex items-center gap-2 p-1.5 rounded-lg bg-rose-50/80 hover:bg-rose-100/90 border border-rose-200 text-rose-900 cursor-pointer transition-all active:scale-[0.98] select-none group"
+              title={legendVisibility.oneTime ? "클릭 시 1회 탑승(1) 마커 숨김" : "클릭 시 1회 탑승(1) 마커 표시"}
+              className={`w-full flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border transition-all cursor-pointer select-none active:scale-[0.98] ${
+                legendVisibility.oneTime
+                  ? 'bg-rose-50/85 hover:bg-rose-100/90 border-rose-200 text-rose-950 shadow-2xs'
+                  : 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-50'
+              }`}
             >
-              <div className="relative w-5 h-5 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <span className="absolute inset-0 rounded-full bg-rose-400 opacity-60 animate-ping"></span>
-                <span className="relative w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] font-black flex items-center justify-center border border-white">1</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[11px] font-black leading-tight flex items-center justify-between">
-                  <span>당일 1회 탑승 / 임시 위치</span>
-                  <span className="text-[10px] text-rose-600 font-bold opacity-0 group-hover:opacity-100 transition-opacity">이동 →</span>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <div className="relative w-4 h-4 flex items-center justify-center shrink-0">
+                  {legendVisibility.oneTime && (
+                    <span className="absolute inset-0 rounded-full bg-rose-400 opacity-60 animate-ping"></span>
+                  )}
+                  <span className={`relative w-3.5 h-3.5 rounded-full text-white text-[8.5px] font-black flex items-center justify-center border border-white ${
+                    legendVisibility.oneTime ? 'bg-rose-500' : 'bg-slate-400'
+                  }`}>1</span>
                 </div>
-                <div className="text-[10px] text-rose-600 font-normal">미탑승 셔틀 희망 원아</div>
+                <span className={`text-[11px] font-black truncate ${!legendVisibility.oneTime ? 'line-through text-slate-400' : ''}`}>
+                  당일 1회 탑승
+                </span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleFocusOneTimeRiders();
+                  }}
+                  title="1회 탑승자 위치로 이동"
+                  className="text-[9px] font-bold text-rose-700 hover:text-blue-600 px-1 py-0.5 rounded hover:bg-rose-100 transition-colors"
+                >
+                  이동
+                </button>
+                <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
+                  legendVisibility.oneTime ? 'bg-rose-100 text-rose-800 border-rose-300' : 'bg-slate-200 text-slate-500 border-slate-300'
+                }`}>
+                  {legendVisibility.oneTime ? '표시' : '숨김'}
+                </span>
               </div>
             </div>
+
             {/* Pure not riding (Walk / Self-pickup) indicator */}
-            <div className="flex items-center gap-2 px-1.5 py-1 text-slate-600">
-              <span className="w-3.5 h-3.5 rounded-full bg-slate-400 border border-white shadow-xs shrink-0"></span>
-              <span className="text-[11px]">셔틀 미탑승 (도보/자차 - 회색 표시)</span>
-            </div>
+            <button
+              type="button"
+              onClick={() => toggleLegendItem('notRiding')}
+              title={legendVisibility.notRiding ? "클릭 시 미탑승(회색) 마커 숨김" : "클릭 시 미탑승(회색) 마커 표시"}
+              className={`w-full text-left flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border transition-all cursor-pointer select-none active:scale-[0.98] ${
+                legendVisibility.notRiding
+                  ? 'bg-slate-50/80 hover:bg-slate-100/90 border-slate-200 text-slate-700'
+                  : 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-50'
+              }`}
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className={`w-3 h-3 rounded-full border border-white shadow-xs shrink-0 ${
+                  legendVisibility.notRiding ? 'bg-slate-400' : 'bg-slate-300'
+                }`}></span>
+                <span className={`text-[11px] font-black truncate ${!legendVisibility.notRiding ? 'line-through text-slate-400' : ''}`}>
+                  미탑승 (도보/자차)
+                </span>
+              </div>
+              <span className={`shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
+                legendVisibility.notRiding ? 'bg-slate-200 text-slate-700 border-slate-300' : 'bg-slate-200 text-slate-500 border-slate-300'
+              }`}>
+                {legendVisibility.notRiding ? '표시' : '숨김'}
+              </span>
+            </button>
+
             {/* Unassigned regular indicator */}
             <div 
-              onClick={handleFocusUnassignedRiders}
+              onClick={() => toggleLegendItem('unassigned')}
               role="button"
-              title="클릭 시 미배정 원아 위치로 지도를 이동합니다"
-              className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-100/90 text-slate-700 cursor-pointer transition-all active:scale-[0.98] select-none group"
+              title={legendVisibility.unassigned ? "클릭 시 미배정 마커 숨김" : "클릭 시 미배정 마커 표시"}
+              className={`w-full flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border transition-all cursor-pointer select-none active:scale-[0.98] ${
+                legendVisibility.unassigned
+                  ? 'bg-slate-50/80 hover:bg-slate-100/90 border-slate-200 text-slate-700 shadow-2xs'
+                  : 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-50'
+              }`}
             >
-              <span className="w-3.5 h-3.5 rounded-full bg-slate-500 border border-white shadow-xs shrink-0 group-hover:scale-110 transition-transform"></span>
-              <div className="flex-1 flex items-center justify-between min-w-0">
-                <span className="text-[11px]">정규 미배정 (구역 밖)</span>
-                <span className="text-[10px] text-slate-400 font-bold opacity-0 group-hover:opacity-100 transition-opacity">이동 →</span>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className={`w-3 h-3 rounded-full border border-white shadow-xs shrink-0 ${
+                  legendVisibility.unassigned ? 'bg-slate-600' : 'bg-slate-300'
+                }`}></span>
+                <span className={`text-[11px] font-black truncate ${!legendVisibility.unassigned ? 'line-through text-slate-400' : ''}`}>
+                  구역 외 미배정
+                </span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleFocusUnassignedRiders();
+                  }}
+                  title="미배정자 위치로 이동"
+                  className="text-[9px] font-bold text-slate-600 hover:text-blue-600 px-1 py-0.5 rounded hover:bg-slate-200 transition-colors"
+                >
+                  이동
+                </button>
+                <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
+                  legendVisibility.unassigned ? 'bg-slate-200 text-slate-700 border-slate-300' : 'bg-slate-200 text-slate-500 border-slate-300'
+                }`}>
+                  {legendVisibility.unassigned ? '표시' : '숨김'}
+                </span>
               </div>
             </div>
 
@@ -7490,6 +7693,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             )}
           </div>
         </div>
+        )}
       </div>
             {/* Student Addition Modal */}
       {showAddStudentModal && (

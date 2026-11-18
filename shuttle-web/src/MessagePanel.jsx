@@ -351,6 +351,72 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   const [isSubmittingAbsence, setIsSubmittingAbsence] = useState(false);
   const [absenceStudentSearch, setAbsenceStudentSearch] = useState('');
 
+  // Staff Leave Request Modal State (채팅에서 임직원이 원장에게 휴가 신청)
+  const [isStaffLeaveModalOpen, setIsStaffLeaveModalOpen] = useState(false);
+  const [staffLeaveForm, setStaffLeaveForm] = useState({
+    applicantName: '',
+    applicantRole: '차량기사',
+    leaveType: '연차 휴가',
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: new Date().toISOString().split('T')[0],
+    needSubstitute: true,
+    reason: '개인 사유로 인한 정기 연차 사용',
+  });
+  const [isSubmittingLeave, setIsSubmittingLeave] = useState(false);
+
+  const handleOpenStaffLeaveModal = () => {
+    setShowPlusMenu(false);
+    const todayStr = new Date().toISOString().split('T')[0];
+    setStaffLeaveForm({
+      applicantName: myUser?.name || myUser?.nickname || '',
+      applicantRole: myUser?.role === 'TEACHER' ? '담임교사' : (myUser?.role === 'DRIVER' ? '차량기사' : '임직원'),
+      leaveType: '연차 휴가',
+      startDate: todayStr,
+      endDate: todayStr,
+      needSubstitute: true,
+      reason: '개인 사유로 인한 정기 연차 사용',
+    });
+    setIsStaffLeaveModalOpen(true);
+  };
+
+  const handleStaffLeaveSubmit = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!staffLeaveForm.applicantName.trim()) {
+      alert('신청자 성함을 입력해주세요.');
+      return;
+    }
+    setIsSubmittingLeave(true);
+    try {
+      const summaryText = `[임직원 휴가·연차 신청서]\n신청자: ${staffLeaveForm.applicantName} (${staffLeaveForm.applicantRole})\n구분: ${staffLeaveForm.leaveType}\n기간: ${staffLeaveForm.startDate} ~ ${staffLeaveForm.endDate}\n대체 인력 배정: ${staffLeaveForm.needSubstitute ? '필요 (대체 기사/교사 배정 요청)' : '불필요'}\n신청 사유: ${staffLeaveForm.reason || '개인 사유'}\n\n원장님의 승인 결재를 부탁드립니다.`;
+
+      await handleSendMessage(summaryText);
+
+      try {
+        await fetch(`${API_BASE_URL}/approval/calendar/event`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            type: 'STAFF_LEAVE',
+            title: `${staffLeaveForm.applicantName} (${staffLeaveForm.applicantRole}) ${staffLeaveForm.leaveType}`,
+            startDate: staffLeaveForm.startDate,
+            endDate: staffLeaveForm.endDate,
+            targetClass: staffLeaveForm.applicantRole,
+            reason: staffLeaveForm.reason,
+            academyId: targetAcademyId,
+          }),
+        });
+      } catch (_) {}
+
+      setIsStaffLeaveModalOpen(false);
+      alert('원장님께 휴가·연차 신청서가 성공적으로 전송되었습니다.');
+    } catch (err) {
+      console.error(err);
+      alert('휴가 신청 전송 중 오류가 발생했습니다.');
+    } finally {
+      setIsSubmittingLeave(false);
+    }
+  };
+
   // Unread badge count helper (카카오톡 스타일 미확인 인원수: 1:1이면 1, 다자간이면 명수)
   const getUnreadNumber = useCallback((msg) => {
     if (!msg) return 0;
@@ -2744,6 +2810,21 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                       </div>
                     </button>
 
+                    {/* 임직원 휴가·연차 신청 (원장에게 휴가 결재 신청) */}
+                    {!isParent && (
+                      <button
+                        type="button"
+                        onClick={handleOpenStaffLeaveModal}
+                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-emerald-50 text-emerald-950 font-bold text-xs flex items-center gap-2 transition"
+                      >
+                        <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-black">휴</span>
+                        <div>
+                          <div className="font-bold text-slate-800">임직원 휴가·연차 신청</div>
+                          <div className="text-[10px] text-slate-400 font-normal">원장님께 휴가 결재 신청</div>
+                        </div>
+                      </button>
+                    )}
+
                     {/* Tools & Media Section */}
                     <div className="text-[11px] font-black text-slate-400 px-2 pt-2 pb-1 border-t border-slate-100 uppercase">
                       도구 및 미디어
@@ -3658,6 +3739,168 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black shadow-xs transition-colors disabled:opacity-50"
                 >
                   {isSubmittingAbsence ? '신청서 등록 중...' : '신청서 전송하기'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* MODAL: 임직원 휴가·연차 신청서 (원장님께 결재 신청) */}
+      {/* ============================================================ */}
+      {isStaffLeaveModalOpen && (
+        <div className="fixed inset-0 z-[3000] bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-emerald-200 w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-emerald-100 bg-gradient-to-r from-emerald-50 to-teal-50 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-sm font-black shadow-xs">
+                  휴
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-sm">임직원 휴가·연차 신청서</h3>
+                  <p className="text-[11px] text-slate-500">원장님께 휴가 결재를 신청하며 캘린더에 자동 반영됩니다.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsStaffLeaveModalOpen(false)}
+                className="w-8 h-8 rounded-lg hover:bg-slate-200 text-slate-400 hover:text-slate-700 flex items-center justify-center transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleStaffLeaveSubmit} className="p-5 overflow-y-auto space-y-4">
+              {/* Applicant Name & Role */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-black text-slate-600 mb-1">
+                    신청자 성함 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={staffLeaveForm.applicantName}
+                    onChange={(e) => setStaffLeaveForm(prev => ({ ...prev, applicantName: e.target.value }))}
+                    placeholder="신청자 이름"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-bold focus:outline-hidden focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-black text-slate-600 mb-1">
+                    직책 / 역할 <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={staffLeaveForm.applicantRole}
+                    onChange={(e) => setStaffLeaveForm(prev => ({ ...prev, applicantRole: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-bold focus:outline-hidden focus:border-emerald-500 bg-white"
+                  >
+                    <option value="차량기사">차량 기사님</option>
+                    <option value="동승교사">동승 안전지도원</option>
+                    <option value="담임교사">학급 담임교사</option>
+                    <option value="행정직원">행정 / 조리 / 시설</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Leave Type */}
+              <div>
+                <label className="block text-[11px] font-black text-slate-600 mb-1">
+                  휴가 구분 <span className="text-red-500">*</span>
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {['연차 휴가', '오전 반차', '오후 반차', '병가', '경조사', '직무 연수'].map(lt => (
+                    <button
+                      key={lt}
+                      type="button"
+                      onClick={() => setStaffLeaveForm(prev => ({ ...prev, leaveType: lt }))}
+                      className={`py-2 px-2.5 rounded-xl text-xs font-black border transition-all text-center ${
+                        staffLeaveForm.leaveType === lt
+                          ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      {lt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Date Period */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-black text-slate-600 mb-1">
+                    시작일 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={staffLeaveForm.startDate}
+                    onChange={(e) => setStaffLeaveForm(prev => ({ ...prev, startDate: e.target.value, endDate: prev.endDate < e.target.value ? e.target.value : prev.endDate }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-bold focus:outline-hidden focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-black text-slate-600 mb-1">
+                    종료일 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={staffLeaveForm.endDate}
+                    min={staffLeaveForm.startDate}
+                    onChange={(e) => setStaffLeaveForm(prev => ({ ...prev, endDate: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-bold focus:outline-hidden focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Need Substitute Toggle */}
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-black text-slate-800 block">대체 근무자(기사/교사) 배정 필요</span>
+                  <span className="text-[10px] text-slate-500">통학차량 운행 또는 학급 지도를 위한 대체 인력 배정 요청</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={staffLeaveForm.needSubstitute}
+                  onChange={(e) => setStaffLeaveForm(prev => ({ ...prev, needSubstitute: e.target.checked }))}
+                  className="w-5 h-5 accent-emerald-600 rounded cursor-pointer"
+                />
+              </div>
+
+              {/* Reason / Details */}
+              <div>
+                <label className="block text-[11px] font-black text-slate-600 mb-1">
+                  신청 사유 및 전달사항
+                </label>
+                <textarea
+                  rows={2}
+                  value={staffLeaveForm.reason}
+                  onChange={(e) => setStaffLeaveForm(prev => ({ ...prev, reason: e.target.value }))}
+                  placeholder="구체적인 사유나 인수인계 사항을 입력해주세요 (예: 개인 사유, 정기 건강검진 등)..."
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:border-emerald-500"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsStaffLeaveModalOpen(false)}
+                  className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingLeave || !staffLeaveForm.applicantName.trim()}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  {isSubmittingLeave ? '신청서 등록 중...' : '원장님께 신청하기'}
                 </button>
               </div>
             </form>

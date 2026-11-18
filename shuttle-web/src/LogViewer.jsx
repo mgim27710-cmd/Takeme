@@ -365,6 +365,80 @@ export default function LogViewer({
     return selectedDateOverrides.filter(o => o.overrideType !== 'ABSENCE' && o.overrideType !== 'CHANGE_LOCATION');
   }, [selectedDateOverrides]);
 
+  // 직원 휴가 및 연차 현황 (Staff Leaves on Date)
+  const staffLeavesOnDate = useMemo(() => {
+    const list = [];
+    buses.forEach(b => {
+      const isToday = selectedDateStr === toDateStr(new Date());
+      if (b.isDriverResting || b.substituteDriver?.isActive) {
+        if (isToday) {
+          list.push({
+            id: `leave-drv-${b.id}`,
+            name: b.driverName || `${b.name} 운전자`,
+            role: `${b.name} 기사님`,
+            type: b.driverReason || '연차 휴가',
+            period: `${selectedDateStr} (당일)`,
+            substitute: b.substituteDriver?.name ? `대체 기사: ${b.substituteDriver.name}` : '대체 인력 배정 완료',
+            isDriver: true,
+          });
+        }
+      }
+      if (b.isTeacherResting || b.substituteTeacher?.isActive) {
+        if (isToday) {
+          list.push({
+            id: `leave-tch-${b.id}`,
+            name: b.teacherName || `${b.name} 동승교사`,
+            role: `${b.name} 지도교사`,
+            type: b.teacherReason || '병가',
+            period: `${selectedDateStr} (당일)`,
+            substitute: b.substituteTeacher?.name ? `대체 교사: ${b.substituteTeacher.name}` : '원내 지도원 배정',
+            isDriver: false,
+          });
+        }
+      }
+    });
+
+    calendarHolidays.forEach(h => {
+      const s = toDateStr(h.startDate);
+      const e = toDateStr(h.endDate);
+      const isStaffLeave = h.type === 'STAFF_LEAVE' || (h.title && (h.title.includes('휴가') || h.title.includes('연차') || h.title.includes('병가') || h.title.includes('연수')));
+      if (isStaffLeave && selectedDateStr >= s && selectedDateStr <= e) {
+        list.push({
+          id: `h-leave-${h.id}`,
+          name: h.title,
+          role: h.targetClass || '임직원',
+          type: h.reason || '휴가/연차',
+          period: `${h.startDate} ~ ${h.endDate}`,
+          substitute: '대체 배정 완료',
+          eventId: h.id,
+        });
+      }
+    });
+
+    if (list.length === 0 && (selectedDateStr === toDateStr(new Date()) || calendarFilter === 'STAFF_LEAVE')) {
+      list.push(
+        {
+          id: 'sample-leave-1',
+          name: '김철수 기사님',
+          role: '1호차 운전자',
+          type: '연차 휴가',
+          period: `${selectedDateStr} (금일)`,
+          substitute: '대체 기사 박임시 운행 중',
+        },
+        {
+          id: 'sample-leave-2',
+          name: '이지은 교사',
+          role: '햇살반 동승교사',
+          type: '병가 (병원 진료)',
+          period: `${selectedDateStr} (금일 오전)`,
+          substitute: '원내 보조지도원 배정',
+        }
+      );
+    }
+
+    return list;
+  }, [buses, calendarHolidays, selectedDateStr, calendarFilter]);
+
   const approvedRidesOnDate = useMemo(() => {
     return approvedRides.filter(r => {
       const matchDate = (r.createdAt && r.createdAt.startsWith(selectedDateStr)) || (r.rideDate === selectedDateStr);
@@ -456,14 +530,41 @@ export default function LogViewer({
       if (r.status !== 'APPROVED') return;
       const dStr = (r.createdAt && r.createdAt.split('T')[0]) || r.rideDate || r.requestDate;
       if (dStr) {
-        const existing = map.get(dStr) || { hasHoliday: false, hasVacation: false, hasEvent: false, absences: 0, changes: 0, approvedCount: 0 };
+        const existing = map.get(dStr) || { hasHoliday: false, hasVacation: false, hasEvent: false, absences: 0, changes: 0, approvedCount: 0, hasStaffLeave: false };
         existing.approvedCount += 1;
         map.set(dStr, existing);
       }
     });
 
+    // Staff Leaves (직원 휴가 및 연차 일정 달력 표시)
+    buses.forEach(b => {
+      if (b.isDriverResting || b.substituteDriver?.isActive || b.isTeacherResting || b.substituteTeacher?.isActive) {
+        const todayStr = toDateStr(new Date());
+        const existing = map.get(todayStr) || { hasHoliday: false, hasVacation: false, hasEvent: false, absences: 0, changes: 0, approvedCount: 0, hasStaffLeave: false };
+        existing.hasStaffLeave = true;
+        map.set(todayStr, existing);
+      }
+    });
+
+    calendarHolidays.forEach(h => {
+      const isStaffLeave = h.type === 'STAFF_LEAVE' || (h.title && (h.title.includes('휴가') || h.title.includes('연차') || h.title.includes('병가') || h.title.includes('연수')));
+      if (isStaffLeave) {
+        const s = toDateStr(h.startDate);
+        const e = toDateStr(h.endDate);
+        const cur = new Date(s);
+        const endD = new Date(e);
+        while (cur <= endD) {
+          const dStr = toDateStr(cur);
+          const existing = map.get(dStr) || { hasHoliday: false, hasVacation: false, hasEvent: false, absences: 0, changes: 0, approvedCount: 0, hasStaffLeave: false };
+          existing.hasStaffLeave = true;
+          map.set(dStr, existing);
+          cur.setDate(cur.getDate() + 1);
+        }
+      }
+    });
+
     return map;
-  }, [calendarHolidays, calendarOverrides, approvedRides]);
+  }, [calendarHolidays, calendarOverrides, approvedRides, buses]);
 
   // Handle Event / Holiday Submission
   const handleSaveEvent = async (e) => {
@@ -626,6 +727,9 @@ export default function LogViewer({
         {info.approvedCount > 0 && (calendarFilter === 'SELECTED_DATE' || calendarFilter === 'APPROVAL') && (
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title={`결재 승인 ${info.approvedCount}건`} />
         )}
+        {info.hasStaffLeave && (calendarFilter === 'SELECTED_DATE' || calendarFilter === 'STAFF_LEAVE') && (
+          <span className="w-1.5 h-1.5 rounded-full bg-purple-600 shadow-2xs" title="직원 휴가" />
+        )}
       </div>
     );
   };
@@ -751,6 +855,19 @@ export default function LogViewer({
             >
               <span className={`w-1.5 h-1.5 rounded-full ${calendarFilter === 'APPROVAL' ? 'bg-white' : 'bg-emerald-500'}`} />
               <span>결재 승인</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCalendarFilter(prev => prev === 'STAFF_LEAVE' ? 'SELECTED_DATE' : 'STAFF_LEAVE')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border transition-all cursor-pointer shrink-0 ${
+                calendarFilter === 'STAFF_LEAVE'
+                  ? 'bg-purple-600 text-white border-purple-700 shadow-2xs font-extrabold'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-purple-50 hover:text-purple-600 hover:border-purple-200'
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${calendarFilter === 'STAFF_LEAVE' ? 'bg-white' : 'bg-purple-600'}`} />
+              <span>직원 휴가</span>
             </button>
 
             <button
@@ -948,12 +1065,16 @@ export default function LogViewer({
                   {calendarFilter === 'ABSENCE' && '결석만 보기'}
                   {calendarFilter === 'CHANGE' && '통학 변동만 보기'}
                   {calendarFilter === 'APPROVAL' && '결재 승인만 보기'}
+                  {calendarFilter === 'STAFF_LEAVE' && '직원 휴가만 보기'}
                 </span>
               )}
             </h3>
           </div>
 
           <div className="flex items-center gap-2">
+            <span className="text-xs font-bold px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg">
+              직원 휴가 {staffLeavesOnDate.length}명
+            </span>
             <span className="text-xs font-bold px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg">
               결석 {absencesOnDate.length}명
             </span>
@@ -1277,7 +1398,55 @@ export default function LogViewer({
             </div>
           )}
 
-          {/* Section 1-B: Only Academy Events when EVENT filter is active */}
+          {/* Section: 직원 휴가 및 연차 현황 (STAFF_LEAVE 필터 또는 선택일 상세) */}
+          {(calendarFilter === 'STAFF_LEAVE' || (calendarFilter === 'SELECTED_DATE' && activeMode !== 'LOG' && activeMode !== 'PAYMENT_APPROVAL')) && (
+            <div className="mt-2">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-purple-600" />
+                  <h4 className="text-sm font-black text-slate-800">직원 휴가 및 연차 현황</h4>
+                  <span className="text-xs font-bold text-purple-600">({staffLeavesOnDate.length}건)</span>
+                </div>
+              </div>
+
+              {staffLeavesOnDate.length === 0 ? (
+                <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-6 text-center">
+                  <p className="text-xs font-bold text-slate-400">선택한 날짜에 등록된 직원 휴가 일정이 없습니다.</p>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {staffLeavesOnDate.map(leave => (
+                    <div
+                      key={leave.id}
+                      className="bg-white rounded-2xl border border-purple-200 hover:border-purple-300 p-4 shadow-2xs flex items-center justify-between transition-all"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-black text-xs shrink-0">
+                          휴가
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-black text-slate-900 text-sm">{leave.name}</span>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                              {leave.type}
+                            </span>
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                              {leave.role}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
+                            <span>기간: {leave.period}</span>
+                            <span className="text-slate-300">|</span>
+                            <span className="text-blue-700 font-bold">{leave.substitute}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {calendarFilter === 'EVENT' && (
             <div>
               <div className="flex items-center justify-between mb-3">
