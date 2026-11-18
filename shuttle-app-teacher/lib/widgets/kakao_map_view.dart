@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -647,6 +648,16 @@ class _KakaoMapFullscreenPageState extends State<KakaoMapFullscreenPage> {
   void initState() {
     super.initState();
     _checkCardDismissed();
+    // 전체화면 지도에서는 안드로이드 하단 버튼 줄(뒤로·홈·최근 앱)과 상태 표시줄을 숨긴다.
+    // 화면 가장자리를 쓸어 올리면 잠깐 나타나고, 뒤로 가기는 위의 ← 버튼으로 한다.
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  @override
+  void dispose() {
+    // 지도에서 나가면 시스템 표시줄을 원래대로
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
+    super.dispose();
   }
 
   Future<void> _checkCardDismissed() async {
