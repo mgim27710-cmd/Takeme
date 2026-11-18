@@ -559,20 +559,30 @@ class ApiService {
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message'] ?? '전화번호가 저장되었습니다.'};
   }
 
-  /// 비상연락망 저장 (이름·전화번호를 비우면 삭제)
-  Future<Map<String, dynamic>> updateEmergencyContact(String name, String phone) async {
+  /// 내 아이들의 원아·보호자 정보와 빠진 필수 칸(missing). 실패하면 예외
+  Future<List<Map<String, dynamic>>> getChildInfoList() async {
+    final res = await getWithAuth(Uri.parse('${AppConfig.apiHost}/parent/child-info'))
+        .timeout(const Duration(seconds: 8));
+    throwIfServerError(res);
+    if (res.statusCode != 200) {
+      throw ApiException('원아 정보를 불러오지 못했습니다. (${res.statusCode})', res.statusCode);
+    }
+    if (res.bodyBytes.isEmpty) return [];
+    final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+    if (decoded is List) return decoded.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    if (decoded is Map) return [Map<String, dynamic>.from(decoded)];
+    return [];
+  }
+
+  /// 원아·보호자 정보 저장. 성공하면 저장된 정보(missing 포함), 실패하면 message
+  Future<Map<String, dynamic>> saveChildInfo(Map<String, dynamic> body) async {
     try {
-      final url = Uri.parse('${AppConfig.apiHost}/parent/update-emergency-contact');
-      final res = await postWithAuth(url, jsonEncode({'name': name, 'phone': phone}));
+      final res = await postWithAuth(Uri.parse('${AppConfig.apiHost}/parent/child-info'), jsonEncode(body));
       final data = res.bodyBytes.isEmpty ? <String, dynamic>{} : jsonDecode(utf8.decode(res.bodyBytes));
       final ok = res.statusCode == 200 || res.statusCode == 201;
-      final msg = data is Map ? data['message'] : null;
-      return {
-        'success': ok,
-        'message': msg is List ? msg.join(', ') : msg,
-        'emergencyContactName': data is Map ? data['emergencyContactName'] : null,
-        'emergencyContactPhone': data is Map ? data['emergencyContactPhone'] : null,
-      };
+      final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      final msg = map['message'];
+      return {...map, 'success': ok, 'message': msg is List ? msg.join(', ') : msg};
     } catch (e) {
       return {'success': false, 'message': friendlyError(e)};
     }

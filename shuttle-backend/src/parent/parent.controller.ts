@@ -185,15 +185,18 @@ export class ParentController {
     return this.parentService.getProfile(email);
   }
 
-  /** 비상연락망(주보호자 연락이 안 될 때 연락할 사람) 저장 — 로그인한 본인 것만 */
-  @Post('update-emergency-contact')
-  async updateEmergencyContact(
-    @AuthEmail() authEmail: string,
-    @Body('name') name: string,
-    @Body('phone') phone: string,
-  ) {
+  /** 내 아이의 원아·보호자 정보와 빠진 필수 칸 (studentId 없으면 내 아이 전체) — 로그인한 본인 것만 */
+  @Get('child-info')
+  async getChildInfo(@AuthEmail() authEmail: string, @Query('studentId') studentId?: string) {
     if (!authEmail) throw new BadRequestException('로그인이 필요합니다.');
-    return this.parentService.updateEmergencyContact(authEmail, name, phone);
+    return this.parentService.getChildInfo(authEmail, studentId ? Number(studentId) : undefined);
+  }
+
+  /** 원아·보호자 정보 저장 (성별·연령·주보호자·비상연락망·알레르기·전달사항, 주소는 비어 있을 때만) */
+  @Post('child-info')
+  async updateChildInfo(@AuthEmail() authEmail: string, @Body() body: any) {
+    if (!authEmail) throw new BadRequestException('로그인이 필요합니다.');
+    return this.parentService.updateChildInfo(authEmail, body || {});
   }
 
   @Post('update-phone')

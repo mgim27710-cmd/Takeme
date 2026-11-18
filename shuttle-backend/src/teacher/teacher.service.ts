@@ -21,6 +21,21 @@ import { AttendanceSubmission } from '../entities/attendance-submission.entity';
 import { ChatService } from '../chat/chat.service';
 import { formatTeacherName } from '../utils/teacher.util';
 
+/** 원아 정보(raw)에 저장된 주보호자·비상연락망(보호자2)·학부모 전달사항 — 웹 [원아 추가]·학부모 앱과 같은 키 */
+function guardianFields(s: Student) {
+  let raw: any = s.raw;
+  if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch { raw = {}; } }
+  raw = raw && typeof raw === 'object' ? raw : {};
+  return {
+    parentName: raw['보호자1 성함'] || raw['보호자 성함'] || s.parentUser?.name || '',
+    parentRelation: raw['보호자1 관계'] || raw['보호자 관계'] || '',
+    emergencyContactName: raw['보호자2 성함'] || raw['보호자2성함'] || '',
+    emergencyContactRelation: raw['보호자2 관계'] || raw['보호자2관계'] || '',
+    emergencyContactPhone: raw['보호자2 연락처'] || raw['보호자2연락처'] || raw['비상연락처'] || '',
+    parentMessage: raw['보호자 전달사항'] || '',
+  };
+}
+
 @Injectable()
 export class TeacherService {
   constructor(
@@ -245,8 +260,7 @@ export class TeacherService {
             expectedTime: s.raw ? s.raw['예상탑승시간'] || '15:30' : '15:30',
             allergies: s.allergies || (s.raw ? s.raw['알레르기'] : '') || '',
             parentPhone,
-            emergencyContactName: s.parentUser?.emergencyContactName || '',
-            emergencyContactPhone: s.parentUser?.emergencyContactPhone || '',
+            ...guardianFields(s),
             gender: s.gender || null,
             className: user.assignedClass,
           };
@@ -323,9 +337,8 @@ export class TeacherService {
           overrideType: (s as any).overrideType || null,
           overrideReason: (s as any).overrideReason || null,
           parentPhone,
-          // 주보호자 연락이 안 될 때 연락할 비상연락망 (학부모가 앱 설정에서 입력)
-          emergencyContactName: s.parentUser?.emergencyContactName || '',
-          emergencyContactPhone: s.parentUser?.emergencyContactPhone || '',
+          // 주보호자·비상연락망(보호자2)·학부모 전달사항 (원아 정보에 저장된 값)
+          ...guardianFields(s),
           gender: s.gender || null,
         };
       });

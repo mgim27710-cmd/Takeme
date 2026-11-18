@@ -15,6 +15,7 @@ import 'daily_notice_screen.dart';
 import 'board_community_screen.dart';
 import 'parent_chat_room_list_screen.dart';
 import '../settings_screen.dart';
+import 'child_info_screen.dart';
 
 class ParentHomeScreen extends StatefulWidget {
   const ParentHomeScreen({super.key});
@@ -60,6 +61,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     super.initState();
     _loadAllData();
     _loadUnreadCount();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _ensureChildInfo());
     _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) _loadUnreadCount();
     });
@@ -74,6 +76,34 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
       SocketService().leaveVehicleRoom(vehicleId);
     }
     super.dispose();
+  }
+
+  /// 가입 후 원아·보호자 필수 정보(성별·연령·주소·주보호자·비상연락망·알레르기)가 비어 있으면
+  /// 홈을 쓰기 전에 입력 화면을 먼저 보여준다 (저장해야만 닫힌다).
+  bool _childInfoChecked = false;
+  Future<void> _ensureChildInfo() async {
+    if (_childInfoChecked) return;
+    _childInfoChecked = true;
+    List<Map<String, dynamic>> list;
+    try {
+      list = await ApiService().getChildInfoList();
+    } catch (e) {
+      // 확인하지 못하면 다음에 홈을 열 때 다시 확인한다
+      _childInfoChecked = false;
+      debugPrint('[ParentHomeScreen] child-info check failed: $e');
+      return;
+    }
+    var changed = false;
+    for (final info in list) {
+      if (info['isComplete'] == true) continue;
+      if (!mounted) return;
+      final saved = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(builder: (_) => ChildInfoScreen(info: info, required: true)),
+      );
+      changed = changed || saved == true;
+    }
+    if (changed && mounted) _loadAllData();
   }
 
   Future<void> _loadUnreadCount() async {

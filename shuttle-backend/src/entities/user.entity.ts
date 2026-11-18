@@ -34,14 +34,6 @@ export class User {
   @Column({ type: 'varchar', nullable: true, transformer: encryptionTransformer })
   phone: string | null;
 
-  /** 학부모의 비상연락망(주보호자가 연락이 안 될 때): 이름·관계 (예: 할머니 김OO) */
-  @Column({ type: 'varchar', nullable: true, transformer: encryptionTransformer })
-  emergencyContactName: string | null;
-
-  /** 학부모의 비상연락망 전화번호 */
-  @Column({ type: 'varchar', nullable: true, transformer: encryptionTransformer })
-  emergencyContactPhone: string | null;
-
   @Column({ nullable: true })
   assignedClass: string; // 유치원 담당 반 (예: 햇살반)
 

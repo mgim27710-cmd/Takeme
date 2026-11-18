@@ -3,6 +3,7 @@ import '../services/api_service.dart';
 import '../models/student_model.dart';
 import '../models/user_model.dart';
 import 'login_screen.dart';
+import 'parent/child_info_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final bool isEmbeddedTab;
@@ -18,8 +19,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isSavingAllergy = false;
   bool _isDeletingAccount = false;
   String _userPhone = '';
-  String _emergencyName = '';
-  String _emergencyPhone = '';
   bool _notifyShuttleOperation = true;
   bool _notifyBoardPost = true;
 
@@ -50,8 +49,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           if (profile != null && profile['phone'] != null) {
             _userPhone = profile['phone'].toString();
           }
-          _emergencyName = profile?['emergencyContactName']?.toString() ?? '';
-          _emergencyPhone = profile?['emergencyContactPhone']?.toString() ?? '';
           _notifyShuttleOperation = notiSettings['notifyShuttleOperation'] ?? true;
           _notifyBoardPost = notiSettings['notifyBoardPost'] ?? true;
         });
@@ -138,107 +135,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  /// 비상연락망 등록/수정: 주보호자(나)가 전화를 못 받을 때 지도교사가 연락할 사람
-  void _showEmergencyContactDialog() {
-    final nameCtrl = TextEditingController(text: _emergencyName);
-    final phoneCtrl = TextEditingController(text: _emergencyPhone);
-    bool isSaving = false;
-
-    Future<void> save(BuildContext ctx, StateSetter setDialogState, {bool clear = false}) async {
-      setDialogState(() => isSaving = true);
-      final res = await ApiService().updateEmergencyContact(
-        clear ? '' : nameCtrl.text.trim(),
-        clear ? '' : phoneCtrl.text.trim(),
-      );
-      setDialogState(() => isSaving = false);
-      if (!ctx.mounted || !mounted) return;
-      if (res['success'] == true) {
-        Navigator.pop(ctx);
-        setState(() {
-          _emergencyName = res['emergencyContactName']?.toString() ?? '';
-          _emergencyPhone = res['emergencyContactPhone']?.toString() ?? '';
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(res['message'] ?? '저장되었습니다.'), backgroundColor: const Color(0xFF10B981)),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(res['message'] ?? '저장하지 못했습니다.'), backgroundColor: Colors.red),
-        );
+  /// 원아·보호자 정보(주보호자·비상연락망 등) 열기
+  Future<void> _openChildInfo() async {
+    try {
+      final list = await ApiService().getChildInfoList();
+      if (!mounted) return;
+      if (list.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('연결된 원아 정보가 없습니다.')));
+        return;
       }
+      // 선택된 아이가 있으면 그 아이, 없으면 첫 번째 아이
+      final selectedId = _childInfo?.id;
+      final info = list.firstWhere((e) => e['studentId'] == selectedId, orElse: () => list.first);
+      await Navigator.push(context, MaterialPageRoute(builder: (_) => ChildInfoScreen(info: info)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('원아 정보를 불러오지 못했습니다. ${friendlyError(e)}')));
     }
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('비상연락망', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                '내가 전화를 받지 못할 때 지도교사 선생님이 대신 연락할 분을 한 명 등록해 주세요.',
-                style: TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.4),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: nameCtrl,
-                decoration: InputDecoration(
-                  hintText: '예: 할머니 김영희',
-                  labelText: '이름·관계',
-                  prefixIcon: const Icon(Icons.person_outline, size: 20, color: Color(0xFF2563EB)),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: phoneCtrl,
-                keyboardType: TextInputType.phone,
-                decoration: InputDecoration(
-                  hintText: '010-0000-0000',
-                  labelText: '전화번호',
-                  prefixIcon: const Icon(Icons.phone_android, size: 20, color: Color(0xFF2563EB)),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            if (_emergencyPhone.isNotEmpty)
-              TextButton(
-                onPressed: isSaving ? null : () => save(ctx, setDialogState, clear: true),
-                child: const Text('삭제', style: TextStyle(color: Color(0xFFDC2626))),
-              ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('취소', style: TextStyle(color: Color(0xFF64748B))),
-            ),
-            ElevatedButton(
-              onPressed: isSaving
-                  ? null
-                  : () {
-                      if (phoneCtrl.text.trim().isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('비상연락망 전화번호를 입력해 주세요.'), backgroundColor: Colors.red),
-                        );
-                        return;
-                      }
-                      save(ctx, setDialogState);
-                    },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2563EB),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-              child: isSaving
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text('저장하기', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   void _showPasswordChangeDialog() {
@@ -648,42 +561,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ],
                         ),
                         const Divider(height: 20, color: Color(0xFFF1F5F9)),
-                        // 비상연락망: 주보호자가 전화를 못 받을 때 지도교사가 연락할 사람
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text('비상연락망', style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    _emergencyPhone.isNotEmpty
-                                        ? '${_emergencyName.isNotEmpty ? '$_emergencyName · ' : ''}$_emergencyPhone'
-                                        : '등록된 비상연락망 없음',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: _emergencyPhone.isNotEmpty ? const Color(0xFF1E293B) : const Color(0xFF94A3B8),
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                        // 원아·보호자 정보: 주보호자·비상연락망·알레르기 등 (웹 [원아 추가] 와 같은 정보)
+                        InkWell(
+                          onTap: _openChildInfo,
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 6),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('원아·보호자 정보', style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
+                                      SizedBox(height: 2),
+                                      Text('주보호자, 비상연락망, 알레르기 등', style: TextStyle(fontSize: 13, color: Color(0xFF1E293B), fontWeight: FontWeight.bold)),
+                                    ],
                                   ),
-                                ],
-                              ),
+                                ),
+                                Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
+                              ],
                             ),
-                            OutlinedButton(
-                              onPressed: _showEmergencyContactDialog,
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                visualDensity: VisualDensity.compact,
-                                side: const BorderSide(color: Color(0xFFBFDBFE)),
-                                backgroundColor: const Color(0xFFEFF6FF),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              ),
-                              child: Text(_emergencyPhone.isNotEmpty ? '수정' : '등록',
-                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
-                            ),
-                          ],
+                          ),
                         ),
                         const Divider(height: 20, color: Color(0xFFF1F5F9)),
                         Row(

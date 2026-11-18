@@ -832,14 +832,24 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                   const SizedBox(height: 16),
 
                   // 보호자 연락처: 누르면 전화 걸기. 주보호자가 안 받으면 비상연락망으로
+                  // 예: "주보호자 · 모 김영희", "비상 · 조모 박순자"
                   if (phone.isNotEmpty)
-                    callButton('주보호자', phone, const Color(0xFF1D4ED8), const Color(0xFF93C5FD))
+                    callButton(
+                      ['주보호자', [st.parentRelation, st.parentName].where((e) => e.isNotEmpty).join(' ')]
+                          .where((e) => e.isNotEmpty)
+                          .join(' · '),
+                      phone,
+                      const Color(0xFF1D4ED8),
+                      const Color(0xFF93C5FD),
+                    )
                   else
                     noteBox('등록된 주보호자 연락처가 없습니다.', const Color(0xFF64748B), const Color(0xFFF1F5F9), Icons.phone_disabled),
                   const SizedBox(height: 8),
                   if (st.emergencyContactPhone.isNotEmpty)
                     callButton(
-                      st.emergencyContactName.isNotEmpty ? '비상 · ${st.emergencyContactName}' : '비상연락망',
+                      ['비상', [st.emergencyContactRelation, st.emergencyContactName].where((e) => e.isNotEmpty).join(' ')]
+                          .where((e) => e.isNotEmpty)
+                          .join(' · '),
                       st.emergencyContactPhone,
                       const Color(0xFFB45309),
                       const Color(0xFFFCD34D),

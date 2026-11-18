@@ -8,9 +8,13 @@ class StudentModel {
   final double? longitude;
   final String allergies;
   final String? gender;
-  /// 주보호자가 연락이 안 될 때 연락할 비상연락망 (학부모가 앱 설정에서 입력)
+  /// 주보호자 성함·관계 (원아 정보의 보호자1)
+  final String parentName;
+  final String parentRelation;
+  /// 비상연락망 = 원아 정보의 보호자2. 주보호자가 연락이 안 될 때 연락할 사람
   final String emergencyContactName;
-  final String emergencyContactPhone; // 서버가 보내줄 때만 표시 (현재 교사용 원아 API에는 없음)
+  final String emergencyContactRelation;
+  final String emergencyContactPhone;
   final bool boarded;
   final bool absent;
   final String expectedTime;
@@ -34,7 +38,10 @@ class StudentModel {
     this.longitude,
     this.allergies = '',
     this.gender,
+    this.parentName = '',
+    this.parentRelation = '',
     this.emergencyContactName = '',
+    this.emergencyContactRelation = '',
     this.emergencyContactPhone = '',
     this.boarded = false,
     this.absent = false,
@@ -66,7 +73,10 @@ class StudentModel {
       latitude: parseCoord(json['latitude'] ?? json['lat']),
       longitude: parseCoord(json['longitude'] ?? json['lng']),
       allergies: json['allergies'] ?? '',
+      parentName: json['parentName']?.toString() ?? '',
+      parentRelation: json['parentRelation']?.toString() ?? '',
       emergencyContactName: json['emergencyContactName']?.toString() ?? '',
+      emergencyContactRelation: json['emergencyContactRelation']?.toString() ?? '',
       emergencyContactPhone: json['emergencyContactPhone']?.toString() ?? '',
       gender: (json['gender']?.toString().trim().isEmpty ?? true) ? null : json['gender'].toString().trim(),
       boarded: json['boarded'] == true || json['boardStatus'] == 'BOARDED',
