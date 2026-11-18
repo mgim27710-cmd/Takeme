@@ -75,6 +75,14 @@ class SocketService {
     });
   }
 
+  /// 차량 운행 시작/종료 (차량 방에 들어가면 현재 상태도 한 번 온다)
+  void onVehicleOperatingStatus(Function(Map<String, dynamic> data) callback) {
+    _socket?.off('vehicleOperatingStatus');
+    _socket?.on('vehicleOperatingStatus', (data) {
+      if (data is Map) callback(Map<String, dynamic>.from(data));
+    });
+  }
+
   void onChildBoardStatusChanged(Function(Map<String, dynamic> data) callback) {
     _socket?.off('childBoardStatusChanged');
     _socket?.off('globalChildBoardStatusChanged');

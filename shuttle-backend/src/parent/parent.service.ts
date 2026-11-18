@@ -495,14 +495,11 @@ export class ParentService {
           ? `${s.adminDisplayName || s.name} (우리 아이 ${isGohome ? '하차지' : '탑승지'})` 
           : (s.adminDisplayName || s.name);
         
-        let expectedTime = isGohome ? '16:30' : '08:40';
-        if (s.raw) {
-          if (isGohome) {
-            expectedTime = s.raw['하원예상시간'] || s.raw['예상하차시간'] || '16:30';
-          } else {
-            expectedTime = s.raw['등원예상시간'] || s.raw['예상탑승시간'] || '08:40';
-          }
-        }
+        // 정류장 예정 시각: 원장 웹에 입력된 값만 보낸다(없으면 null). 지어낸 기본 시각은 지연 안내를 틀리게 만든다.
+        const rawT: any = s.raw || {};
+        const expectedTime: string | null = (isGohome
+          ? (rawT['하원예상시간'] || rawT['예상하차시간'] || rawT['하원시간'])
+          : (rawT['등원예상시간'] || rawT['예상탑승시간'] || rawT['등원시간'])) || null;
 
         const stopAddress = isGohome 
           ? (s.dropoffLocation || s.boardingLocation || s.address)

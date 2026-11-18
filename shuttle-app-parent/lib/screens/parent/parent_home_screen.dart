@@ -46,6 +46,13 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   // 기사 앱이 올린 실제 도로 경로(전체)와 지나온 위치. 없으면 정류장끼리 이은 선으로 대신 그린다.
   List<dynamic>? _roadPath;
   int _roadProgress = 0;
+  // 기사 앱이 위치와 함께 보내는 값: 현재 속도, 다음 정류장 이름과 그곳까지 남은 시간(초)
+  double? _busSpeedKmh;
+  String? _nextStopName;
+  int? _nextStopEtaSec;
+  // 운행 상태: null = 아직 모름, true = 운행 중, false = 운행 안 함. 이번 화면에서 운행 중을 본 적이 있는지
+  bool? _isOperating;
+  bool _sawOperating = false;
   bool _isLoading = true;
   String? _loadError; // 홈 데이터 일부 불러오기 실패 이유 (null 이면 정상)
   bool _isScanning = false;
@@ -63,7 +70,10 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     _loadUnreadCount();
     WidgetsBinding.instance.addPostFrameCallback((_) => _ensureChildInfo());
     _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted) _loadUnreadCount();
+      if (!mounted) return;
+      _loadUnreadCount();
+      // 위치가 끊겼는지(5분)·남은 시간 표시를 새로 계산하도록 다시 그린다
+      setState(() {});
     });
   }
 
@@ -221,13 +231,35 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
               }
             });
             SocketService().onLocationUpdated((data) {
-              if (mounted && data['lat'] != null && data['lng'] != null) {
-                setState(() {
-                  _busLat = double.tryParse(data['lat'].toString());
-                  _busLng = double.tryParse(data['lng'].toString());
-                  _lastBusUpdate = DateTime.now();
-                });
-              }
+              if (!mounted || data['lat'] == null || data['lng'] == null) return;
+              final vid = (data['vehicleId'] as num?)?.toInt();
+              if (vid != null && vid != routeVehicleId) return; // 내 아이 차량 것만
+              setState(() {
+                _busLat = double.tryParse(data['lat'].toString());
+                _busLng = double.tryParse(data['lng'].toString());
+                _lastBusUpdate = DateTime.now();
+                _busSpeedKmh = (data['speedKmh'] as num?)?.toDouble();
+                _nextStopName = data['nextStopName']?.toString();
+                _nextStopEtaSec = (data['nextStopEtaSeconds'] as num?)?.toInt();
+                // 위치가 오면 운행 중이다
+                _isOperating = true;
+                _sawOperating = true;
+              });
+            });
+            SocketService().onVehicleOperatingStatus((data) {
+              if (!mounted) return;
+              final vid = (data['vehicleId'] as num?)?.toInt();
+              if (vid != null && vid != routeVehicleId) return;
+              final op = data['isOperating'] == true;
+              setState(() {
+                _isOperating = op;
+                if (op) _sawOperating = true;
+                if (!op) {
+                  // 운행이 끝나면 지도의 버스 표시는 마지막 위치로 두고, 남은 시간 계산은 멈춘다
+                  _nextStopEtaSec = null;
+                  _nextStopName = null;
+                }
+              });
             });
           } catch (e) {
             debugPrint('[ParentHomeScreen] Socket room error: $e');
@@ -245,7 +277,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
               setState(() {
                 _childInfo!.boardStatus = newBoardStatus;
               });
-              final statusKr = newBoardStatus == 'BOARDED' ? '탑승 완료' : (newBoardStatus == 'ABSENT' ? '결석' : '탑승 대기');
+              final statusKr = newBoardStatus == 'BOARDED' ? '탑승 완료' : (newBoardStatus == 'DROPPED' ? '하차 완료' : (newBoardStatus == 'ABSENT' ? '결석' : '탑승 대기'));
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text('🔔 $studentName 원아가 $statusKr되었습니다.'),
@@ -428,98 +460,192 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     }
   }
 
-  // 실시간 버스 도착 예측 (ETA & 잔여 정류장 계산)
+  // ───────────── 실시간 도착 예정 시간 · 지연 · 운행 상태 ─────────────
+
+  /// 위치가 이 시간 넘게 안 들어오면 "위치가 갱신되지 않았어요"로 알린다
+  static const Duration _staleAfter = Duration(minutes: 5);
+
+  /// 계획보다 이 시간 이상 늦을 때만 "약 N분 늦어요"를 보여준다 (몇 분 차이는 신호·승하차로 흔히 생긴다)
+  static const int _delayNoticeMinutes = 5;
+
+  static double _distM(double lat1, double lng1, double lat2, double lng2) {
+    const r = 6371000.0;
+    final dLat = (lat2 - lat1) * math.pi / 180;
+    final dLng = (lng2 - lng1) * math.pi / 180;
+    final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(lat1 * math.pi / 180) * math.cos(lat2 * math.pi / 180) * math.sin(dLng / 2) * math.sin(dLng / 2);
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+  }
+
+  /// 기사 앱 도로 경로를 [lat, lng] 목록으로
+  List<List<double>> _roadPoints() {
+    final out = <List<double>>[];
+    for (final p in _roadPath ?? const []) {
+      if (p is Map) {
+        final lat = (p['lat'] ?? p['latitude']) as num?;
+        final lng = (p['lng'] ?? p['longitude']) as num?;
+        if (lat != null && lng != null) out.add([lat.toDouble(), lng.toDouble()]);
+      }
+    }
+    return out;
+  }
+
+  /// 버스 위치에서 목적지까지 남은 도로 거리(m). 도로 경로가 없으면 직선거리 x 1.3.
+  /// 목적지를 이미 지났으면 0.
+  double _remainingMeters(double toLat, double toLng) {
+    final pts = _roadPoints();
+    if (pts.length > 1) {
+      int nearest(double lat, double lng, int from) {
+        var best = from;
+        var bestD = double.infinity;
+        for (var i = from; i < pts.length; i++) {
+          final d = _distM(lat, lng, pts[i][0], pts[i][1]);
+          if (d < bestD) {
+            bestD = d;
+            best = i;
+          }
+        }
+        return best;
+      }
+
+      final start = _roadProgress.clamp(0, pts.length - 1);
+      final busIdx = nearest(_busLat!, _busLng!, start);
+      final destIdx = nearest(toLat, toLng, busIdx);
+      if (destIdx <= busIdx) return _distM(_busLat!, _busLng!, toLat, toLng) < 80 ? 0 : _distM(_busLat!, _busLng!, toLat, toLng) * 1.3;
+      var sum = _distM(_busLat!, _busLng!, pts[busIdx][0], pts[busIdx][1]);
+      for (var i = busIdx; i < destIdx; i++) {
+        sum += _distM(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
+      }
+      return sum;
+    }
+    return _distM(_busLat!, _busLng!, toLat, toLng) * 1.3;
+  }
+
+  /// 남은 시간(초). 시내 통학차량 평균(신호·정차 포함) 시속 25km, 지금 더 빨리 달리면 그 속도로.
+  int _etaSeconds(double meters) {
+    final kmh = (_busSpeedKmh != null && _busSpeedKmh! > 25) ? _busSpeedKmh! : 25.0;
+    return (meters / (kmh / 3.6)).round();
+  }
+
+  /// "HH:mm" 예정 시각을 오늘 날짜로
+  DateTime? _plannedTime(String? hhmm) {
+    if (hhmm == null) return null;
+    final m = RegExp(r'^(\d{1,2}):(\d{2})').firstMatch(hhmm.trim());
+    if (m == null) return null;
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day, int.parse(m.group(1)!), int.parse(m.group(2)!));
+  }
+
+  String _hhmm(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+  Map<String, dynamic> _etaState(String status, String title, String subtitle, Color color, {String? notice}) => {
+        'status': status,
+        'title': title,
+        'subtitle': subtitle,
+        'badgeColor': color,
+        'notice': notice,
+      };
+
+  /// 실시간 버스 도착 현황: 운행 전 / 운행 중(남은 시간·다음 정류장·지연) / 위치 끊김 / 운행 종료
+  /// 다른 원아 정류장의 이름·위치는 보여주지 않는다 (학부모에게는 내 아이 정류장만 온다)
   Map<String, dynamic> _calculateLiveETA() {
-    final stops = _routeData?.stops ?? [];
-    if (stops.isEmpty) {
-      return {
-        'status': 'WAITING',
-        'title': '운행 대기 중',
-        'subtitle': '배정된 셔틀이 운행을 준비하고 있습니다.',
-        'badgeColor': const Color(0xFF64748B),
-        'remainingStops': 0,
-        'etaMinutes': 0,
-      };
+    const grey = Color(0xFF64748B);
+    const blue = Color(0xFF3B82F6);
+    const green = Color(0xFF10B981);
+    const amber = Color(0xFFF59E0B);
+    const red = Color(0xFFEF4444);
+    final isGohome = _activeTab == 'gohome';
+    final board = _childInfo?.boardStatus ?? 'WAITING';
+
+    if (_routeData == null || _routeData?.vehicleId == null) {
+      return _etaState('NONE', '배정된 차량이 없어요', '차량이 배정되면 여기서 위치와 도착 시간을 볼 수 있어요.', grey);
+    }
+    if (board == 'ABSENT') {
+      return _etaState('ABSENT', '오늘은 결석이에요', '결석(미탑승)으로 처리되어 셔틀을 타지 않습니다.', grey);
+    }
+    if (board == 'DROPPED') {
+      return _etaState('DONE', isGohome ? '하차 완료' : '유치원 도착 완료', isGohome ? '아이가 안전하게 내렸어요.' : '아이가 유치원에 도착했어요.', green);
     }
 
-    // 버스 좌표가 없거나 운행 전일 때
-    final isBusActive = _busLat != null && _busLng != null;
-    if (!isBusActive) {
-      return {
-        'status': 'SCHEDULED',
-        'title': '탑승 예정',
-        'subtitle': _activeTab == 'gohome' ? '오후 하원 셔틀 운행 대기' : '오전 등원 셔틀 운행 대기',
-        'badgeColor': const Color(0xFF3B82F6),
-        'remainingStops': 0,
-        'etaMinutes': 0,
-      };
-    }
-
-    // 자녀의 탑승 정류장 인덱스 찾기
-    final childName = _childInfo?.name ?? '';
-    final childAddr = _childInfo?.boardingLocation ?? _childInfo?.address ?? '';
-    int childStopIndex = -1;
-
-    for (int i = 0; i < stops.length; i++) {
-      final s = stops[i];
-      if (s.isMyChild ||
-          (childName.isNotEmpty && s.name.contains(childName)) ||
-          (childAddr.isNotEmpty && (s.address?.contains(childAddr) ?? false))) {
-        childStopIndex = i;
-        break;
+    final hasBus = _busLat != null && _busLng != null;
+    if (_isOperating == false) {
+      if (_sawOperating || board == 'BOARDED') {
+        return _etaState('ENDED', '운행이 끝났어요', '오늘 이 차량의 운행이 종료되었습니다.', grey);
       }
+      return _etaState('BEFORE', '아직 출발 전이에요', isGohome ? '하원 차량이 출발하면 위치와 도착 시간을 알려드려요.' : '등원 차량이 출발하면 위치와 도착 시간을 알려드려요.', blue);
     }
-
-    if (childStopIndex == -1) {
-      childStopIndex = (stops.length * 0.6).round().clamp(0, stops.length - 1);
-    }
-
-    // 버스 현재 위치와 가장 가까운 정류장(현재 지난 정류장) 찾기
-    int nearestStopIndex = 0;
-    double minDistance = double.infinity;
-
-    for (int i = 0; i < stops.length; i++) {
-      final s = stops[i];
-      final dLat = s.latitude - _busLat!;
-      final dLng = s.longitude - _busLng!;
-      final dist = math.sqrt(dLat * dLat + dLng * dLng);
-      if (dist < minDistance) {
-        minDistance = dist;
-        nearestStopIndex = i;
+    if (!hasBus) {
+      if (_isOperating == true) {
+        return _etaState('STARTING', '차량이 출발했어요', '차량 위치를 받는 중입니다.', blue);
       }
+      return _etaState('BEFORE', '아직 출발 전이에요', isGohome ? '하원 차량이 출발하면 위치와 도착 시간을 알려드려요.' : '등원 차량이 출발하면 위치와 도착 시간을 알려드려요.', blue);
     }
 
-    final remainingStops = childStopIndex - nearestStopIndex;
-    final etaMinutes = (remainingStops * 2.5).round().clamp(1, 40);
+    // 위치가 5분 넘게 안 들어옴: 마지막 위치를 그대로 보여주고 알린다
+    final last = _lastBusUpdate;
+    final stale = last != null && DateTime.now().difference(last) >= _staleAfter;
 
-    if (remainingStops <= 0) {
-      return {
-        'status': 'ARRIVING',
-        'title': '곧 정류장 도착!',
-        'subtitle': '셔틀버스가 탑승 정류장에 진입 중입니다. 미리 나와주세요.',
-        'badgeColor': const Color(0xFFEF4444),
-        'remainingStops': 0,
-        'etaMinutes': 1,
-      };
-    } else if (remainingStops <= 2) {
-      return {
-        'status': 'NEAR',
-        'title': '$remainingStops정거장 전 (약 $etaMinutes분 후)',
-        'subtitle': '셔틀버스가 우리 동네로 다가오고 있습니다.',
-        'badgeColor': const Color(0xFFF59E0B),
-        'remainingStops': remainingStops,
-        'etaMinutes': etaMinutes,
-      };
+    // 목적지: 아이가 타기 전이면 아이 정류장(등원 탑승지/하원 하차지), 등원 중 이미 탔으면 유치원
+    final myStop = (_routeData?.stops ?? []).cast<RouteStop?>().firstWhere((s) => s?.isMyChild == true, orElse: () => null);
+    double? destLat;
+    double? destLng;
+    String destLabel;
+    String? planned;
+    if (!isGohome && board == 'BOARDED') {
+      destLat = _routeData?.academyLat;
+      destLng = _routeData?.academyLng;
+      destLabel = '유치원';
     } else {
-      return {
-        'status': 'RUNNING',
-        'title': '$remainingStops정거장 전 (약 $etaMinutes분 후)',
-        'subtitle': '정규 코스대로 안전하게 운행 중입니다.',
-        'badgeColor': const Color(0xFF10B981),
-        'remainingStops': remainingStops,
-        'etaMinutes': etaMinutes,
-      };
+      destLat = myStop?.latitude ?? _childInfo?.latitude;
+      destLng = myStop?.longitude ?? _childInfo?.longitude;
+      destLabel = isGohome ? '하차 정류장' : '탑승 정류장';
+      planned = myStop?.expectedTime;
     }
+    if (destLat == null || destLng == null || destLat == 0) {
+      return _etaState('RUNNING', '운행 중이에요', '정류장 위치가 등록되지 않아 도착 시간을 계산할 수 없어요.', green,
+          notice: stale ? '위치가 5분 넘게 갱신되지 않았어요 (마지막 ${_hhmm(last)})' : null);
+    }
+
+    // 다음 정류장이 우리 아이 정류장이면 기사 앱의 도로 기준 남은 시간을 그대로 쓴다
+    final myNames = [myStop?.rawName, _childInfo?.name].whereType<String>().where((e) => e.isNotEmpty);
+    final nextIsMine = _nextStopName != null && myNames.any((n) => _nextStopName!.contains(n));
+    final meters = _remainingMeters(destLat, destLng);
+    var etaSec = (nextIsMine && destLabel != '유치원' && _nextStopEtaSec != null) ? _nextStopEtaSec! : _etaSeconds(meters);
+    if (stale) etaSec = _etaSeconds(meters); // 끊긴 동안은 마지막 위치 기준
+    final etaMin = (etaSec / 60).ceil();
+    final arriveAt = DateTime.now().add(Duration(seconds: etaSec));
+
+    // 다음 정류장 안내: 다른 원아의 정류장 이름은 보여주지 않는다
+    String nextInfo;
+    if (destLabel == '유치원') {
+      nextInfo = '유치원으로 가는 중';
+    } else if (nextIsMine) {
+      nextInfo = '다음 정류장이 우리 아이 $destLabel이에요';
+    } else if (_nextStopName != null) {
+      nextInfo = '다른 정류장을 들른 뒤 도착해요';
+    } else {
+      nextInfo = '$destLabel으로 가는 중';
+    }
+
+    // 지연: 원장님이 정해 둔 예정 시각보다 5분 이상 늦을 때만
+    String? notice;
+    final plan = _plannedTime(planned);
+    if (plan != null) {
+      final late = arriveAt.difference(plan).inMinutes;
+      if (late >= _delayNoticeMinutes) notice = '약 $late분 늦어요 (예정 ${_hhmm(plan)})';
+    }
+    if (stale) notice = '위치가 5분 넘게 갱신되지 않았어요 · 마지막 위치 ${_hhmm(last)} 기준';
+
+    if (meters < 80 || etaMin <= 1) {
+      return _etaState('ARRIVING', '곧 $destLabel 도착', destLabel == '유치원' ? '유치원에 거의 다 왔어요.' : '미리 나와 주세요.', red, notice: notice);
+    }
+    return _etaState(
+      etaMin <= 5 ? 'NEAR' : 'RUNNING',
+      '$destLabel까지 약 $etaMin분 (${_hhmm(arriveAt)} 도착 예정)',
+      nextInfo,
+      stale ? grey : (etaMin <= 5 ? amber : green),
+      notice: notice,
+    );
   }
 
   void _showAllergyEditDialog() {
@@ -952,7 +1078,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                   ),
                 ],
               ),
-              if (_busLat != null && _busLng != null)
+              if (_busLat != null &&
+                  _busLng != null &&
+                  _isOperating != false &&
+                  _lastBusUpdate != null &&
+                  DateTime.now().difference(_lastBusUpdate!) < _staleAfter)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
@@ -1000,8 +1130,24 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                     const SizedBox(height: 2),
                     Text(
                       eta['subtitle'],
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+                      style: const TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
                     ),
+                    // 지연("약 N분 늦어요") 또는 위치 끊김(5분) 안내
+                    if (eta['notice'] != null) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Icon(Icons.schedule, size: 16, color: Color(0xFFB45309)),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              eta['notice'],
+                              style: const TextStyle(fontSize: 14, color: Color(0xFFB45309), fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1015,10 +1161,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   // 라이브 탑승 3단계 스테퍼 (Live Stepper)
   Widget _buildRideStepper() {
     // 0: 탑승 대기, 1: 버스 탑승 중, 2: 도착 완료
+    // 아이 상태 기준: 탑승 전 → 탑승(이동 중) → 하차(도착)
+    final board = _childInfo?.boardStatus ?? 'WAITING';
     int currentStep = 0;
-    if (_busLat != null && _busLng != null) {
-      currentStep = 1;
-    }
+    if (board == 'BOARDED') currentStep = 1;
+    if (board == 'DROPPED') currentStep = 2;
 
     final isGohome = _activeTab == 'gohome';
     final stepTitles = isGohome
