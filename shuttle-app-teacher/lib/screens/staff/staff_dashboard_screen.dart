@@ -296,6 +296,68 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     }
   }
 
+  /// 하차 처리 (탑승한 원아만)
+  Future<bool> _dropStudent(StudentModel student, {bool reload = true}) async {
+    try {
+      final res = await ApiService().postWithAuth(
+        Uri.parse('${AppConfig.apiHost}/teacher/drop-student'),
+        jsonEncode({'studentId': student.id}),
+      );
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        if (reload) _loadAllData();
+        return true;
+      }
+      if (mounted) {
+        String msg = '${student.name} 원아 하차 처리에 실패했습니다.';
+        try {
+          final m = jsonDecode(utf8.decode(res.bodyBytes))['message'];
+          if (m != null) msg = '$msg ${m is List ? m.join(', ') : m}';
+        } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${student.name} 원아 하차 처리에 실패했습니다. ${friendlyError(e)}'), backgroundColor: Colors.red),
+        );
+      }
+    }
+    return false;
+  }
+
+  Future<void> _handleDropStudent(StudentModel student) async {
+    if (await _dropStudent(student)) {
+      _flutterTts.speak('${student.name} 원아 하차 완료');
+    }
+  }
+
+  void _confirmDropAll(List<StudentModel> boarded) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('${boarded.length}명 모두 하차', style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: Text('타고 있는 원아를 모두 하차 처리할까요?\n\n${boarded.map((s) => s.name).join(', ')}',
+            style: const TextStyle(fontSize: 15, height: 1.4)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              var ok = 0;
+              for (final s in boarded) {
+                if (await _dropStudent(s, reload: false)) ok++;
+              }
+              _loadAllData();
+              if (ok > 0) _flutterTts.speak('$ok명 하차 완료');
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF7C3AED)),
+            child: const Text('모두 하차', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _handleUnboardStudent(StudentModel student) {
     showDialog(
       context: context,
@@ -602,10 +664,13 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     }
   }
 
-  /// 원아 상태(색 + 문구 + 아이콘). 서버 상태값이 탑승 대기/탑승/결석 세 가지라 하차는 아직 표시하지 않는다.
+  /// 원아 상태(색 + 문구 + 아이콘): 탑승 전 / 탑승 / 하차 / 결석
   ({String label, IconData icon, Color fg, Color bg, Color border}) _statusOf(StudentModel st) {
     if (st.absent) {
       return (label: '결석', icon: Icons.block, fg: const Color(0xFFB91C1C), bg: const Color(0xFFFEE2E2), border: const Color(0xFFFECACA));
+    }
+    if (st.dropped) {
+      return (label: '하차', icon: Icons.where_to_vote, fg: const Color(0xFF6D28D9), bg: const Color(0xFFEDE9FE), border: const Color(0xFFDDD6FE));
     }
     if (st.boarded) {
       return (label: '탑승', icon: Icons.check_circle, fg: const Color(0xFF15803D), bg: const Color(0xFFDCFCE7), border: const Color(0xFFBBF7D0));
@@ -885,7 +950,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                   const SizedBox(height: 16),
 
                   // 처리 버튼: 상태마다 할 수 있는 동작만 보여준다
-                  if (!st.boarded && !st.absent)
+                  if (!st.boarded && !st.absent && !st.dropped)
                     Row(
                       children: [
                         Expanded(
@@ -916,19 +981,37 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                       ],
                     )
                   else if (st.boarded)
-                    SizedBox(
-                      width: double.infinity,
-                      child: actionButton(
-                        label: '탑승 취소',
-                        icon: Icons.undo,
-                        color: const Color(0xFFDC2626),
-                        outlined: true,
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _handleUnboardStudent(st);
-                        },
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: actionButton(
+                            label: '하차',
+                            icon: Icons.where_to_vote,
+                            color: const Color(0xFF7C3AED),
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _handleDropStudent(st);
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: actionButton(
+                            label: '탑승 취소',
+                            icon: Icons.undo,
+                            color: const Color(0xFFDC2626),
+                            outlined: true,
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _handleUnboardStudent(st);
+                            },
+                          ),
+                        ),
+                      ],
                     )
+                  else if (st.dropped)
+                    noteBox('오늘 이 운행에서 하차한 원아입니다.', const Color(0xFF6D28D9), const Color(0xFFF5F3FF), Icons.where_to_vote)
                   else
                     noteBox('오늘 결석(미탑승) 처리된 원아입니다.', const Color(0xFFB91C1C), const Color(0xFFFEF2F2), Icons.block),
                 ],
@@ -1065,6 +1148,17 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
+                              // 유치원·하차지에 도착했을 때 타고 있는 원아를 한 번에 하차 처리
+                              if (_selectedStudentIds.isEmpty && runList.any((s) => s.boarded))
+                                TextButton.icon(
+                                  onPressed: () => _confirmDropAll(runList.where((s) => s.boarded).toList()),
+                                  icon: const Icon(Icons.where_to_vote, size: 18, color: Color(0xFF7C3AED)),
+                                  label: Text(
+                                    '모두 하차 (${runList.where((s) => s.boarded).length})',
+                                    style: const TextStyle(color: Color(0xFF7C3AED), fontWeight: FontWeight.w800, fontSize: 14),
+                                  ),
+                                  style: TextButton.styleFrom(minimumSize: const Size(48, 44)),
+                                ),
                               if (_selectedStudentIds.isNotEmpty)
                                 GestureDetector(
                                   onTap: _showBroadcastModal,

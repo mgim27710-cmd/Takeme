@@ -1095,19 +1095,56 @@ class DriverNavigator extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> stop({bool interiorChecked = true}) async {
+  /// 아직 하차 처리 안 된(차에 타고 있는) 원아 이름. 확인하지 못하면 null
+  Future<List<String>?> fetchUndroppedNames() async {
+    if (!serverLive || testMode) return const [];
+    try {
+      final res = await ApiService()
+          .getWithAuth(Uri.parse('${AppConfig.apiHost}/teacher/undropped-students'))
+          .timeout(const Duration(seconds: 6));
+      if (res.statusCode != 200) return null;
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      final list = data is Map ? data['students'] : null;
+      if (list is! List) return const [];
+      return list.whereType<Map>().map((e) => e['name']?.toString() ?? '').where((n) => n.isNotEmpty).toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 운행 종료. 서버가 "하차 안 된 원아가 있다"고 막으면 그 이름 목록을 돌려주고 운행은 그대로 둔다.
+  /// ignoreUndropped: 기사가 경고를 보고도 종료하기로 한 경우 (서버에 기록이 남고 원장님께 알림)
+  Future<List<String>?> stop({bool interiorChecked = true, bool ignoreUndropped = false}) async {
     busy = true;
     notifyListeners();
-    _stopSimulation();
-    unawaited(_setKeepScreenOn(false));
-    if (serverLive) {
+    if (serverLive && !testMode) {
       try {
-        await _post('/teacher/end-operation', {'interiorChecked': interiorChecked});
+        final res = await ApiService().postWithAuth(
+          Uri.parse('${AppConfig.apiHost}/teacher/end-operation'),
+          {'interiorChecked': interiorChecked, 'ignoreUndropped': ignoreUndropped},
+        );
+        if (res.statusCode == 409) {
+          final data = jsonDecode(utf8.decode(res.bodyBytes));
+          final list = data is Map ? (data['students'] ?? (data['message'] is Map ? data['message']['students'] : null)) : null;
+          final names = list is List
+              ? list.whereType<Map>().map((e) => e['name']?.toString() ?? '').where((n) => n.isNotEmpty).toList()
+              : <String>[];
+          busy = false;
+          notifyListeners();
+          return names.isEmpty ? ['(이름 확인 필요)'] : names;
+        }
+        if (res.statusCode >= 400) {
+          actionError = '운행 종료가 서버에 전달되지 않았습니다. (${res.statusCode}) 연결 후 다시 운행 종료를 눌러 주세요.';
+        }
       } catch (e) {
         // 화면상으로는 운행이 끝나지만 서버에는 아직 운행 중으로 남을 수 있다 -> 반드시 알린다
         actionError = '운행 종료가 서버에 전달되지 않았습니다. ${friendlyError(e)} 연결 후 다시 운행 종료를 눌러 주세요.';
       }
-      if (vehicleId != null) SocketService().sendOperationStatus(vehicleId: vehicleId!, isOperating: false);
+    }
+    _stopSimulation();
+    unawaited(_setKeepScreenOn(false));
+    if (serverLive && vehicleId != null) {
+      SocketService().sendOperationStatus(vehicleId: vehicleId!, isOperating: false);
     }
     _resetDriving();
     _syncOverlay();
@@ -1126,6 +1163,7 @@ class DriverNavigator extends ChangeNotifier {
       map.centerOn(position!, zoom: 15);
     }
     await previewRoutes();
+    return null;
   }
 
   void _resetDriving() {

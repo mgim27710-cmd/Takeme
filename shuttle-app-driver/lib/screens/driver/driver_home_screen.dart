@@ -392,7 +392,88 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     ),
   );
   _map.setInteractive(true);
-  if (ok == true) await _nav.stop(interiorChecked: true);
+  if (ok != true) return;
+
+  // 운행 종료 전 점검: 탑승 처리 후 하차 처리가 안 된 원아가 있으면 이름과 함께 경고한다.
+  // 남은 원아가 없을 때만 그대로 종료한다.
+  var ignoreUndropped = false;
+  if (!_nav.testMode) {
+    final names = await _nav.fetchUndroppedNames();
+    if (names != null && names.isNotEmpty) {
+      if (!mounted) return;
+      if (await _showUndroppedWarning(names) != true) return;
+      ignoreUndropped = true;
+    }
+  }
+  final blocked = await _nav.stop(interiorChecked: true, ignoreUndropped: ignoreUndropped);
+  // 확인하는 사이 상태가 바뀌었거나 목록을 못 불러온 경우 서버가 한 번 더 막는다
+  if (blocked != null && blocked.isNotEmpty && mounted) {
+    if (await _showUndroppedWarning(blocked) == true) {
+      await _nav.stop(interiorChecked: true, ignoreUndropped: true);
+    }
+  }
+  }
+
+  /// 미하차 원아 경고. true = 그래도 종료 (서버에 기록이 남고 원장님께 알림)
+  Future<bool?> _showUndroppedWarning(List<String> names) async {
+    _map.setInteractive(false);
+    final res = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PointerInterceptor(
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: const Row(
+            children: [
+              Icon(Icons.warning_rounded, color: _C.red, size: 26),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text('하차 안 된 원아가 있어요',
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 19, color: _C.red)),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(names.join(', '),
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: _C.slate800, height: 1.4)),
+              const SizedBox(height: 12),
+              const Text(
+                '차 안에 남은 아이가 없는지 다시 확인해 주세요.\n차량선생님이 하차 처리를 하지 않았을 수도 있습니다.',
+                style: TextStyle(fontSize: 15, color: _C.slate600, height: 1.4),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '그래도 종료하면 기록이 남고 원장님께 알림이 갑니다.',
+                style: TextStyle(fontSize: 13, color: _C.slate500, height: 1.4),
+              ),
+            ],
+          ),
+          actionsAlignment: MainAxisAlignment.spaceBetween,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+              child: const Text('그래도 종료', style: TextStyle(color: _C.red, fontWeight: FontWeight.w700, fontSize: 15)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _C.blue,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(140, 52),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('다시 확인하기', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+            ),
+          ],
+        ),
+      ),
+    );
+    _map.setInteractive(true);
+    return res;
   }
 
   /// 긴급 버튼 (길게 눌렀을 때 작동): 원장님 및 타 차량에 위치와 함께 사고·고장 긴급 알림 발송

@@ -17,6 +17,8 @@ class StudentModel {
   final String emergencyContactPhone;
   final bool boarded;
   final bool absent;
+  /// 이번 운행에서 하차함
+  final bool dropped;
   final String expectedTime;
   final String? actualBoardTime;
   final String? teacherMemo;
@@ -45,6 +47,7 @@ class StudentModel {
     this.emergencyContactPhone = '',
     this.boarded = false,
     this.absent = false,
+    this.dropped = false,
     this.expectedTime = '15:30',
     this.actualBoardTime,
     this.teacherMemo,
@@ -81,6 +84,7 @@ class StudentModel {
       gender: (json['gender']?.toString().trim().isEmpty ?? true) ? null : json['gender'].toString().trim(),
       boarded: json['boarded'] == true || json['boardStatus'] == 'BOARDED',
       absent: json['absent'] == true || json['boardStatus'] == 'ABSENT',
+      dropped: json['dropped'] == true || json['boardStatus'] == 'DROPPED',
       expectedTime: json['expectedTime'] ?? '15:30',
       actualBoardTime: json['actualBoardTime']?.toString(),
       teacherMemo: json['teacherMemo'],

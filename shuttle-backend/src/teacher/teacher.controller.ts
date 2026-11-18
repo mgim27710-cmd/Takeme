@@ -122,13 +122,28 @@ export class TeacherController {
     return this.teacherService.startOperation(email);
   }
 
+  /** 운행 종료. 하차 처리 안 된 원아가 있으면 409(UNDROPPED_STUDENTS, 이름 목록). ignoreUndropped=true 면 기록을 남기고 종료 */
   @Post('end-operation')
   async endOperation(
     @AuthEmail() email: string,
-    @Body() body?: { interiorChecked?: boolean },
+    @Body() body?: { interiorChecked?: boolean; ignoreUndropped?: boolean },
   ) {
     if (!email) throw new BadRequestException('이메일이 필요합니다.');
-    return this.teacherService.endOperation(email, body?.interiorChecked);
+    return this.teacherService.endOperation(email, body?.interiorChecked, body?.ignoreUndropped === true);
+  }
+
+  /** 하차 처리 */
+  @Post('drop-student')
+  async dropStudent(@AuthEmail() email: string, @Body() body: { studentId: number }) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.dropStudent(email, Number(body?.studentId));
+  }
+
+  /** 아직 하차 처리 안 된(타고 있는) 원아 */
+  @Get('undropped-students')
+  async getUndroppedStudents(@AuthEmail() email: string) {
+    if (!email) throw new BadRequestException('이메일이 필요합니다.');
+    return this.teacherService.getUndroppedStudents(email);
   }
 
   @Post('ready-to-depart')
