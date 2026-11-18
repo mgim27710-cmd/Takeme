@@ -59,6 +59,20 @@ export class JwtAuthGuard implements CanActivate {
       throw new UnauthorizedException('다른 기기 또는 브라우저에서 로그인되어 현재 접속이 종료되었습니다. 다시 로그인해 주세요.');
     }
 
+    // 3-1. 은행형 IP 바인딩 보안 검증 (원장 및 관리자 웹 대상, ENABLE_ADMIN_IP_BINDING=true 시 활성화)
+    const enableAdminIpBinding = process.env.ENABLE_ADMIN_IP_BINDING === 'true';
+    const isAdminRole = payload.role === 'ACADEMY_ADMIN' || payload.role === 'SUPER_ADMIN';
+
+    if (enableAdminIpBinding && isAdminRole && payload.clientIp) {
+      const rawCurrentIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || req.connection?.remoteAddress || '';
+      const currentIp = rawCurrentIp.replace(/^.*:/, '');
+      const tokenIp = payload.clientIp.replace(/^.*:/, '');
+
+      if (tokenIp && currentIp && tokenIp !== currentIp && tokenIp !== '127.0.0.1' && currentIp !== '127.0.0.1') {
+        throw new UnauthorizedException('보안 경고: 로그인 시점의 IP와 다른 환경에서 접속이 감지되었습니다. (은행형 IP 바인딩 보안 정책 적용)');
+      }
+    }
+
     req.user = payload;
     req.dbUser = user;
     if (user.academyId && !req.user.academyId) {

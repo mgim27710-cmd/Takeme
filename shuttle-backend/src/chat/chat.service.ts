@@ -66,7 +66,7 @@ export class ChatService {
       return { drivers: [], teachers: [], parents: [], students: [], admins: [] };
     }
 
-    // 1. 차량 정보 조회 (기사 및 동승교사 매핑)
+    // 1. 차량 정보 조회 (기사 및 차량선생님 매핑)
     const vehicles = await this.vehicleRepo.find({
       where: { academy: { id: targetAcademyId } },
       relations: { driverUser: true, teacherUser: true },
@@ -82,7 +82,7 @@ export class ChatService {
         vehicleUserIds.add(v.driverUser.id);
       }
       if (v.teacherUser) {
-        teacherVehicleMap.set(v.teacherUser.id, v.busNumber ? `${v.busNumber} 동승교사` : '동승교사');
+        teacherVehicleMap.set(v.teacherUser.id, v.busNumber ? `${v.busNumber} 차량선생님` : '차량선생님');
         vehicleUserIds.add(v.teacherUser.id);
       }
     }
@@ -146,7 +146,7 @@ export class ChatService {
         u.role === UserRole.HOMEROOM_TEACHER ||
         u.role === UserRole.SHUTTLE_TEACHER
       ) {
-        const sub = u.assignedClass ? `${u.assignedClass} 담임` : teacherVehicleMap.get(u.id) || '교사';
+        const sub = u.assignedClass ? `${u.assignedClass} 담임` : teacherVehicleMap.get(u.id) || (u.role === UserRole.SHUTTLE_TEACHER ? '차량선생님' : '교사');
         teachers.push({
           id: u.id,
           name: u.name || '선생님',
@@ -200,7 +200,13 @@ export class ChatService {
   private async broadcastToRoom(roomId: number, message: any) {
     const room = await this.roomRepo.findOne({ where: { id: roomId }, relations: { members: { user: true } } });
     const ids = (room?.members || []).map(m => m.user?.id).filter(Boolean) as number[];
-    this.chatGateway.broadcastMessageToRoom(roomId, message, ids);
+    const memberCount = ids.length || 2;
+    const msgWithCounts = {
+      ...message,
+      memberCount,
+      unreadCount: message.unreadCount !== undefined ? message.unreadCount : Math.max(0, memberCount - 1),
+    };
+    this.chatGateway.broadcastMessageToRoom(roomId, msgWithCounts, ids);
   }
 
   /** WebSocket 메시지 전송용: 사용자 ID 기준 (참여자 검증 포함) */
@@ -535,30 +541,80 @@ export class ChatService {
     }
 
     const rooms = await query.getMany();
+    const roomIds = rooms.map(r => r.id);
 
-    for (const room of rooms) {
-      const latestMessage = await this.messageRepo.findOne({
-        where: { room: { id: room.id } },
-        order: { createdAt: 'DESC' },
-        relations: { sender: true },
-      });
-      (room as any).latestMessage = latestMessage || null;
+    const latestMap = new Map<number, ChatMessage>();
+    const unreadMap = new Map<number, number>();
 
-      // 안 읽은 메시지 수 계산
-      const allMsgs = await this.messageRepo.find({
-        where: { room: { id: room.id } },
-        relations: { sender: true },
-      });
-      let unread = 0;
-      for (const m of allMsgs) {
-        if (m.sender && m.sender.id !== userId) {
-          const reads = (m.readBy || []).map(Number);
-          if (!reads.includes(userId)) {
-            unread++;
+    if (roomIds.length > 0) {
+      // 1) 각 방별 최신 메시지를 MAX(id) 기반 단일 조인 쿼리로 일괄 조회
+      try {
+        const latestMessages = await this.messageRepo
+          .createQueryBuilder('msg')
+          .leftJoinAndSelect('msg.sender', 'sender')
+          .leftJoinAndSelect('msg.room', 'room')
+          .innerJoin(
+            (subQuery) =>
+              subQuery
+                .select('m.roomId', 'roomId')
+                .addSelect('MAX(m.id)', 'maxId')
+                .from(ChatMessage, 'm')
+                .where('m.roomId IN (:...roomIds)', { roomIds })
+                .groupBy('m.roomId'),
+            'latest',
+            'msg.id = latest.maxId'
+          )
+          .getMany();
+
+        for (const msg of latestMessages) {
+          if (msg.room?.id) {
+            latestMap.set(msg.room.id, msg);
+          }
+        }
+      } catch (err) {
+        // 폴백: 서브쿼리 조인이 실패할 경우 최신순 조회로 안전하게 매핑
+        const recentMessages = await this.messageRepo.find({
+          where: { room: { id: In(roomIds) } },
+          order: { createdAt: 'DESC' },
+          relations: { sender: true, room: true },
+          take: roomIds.length * 5,
+        });
+        for (const msg of recentMessages) {
+          if (msg.room?.id && !latestMap.has(msg.room.id)) {
+            latestMap.set(msg.room.id, msg);
           }
         }
       }
-      (room as any).unreadCount = unread;
+
+      // 2) 안 읽은 메시지 수 계산:
+      // senderId != userId 인 안 읽은 메시지 후보들만 경량 조회
+      try {
+        const candidateMsgs = await this.messageRepo
+          .createQueryBuilder('msg')
+          .select(['msg.id', 'msg.readBy', 'room.id', 'sender.id'])
+          .leftJoin('msg.room', 'room')
+          .leftJoin('msg.sender', 'sender')
+          .where('room.id IN (:...roomIds)', { roomIds })
+          .andWhere('(sender.id IS NULL OR sender.id != :userId)', { userId })
+          .getMany();
+
+        for (const m of candidateMsgs) {
+          const reads = (m.readBy || []).map(Number);
+          if (!reads.includes(userId)) {
+            const rId = m.room?.id;
+            if (rId) {
+              unreadMap.set(rId, (unreadMap.get(rId) || 0) + 1);
+            }
+          }
+        }
+      } catch (err) {
+        // 에러 시 0 유지
+      }
+    }
+
+    for (const room of rooms) {
+      (room as any).latestMessage = latestMap.get(room.id) || null;
+      (room as any).unreadCount = unreadMap.get(room.id) || 0;
     }
 
     // 내 참여 정보(고정·삭제 여부)
@@ -658,7 +714,22 @@ export class ChatService {
       where: { id: roomId },
       relations: { members: { user: true } },
     });
-    const memberCount = room?.members?.length || 2;
+    if (!room) {
+      throw new BadRequestException('채팅방을 찾을 수 없습니다.');
+    }
+
+    // 테넌트 격리 및 인가 검증: 참여자가 아닌 경우 조회 차단 (SUPER_ADMIN 제외)
+    if (currentUserId) {
+      const isMember = room.members?.some(m => m.user?.id === currentUserId);
+      if (!isMember) {
+        const user = await this.userRepo.findOne({ where: { id: currentUserId } });
+        if (user && user.role !== UserRole.SUPER_ADMIN) {
+          throw new ForbiddenException('해당 채팅방에 참여 중인 사용자만 메시지를 조회할 수 있습니다.');
+        }
+      }
+    }
+
+    const memberCount = room?.members?.length && room.members.length > 0 ? room.members.length : 2;
 
     const messages = await this.messageRepo.find({
       where: { room: { id: roomId } },
@@ -666,27 +737,84 @@ export class ChatService {
       relations: { sender: true },
     });
 
-    let hasNewRead = false;
-    for (const m of messages) {
-      const readByList = (m.readBy || []).map(Number);
-      if (currentUserId && m.sender && m.sender.id !== currentUserId && !readByList.includes(currentUserId)) {
-        readByList.push(currentUserId);
-        m.readBy = readByList;
-        await this.messageRepo.save(m);
-        hasNewRead = true;
+    const updatedIds: number[] = [];
+    if (currentUserId) {
+      const toUpdate: ChatMessage[] = [];
+      for (const m of messages) {
+        if (m.sender && m.sender.id !== currentUserId) {
+          const readByList = (m.readBy || []).map(Number);
+          if (!readByList.includes(currentUserId)) {
+            readByList.push(currentUserId);
+            m.readBy = readByList;
+            toUpdate.push(m);
+            updatedIds.push(m.id);
+          }
+        }
       }
-      (m as any).unreadCount = Math.max(0, memberCount - (m.readBy ? m.readBy.length : 0));
+      if (toUpdate.length > 0) {
+        await this.messageRepo.save(toUpdate);
+        await this.memberRepo.update(
+          { room: { id: roomId }, user: { id: currentUserId } },
+          { lastReadAt: new Date() }
+        ).catch(() => {});
+        this.chatGateway.server?.to(`chat_${roomId}`).emit('messagesRead', {
+          roomId,
+          userId: currentUserId,
+          messageIds: updatedIds,
+        });
+        this.chatGateway.broadcastReadStatus(roomId, currentUserId);
+        this.chatGateway.server?.emit('roomUpdated', { roomId });
+      }
     }
 
-    if (hasNewRead && currentUserId) {
-      await this.memberRepo.update(
-        { room: { id: roomId }, user: { id: currentUserId } },
-        { lastReadAt: new Date() }
-      ).catch(() => {});
-      this.chatGateway.broadcastReadStatus(roomId, currentUserId);
+    return messages.map(m => {
+      const readSet = new Set((m.readBy || []).map(Number));
+      if (m.sender?.id) readSet.add(m.sender.id);
+      const readCount = readSet.size;
+      const unreadCount = Math.max(0, memberCount - readCount);
+      return {
+        ...m,
+        memberCount,
+        unreadCount,
+      };
+    });
+  }
+
+  async markRoomMessagesRead(roomId: number, userId: number) {
+    if (!roomId || !userId) return { success: false, count: 0 };
+    const room = await this.roomRepo.findOne({
+      where: { id: roomId },
+      relations: { members: true },
+    });
+    if (!room) return { success: false, count: 0 };
+
+    const unreadMessages = await this.messageRepo
+      .createQueryBuilder('m')
+      .where('m.roomId = :roomId', { roomId })
+      .andWhere('(m.senderId != :userId OR m.senderId IS NULL)', { userId })
+      .getMany();
+
+    const updatedIds: number[] = [];
+    for (const m of unreadMessages) {
+      const readList = (m.readBy || []).map(Number);
+      if (!readList.includes(userId)) {
+        readList.push(userId);
+        m.readBy = readList;
+        await this.messageRepo.save(m);
+        updatedIds.push(m.id);
+      }
     }
 
-    return messages;
+    if (updatedIds.length > 0) {
+      this.chatGateway.server?.to(`chat_${roomId}`).emit('messagesRead', {
+        roomId,
+        userId,
+        messageIds: updatedIds,
+      });
+      this.chatGateway.server?.emit('roomUpdated', { roomId });
+    }
+
+    return { success: true, count: updatedIds.length };
   }
 
   async createRoomByEmail(name: string | undefined, type: string | undefined, userIds: number[], creatorEmail: string) {
@@ -724,6 +852,14 @@ export class ChatService {
     }
 
     const targetUsers = await this.userRepo.find({ where: { id: In(userIds) } });
+    if (creator.academyId && creator.role !== UserRole.SUPER_ADMIN) {
+      const otherUsers = targetUsers.filter(u => u.id !== creator.id);
+      for (const u of otherUsers) {
+        if (u.academyId && u.academyId !== creator.academyId) {
+          throw new ForbiddenException('타 유치원 소속 사용자는 채팅방에 초대할 수 없습니다.');
+        }
+      }
+    }
     let roomName = name?.trim();
     if (!roomName) {
       const otherNames = targetUsers.filter(u => u.id !== creator.id).map(u => u.name || u.email);
@@ -758,26 +894,39 @@ export class ChatService {
     });
   }
 
-  async sendMessageAndBroadcast(roomId: number, senderEmail: string, text: string) {
+  async sendMessageAndBroadcast(roomId: number, senderEmail: string, text: string, type: string = 'TEXT', payload?: any) {
     const user = await this.userRepo.findOne({ where: { email: senderEmail } });
     if (!user) throw new BadRequestException('사용자를 찾을 수 없습니다.');
 
     if (!(await this.isUserRoomMember(roomId, user.id))) {
       throw new ForbiddenException('대화방 참여자만 메시지를 보낼 수 있습니다.');
     }
-    const targetRoom = await this.roomRepo.findOne({ where: { id: roomId } });
-    if (targetRoom?.type === ChatRoomType.NOTIFICATION_SYSTEM) {
+    const room = await this.roomRepo.findOne({
+      where: { id: roomId },
+      relations: { members: { user: true } },
+    });
+    if (!room) throw new BadRequestException('채팅방을 찾을 수 없습니다.');
+
+    if (room.type === ChatRoomType.NOTIFICATION_SYSTEM) {
       const isAdmin = user.role === UserRole.ACADEMY_ADMIN || user.role === UserRole.SUPER_ADMIN;
-      if (targetRoom.name === PERSONAL_NOTI_ROOM_NAME || !isAdmin) {
+      if (room.name === PERSONAL_NOTI_ROOM_NAME || !isAdmin) {
         throw new ForbiddenException('알림 채널에는 답장을 보낼 수 없습니다.');
       }
     }
 
+    const isMember = room.members?.some(m => m.user?.id === user.id);
+    if (!isMember && user.role !== UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException('해당 채팅방에 참여 중인 멤버만 메시지를 전송할 수 있습니다.');
+    }
+    const memberCount = room?.members?.length && room.members.length > 0 ? room.members.length : 2;
+    const initialUnreadCount = Math.max(0, memberCount - 1);
+
     const message = this.messageRepo.create({
       room: { id: roomId },
       sender: user,
-      text: text.trim(),
-      type: 'TEXT',
+      text: (text || '').trim(),
+      type: type || 'TEXT',
+      payload: payload || null,
       readBy: [user.id],
     });
     const saved = await this.messageRepo.save(message);
@@ -790,22 +939,19 @@ export class ChatService {
     });
 
     if (fullMessage) {
-      const roomForBroadcast = await this.roomRepo.findOne({ where: { id: roomId }, relations: { members: { user: true } } });
-      this.chatGateway.broadcastMessageToRoom(
-        roomId,
-        fullMessage,
-        (roomForBroadcast?.members || []).map(m => m.user?.id).filter(Boolean) as number[],
-      );
+      const payloadMessage = {
+        ...fullMessage,
+        memberCount,
+        unreadCount: initialUnreadCount,
+      };
+      const memberIds = (room?.members || []).map(m => m.user?.id).filter(Boolean) as number[];
+      this.chatGateway.broadcastMessageToRoom(roomId, payloadMessage, memberIds);
     }
 
     // [교사/기사 앱 수신함 즉시 동기화]
     // 관리자(원장님) 또는 다른 사용자가 메시지를 보냈을 때,
     // 이 방의 다른 멤버들(교사, 기사 등)의 앱 수신함(ParentMessage)으로 자동 전달!
     try {
-      const room = await this.roomRepo.findOne({
-        where: { id: roomId },
-        relations: { members: { user: true } },
-      });
       if (room && room.members) {
         const isSenderAdmin = user.role === 'ACADEMY_ADMIN' || user.role === 'SUPER_ADMIN';
         const isDirect = room.type === ChatRoomType.DIRECT || room.members.length <= 2;
@@ -877,7 +1023,7 @@ export class ChatService {
         busNumber: v.busNumber,
         driverName: v.driverUser?.name || v.driverName || '기사님',
         driverPhone: v.driverPhone,
-        teacherName: v.teacherUser?.name || v.teacherName || '지도교사',
+        teacherName: v.teacherUser?.name || v.teacherName || '차량선생님',
         teacherPhone: v.teacherPhone,
         colorHex: v.colorHex || '#3b82f6',
       })),
@@ -984,6 +1130,8 @@ export class ChatService {
       throw new ForbiddenException('다른 유치원의 차량에는 신청할 수 없습니다.');
     }
 
+    const targetAcademyId = vehicle?.academy?.id || requester.academyId;
+
     let studentName = data.studentName;
     let studentObj: Student | null = null;
     let studentRaw: any = {};
@@ -992,34 +1140,63 @@ export class ChatService {
         where: { id: Number(data.studentId) },
         relations: { parentUser: true, assignedVehicle: true },
       });
-      if (studentObj) {
-        studentName = studentObj.adminDisplayName || studentObj.name;
-        if (typeof studentObj.raw === 'string') {
-          try { studentRaw = JSON.parse(studentObj.raw); } catch (e) {}
-        } else if (typeof studentObj.raw === 'object' && studentObj.raw) {
-          studentRaw = studentObj.raw;
-        }
-      }
+    } else if (studentName && targetAcademyId) {
+      const trimmedName = String(studentName).trim();
+      const candidates = await this.studentRepo.find({
+        where: { academy: { id: targetAcademyId } },
+        relations: { parentUser: true, assignedVehicle: true },
+      });
+      studentObj =
+        candidates.find(
+          (c) =>
+            c.name === trimmedName ||
+            c.adminDisplayName === trimmedName ||
+            (c.name && c.name.split('/')[0].trim() === trimmedName),
+        ) || null;
+    }
 
+    if (studentObj) {
+      studentName = studentObj.adminDisplayName || studentObj.name;
+      if (typeof studentObj.raw === 'string') {
+        try { studentRaw = JSON.parse(studentObj.raw); } catch (e) {}
+      } else if (typeof studentObj.raw === 'object' && studentObj.raw) {
+        studentRaw = studentObj.raw;
+      }
+    }
+
+    const resolvedStudentId = data.studentId ? Number(data.studentId) : studentObj?.id;
+    if (resolvedStudentId) {
       // Check if an active payment request already exists for this student (중복 신청 방지 원아 락)
-      const existingPending = await this.messageRepo
-        .createQueryBuilder('m')
-        .where("m.type = 'PAYMENT_REQUEST'")
-        .andWhere("m.payload->>'studentId' = :sId", { sId: String(data.studentId) })
-        .andWhere("m.payload->>'status' IN ('PENDING', 'RE_REQUESTED')")
-        .getOne();
+      const recentRequests = await this.messageRepo.find({
+        where: { type: 'PAYMENT_REQUEST' },
+        order: { id: 'DESC' },
+        take: 200,
+      });
+      const existingPending = recentRequests.find((m) => {
+        let p: any = m.payload;
+        if (typeof p === 'string') {
+          try { p = JSON.parse(p); } catch (e) { p = null; }
+        }
+        return (
+          p &&
+          String(p.studentId) === String(resolvedStudentId) &&
+          ['PENDING', 'RE_REQUESTED'].includes(p.status)
+        );
+      });
 
       if (existingPending) {
-        const reqName = existingPending.payload?.requesterName || '다른 교직원';
-        const reqStatus = existingPending.payload?.status === 'RE_REQUESTED' ? '새 위치 제안 검토 중' : '승인 대기 중';
+        let p: any = existingPending.payload;
+        if (typeof p === 'string') {
+          try { p = JSON.parse(p); } catch (e) { p = {}; }
+        }
+        const reqName = p?.requesterName || '다른 교직원';
+        const reqStatus = p?.status === 'RE_REQUESTED' ? '새 위치 제안 검토 중' : '승인 대기 중';
         throw new BadRequestException(
           `이미 해당 원아(${studentName})에 대한 결제/탑승 승인 요청이 진행 중입니다. (신청자: ${reqName}, 상태: ${reqStatus})`
         );
       }
     }
     studentName = studentName || '신규 원생';
-
-    const targetAcademyId = vehicle?.academy?.id || requester.academyId;
 
     // 결재를 진행할 1:1 또는 그룹 대화방 찾기
     let targetRoom: ChatRoom | null = null;
@@ -1071,14 +1248,14 @@ export class ChatService {
       allergies: studentObj?.allergies || studentRaw.알레르기 || '',
       vehicleId: vehicle.id,
       busNumber: vehicle.busNumber,
-      teacherName: vehicle.teacherUser?.name || vehicle.teacherName || '담당 지도교사',
+      teacherName: vehicle.teacherUser?.name || vehicle.teacherName || '담당 차량선생님',
       teacherEmail: vehicle.teacherUser?.email || null,
       driverName: vehicle.driverUser?.name || vehicle.driverName || '기사님',
       isPublicContest: false,
       requestType: 'ONE_ON_ONE',
       targetTeacherId: vehicle.teacherUser?.id || null,
       targetTeacherEmail: vehicle.teacherUser?.email || null,
-      targetTeacherName: vehicle.teacherUser?.name || vehicle.teacherName || '담당 지도교사',
+      targetTeacherName: vehicle.teacherUser?.name || vehicle.teacherName || '담당 차량선생님',
       requesterId: requester.id,
       requesterEmail: requester.email,
       requesterName: requester.name || requester.email,
@@ -1116,7 +1293,7 @@ export class ChatService {
         student: studentObj,
         receiverUser: studentObj.parentUser,
         targetRoles: ['PARENT'],
-        message: `[통학 셔틀 결재 신청 접수] ${studentName} 원아의 [${payload.busNumber}] ${rideType === 'TODAY_ONLY' ? '당일 탑승' : '정규 탑승'} 결재 신청이 접수되어 지도교사 승인 대기 중입니다. (탑승 희망지: ${payload.boardingLocation})`,
+        message: `[통학 셔틀 결재 신청 접수] ${studentName} 원아의 [${payload.busNumber}] ${rideType === 'TODAY_ONLY' ? '당일 탑승' : '정규 탑승'} 결재 신청이 접수되어 차량선생님 승인 대기 중입니다. (탑승 희망지: ${payload.boardingLocation})`,
       });
       await this.parentMessageRepo.save(parentMsg).catch(() => {});
     }
@@ -1192,7 +1369,7 @@ export class ChatService {
       const alreadyDecidedBy = payload.decidedBy || '다른 담당자';
       const alreadyDecidedBus = payload.busNumber || '';
       throw new BadRequestException(
-        `이미 ${alreadyDecidedBy} 지도교사에 의해 결재가 완료되었습니다. (${alreadyDecidedBus}) 추가 결재가 불가능합니다.`
+        `이미 ${alreadyDecidedBy} 차량선생님에 의해 결재가 완료되었습니다. (${alreadyDecidedBus}) 추가 결재가 불가능합니다.`
       );
     }
 
@@ -1204,11 +1381,11 @@ export class ChatService {
 
     if (isRequester) {
       throw new ForbiddenException(
-        '본인이 직접 신청한 결재 건은 본인이 결재할 수 없습니다. 상대방(담당 지도교사 또는 원장님)만 결재 가능합니다.'
+        '본인이 직접 신청한 결재 건은 본인이 결재할 수 없습니다. 상대방(담당 차량선생님 또는 원장님)만 결재 가능합니다.'
       );
     }
 
-    // 3. 1:1 결재 시 상대방(지정된 지도교사 또는 관리자)만 결재 가능
+    // 3. 1:1 결재 시 상대방(지정된 차량선생님 또는 관리자)만 결재 가능
     const isAdmin = decider.role === UserRole.ACADEMY_ADMIN || decider.role === UserRole.SUPER_ADMIN;
     const isDesignatedTeacher =
       (payload.targetTeacherId && Number(payload.targetTeacherId) === decider.id) ||
@@ -1216,7 +1393,7 @@ export class ChatService {
       (payload.teacherEmail && payload.teacherEmail.toLowerCase() === decider.email.toLowerCase());
 
     if (!isDesignatedTeacher && !isAdmin) {
-      throw new ForbiddenException('해당 1:1 결재 건은 지정된 담당 지도교사 또는 원장님만 결재할 수 있습니다.');
+      throw new ForbiddenException('해당 1:1 결재 건은 지정된 담당 차량선생님 또는 원장님만 결재할 수 있습니다.');
     }
 
     if (decision === 'APPROVED') {
@@ -1246,6 +1423,23 @@ export class ChatService {
         });
       }
 
+      const academy = vehicle.academy || (await this.academyRepo.findOne({ where: { id: decider.academyId } }));
+
+      if (!student && payload.studentName && academy?.id) {
+        const trimmedName = String(payload.studentName).trim();
+        const candidates = await this.studentRepo.find({
+          where: { academy: { id: academy.id } },
+          relations: { academy: true },
+        });
+        student =
+          candidates.find(
+            (c) =>
+              c.name === trimmedName ||
+              c.adminDisplayName === trimmedName ||
+              (c.name && c.name.split('/')[0].trim() === trimmedName),
+          ) || null;
+      }
+
       const finalLocation = payload.counterProposal?.suggestedLocation || payload;
       const finalLat = Number(finalLocation.latitude || payload.latitude);
       const finalLng = Number(finalLocation.longitude || payload.longitude);
@@ -1253,7 +1447,6 @@ export class ChatService {
       const finalAddress = finalLocation.address || payload.address || finalBoardingLocation;
 
       if (!student) {
-        const academy = vehicle.academy || (await this.academyRepo.findOne({ where: { id: decider.academyId } }));
         student = this.studentRepo.create({
           name: payload.studentName,
           adminDisplayName: payload.studentName,
@@ -1261,7 +1454,7 @@ export class ChatService {
           boardingLocation: finalBoardingLocation,
           latitude: finalLat,
           longitude: finalLng,
-          academy,
+          academy: academy || undefined,
           approvalStatus: 'APPROVED',
         });
       }
@@ -1352,7 +1545,7 @@ export class ChatService {
       payload.decidedAt = new Date().toISOString();
       payload.vehicleId = vehicle.id;
       payload.busNumber = vehicle.busNumber;
-      payload.teacherName = formatTeacherName(decider.name || vehicle.teacherUser?.name) || '지도교사';
+      payload.teacherName = formatTeacherName(decider.name || vehicle.teacherUser?.name) || '차량선생님';
       payload.teacherEmail = decider.email;
       payload.driverName = vehicle.driverUser?.name || vehicle.driverName || '기사님';
 
@@ -1363,7 +1556,7 @@ export class ChatService {
       const isCounterApproved = Boolean(payload.counterProposal);
       let confText = '';
       if (isCounterApproved) {
-        confText = `✓ [재결재 수락 완료] 지도교사 제안 탑승지(${finalBoardingLocation})로 최종 승인되었습니다. (${payload.studentName} 원아 -> ${payload.busNumber}, ${isTodayOnly ? '오늘 하루 탑승' : '정규 등록'})`;
+        confText = `✓ [재결재 수락 완료] 차량선생님 제안 탑승지(${finalBoardingLocation})로 최종 승인되었습니다. (${payload.studentName} 원아 -> ${payload.busNumber}, ${isTodayOnly ? '오늘 하루 탑승' : '정규 등록'})`;
       } else {
         confText = isTodayOnly
           ? `✓ [당일 탑승 수락 완료] 오늘 하루만 ${payload.studentName} 원아가 ${payload.busNumber}에 임시 탑승합니다. (익일 자정 픽업으로 자동 원복, 담당: ${decider.name || '선생님'})`
@@ -1383,7 +1576,7 @@ export class ChatService {
       await this.broadcastToRoom(message.room.id, savedConf);
 
       const notifyTitle = '결재 승인 완료 알림';
-      const notifyText = `[결재 승인 완료] ${payload.studentName} 원아의 [${vehicle.busNumber}] ${isTodayOnly ? '당일 임시' : '정규'} 탑승 결재가 ${formatTeacherName(decider.name)} 지도교사에 의해 최종 승인 완료되었습니다. (탑승지: ${finalBoardingLocation})`;
+      const notifyText = `[결재 승인 완료] ${payload.studentName} 원아의 [${vehicle.busNumber}] ${isTodayOnly ? '당일 임시' : '정규'} 탑승 결재가 ${formatTeacherName(decider.name)} 차량선생님에 의해 최종 승인 완료되었습니다. (탑승지: ${finalBoardingLocation})`;
 
       // 결재 결과: 공지사항 채널이 아니라 신청자에게만 개인 알림 (학부모에게는 아래 pushParentNotification 이 따로 안내)
       if (message.sender?.id && message.sender.id !== decider.id) {
@@ -1421,7 +1614,7 @@ export class ChatService {
 
       const targetAcadId = payload.vehicleId ? (await this.vehicleRepo.findOne({ where: { id: payload.vehicleId } }))?.academy?.id : decider.academyId;
       // 결재 결과: 공지사항 채널이 아니라 신청자와 그 원아의 학부모에게만 개인 알림
-      const rejectText = `[결재 반려] ${payload.studentName} 원아의 탑승 요청이 ${formatTeacherName(decider.name)} 지도교사에 의해 반려되었습니다.`;
+      const rejectText = `[결재 반려] ${payload.studentName} 원아의 탑승 요청이 ${formatTeacherName(decider.name)} 차량선생님에 의해 반려되었습니다.`;
       const rejectTargets = new Set<number>();
       if (message.sender?.id && message.sender.id !== decider.id) rejectTargets.add(message.sender.id);
       if (payload.studentId) {
@@ -1480,7 +1673,7 @@ export class ChatService {
     const suggested = data.suggestedLocation || {};
     const newLat = Number(suggested.latitude) || originalLocation.latitude;
     const newLng = Number(suggested.longitude) || originalLocation.longitude;
-    const newBoardingLocation = suggested.boardingLocation || '지도교사 제안 탑승지';
+    const newBoardingLocation = suggested.boardingLocation || '차량선생님 제안 탑승지';
     const newAddress = suggested.address || newBoardingLocation;
 
     payload.status = 'RE_REQUESTED';
@@ -1513,7 +1706,7 @@ export class ChatService {
     const notifyMsg = this.messageRepo.create({
       room: message.room,
       sender: proposer,
-      text: `🔄 [탑승지 변경 재결재 요청] ${payload.studentName} 원아 탑승지를 ${proposer.name} 지도교사가 수정 제안하였습니다.\n(사유: ${data.note || '위치 변경'})`,
+      text: `🔄 [탑승지 변경 재결재 요청] ${payload.studentName} 원아 탑승지를 ${proposer.name} 차량선생님이 수정 제안하였습니다.\n(사유: ${data.note || '위치 변경'})`,
       type: 'TEXT',
       readBy: [proposer.id],
     });
@@ -1550,17 +1743,17 @@ export class ChatService {
 
     const finalLocation = payload.counterProposal?.suggestedLocation?.boardingLocation || payload.boardingLocation || student.boardingLocation || '지정 하차지';
     const busName = payload.busNumber || student.assignedVehicle?.busNumber || '셔틀 차량';
-    const teacherName = payload.teacherName || '담당 지도교사';
+    const teacherName = payload.teacherName || '담당 차량선생님';
     const isTodayOnly = (payload.rideType || 'TODAY_ONLY') === 'TODAY_ONLY';
 
     let notiText = '';
     if (payload.status === 'RE_REQUESTED' || payload.counterProposal) {
       const reason = payload.counterProposal?.note || '안전 승하차 위치 조정';
-      notiText = `[통학 셔틀 하차지 안내] 오늘 ${student.adminDisplayName || student.name} 원아는 [${busName}]을(를) 이용하여 [${finalLocation}]에서 하차합니다. (사유: ${reason}, 지도교사: ${teacherName})`;
+      notiText = `[통학 셔틀 하차지 안내] 오늘 ${student.adminDisplayName || student.name} 원아는 [${busName}]을(를) 이용하여 [${finalLocation}]에서 하차합니다. (사유: ${reason}, 차량선생님: ${teacherName})`;
     } else {
       notiText = isTodayOnly
-        ? `[오늘 하원 셔틀 안내] 오늘 ${student.adminDisplayName || student.name} 원아가 [${busName}]에 임시 탑승하여 [${finalLocation}]에서 하차할 예정입니다. (지도교사: ${teacherName})`
-        : `[정규 셔틀 탑승 안내] ${student.adminDisplayName || student.name} 원아가 [${busName}] 정규 셔틀을 이용하며 [${finalLocation}]에서 하차 예정입니다. (지도교사: ${teacherName})`;
+        ? `[오늘 하원 셔틀 안내] 오늘 ${student.adminDisplayName || student.name} 원아가 [${busName}]에 임시 탑승하여 [${finalLocation}]에서 하차할 예정입니다. (차량선생님: ${teacherName})`
+        : `[정규 셔틀 탑승 안내] ${student.adminDisplayName || student.name} 원아가 [${busName}] 정규 셔틀을 이용하며 [${finalLocation}]에서 하차 예정입니다. (차량선생님: ${teacherName})`;
     }
 
     // 1. Create ParentMessage
@@ -1601,6 +1794,79 @@ export class ChatService {
       pushedAt: payload.parentPushedAt,
       pushText: notiText,
       hasParentAccount: !!student.parentUser,
+    };
+  }
+
+  async uploadChatMedia(data: { base64Data: string; filename?: string; mimeType?: string }, reqHost?: string) {
+    if (!data.base64Data) {
+      throw new BadRequestException('업로드할 이미지 데이터가 없습니다.');
+    }
+
+    const fs = require('fs');
+    const path = require('path');
+    const crypto = require('crypto');
+
+    let base64String = data.base64Data;
+    let ext = '';
+    let detectedMime = 'image/jpeg';
+
+    if (base64String.includes(';base64,')) {
+      const parts = base64String.split(';base64,');
+      const mime = parts[0].replace('data:', '');
+      detectedMime = mime;
+      if (mime.includes('png')) ext = 'png';
+      else if (mime.includes('webp')) ext = 'webp';
+      else if (mime.includes('gif')) ext = 'gif';
+      else if (mime.includes('jpeg') || mime.includes('jpg')) ext = 'jpg';
+      base64String = parts[1];
+    } else if (data.mimeType) {
+      detectedMime = data.mimeType;
+      if (data.mimeType.includes('png')) ext = 'png';
+      else if (data.mimeType.includes('webp')) ext = 'webp';
+      else if (data.mimeType.includes('gif')) ext = 'gif';
+      else if (data.mimeType.includes('jpeg') || data.mimeType.includes('jpg')) ext = 'jpg';
+    }
+
+    if (!ext && data.filename) {
+      const fileExt = path.extname(data.filename).toLowerCase().replace('.', '');
+      if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(fileExt)) {
+        ext = fileExt === 'jpeg' ? 'jpg' : fileExt;
+        if (ext === 'png') detectedMime = 'image/png';
+        else if (ext === 'webp') detectedMime = 'image/webp';
+        else if (ext === 'gif') detectedMime = 'image/gif';
+        else detectedMime = 'image/jpeg';
+      }
+    }
+
+    if (!['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) {
+      ext = 'jpg';
+    }
+
+    const buffer = Buffer.from(base64String, 'base64');
+    const MAX_SIZE = 15 * 1024 * 1024; // 15MB
+    if (buffer.length > MAX_SIZE) {
+      throw new BadRequestException('파일 크기는 15MB를 초과할 수 없습니다.');
+    }
+
+    const randomName = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${ext}`;
+    const uploadsDir = path.join(process.cwd(), 'uploads', 'chat');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    const filePath = path.join(uploadsDir, randomName);
+    fs.writeFileSync(filePath, buffer);
+
+    const host = reqHost || '52.63.245.203.sslip.io';
+    const protocol = (host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':3000')) ? 'http' : 'https';
+    const url = `${protocol}://${host}/uploads/chat/${randomName}`;
+
+    return {
+      success: true,
+      url,
+      filename: randomName,
+      size: buffer.length,
+      createdAt: new Date().toISOString(),
     };
   }
 }

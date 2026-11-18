@@ -44,10 +44,13 @@ export class TeacherService {
     private readonly chatService?: ChatService
   ) {}
 
-  private async isTodayHoliday(): Promise<boolean> {
+  private async isTodayHoliday(academyId?: number | null): Promise<boolean> {
+    if (!academyId) return false;
     const today = new Date().toISOString().split('T')[0];
     const holiday = await this.academyHolidayRepository.findOne({
       where: {
+        academy: { id: academyId },
+        type: 'ACADEMY_HOLIDAY' as any,
         startDate: LessThanOrEqual(today),
         endDate: MoreThanOrEqual(today),
       }
@@ -66,10 +69,20 @@ export class TeacherService {
     });
   }
 
-  private async getTodayStudentsForVehicle(vehicleId: number): Promise<Student[]> {
+  private async getTodayStudentsForVehicle(vehicleId: number, mode?: string): Promise<Student[]> {
+    const nowKst = new Date(Date.now() + 9 * 3600 * 1000);
+    const dayMap = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+    const todayDayKey = dayMap[nowKst.getUTCDay()];
+    const isMorning = mode ? (mode === 'MORNING') : (nowKst.getUTCHours() < 12);
+
     const defaultStudents = await this.studentRepository.find({ 
-      where: { assignedVehicle: { id: vehicleId } },
-      relations: { parentUser: true }
+      where: isMorning 
+        ? { assignedVehicle: { id: vehicleId } }
+        : [
+            { assignedDepartureVehicle: { id: vehicleId } },
+            { assignedVehicle: { id: vehicleId } }
+          ],
+      relations: { parentUser: true, assignedVehicle: true, assignedDepartureVehicle: true }
     });
     const overrides = await this.getActiveOverridesForToday();
     
@@ -81,7 +94,27 @@ export class TeacherService {
     ];
 
     // Students originally in this vehicle
-    const currentStudents = defaultStudents.map(s => {
+    const currentStudents = defaultStudents
+      .filter(s => {
+        const raw = s.raw || {};
+        const weekly = raw['요일별일정'] || raw.weeklySchedules;
+        if (weekly && weekly[todayDayKey] && weekly[todayDayKey].enabled === false) {
+          return false;
+        }
+
+        const bType = raw['탑승구분'] || (s.isNotRiding ? 'NONE' : 'BOTH');
+        if (s.isNotRiding || bType === 'NONE') return false;
+
+        if (isMorning) {
+          if (bType === 'AFTERNOON_ONLY' || bType === '하원만') return false;
+          return s.assignedVehicle?.id === vehicleId;
+        } else {
+          if (bType === 'MORNING_ONLY' || bType === '등원만') return false;
+          const depVehId = s.assignedDepartureVehicle?.id || s.assignedVehicle?.id;
+          return depVehId === vehicleId;
+        }
+      })
+      .map(s => {
       const override = overrides.find(o => o.student?.id === s.id);
       if (override) {
         if (absentTypes.includes(override.overrideType)) {
@@ -159,7 +192,7 @@ export class TeacherService {
   }
 
   /**
-   * 로그인한 직원(지도교사 또는 기사)에게 배정된 차량 찾기.
+   * 로그인한 직원(차량선생님 또는 기사)에게 배정된 차량 찾기.
    * 테넌트 격리(Tenant Isolation)를 보장하며, 타 학원 차량이나 임의 1호차 자동 할당을 차단합니다.
    */
   private async findAssignedVehicle(userId: number, relations: any = {}) {
@@ -179,10 +212,10 @@ export class TeacherService {
   }
 
   async getStudents(email: string) {
-    if (await this.isTodayHoliday()) return [];
-
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
+
+    if (await this.isTodayHoliday(user.academyId)) return [];
 
     if ((user.role as string) === 'HOMEROOM_TEACHER' || user.role === UserRole.HOMEROOM_TEACHER) {
       if (!hasAssignedClass(user.assignedClass)) {
@@ -298,33 +331,53 @@ export class TeacherService {
       });
   }
 
-  async getRoute(email: string) {
-    if (await this.isTodayHoliday()) {
-      return { stops: [], routePoints: [], academy: null, vehicleId: null };
-    }
-
+  async getRoute(email: string, mode?: string) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
+
+    if (await this.isTodayHoliday(user.academyId)) {
+      return { stops: [], routePoints: [], academy: null, vehicleId: null };
+    }
 
     const vehicle = await this.findAssignedVehicle(user.id, { academy: true });
     if (!vehicle) return { stops: [], routePoints: [], academy: null, vehicleId: null };
 
-    const students = await this.getTodayStudentsForVehicle(vehicle.id);
+    const students = await this.getTodayStudentsForVehicle(vehicle.id, mode);
     
+    const nowKst = new Date(Date.now() + 9 * 3600 * 1000);
+    const dayMap = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+    const todayDayKey = dayMap[nowKst.getUTCDay()];
+    const isMorning = mode ? (mode === 'MORNING') : (nowKst.getUTCHours() < 12);
+
     // Convert to route stops
     let stops = students
       .filter(s => s.boardStatus === 'WAITING' && s.latitude && s.longitude)
-      .map(s => ({
-        id: s.id,
-        name: s.adminDisplayName || s.name,
-        address: s.address,
-        latitude: parseFloat(s.latitude as any),
-        longitude: parseFloat(s.longitude as any),
-        expectedTime: s.raw ? s.raw['예상탑승시간'] || '15:30' : '15:30',
-        isOneTimeBoarding: (s as any).isOneTimeBoarding || false,
-        isOverride: (s as any).isOverride || false,
-        overrideType: (s as any).overrideType || null,
-      }));
+      .map(s => {
+        const raw = s.raw || {};
+        const weekly = raw['요일별일정'] || raw.weeklySchedules;
+        const daySched = weekly ? weekly[todayDayKey] : null;
+
+        const mornStop = daySched?.inLocation || s.boardingLocation || raw['등원지'] || raw['탑승지'] || s.address;
+        const aftStop = daySched?.outLocation || s.dropoffLocation || raw['하차지'] || raw['하원지'] || s.address;
+        const stopAddress = (!isMorning && aftStop) ? aftStop : mornStop;
+
+        const defaultTime = isMorning ? '08:30' : '17:00';
+        const expectedTime = isMorning
+          ? (daySched?.inTime || raw['등원시간'] || raw['예상탑승시간'] || defaultTime)
+          : (daySched?.outTime || raw['하원시간'] || raw['예상탑승시간'] || defaultTime);
+
+        return {
+          id: s.id,
+          name: s.adminDisplayName || s.name,
+          address: stopAddress,
+          latitude: parseFloat(s.latitude as any),
+          longitude: parseFloat(s.longitude as any),
+          expectedTime,
+          isOneTimeBoarding: (s as any).isOneTimeBoarding || false,
+          isOverride: (s as any).isOverride || false,
+          overrideType: (s as any).overrideType || null,
+        };
+      });
 
     // TSP Optimization (Nearest Neighbor)
     const sortedStops = [];
@@ -444,15 +497,19 @@ export class TeacherService {
       order: { createdAt: 'DESC' }
     });
 
+    const isHomeroom = (user.role as string) === 'HOMEROOM_TEACHER' || user.role === UserRole.HOMEROOM_TEACHER || !!user.assignedClass;
+    const isShuttle = (user.role as string) === 'SHUTTLE_TEACHER' || user.role === UserRole.SHUTTLE_TEACHER || (!user.assignedClass && user.role === UserRole.TEACHER);
+
     for (const m of messages) {
+      const roles = Array.isArray(m.targetRoles) ? m.targetRoles : [];
+      const roleMatches =
+        roles.includes('ALL') ||
+        (isHomeroom && (roles.includes('HOMEROOM_TEACHER') || (roles.includes('TEACHER') && !roles.includes('SHUTTLE_TEACHER')))) ||
+        (isShuttle && (roles.includes('SHUTTLE_TEACHER') || (roles.includes('TEACHER') && !roles.includes('HOMEROOM_TEACHER'))));
+
       const isTarget =
         (m.receiverUser && m.receiverUser.id === user.id) ||
-        (m.targetRoles &&
-          Array.isArray(m.targetRoles) &&
-          (m.targetRoles.includes('TEACHER') ||
-            m.targetRoles.includes('HOMEROOM_TEACHER') ||
-            m.targetRoles.includes('SHUTTLE_TEACHER') ||
-            m.targetRoles.includes('ALL')));
+        roleMatches;
 
       if (isTarget) {
         const dedupeKey = `${m.message}_${new Date(m.createdAt).getMinutes()}`;
@@ -546,7 +603,7 @@ export class TeacherService {
         order: { createdAt: 'DESC' }
       });
 
-      let adminLogMessage = `${vehicle.busNumber}호차 ${student.adminDisplayName || student.name} 원생 지도교사 메모 업데이트: ${memo}`;
+      let adminLogMessage = `${vehicle.busNumber}호차 ${student.adminDisplayName || student.name} 원생 차량선생님 메모 업데이트: ${memo}`;
       if (latestMessage) {
         const timeStr = new Date(latestMessage.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
         adminLogMessage = `[${student.adminDisplayName || student.name} 학부모님 ${timeStr} 메세지] ${latestMessage.message}\n` +
@@ -787,7 +844,7 @@ export class TeacherService {
           recipient: vehicle.driverUser || undefined,
           recipientRole: 'DRIVER',
           type: 'ESCORT_CONFIRMED',
-          message: `${escortName} 지도교사가 동승 확인을 완료하였습니다.`,
+          message: `${escortName} 차량선생님이 동승 확인을 완료하였습니다.`,
           academy: vehicle.academy || undefined,
         });
         await this.notificationRepository.save(escortNoti);
@@ -806,7 +863,7 @@ export class TeacherService {
           await this.chatService.sendSystemNotificationToUser(
             vehicle.driverUser.id,
             '동승 확인 완료',
-            `${escortName} 지도교사가 동승 확인을 완료하였습니다.`,
+            `${escortName} 차량선생님이 동승 확인을 완료하였습니다.`,
             { type: 'escort' }
           ).catch(() => {});
         }
@@ -1196,7 +1253,7 @@ export class TeacherService {
     const parentMsg = this.messageRepository.create({
       student: originalMsg.student,
       targetRoles: ['PARENT'],
-      message: `[지도교사 응답] ${replyToStudent}`
+      message: `[차량선생님 응답] ${replyToStudent}`
     });
     await this.messageRepository.save(parentMsg);
 
@@ -1207,7 +1264,7 @@ export class TeacherService {
       if (originalMsg.student.parentUser) {
         this.locationGateway.server.to(room).emit('teacherReply', { 
           email: originalMsg.student.parentUser.email, 
-          message: `[지도교사 응답] ${replyToStudent}` 
+          message: `[차량선생님 응답] ${replyToStudent}` 
         });
       }
       // Emit TTS to Driver
@@ -1365,12 +1422,12 @@ export class TeacherService {
     const overrides = await this.getActiveOverridesForToday();
 
     const qb = this.studentRepository.createQueryBuilder('s')
-      .leftJoinAndSelect('s.assignedVehicle', 'vehicle')
-      .leftJoinAndSelect('s.parentUser', 'parentUser');
+      .leftJoinAndSelect('s.assignedVehicle', 'vehicle');
 
     if (academyId) {
       qb.where('s.academyId = :academyId', { academyId });
     }
+    qb.andWhere('(s.className = :assignedClass OR s.className IS NULL OR s.className = \'\')', { assignedClass });
 
     const allStudents = await qb.getMany();
 
@@ -1446,32 +1503,31 @@ export class TeacherService {
     const date = (dateInput && isValidDateString(dateInput)) ? dateInput : kstDateString();
     const academyId = user.academy?.id || user.academyId;
 
-    const submission = await this.submissionRepository.findOne({
-      where: {
-        academy: { id: academyId },
-        className: assignedClass,
-        date,
-      },
-    });
+    // 1) 제출 내역과 학생 목록 병렬 조회 (불필요한 parentUser 조인 제거 및 타 반 원천 배제로 성능 극대화)
+    const [submission, allStudents] = await Promise.all([
+      this.submissionRepository.findOne({
+        where: {
+          academy: { id: academyId },
+          className: assignedClass,
+          date,
+        },
+      }),
+      this.studentRepository.createQueryBuilder('s')
+        .leftJoinAndSelect('s.assignedVehicle', 'vehicle')
+        .where('s.academyId = :academyId', { academyId })
+        .andWhere('(s.className = :assignedClass OR s.className IS NULL OR s.className = \'\')', { assignedClass })
+        .getMany(),
+    ]);
 
-    const qb = this.studentRepository.createQueryBuilder('s')
-      .leftJoinAndSelect('s.assignedVehicle', 'vehicle')
-      .leftJoinAndSelect('s.parentUser', 'parentUser');
-
-    if (academyId) {
-      qb.where('s.academyId = :academyId', { academyId });
-    }
-
-    const allStudents = await qb.getMany();
     const classStudents = allStudents.filter(s => isSameClass(getStudentClassName(s), assignedClass));
 
     const studentIds = classStudents.map(s => s.id);
     let attendances: Attendance[] = [];
     if (studentIds.length > 0) {
-      attendances = await this.attendanceRepository.createQueryBuilder('att')
-        .leftJoinAndSelect('att.student', 'student')
-        .where('att.studentId IN (:...ids) AND att.date = :date', { ids: studentIds, date })
-        .getMany();
+      attendances = await this.attendanceRepository.find({
+        where: { student: { id: In(studentIds) }, date },
+        relations: { student: true },
+      });
     }
 
     const attendanceMap = new Map<number, Attendance>();
@@ -1813,7 +1869,7 @@ export class TeacherService {
 
     this.locationGateway?.broadcastDepartSignal(vehicle.id, stopName);
     const label = stopName ? ` (${stopName})` : '';
-    await this.appendBoardingLog(vehicle.id, null, `지도교사 출발 가능 신호 발송${label}`, 'SYSTEM');
+    await this.appendBoardingLog(vehicle.id, null, `차량선생님 출발 가능 신호 발송${label}`, 'SYSTEM');
     return { success: true, message: '기사님께 출발 신호를 전달했습니다.' };
   }
 
@@ -1863,7 +1919,7 @@ export class TeacherService {
       endDate: today,
       overrideType: OverrideType.CHANGE_LOCATION,
       newVehicleId: vehicle.id,
-      reason: '지도교사 현장 추가 탑승 요청',
+      reason: '차량선생님 현장 추가 탑승 요청',
     });
     await this.scheduleOverrideRepository.save(override);
     return { success: true };

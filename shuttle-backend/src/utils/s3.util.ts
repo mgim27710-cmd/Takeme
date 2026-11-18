@@ -29,13 +29,30 @@ export async function uploadToS3(key: string, body: Buffer, contentType: string)
   );
 }
 
-/** 비공개 버킷 파일에 대한 1시간짜리 읽기용 서명 URL */
+// In-memory cache for presigned URLs (Key -> { url, expiresAt })
+const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
+
+/** 비공개 버킷 파일에 대한 1시간짜리 읽기용 서명 URL (캐싱 적용: 50분 재사용) */
 export async function signS3Key(key: string, expiresIn = SIGNED_URL_EXPIRES_SEC): Promise<string> {
-  return getSignedUrl(
+  const now = Date.now();
+  const cached = signedUrlCache.get(key);
+  if (cached && cached.expiresAt > now + 300_000) {
+    return cached.url;
+  }
+
+  const url = await getSignedUrl(
     getClient(),
     new GetObjectCommand({ Bucket: process.env.AWS_S3_BUCKET, Key: key }),
     { expiresIn },
   );
+
+  // Cache url until 5 minutes before actual expiry
+  signedUrlCache.set(key, {
+    url,
+    expiresAt: now + (expiresIn - 300) * 1000,
+  });
+
+  return url;
 }
 
 /**
@@ -80,12 +97,8 @@ export async function resolveMediaRef(value: string | null | undefined): Promise
 
 export async function resolveMediaRefs(values: unknown): Promise<string[]> {
   if (!Array.isArray(values)) return [];
-  const out: string[] = [];
-  for (const v of values) {
-    if (typeof v !== 'string') continue;
-    const resolved = await resolveMediaRef(v);
-    if (resolved) out.push(resolved);
-  }
-  return out;
+  const stringValues = values.filter((v): v is string => typeof v === 'string' && v.length > 0);
+  const resolvedList = await Promise.all(stringValues.map((v) => resolveMediaRef(v)));
+  return resolvedList.filter((r): r is string => !!r);
 }
 

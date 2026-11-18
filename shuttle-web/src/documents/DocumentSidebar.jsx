@@ -17,6 +17,7 @@ export default function DocumentSidebar({
   buses = [], 
   students = [],
   activeEducationLevel,
+  terms,
 }) {
   const currentEducationLevel = activeEducationLevel || currentUser?.educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
   const [documents, setDocuments] = useState([]);
@@ -173,88 +174,90 @@ export default function DocumentSidebar({
       academyName,
       date: new Date().toISOString().split('T')[0],
       selectedBus: activeBus,
-      busStudents: activeBus ? activeBusStudents : students.slice(0, 15),
+      busStudents: type === 'health-allergy' ? students : (activeBus ? activeBusStudents : students),
       selectedStudent: activeStudent,
     });
   };
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <div className="p-5 border-b border-slate-100 bg-white">
-        <div className="flex items-center justify-between mb-1">
-          <h2 className="text-xl font-black text-slate-800">
-            서류 및 문서함
-          </h2>
-          <span className="text-xs bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded-full">
-            {documents.length}건
+    <div className="p-6 h-full flex flex-col overflow-y-auto break-keep select-none bg-white">
+      {/* Header - 다른 사이드바 창과 완전히 동일한 규격 및 타이포그래피 */}
+      <div className="mb-4 shrink-0">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
+              서류 관리
+            </h2>
+            <span className={`text-xs px-2.5 py-1 rounded-lg font-black shadow-xs flex items-center gap-1 border ${terms?.themeBadge || 'bg-blue-100 text-blue-800 border-blue-200'}`}>
+              <span>{terms?.icon || '🏫'}</span>
+              <span>{currentEducationLevel}</span>
+            </span>
+          </div>
+          <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded-lg border border-slate-200">
+            총 {documents.length}건
           </span>
         </div>
-        <p className="text-xs text-slate-500 font-medium">
-          서류를 업로드하여 등록하고 원클릭으로 다운로드하세요.
+        <p className="text-xs text-slate-600 font-medium mt-1">
+          법정 의무 서식 출력, 안전 서류 및 유효기간을 통합 관리합니다.
         </p>
       </div>
 
-      {/* Sidebar Sub Tabs */}
-      <div className="flex border-b border-slate-200 bg-slate-50 p-1.5 gap-1 text-[11px] font-bold">
+      {/* Sidebar Sub Tabs - 세그먼트 버튼 */}
+      <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200/80 shrink-0 select-none shadow-2xs mb-4">
         <button
+          type="button"
           onClick={() => setSidebarTab('templates')}
-          className={`flex-1 py-1.5 px-1 rounded-lg text-center transition-all ${
+          className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
             sidebarTab === 'templates'
-              ? 'bg-white text-blue-700 shadow-2xs font-extrabold'
+              ? 'bg-white text-blue-600 shadow-xs border border-slate-200'
               : 'text-slate-500 hover:text-slate-800'
           }`}
         >
-          서식발급
+          <span>📄</span>
+          <span>서식 출력</span>
         </button>
         <button
+          type="button"
           onClick={() => setSidebarTab('expiry')}
-          className={`flex-1 py-1.5 px-1 rounded-lg text-center transition-all flex items-center justify-center gap-1 ${
+          className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
             sidebarTab === 'expiry'
-              ? 'bg-white text-blue-700 shadow-2xs font-extrabold'
+              ? 'bg-white text-blue-600 shadow-xs border border-slate-200'
               : 'text-slate-500 hover:text-slate-800'
           }`}
         >
+          <span>⏳</span>
           <span>만료일</span>
           {expirySummary.urgentCount > 0 && (
-            <span className="bg-red-500 text-white text-[9px] px-1 py-0.2 rounded-full font-black animate-pulse">
+            <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">
               {expirySummary.urgentCount}
             </span>
           )}
         </button>
         <button
+          type="button"
           onClick={() => setSidebarTab('docs')}
-          className={`flex-1 py-1.5 px-1 rounded-lg text-center transition-all ${
+          className={`flex-1 py-1.5 px-2.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
             sidebarTab === 'docs'
-              ? 'bg-white text-blue-700 shadow-2xs font-extrabold'
+              ? 'bg-white text-blue-600 shadow-xs border border-slate-200'
               : 'text-slate-500 hover:text-slate-800'
           }`}
         >
-          서류 ({documents.length})
+          <span>📁</span>
+          <span>보관 서류</span>
         </button>
       </div>
 
-      <div className="p-4 flex-1 overflow-y-auto space-y-4">
-        {/* Tab 1: Templates (서식 발급) */}
+      <div className="flex-1 space-y-4">
+        {/* Tab 1: Templates (서식 출력) */}
         {sidebarTab === 'templates' && (
-          <div className="p-3.5 bg-gradient-to-br from-blue-50 to-indigo-50/50 border border-blue-200/80 rounded-xl space-y-3 animate-in fade-in">
-            <div className="flex items-center justify-between">
-              <div className="text-[11px] font-extrabold text-blue-900">
-                DB 연동 법정 서식 발급 (6종)
-              </div>
-              {activeBus && (
-                <span className="text-[10px] text-blue-600 font-bold">
-                  원생 {activeBusStudents.length}명 연동
-                </span>
-              )}
-            </div>
-
+          <div className="space-y-4 animate-in fade-in">
             {/* Bus Selector */}
-            <div className="bg-white px-2.5 py-1.5 rounded-lg border border-blue-200 shadow-2xs">
+            <div className="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+              <label className="text-xs font-bold text-slate-700 block mb-1.5">차량(호차) 선택</label>
               <select
                 value={selectedBusId}
                 onChange={(e) => setSelectedBusId(e.target.value)}
-                className="w-full text-xs font-bold text-blue-800 bg-transparent outline-none cursor-pointer"
+                className="w-full text-xs font-bold text-slate-800 bg-white border border-slate-200 rounded-lg px-3 py-2 outline-none cursor-pointer focus:border-blue-500 shadow-2xs"
               >
                 <option value="all">전체 호차 (기본 서식)</option>
                 {buses.map((b) => (
@@ -265,50 +268,64 @@ export default function DocumentSidebar({
               </select>
             </div>
 
-            <div className="space-y-1.5 pt-1">
-              <div className="text-[10px] font-bold text-slate-500 px-1">차량·노선 비치 필수 서식</div>
+            {/* Template List */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-1.5 px-1 pt-1">
+                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                <span className="text-xs font-black text-slate-700 tracking-tight">차량 및 안전운행 서식</span>
+              </div>
               <button
                 onClick={() => handleDownloadTemplate('safety')}
-                className="w-full py-2 px-3 bg-white hover:bg-blue-600 text-xs font-bold text-slate-700 hover:text-white border border-slate-200 hover:border-blue-600 rounded-xl transition-all shadow-2xs flex items-center justify-between group"
+                className="w-full py-2.5 px-3.5 bg-white hover:bg-slate-50 text-xs sm:text-sm font-extrabold text-slate-800 border border-slate-200/90 border-l-4 border-l-blue-500 hover:border-blue-400 rounded-xl transition-all shadow-2xs flex items-center justify-between group cursor-pointer"
               >
                 <span>일일 안전점검표 {activeBus ? `(${activeBus.name})` : ''}</span>
-                <span className="text-[10px] bg-blue-50 text-blue-600 group-hover:bg-blue-500 group-hover:text-white px-2 py-0.5 rounded-md font-bold">인쇄</span>
+                <span className="text-xs text-blue-600 font-black bg-blue-50 px-2 py-0.5 rounded-md group-hover:bg-blue-600 group-hover:text-white transition-colors">출력</span>
               </button>
               <button
                 onClick={() => handleDownloadTemplate('companion')}
-                className="w-full py-2 px-3 bg-white hover:bg-blue-600 text-xs font-bold text-slate-700 hover:text-white border border-slate-200 hover:border-blue-600 rounded-xl transition-all shadow-2xs flex items-center justify-between group"
+                className="w-full py-2.5 px-3.5 bg-white hover:bg-slate-50 text-xs sm:text-sm font-extrabold text-slate-800 border border-slate-200/90 border-l-4 border-l-blue-500 hover:border-blue-400 rounded-xl transition-all shadow-2xs flex items-center justify-between group cursor-pointer"
               >
-                <span>동승자 탑승일지 및 승하차 명부</span>
-                <span className="text-[10px] bg-blue-50 text-blue-600 group-hover:bg-blue-500 group-hover:text-white px-2 py-0.5 rounded-md font-bold">인쇄</span>
+                <span>동승보호자 탑승일지 및 승하차명부</span>
+                <span className="text-xs text-blue-600 font-black bg-blue-50 px-2 py-0.5 rounded-md group-hover:bg-blue-600 group-hover:text-white transition-colors">출력</span>
               </button>
               <button
                 onClick={() => handleDownloadTemplate('emergency')}
-                className="w-full py-2 px-3 bg-white hover:bg-red-600 text-xs font-bold text-slate-700 hover:text-white border border-slate-200 hover:border-red-600 rounded-xl transition-all shadow-2xs flex items-center justify-between group"
+                className="w-full py-2.5 px-3.5 bg-white hover:bg-slate-50 text-xs sm:text-sm font-extrabold text-slate-800 border border-slate-200/90 border-l-4 border-l-blue-500 hover:border-blue-400 rounded-xl transition-all shadow-2xs flex items-center justify-between group cursor-pointer"
               >
-                <span>비상연락망 및 건강·알레르기 명부</span>
-                <span className="text-[10px] bg-red-50 text-red-600 group-hover:bg-red-500 group-hover:text-white px-2 py-0.5 rounded-md font-bold">인쇄</span>
+                <span>비상연락망 및 특이사항 명부</span>
+                <span className="text-xs text-blue-600 font-black bg-blue-50 px-2 py-0.5 rounded-md group-hover:bg-blue-600 group-hover:text-white transition-colors">출력</span>
               </button>
               <button
                 onClick={() => handleDownloadTemplate('timetable')}
-                className="w-full py-2 px-3 bg-white hover:bg-emerald-600 text-xs font-bold text-slate-700 hover:text-white border border-slate-200 hover:border-emerald-600 rounded-xl transition-all shadow-2xs flex items-center justify-between group"
+                className="w-full py-2.5 px-3.5 bg-white hover:bg-slate-50 text-xs sm:text-sm font-extrabold text-slate-800 border border-slate-200/90 border-l-4 border-l-blue-500 hover:border-blue-400 rounded-xl transition-all shadow-2xs flex items-center justify-between group cursor-pointer"
               >
-                <span>호차별 운행 노선표 및 시간표</span>
-                <span className="text-[10px] bg-emerald-50 text-emerald-700 group-hover:bg-emerald-500 group-hover:text-white px-2 py-0.5 rounded-md font-bold">인쇄</span>
+                <span>운행 노선표 및 시간표</span>
+                <span className="text-xs text-blue-600 font-black bg-blue-50 px-2 py-0.5 rounded-md group-hover:bg-blue-600 group-hover:text-white transition-colors">출력</span>
+              </button>
+              <button
+                onClick={() => handleDownloadTemplate('attendance-log')}
+                className="w-full py-2.5 px-3 bg-white hover:bg-indigo-600 text-[13px] font-bold text-slate-800 hover:text-white border border-slate-200 hover:border-indigo-600 rounded-xl transition-all shadow-2xs flex items-center justify-between group"
+              >
+                <span>교직원·셔틀 근태표 (월간 출근부)</span>
+                <span className="text-xs bg-indigo-50 text-indigo-700 group-hover:bg-indigo-500 group-hover:text-white px-2 py-0.5 rounded-md font-bold">인쇄</span>
               </button>
             </div>
 
-            <div className="space-y-1.5 pt-2 border-t border-blue-200/60">
-              <div className="text-[10px] font-bold text-slate-500 px-1">원생별 보호자 동의서 서식</div>
+            <div className="space-y-2 pt-3 border-t border-slate-200">
+              <div className="flex items-center gap-1.5 px-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <span className="text-xs font-black text-slate-700 tracking-tight">원아 및 보호자 동의서</span>
+              </div>
               {availableStudents.length > 0 && (
-                <div className="bg-white px-2.5 py-1.5 rounded-lg border border-indigo-200 shadow-2xs mb-1">
+                <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-200 shadow-2xs mb-2">
                   <select
                     value={selectedStudentId}
                     onChange={(e) => setSelectedStudentId(e.target.value)}
-                    className="w-full text-xs font-bold text-indigo-800 bg-transparent outline-none cursor-pointer"
+                    className="w-full text-xs font-bold text-slate-800 bg-white border border-slate-200 rounded-lg px-3 py-1.5 outline-none cursor-pointer focus:border-blue-500 shadow-2xs"
                   >
                     {availableStudents.map((st) => (
                       <option key={st.id} value={st.id}>
-                        원생: {st.name} ({st.className || st.raw?.['반명'] || '원아'})
+                        {st.name} ({st.className || st.raw?.['반명'] || '원아'})
                       </option>
                     ))}
                   </select>
@@ -316,23 +333,19 @@ export default function DocumentSidebar({
               )}
               <button
                 onClick={() => handleDownloadTemplate('consent')}
-                className="w-full py-2 px-3 bg-white hover:bg-indigo-600 text-xs font-bold text-slate-700 hover:text-white border border-slate-200 hover:border-indigo-600 rounded-xl transition-all shadow-2xs flex items-center justify-between group"
+                className="w-full py-2.5 px-3.5 bg-white hover:bg-slate-50 text-xs sm:text-sm font-extrabold text-slate-800 border border-slate-200/90 border-l-4 border-l-emerald-500 hover:border-emerald-400 rounded-xl transition-all shadow-2xs flex items-center justify-between group cursor-pointer"
               >
                 <span>차량 이용 신청 및 안전동의서</span>
-                <span className="text-[10px] bg-indigo-50 text-indigo-600 group-hover:bg-indigo-500 group-hover:text-white px-2 py-0.5 rounded-md font-bold">인쇄</span>
+                <span className="text-xs text-emerald-700 font-black bg-emerald-50 px-2 py-0.5 rounded-md group-hover:bg-emerald-600 group-hover:text-white transition-colors">출력</span>
               </button>
               <button
                 onClick={() => handleDownloadTemplate('handover')}
-                className="w-full py-2 px-3 bg-white hover:bg-indigo-600 text-xs font-bold text-slate-700 hover:text-white border border-slate-200 hover:border-indigo-600 rounded-xl transition-all shadow-2xs flex items-center justify-between group"
+                className="w-full py-2.5 px-3.5 bg-white hover:bg-slate-50 text-xs sm:text-sm font-extrabold text-slate-800 border border-slate-200/90 border-l-4 border-l-emerald-500 hover:border-emerald-400 rounded-xl transition-all shadow-2xs flex items-center justify-between group cursor-pointer"
               >
                 <span>영유아 귀가 및 응급처치 동의서</span>
-                <span className="text-[10px] bg-indigo-50 text-indigo-600 group-hover:bg-indigo-500 group-hover:text-white px-2 py-0.5 rounded-md font-bold">인쇄</span>
+                <span className="text-xs text-emerald-700 font-black bg-emerald-50 px-2 py-0.5 rounded-md group-hover:bg-emerald-600 group-hover:text-white transition-colors">출력</span>
               </button>
             </div>
-
-            <p className="text-[10px] text-slate-400 text-center">
-              호차 및 원생을 선택하면 DB 정보가 서식에 자동 입력됩니다.
-            </p>
           </div>
         )}
 
@@ -345,15 +358,15 @@ export default function DocumentSidebar({
                 : 'bg-slate-50 border-slate-200'
             }`}>
               <div className="flex items-center justify-between mb-2">
-                <div className="text-[11px] font-extrabold text-slate-800">
+                <div className="text-xs font-black text-slate-800">
                   서류·교육 만료 상태
                 </div>
                 {expirySummary.urgentCount > 0 ? (
-                  <span className="text-[10px] font-black text-red-600 bg-red-100 px-2 py-0.5 rounded-md animate-pulse">
+                  <span className="text-xs font-black text-red-600 bg-red-100 px-2 py-0.5 rounded-md animate-pulse">
                     긴급 {expirySummary.urgentCount}건
                   </span>
                 ) : (
-                  <span className="text-[10px] font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-md">
+                  <span className="text-xs font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-md">
                     정상
                   </span>
                 )}
@@ -433,32 +446,32 @@ export default function DocumentSidebar({
                   {documents.map((doc) => (
                     <div
                       key={doc.id}
-                      className="bg-white border border-slate-200 rounded-xl p-3 shadow-2xs hover:border-blue-300 transition-all"
+                      className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs hover:border-blue-400 transition-all"
                     >
-                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                      <div className="flex items-start justify-between gap-2 mb-2">
                         <div className="flex-1 min-w-0 pr-1">
-                          <div className="text-[10px] text-blue-600 font-bold mb-0.5">{doc.category}</div>
-                          <div className="text-xs font-bold text-slate-800 break-all leading-snug" title={doc.title}>
+                          <div className="text-[11px] text-blue-600 font-bold mb-0.5">{doc.category}</div>
+                          <div className="text-sm font-bold text-slate-800 break-all leading-snug" title={doc.title}>
                             {doc.title}
                           </div>
-                          <div className="text-[11px] text-slate-500 break-all leading-tight mt-1" title={doc.fileName}>
-                            {doc.fileName} <span className="text-slate-400 text-[10px]">({formatFileSize(doc.fileSize)})</span>
+                          <div className="text-xs text-slate-500 break-all leading-tight mt-1" title={doc.fileName}>
+                            {doc.fileName} <span className="text-slate-400 text-[11px]">({formatFileSize(doc.fileSize)})</span>
                           </div>
                         </div>
 
                         <button
                           onClick={() => handleDelete(doc)}
-                          className="text-slate-300 hover:text-red-500 p-1 transition-colors shrink-0"
+                          className="text-slate-300 hover:text-red-500 p-1 transition-colors shrink-0 cursor-pointer"
                           title="삭제"
                         >
                           ✕
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-1.5 mt-1.5">
+                      <div className="grid grid-cols-2 gap-2 mt-2">
                         <button
                           onClick={() => handleOpenPreview(doc)}
-                          className="py-1.5 px-2 bg-slate-100 hover:bg-slate-800 text-slate-700 hover:text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1"
+                          className="py-2 px-2.5 bg-slate-100 hover:bg-slate-800 text-slate-700 hover:text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                         >
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -468,7 +481,7 @@ export default function DocumentSidebar({
                         </button>
                         <button
                           onClick={() => downloadDocument(doc)}
-                          className="py-1.5 px-2 bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1"
+                          className="py-2 px-2.5 bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                         >
                           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />

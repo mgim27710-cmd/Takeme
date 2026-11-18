@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { API_BASE_URL } from './config';
@@ -113,7 +113,7 @@ function ComparisonLocationMap({ original, suggested }) {
           <Popup>관리자 지정: {original.boardingLocation}</Popup>
         </Marker>
         <Marker position={pos2} icon={greenPinIcon}>
-          <Popup>지도교사 제안: {suggested.boardingLocation}</Popup>
+          <Popup>차량선생님 제안: {suggested.boardingLocation}</Popup>
         </Marker>
       </MapContainer>
       <div className="absolute bottom-1 left-1 right-1 flex items-center justify-between bg-white/95 backdrop-blur-xs px-2.5 py-1 rounded-lg text-[10px] border border-slate-200 z-[400] shadow-2xs font-extrabold">
@@ -130,14 +130,22 @@ function ComparisonLocationMap({ original, suggested }) {
   );
 }
 
-export default function MessagePanel({ currentUser, selectedAcademyId, socket, isClosing, initialStudent, onClearInitialStudent, activeEducationLevel, initialRoomType }) {
+export default function MessagePanel({ currentUser, selectedAcademyId, socket, isClosing, initialStudent, onClearInitialStudent, activeEducationLevel, initialRoomType, onSwitchToBoard }) {
   const currentEducationLevel = activeEducationLevel || currentUser?.educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
   const isKindergarten = currentEducationLevel === '유치원';
   const isElementary = currentEducationLevel === '초등부';
   const isMiddleHigh = currentEducationLevel === '중,고등부';
-  const [rooms, setRooms] = useState([]);
+  const chatRoomsCacheKey = `takeme_chat_rooms_${currentEducationLevel}`;
+  const [rooms, setRooms] = useState(() => {
+    try {
+      const saved = localStorage.getItem(chatRoomsCacheKey);
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return [];
+  });
   const [activeRoom, setActiveRoom] = useState(null);
   const [messages, setMessages] = useState([]);
+  const messagesCacheRef = useRef(new Map());
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [searchRoomQuery, setSearchRoomQuery] = useState('');
@@ -158,6 +166,93 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       try { localStorage.setItem('takeme_bookmarked_msgs', JSON.stringify(next)); } catch (e) {}
       return next;
     });
+  };
+
+  // Image Upload & Preview States
+  const imageInputRef = useRef(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [previewImageUrl, setPreviewImageUrl] = useState(null);
+
+  const resolveImageUrl = (url) => {
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+      return url;
+    }
+    return `${API_BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`;
+  };
+
+  const handleImageFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeRoom) return;
+
+    // Reset input value so user can re-select the same file
+    e.target.value = '';
+
+    if (!file.type.startsWith('image/')) {
+      alert('이미지 파일만 전송할 수 있습니다.');
+      return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      alert('사진 크기는 최대 15MB까지 전송 가능합니다.');
+      return;
+    }
+
+    setIsUploadingImage(true);
+    try {
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const uploadRes = await fetch(`${API_BASE_URL}/chat/upload`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          base64Data,
+          filename: file.name,
+          mimeType: file.type,
+        }),
+      });
+
+      if (!uploadRes.ok) {
+        throw new Error('사진 업로드에 실패했습니다.');
+      }
+
+      const uploadData = await uploadRes.json();
+      const imageUrl = uploadData.url;
+
+      const msgRes = await fetch(`${API_BASE_URL}/chat/messages`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          roomId: activeRoom.id,
+          text: `[사진] ${file.name}`,
+          type: 'IMAGE',
+          payload: {
+            imageUrl,
+            filename: file.name,
+            fileSize: file.size,
+          },
+          senderEmail: myUser.email,
+        }),
+      });
+
+      if (msgRes.ok) {
+        const savedMsg = await msgRes.json();
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === savedMsg.id)) return prev;
+          return [...prev, savedMsg];
+        });
+        scrollToBottom();
+      }
+    } catch (err) {
+      console.error('Image upload error:', err);
+      alert(err.message || '사진 전송 중 오류가 발생했습니다.');
+    } finally {
+      setIsUploadingImage(false);
+    }
   };
 
   // Quick Action [+] Menu State
@@ -206,6 +301,13 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   // Participant list popover state
   const [showParticipantsModal, setShowParticipantsModal] = useState(false);
 
+  // Section refs for Category Navigation in New Chat Modal
+  const driversSectionRef = useRef(null);
+  const teachersSectionRef = useRef(null);
+  const studentsSectionRef = useRef(null);
+  const parentsSectionRef = useRef(null);
+  const adminsSectionRef = useRef(null);
+
   // Payment / Boarding Request Modal State
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [isLoadingPaymentContext, setIsLoadingPaymentContext] = useState(false);
@@ -232,11 +334,35 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   const [isDeciding, setIsDeciding] = useState(null);
   const [isPushingParent, setIsPushingParent] = useState(null);
 
-  // Counter-Proposal (지도교사 재결재 요청) Modal State
+  // Counter-Proposal (차량선생님 재결재 요청) Modal State
   const [counterModalMsg, setCounterModalMsg] = useState(null);
   const [counterLocation, setCounterLocation] = useState({ lat: 37.842, lng: 127.123, boardingLocation: '', address: '' });
   const [counterNote, setCounterNote] = useState('');
   const [isSubmittingCounter, setIsSubmittingCounter] = useState(false);
+
+  // Absence / Attendance Form Modal State (채팅 타이핑 대신 결재형 창 띄우기)
+  const [isAbsenceModalOpen, setIsAbsenceModalOpen] = useState(false);
+  const [absenceFormType, setAbsenceFormType] = useState('ABSENCE'); // 'ABSENCE' | 'LATENESS' | 'EXTENDED_CARE' | 'PARENT_PICKUP'
+  const [absenceStudentId, setAbsenceStudentId] = useState('');
+  const [absenceStartDate, setAbsenceStartDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [absenceEndDate, setAbsenceEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [absenceReason, setAbsenceReason] = useState('감기 및 몸살로 인한 가정 요양');
+  const [absenceDetail, setAbsenceDetail] = useState('');
+  const [isSubmittingAbsence, setIsSubmittingAbsence] = useState(false);
+  const [absenceStudentSearch, setAbsenceStudentSearch] = useState('');
+
+  // Unread badge count helper (카카오톡 스타일 미확인 인원수: 1:1이면 1, 다자간이면 명수)
+  const getUnreadNumber = useCallback((msg) => {
+    if (!msg) return 0;
+    if (msg.unreadCount !== undefined && msg.unreadCount !== null) {
+      return Number(msg.unreadCount);
+    }
+    const totalMembers = (activeRoom?.members && activeRoom.members.length > 0) ? activeRoom.members.length : 2;
+    const readList = (msg.readBy || []).map(Number);
+    const readSet = new Set(readList);
+    if (msg.sender?.id) readSet.add(Number(msg.sender.id));
+    return Math.max(0, totalMembers - readSet.size);
+  }, [activeRoom]);
 
   const messagesEndRef = useRef(null);
   const activeRoomRef = useRef(null);
@@ -256,8 +382,20 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
   // Initial Load: Fetch rooms
   useEffect(() => {
-    setActiveRoom(null);
-    setMessages([]);
+    // 로컬 캐시에서 즉시 방 목록 복원 (0초 반응)
+    try {
+      const saved = localStorage.getItem(chatRoomsCacheKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setRooms(parsed);
+          if (!activeRoomRef.current) {
+            setActiveRoom(parsed[0]);
+          }
+        }
+      }
+    } catch (_) {}
+
     fetchRooms();
   }, [myUser.email, currentEducationLevel]);
 
@@ -280,6 +418,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           return [...prev, newMsg];
         });
         scrollToBottom();
+
+        // 즉시 읽음 처리 통지 (상대방 화면에서 1이 바로 사라지도록 처리)
+        if (socket && myUser?.id) {
+          socket.emit('markAsRead', { roomId: msgRoomId, userId: myUser.id });
+        }
       }
 
       // Update room list latest message
@@ -310,9 +453,25 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
     const handleMessagesRead = (data) => {
       const currentActive = activeRoomRef.current;
-      if (currentActive && Number(currentActive.id) === Number(data?.roomId)) {
+      const targetRoomId = data?.roomId;
+      if (currentActive && Number(currentActive.id) === Number(targetRoomId)) {
+        const { userId, messageIds } = data || {};
         setMessages((prev) =>
-          prev.map((m) => ({ ...m, unreadCount: 0 }))
+          prev.map((m) => {
+            if (!messageIds || messageIds.includes(m.id)) {
+              const readList = (m.readBy || []).map(Number);
+              if (userId && !readList.includes(Number(userId))) {
+                readList.push(Number(userId));
+              }
+              const currentUnread = m.unreadCount !== undefined ? Math.max(0, m.unreadCount - 1) : 0;
+              return {
+                ...m,
+                readBy: readList,
+                unreadCount: currentUnread,
+              };
+            }
+            return m;
+          })
         );
       }
     };
@@ -334,6 +493,15 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
     if (socket) {
       socket.emit('joinChatRoom', { roomId: activeRoom.id });
+      if (myUser?.id) {
+        socket.emit('markAsRead', { roomId: activeRoom.id, userId: myUser.id });
+      }
+    }
+
+    // 인메모리 캐시에서 해당 방의 직전 메시지 즉시 렌더링 (0초 전환)
+    if (messagesCacheRef.current.has(activeRoom.id)) {
+      setMessages(messagesCacheRef.current.get(activeRoom.id));
+      scrollToBottom();
     }
 
     markRoomAsRead(activeRoom.id);
@@ -377,6 +545,9 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         // 학제 일치 검증 필터 (방에 educationLevel이 명시된 경우 현재 학제와 반드시 일치해야 함)
         const filtered = (data || []).filter((r) => !r.educationLevel || r.educationLevel === currentEducationLevel);
         setRooms(filtered);
+        try {
+          localStorage.setItem(chatRoomsCacheKey, JSON.stringify(filtered));
+        } catch (_) {}
         if (initialRoomType) {
           const match = filtered.find((r) => r.type === initialRoomType);
           if (match) {
@@ -426,6 +597,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       if (res.ok) {
         const data = await res.json();
         setMessages(data);
+        messagesCacheRef.current.set(roomId, data);
         setRooms((prev) =>
           prev.map((r) => (Number(r.id) === Number(roomId) ? { ...r, unreadCount: 0 } : r))
         );
@@ -494,6 +666,14 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         return Array.from(next);
       }
     });
+  };
+
+  // 역할별 일괄 선택/해제 토글 및 해당 섹션으로 스크롤 이동
+  const handleToggleSelectRoleAndScroll = (userList, sectionRef) => {
+    handleToggleSelectRole(userList);
+    if (sectionRef?.current) {
+      sectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   // 관련 인원 전체 선택/해제 토글
@@ -684,8 +864,145 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   };
 
   // ============================================================
+  // 원아 결석계 및 출결 변동 신청 모달 핸들러 (채팅 타이핑 대체)
+  // ============================================================
+  const handleOpenAbsenceModal = async (formType = 'ABSENCE') => {
+    setShowPlusMenu(false);
+    setAbsenceFormType(formType);
+    const todayStr = new Date().toISOString().split('T')[0];
+    setAbsenceStartDate(todayStr);
+    setAbsenceEndDate(todayStr);
+
+    if (formType === 'ABSENCE') {
+      setAbsenceReason('감기 및 몸살로 인한 가정 요양');
+    } else if (formType === 'LATENESS') {
+      setAbsenceReason('병원 진료 후 등원');
+    } else if (formType === 'EXTENDED_CARE') {
+      setAbsenceReason('학부모 야근으로 인한 연장 보육 신청');
+    } else if (formType === 'PARENT_PICKUP') {
+      setAbsenceReason('보호자 직접 픽업 (셔틀 미탑승)');
+    }
+    setAbsenceDetail('');
+
+    // paymentContext.students 가 비어있을 경우 자동 로드
+    if (!paymentContext.students || paymentContext.students.length === 0) {
+      try {
+        const q = new URLSearchParams();
+        if (targetAcademyId) q.append('academyId', String(targetAcademyId));
+        if (myUser?.email) q.append('email', myUser.email);
+        const res = await fetch(`${API_BASE_URL}/chat/payment-context?${q.toString()}`, {
+          headers: getAuthHeaders(),
+        });
+        if (res.ok) {
+          const ctx = await res.json();
+          setPaymentContext(ctx);
+          if (ctx.students && ctx.students.length > 0) {
+            setAbsenceStudentId(String(ctx.students[0].id));
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load students for absence', e);
+      }
+    } else if (paymentContext.students.length > 0 && !absenceStudentId) {
+      setAbsenceStudentId(String(paymentContext.students[0].id));
+    }
+
+    setIsAbsenceModalOpen(true);
+  };
+
+  const handleSubmitAbsenceForm = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!absenceStudentId) {
+      return alert('대상 원아를 선택해주세요.');
+    }
+    if (!activeRoom) {
+      return alert('전송할 대화방을 먼저 선택해주세요.');
+    }
+
+    const selectedStudent = (paymentContext.students || []).find(s => String(s.id) === String(absenceStudentId));
+    const studentName = selectedStudent?.name || '원아';
+    const className = selectedStudent?.className || selectedStudent?.raw?.['반명'] || selectedStudent?.raw?.['반'] || '';
+
+    const formTitleMap = {
+      ABSENCE: '원아 결석계 (결석원)',
+      LATENESS: '등원 지각 알림서',
+      EXTENDED_CARE: '연장 보육 신청서',
+      PARENT_PICKUP: '학부모 직접 픽업 신청서',
+    };
+    const formTitle = formTitleMap[absenceFormType] || '출결 변동 신청서';
+
+    const fullReason = absenceDetail.trim()
+      ? `${absenceReason} (${absenceDetail.trim()})`
+      : absenceReason;
+
+    setIsSubmittingAbsence(true);
+
+    try {
+      // 1. 캘린더 및 출결 오버라이드 시스템에 등록
+      try {
+        await fetch(`${API_BASE_URL}/approval/calendar/absence`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            studentId: Number(absenceStudentId),
+            startDate: absenceStartDate,
+            endDate: absenceEndDate,
+            reason: `[${formTitle}] ${fullReason}`,
+          }),
+        });
+      } catch (calErr) {
+        console.warn('Calendar sync error:', calErr);
+      }
+
+      // 2. 채팅 메시지로 정형화된 서식 카드 전송
+      const messageText = `[${formTitle}]
+- 대상 원아: ${studentName}${className ? ` (${className})` : ''}
+- 적용 기간: ${absenceStartDate === absenceEndDate ? absenceStartDate : `${absenceStartDate} ~ ${absenceEndDate}`}
+- 신청 사유: ${fullReason}`;
+
+      const payload = {
+        isAbsenceForm: true,
+        formType: absenceFormType,
+        formTitle,
+        studentId: Number(absenceStudentId),
+        studentName,
+        className,
+        startDate: absenceStartDate,
+        endDate: absenceEndDate,
+        reason: fullReason,
+        requesterName: myUser.name || myUser.email,
+        requesterRole: myUser.role,
+        appliedToCalendar: true,
+      };
+
+      const sendRes = await fetch(`${API_BASE_URL}/chat/messages`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          roomId: activeRoom.id,
+          text: messageText,
+          senderEmail: myUser.email,
+          type: 'ABSENCE_REQUEST',
+          payload,
+        }),
+      });
+
+      if (sendRes.ok) {
+        setIsAbsenceModalOpen(false);
+      } else {
+        alert('신청서 전송에 실패했습니다.');
+      }
+    } catch (err) {
+      alert('신청서 전송 중 오류가 발생했습니다.');
+    } finally {
+      setIsSubmittingAbsence(false);
+    }
+  };
+
+  // ============================================================
   // 결재 및 탑승 신청 관련 핸들러
   // ============================================================
+
 
   // Auto open modal when initialStudent prop is provided (e.g. from Director Dashboard consultation)
   useEffect(() => {
@@ -879,7 +1196,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     }
   };
 
-  // Open Counter-Proposal Modal (지도교사가 다른 위치 핀 찍어 재결재 요청)
+  // Open Counter-Proposal Modal (차량선생님이 다른 위치 핀 찍어 재결재 요청)
   const handleOpenCounterModal = (msg) => {
     setCounterModalMsg(msg);
     const p = msg.payload || {};
@@ -1074,7 +1391,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           });
           scrollToBottom();
         } else if (createdMsg.roomId) {
-          alert('담당 차량 지도교사와의 결재 대화방으로 결재 신청서가 안전하게 발송되었습니다.\n(학부모 대화방에는 결재 카드가 노출되지 않습니다.)');
+          alert('담당 차량선생님과의 결재 대화방으로 결재 신청서가 안전하게 발송되었습니다.\n(학부모 대화방에는 결재 카드가 노출되지 않습니다.)');
         }
         await fetchRooms();
       } else {
@@ -1332,7 +1649,28 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       {/* ============================================================ */}
       {/* LEFT COLUMN: 채팅방 목록 (Kakao Style Room List) */}
       {/* ============================================================ */}
-      <div className="w-96 h-full border-r border-slate-200 flex flex-col bg-white overflow-hidden flex-shrink-0 shadow-sm">
+      <div className="w-[450px] h-full border-r border-slate-200 flex flex-col bg-white overflow-hidden flex-shrink-0 shadow-sm">
+        {/* Sub Navigation Tabs: 실시간 대화 <-> 공지·게시판 */}
+        {onSwitchToBoard && (
+          <div className="p-3 bg-white border-b border-slate-200 shrink-0">
+            <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200/80 shrink-0 select-none shadow-2xs">
+              <button
+                type="button"
+                className="flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer bg-white text-blue-600 shadow-xs border border-slate-200 flex items-center justify-center gap-1.5"
+              >
+                💬 실시간 대화
+              </button>
+              <button
+                type="button"
+                onClick={onSwitchToBoard}
+                className="flex-1 py-1.5 px-3 rounded-lg text-xs font-black transition-all cursor-pointer text-slate-500 hover:text-slate-800 flex items-center justify-center gap-1.5"
+              >
+                📢 공지·게시판
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Top Header */}
         <div className="p-4 border-b border-slate-200 bg-white flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -1342,8 +1680,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
               </svg>
             </div>
             <div>
-              <h2 className="text-base font-extrabold text-slate-800 tracking-tight leading-none">메세지함</h2>
-              <span className="text-[11px] text-slate-400 font-medium">실시간 원내 메신저</span>
+              <h2 className="text-xl font-extrabold text-slate-900 tracking-tight leading-none mb-0.5">메세지함</h2>
+              <span className="text-xs text-slate-500 font-medium">실시간 원내 메신저</span>
             </div>
           </div>
 
@@ -1445,11 +1783,14 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
           ) : (
             filteredRooms.map((room) => {
               const isSelected = activeRoom && activeRoom.id === room.id;
+              const isSystemAlert = room.type === 'SYSTEM' || room.type === 'SYSTEM_ALERT' || room.name === 'TakeMe 알림' || room.name === '실시간 알림' || Boolean(room.isSystem);
               const isPaymentSystem = room.type === 'PAYMENT_SYSTEM' || room.name === '결재 전용 채널' || room.name === '결제 시스템 방';
               const isNotificationSystem = room.type === 'NOTIFICATION_SYSTEM' || room.name === '실시간 알림 채널' || room.name === '공지사항';
-              const title = getRoomTitle(room);
+              const title = isSystemAlert ? (room.name || 'TakeMe 알림') : getRoomTitle(room);
               const isGroup = (room.members || []).length > 2 || room.type === 'GROUP';
-              const lastText = isPaymentSystem
+              const lastText = isSystemAlert
+                ? room.latestMessage?.text || '시스템 알림 채널입니다.'
+                : isPaymentSystem
                 ? room.latestMessage?.text || '신규 원생 탑승 및 결재 승인 요청 전용 채널입니다.'
                 : isNotificationSystem
                 ? room.latestMessage?.text || '실시간 출결 변동 및 결재 승인 완료 알림 채널입니다.'
@@ -1574,7 +1915,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                   </div>
                   <p className="text-[11px] text-slate-400 truncate">
                     {isCurrentRoomPaymentSystem
-                      ? '신규 학생 탑승 요청 및 담당 차량 지도교사 수락/거절 시스템 채널입니다.'
+                      ? '신규 학생 탑승 요청 및 담당 차량선생님 수락/거절 시스템 채널입니다.'
                       : isCurrentRoomNotificationSystem
                       ? '나와 관련된 알림과 기관 전체 소식(휴업·방학·행사, 원장님 알림)이 옵니다.'
                       : (activeRoom.members || [])
@@ -1604,6 +1945,25 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
                 <button
                   type="button"
+                  onClick={() => setShowBookmarksOnly(prev => !prev)}
+                  className={`p-2 rounded-lg transition-colors relative ${
+                    showBookmarksOnly
+                      ? 'bg-amber-100 text-amber-700 font-bold'
+                      : 'text-slate-400 hover:text-amber-500 hover:bg-slate-50'
+                  }`}
+                  title={showBookmarksOnly ? '전체 메시지 보기' : '책갈피 모아보기'}
+                >
+                  <svg className="w-4 h-4" fill={showBookmarksOnly ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                  </svg>
+                  {bookmarkedIds.length > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-amber-500 text-white rounded-full text-[9px] w-4 h-4 flex items-center justify-center font-bold">
+                      {bookmarkedIds.length > 99 ? '99+' : bookmarkedIds.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
                   onClick={() => setShowParticipantsModal(true)}
                   className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-colors flex items-center gap-1"
                 >
@@ -1624,6 +1984,23 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 </button>
               </div>
             </div>
+
+            {/* Bookmarks Only Mode Banner */}
+            {showBookmarksOnly && (
+              <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between text-xs font-bold text-amber-900 shadow-2xs">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                  <span>책갈피 모아보기 활성화 중 (총 {messages.filter(m => bookmarkedIds.includes(m.id)).length}개)</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowBookmarksOnly(false)}
+                  className="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-md text-[11px] font-bold transition shadow-2xs"
+                >
+                  전체 메시지 보기
+                </button>
+              </div>
+            )}
 
             {/* Kakao-style Messages Viewport */}
             <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-100">
@@ -1733,9 +2110,25 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     : '안내 알림'}
                                 </span>
                               </div>
-                              <span className="text-[10px] font-mono text-slate-400">
-                                {formatMessageTime(msg.createdAt)}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] font-mono text-slate-400">
+                                  {formatMessageTime(msg.createdAt)}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleBookmark(msg.id)}
+                                  className={`p-1 rounded-md transition-colors ${
+                                    bookmarkedIds.includes(msg.id)
+                                      ? 'text-amber-500 hover:text-amber-600'
+                                      : 'text-slate-300 hover:text-amber-500'
+                                  }`}
+                                  title={bookmarkedIds.includes(msg.id) ? "책갈피 해제" : "책갈피 추가"}
+                                >
+                                  <svg className="w-3.5 h-3.5" fill={bookmarkedIds.includes(msg.id) ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                                  </svg>
+                                </button>
+                              </div>
                             </div>
 
                             {/* Card Body */}
@@ -1800,7 +2193,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     '신규 탑승 및 결재 승인 요청'
                                   </h4>
                                   <span className="text-[10px] text-indigo-600 font-medium">
-                                    '담당 차량 지도교사 수락/거절'
+                                    '담당 차량선생님 수락/거절'
                                   </span>
                                 </div>
                               </div>
@@ -1839,6 +2232,21 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     승인 대기중
                                   </span>
                                 )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleBookmark(msg.id)}
+                                  className={`p-1 rounded-md transition-colors ${
+                                    bookmarkedIds.includes(msg.id)
+                                      ? 'text-amber-500 hover:text-amber-600'
+                                      : 'text-slate-400 hover:text-amber-500'
+                                  }`}
+                                  title={bookmarkedIds.includes(msg.id) ? "책갈피 해제" : "책갈피 추가"}
+                                >
+                                  <svg className="w-3.5 h-3.5" fill={bookmarkedIds.includes(msg.id) ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                                  </svg>
+                                </button>
                               </div>
                             </div>
 
@@ -1851,13 +2259,13 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                                     </svg>
-                                    <span>지도교사 위치 변경 재결재 요청</span>
+                                    <span>차량선생님 위치 변경 재결재 요청</span>
                                   </div>
                                   <p className="text-xs font-bold text-purple-950 bg-white/80 p-2.5 rounded-xl border border-purple-100 leading-relaxed">
                                     "{payload.counterProposal?.note || payload.counterNote || '통학버스 운행 여건에 따른 탑승 위치 변경 제안'}"
                                   </p>
                                   <div className="text-[10px] text-purple-700 font-semibold text-right">
-                                    제안 지도교사: {payload.counterProposal?.proposedBy || payload.counterProposedBy || '담당 지도교사'}
+                                    제안 차량선생님: {payload.counterProposal?.proposedBy || payload.counterProposedBy || '담당 차량선생님'}
                                   </div>
                                 </div>
                               )}
@@ -1913,7 +2321,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     </span>
                                   </div>
                                   <div className="p-2.5 rounded-xl bg-emerald-50/60 border border-emerald-300">
-                                    <span className="text-[10px] font-bold text-emerald-700 block">지도교사 제안 탑승지</span>
+                                    <span className="text-[10px] font-bold text-emerald-700 block">차량선생님 제안 탑승지</span>
                                     <span className="font-extrabold text-emerald-950 block truncate" title={payload.counterProposal.suggestedLocation?.boardingLocation}>
                                       {payload.counterProposal.suggestedLocation?.boardingLocation}
                                     </span>
@@ -2032,12 +2440,12 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     <span>상대방 결재 대기 중</span>
                                   </div>
                                   <p className="text-[11px] text-amber-700 font-medium">
-                                    신청자는 직접 결재할 수 없으며, 상대방({isContest ? '지도교사 공모 수락자' : `${formatTeacherName(payload.teacherName) || '담당 지도교사'} / 원장님`})만 결재 가능합니다.
+                                    신청자는 직접 결재할 수 없으며, 상대방({isContest ? '차량선생님 공모 수락자' : `${formatTeacherName(payload.teacherName) || '담당 차량선생님'} / 원장님`})만 결재 가능합니다.
                                   </p>
                                 </div>
                               ) : isParent ? (
                                 <div className="text-center py-2.5 px-3 bg-slate-100 rounded-xl text-xs text-slate-500 font-medium">
-                                  담당 차량 지도교사 또는 관리자 승인 대기 중입니다.
+                                  담당 차량선생님 또는 관리자 승인 대기 중입니다.
                                 </div>
                               ) : payload.status === 'RE_REQUESTED' ? (
                                 /* Action for Director/Admin on Counter-Proposal */
@@ -2052,7 +2460,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                                       </svg>
-                                      <span>지도교사 제안 위치로 최종 수락</span>
+                                      <span>차량선생님 제안 위치로 최종 수락</span>
                                     </button>
                                     <button
                                       type="button"
@@ -2064,7 +2472,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     </button>
                                   </div>
                                   <p className="text-[10px] text-center text-slate-400 font-medium">
-                                    관리자님께서 수락하시면 지도교사가 제안한 위치로 최종 노선/구역이 확정됩니다.
+                                    관리자님께서 수락하시면 차량선생님이 제안한 위치로 최종 노선/구역이 확정됩니다.
                                   </p>
                                 </div>
                               ) : isContest ? (
@@ -2092,7 +2500,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                     </button>
                                   </div>
                                   <p className="text-[10px] text-center text-purple-700 font-semibold">
-                                    담당 지도교사 또는 원장님께서 수락하시면 해당 차량의 탑승 노선에 자동 반영됩니다.
+                                    담당 차량선생님 또는 원장님께서 수락하시면 해당 차량의 탑승 노선에 자동 반영됩니다.
                                   </p>
                                 </div>
                               ) : (isTargetTeacher || isAdmin) ? (
@@ -2132,39 +2540,160 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                   </div>
                                 </div>
                               ) : (
-                                /* 1:1 결재 건이지만 다른 지도교사가 열람한 경우 */
+                                /* 1:1 결재 건이지만 다른 차량선생님이 열람한 경우 */
                                 <div className="p-3 bg-slate-100 rounded-xl border border-slate-200 text-center space-y-0.5">
                                   <div className="text-xs font-bold text-slate-700">
                                     1:1 지정 결재 건
                                   </div>
                                   <p className="text-[10px] text-slate-500">
-                                    해당 1:1 결재는 지정된 담당 지도교사({formatTeacherName(payload.teacherName) || payload.busNumber}) 또는 원장님만 결재할 수 있습니다.
+                                    해당 1:1 결재는 지정된 담당 차량선생님({formatTeacherName(payload.teacherName) || payload.busNumber}) 또는 원장님만 결재할 수 있습니다.
                                   </p>
                                 </div>
                               )}
                             </div>
                           </div>
                         </div>
+                      ) : (payload.isAbsenceForm || msg.type === 'ABSENCE_REQUEST') ? (
+                        /* ABSENCE / ATTENDANCE FORM CARD */
+                        <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} my-2 animate-fade-in`}>
+                          <div className="flex items-center gap-1.5 mb-1 px-1">
+                            <span className="text-xs font-bold text-slate-800">{senderName}</span>
+                            {senderRole && getRoleBadge(senderRole)}
+                          </div>
+
+                          <div className="flex items-end gap-1.5">
+                            {isMine && (
+                              <div className="flex flex-col items-end pb-1 select-none">
+                                {getUnreadNumber(msg) > 0 && (
+                                  <span className="text-[11px] font-black text-amber-500 leading-tight">
+                                    {getUnreadNumber(msg)}
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-slate-500 font-medium">
+                                  {formatMessageTime(msg.createdAt)}
+                                </span>
+                              </div>
+                            )}
+
+                            <div className="bg-white rounded-2xl border-2 border-rose-200 p-4 shadow-sm max-w-sm w-full space-y-3">
+                              <div className="flex items-center justify-between pb-2 border-b border-rose-100">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                                  <span className="text-xs font-black text-rose-950">
+                                    {payload.formTitle || '원아 결석계 (결석원)'}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                    출결/캘린더 반영
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleBookmark(msg.id)}
+                                    className={`p-1 rounded-md transition-colors ${
+                                      bookmarkedIds.includes(msg.id)
+                                        ? 'text-amber-500 hover:text-amber-600'
+                                        : 'text-slate-300 hover:text-amber-500'
+                                    }`}
+                                    title={bookmarkedIds.includes(msg.id) ? "책갈피 해제" : "책갈피 추가"}
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill={bookmarkedIds.includes(msg.id) ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="space-y-1.5 text-xs">
+                                <div className="flex justify-between">
+                                  <span className="text-slate-400 font-bold">대상 원아</span>
+                                  <span className="font-black text-slate-800">
+                                    {payload.studentName} {payload.className && `(${payload.className})`}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span className="text-slate-400 font-bold">적용 일자</span>
+                                  <span className="font-bold text-rose-700">
+                                    {payload.startDate === payload.endDate ? payload.startDate : `${payload.startDate} ~ ${payload.endDate}`}
+                                  </span>
+                                </div>
+                                <div className="bg-rose-50/70 p-2.5 rounded-xl border border-rose-100 text-rose-900 mt-2">
+                                  <span className="text-[11px] font-bold block text-rose-800 mb-0.5">신청 사유</span>
+                                  <p className="whitespace-pre-wrap leading-relaxed">{payload.reason || msg.text}</p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {!isMine && (
+                              <div className="flex flex-col items-start pb-1 select-none">
+                                {getUnreadNumber(msg) > 0 && (
+                                  <span className="text-[11px] font-black text-amber-500 leading-tight">
+                                    {getUnreadNumber(msg)}
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-slate-500 font-medium">
+                                  {formatMessageTime(msg.createdAt)}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       ) : (
                         /* Standard Chat Bubble */
                         isMine ? (
-                          <div className="flex justify-end items-end gap-1.5 animate-fade-in">
+                          <div className="flex justify-end items-end gap-1.5 animate-fade-in group">
+                            {/* Bookmark Toggle Icon */}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleBookmark(msg.id)}
+                              className={`p-1 rounded-lg transition-all ${
+                                bookmarkedIds.includes(msg.id)
+                                  ? 'text-amber-500 hover:text-amber-600 opacity-100 scale-105'
+                                  : 'text-slate-300 hover:text-amber-500 opacity-0 group-hover:opacity-100'
+                              }`}
+                              title={bookmarkedIds.includes(msg.id) ? "책갈피 해제" : "책갈피 추가"}
+                            >
+                              <svg className="w-3.5 h-3.5" fill={bookmarkedIds.includes(msg.id) ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                              </svg>
+                            </button>
+
                             <div className="flex flex-col items-end pb-0.5 select-none">
-                              {Number(msg.unreadCount) > 0 && (
-                                <span className="text-[10px] text-amber-500 font-black leading-none pb-0.5">
-                                  {msg.unreadCount}
+                              {getUnreadNumber(msg) > 0 && (
+                                <span className="text-[11px] font-black text-amber-500 leading-tight">
+                                  {getUnreadNumber(msg)}
                                 </span>
                               )}
-                              <span className="text-[10px] text-slate-600 font-medium">
+                              <span className="text-[10px] text-slate-500 font-medium">
                                 {formatMessageTime(msg.createdAt)}
                               </span>
                             </div>
-                            <div className="bg-blue-600 text-white px-3.5 py-2.5 rounded-2xl rounded-tr-xs text-xs font-medium max-w-[70%] break-words shadow-xs">
-                              <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                            <div className={`text-white rounded-2xl rounded-tr-xs text-xs font-medium max-w-[70%] break-words shadow-xs overflow-hidden ${
+                              (msg.type === 'IMAGE' || payload.imageUrl) ? 'bg-blue-600 p-1.5' : 'bg-blue-600 px-3.5 py-2.5'
+                            }`}>
+                              {(msg.type === 'IMAGE' || payload.imageUrl) ? (
+                                <div className="space-y-1">
+                                  <img
+                                    src={resolveImageUrl(payload.imageUrl)}
+                                    alt={payload.filename || '첨부 사진'}
+                                    className="max-w-xs max-h-64 rounded-xl object-cover cursor-pointer hover:opacity-95 transition bg-slate-900/10"
+                                    onClick={() => setPreviewImageUrl(resolveImageUrl(payload.imageUrl))}
+                                    loading="lazy"
+                                  />
+                                  {payload.filename && (
+                                    <div className="text-[10px] text-blue-100 px-1 truncate flex items-center justify-between">
+                                      <span>{payload.filename}</span>
+                                      <span className="text-[9px] opacity-75">클릭 시 확대</span>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                              )}
                             </div>
                           </div>
                         ) : (
-                          <div className="flex items-start gap-2 animate-fade-in">
+                          <div className="flex items-start gap-2 animate-fade-in group">
                             <div className="w-9 h-9 rounded-xl bg-white text-slate-700 border border-slate-200 flex items-center justify-center font-black text-xs flex-shrink-0 shadow-2xs">
                               {senderName[0] || '상'}
                             </div>
@@ -2176,19 +2705,55 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                               </div>
 
                               <div className="flex items-end gap-1.5">
-                                <div className="bg-white text-slate-800 px-3.5 py-2.5 rounded-2xl rounded-tl-xs text-xs font-medium break-words shadow-xs border border-white/80">
-                                  <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                                <div className={`bg-white text-slate-800 rounded-2xl rounded-tl-xs text-xs font-medium break-words shadow-xs border border-white/80 overflow-hidden ${
+                                  (msg.type === 'IMAGE' || payload.imageUrl) ? 'p-1.5' : 'px-3.5 py-2.5'
+                                }`}>
+                                  {(msg.type === 'IMAGE' || payload.imageUrl) ? (
+                                    <div className="space-y-1">
+                                      <img
+                                        src={resolveImageUrl(payload.imageUrl)}
+                                        alt={payload.filename || '첨부 사진'}
+                                        className="max-w-xs max-h-64 rounded-xl object-cover cursor-pointer hover:opacity-95 transition bg-slate-100"
+                                        onClick={() => setPreviewImageUrl(resolveImageUrl(payload.imageUrl))}
+                                        loading="lazy"
+                                      />
+                                      {payload.filename && (
+                                        <div className="text-[10px] text-slate-500 px-1 truncate flex items-center justify-between">
+                                          <span>{payload.filename}</span>
+                                          <span className="text-[9px] text-slate-400">클릭 시 확대</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                                  )}
                                 </div>
                                 <div className="flex flex-col items-start pb-0.5 select-none">
-                                  {Number(msg.unreadCount) > 0 && (
-                                    <span className="text-[10px] text-amber-500 font-black leading-none pb-0.5">
-                                      {msg.unreadCount}
+                                  {getUnreadNumber(msg) > 0 && (
+                                    <span className="text-[11px] font-black text-amber-500 leading-tight">
+                                      {getUnreadNumber(msg)}
                                     </span>
                                   )}
-                                  <span className="text-[10px] text-slate-600 font-medium">
+                                  <span className="text-[10px] text-slate-500 font-medium">
                                     {formatMessageTime(msg.createdAt)}
                                   </span>
                                 </div>
+
+                                {/* Bookmark Toggle Icon for other's message */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleBookmark(msg.id)}
+                                  className={`p-1 rounded-lg transition-all ${
+                                    bookmarkedIds.includes(msg.id)
+                                      ? 'text-amber-500 hover:text-amber-600 opacity-100 scale-105'
+                                      : 'text-slate-300 hover:text-amber-500 opacity-0 group-hover:opacity-100'
+                                  }`}
+                                  title={bookmarkedIds.includes(msg.id) ? "책갈피 해제" : "책갈피 추가"}
+                                >
+                                  <svg className="w-3.5 h-3.5" fill={bookmarkedIds.includes(msg.id) ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                                  </svg>
+                                </button>
                               </div>
                             </div>
                           </div>
@@ -2232,37 +2797,107 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     )}
                     <button
                       type="button"
-                      onClick={() => {
-                        setShowPlusMenu(false);
-                        setInputText('[원아 결석 알림]\n- 원아명: \n- 결석 일자: 오늘\n- 결석 사유: ');
-                      }}
+                      onClick={() => handleOpenAbsenceModal('ABSENCE')}
                       className="w-full text-left px-3 py-2 rounded-xl hover:bg-rose-50 text-rose-950 font-bold text-xs flex items-center gap-2 transition"
                     >
                       <span className="w-6 h-6 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center text-xs font-black">결</span>
-                      <span>원아 결석 알림서</span>
+                      <div>
+                        <div className="font-bold text-slate-800">원아 결석계 (결석원)</div>
+                        <div className="text-[10px] text-slate-400 font-normal">사유 선택형 결재 서식</div>
+                      </div>
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        setShowPlusMenu(false);
-                        setInputText('[등원 지각 알림]\n- 원아명: \n- 예상 등원 시간: \n- 지각 사유: ');
-                      }}
+                      onClick={() => handleOpenAbsenceModal('LATENESS')}
                       className="w-full text-left px-3 py-2 rounded-xl hover:bg-amber-50 text-amber-950 font-bold text-xs flex items-center gap-2 transition"
                     >
                       <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center text-xs font-black">지</span>
-                      <span>등원 지각 알림서</span>
+                      <div>
+                        <div className="font-bold text-slate-800">등원 지각 알림서</div>
+                        <div className="text-[10px] text-slate-400 font-normal">시간 및 병원 사유 선택</div>
+                      </div>
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAbsenceModal('EXTENDED_CARE')}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-purple-50 text-purple-950 font-bold text-xs flex items-center gap-2 transition"
+                    >
+                      <span className="w-6 h-6 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center text-xs font-black">연</span>
+                      <div>
+                        <div className="font-bold text-slate-800">연장 보육 / 개별 하원 신청</div>
+                        <div className="text-[10px] text-slate-400 font-normal">직접 픽업 및 연장 보육</div>
+                      </div>
+                    </button>
+
+                    {/* Tools & Media Section */}
+                    <div className="text-[11px] font-black text-slate-400 px-2 pt-2 pb-1 border-t border-slate-100 uppercase">
+                      도구 및 미디어
+                    </div>
+
+                    {/* Photo Upload Button */}
                     <button
                       type="button"
                       onClick={() => {
                         setShowPlusMenu(false);
-                        setInputText('[연장 보육 신청]\n- 원아명: \n- 신청 시간: ~ 19:30\n- 귀가 방식: 직접 픽업');
+                        imageInputRef.current?.click();
                       }}
-                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-purple-50 text-purple-950 font-bold text-xs flex items-center gap-2 transition"
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-sky-50 text-sky-950 font-bold text-xs flex items-center gap-2 transition"
                     >
-                      <span className="w-6 h-6 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center text-xs font-black">연</span>
-                      <span>연장 보육 신청서</span>
+                      <span className="w-6 h-6 rounded-lg bg-sky-100 text-sky-600 flex items-center justify-center text-xs font-black">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                      </span>
+                      <div>
+                        <div className="font-bold text-slate-800">사진 전송</div>
+                        <div className="text-[10px] text-slate-400 font-normal">이미지/사진 첨부 업로드</div>
+                      </div>
                     </button>
+
+                    {/* Bookmark Toggle Button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowPlusMenu(false);
+                        setShowBookmarksOnly((prev) => !prev);
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition ${
+                        showBookmarksOnly
+                          ? 'bg-amber-100 text-amber-950 hover:bg-amber-200'
+                          : 'hover:bg-amber-50 text-amber-950'
+                      }`}
+                    >
+                      <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center text-xs font-black">
+                        <svg className="w-3.5 h-3.5" fill={showBookmarksOnly ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                        </svg>
+                      </span>
+                      <div>
+                        <div className="font-bold text-slate-800">
+                          {showBookmarksOnly ? '전체 메시지 보기' : '책갈피 모아보기'}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-normal">
+                          {showBookmarksOnly ? '모든 대화 표시로 전환' : `보관된 중요 메시지 (${bookmarkedIds.length}개)`}
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                )}
+
+                {/* Hidden File Input for Image Upload */}
+                <input
+                  type="file"
+                  ref={imageInputRef}
+                  accept="image/*"
+                  onChange={handleImageFileSelect}
+                  style={{ display: 'none' }}
+                />
+
+                {/* Image Uploading Toast Indicator */}
+                {isUploadingImage && (
+                  <div className="absolute -top-10 left-4 z-20 bg-slate-900/90 text-white text-xs px-3.5 py-1.5 rounded-xl shadow-lg flex items-center gap-2 backdrop-blur-xs">
+                    <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping"></span>
+                    <span className="font-bold">사진 업로드 및 전송 중...</span>
                   </div>
                 )}
 
@@ -2372,43 +3007,112 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             </div>
 
             {/* Quick Role Select Toolbar (역할별 및 관련인원 전체 선택 툴바) */}
-            <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-1 flex-wrap">
+            <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-1.5 flex-wrap">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
                   onClick={handleToggleSelectAllUsers}
-                  className="px-2.5 py-1 text-xs font-black rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition shadow-2xs cursor-pointer"
+                  className="px-3 py-1.5 text-xs font-black rounded-xl bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition shadow-2xs border border-blue-700 cursor-pointer"
                 >
                   관련인원 전체 {selectedUserIds.length === (filteredDrivers.length + filteredTeachers.length + filteredParents.length + filteredAdmins.length) && selectedUserIds.length > 0 ? '해제' : '선택'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleToggleSelectRole(filteredTeachers)}
-                  className="px-2 py-1 text-xs font-bold rounded-lg bg-emerald-100 text-emerald-800 hover:bg-emerald-200 transition cursor-pointer"
+                  onClick={() => handleToggleSelectRoleAndScroll(filteredTeachers, teachersSectionRef)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                    filteredTeachers.length > 0 && filteredTeachers.every(u => selectedUserIds.includes(u.id))
+                      ? 'bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700 font-black'
+                      : 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-50 hover:border-emerald-400'
+                  }`}
+                  title="교사 전체 선택 및 교사 목록으로 이동"
                 >
-                  교사 전체 ({filteredTeachers.length})
+                  <span>교사 전체</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                    filteredTeachers.length > 0 && filteredTeachers.every(u => selectedUserIds.includes(u.id))
+                      ? 'bg-emerald-700 text-white'
+                      : 'bg-emerald-100 text-emerald-800'
+                  }`}>
+                    {filteredTeachers.length}
+                  </span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleToggleSelectRole(filteredDrivers)}
-                  className="px-2 py-1 text-xs font-bold rounded-lg bg-blue-100 text-blue-800 hover:bg-blue-200 transition cursor-pointer"
+                  onClick={() => handleToggleSelectRoleAndScroll(filteredDrivers, driversSectionRef)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                    filteredDrivers.length > 0 && filteredDrivers.every(u => selectedUserIds.includes(u.id))
+                      ? 'bg-blue-600 text-white border-blue-700 hover:bg-blue-700 font-black'
+                      : 'bg-white text-blue-800 border-blue-300 hover:bg-blue-50 hover:border-blue-400'
+                  }`}
+                  title="기사 전체 선택 및 기사 목록으로 이동"
                 >
-                  기사 전체 ({filteredDrivers.length})
+                  <span>기사 전체</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                    filteredDrivers.length > 0 && filteredDrivers.every(u => selectedUserIds.includes(u.id))
+                      ? 'bg-blue-700 text-white'
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {filteredDrivers.length}
+                  </span>
                 </button>
+                {!isKindergarten && filteredStudents.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleToggleSelectRoleAndScroll(filteredStudents, studentsSectionRef)}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                      filteredStudents.length > 0 && filteredStudents.every(u => selectedUserIds.includes(u.id))
+                        ? 'bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700 font-black'
+                        : 'bg-white text-indigo-800 border-indigo-300 hover:bg-indigo-50 hover:border-indigo-400'
+                    }`}
+                    title="학생 전체 선택 및 학생 목록으로 이동"
+                  >
+                    <span>학생 전체</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                      filteredStudents.length > 0 && filteredStudents.every(u => selectedUserIds.includes(u.id))
+                        ? 'bg-indigo-700 text-white'
+                        : 'bg-indigo-100 text-indigo-800'
+                    }`}>
+                      {filteredStudents.length}
+                    </span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => handleToggleSelectRole(filteredParents)}
-                  className="px-2 py-1 text-xs font-bold rounded-lg bg-amber-100 text-amber-800 hover:bg-amber-200 transition cursor-pointer"
+                  onClick={() => handleToggleSelectRoleAndScroll(filteredParents, parentsSectionRef)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                    filteredParents.length > 0 && filteredParents.every(u => selectedUserIds.includes(u.id))
+                      ? 'bg-amber-600 text-white border-amber-700 hover:bg-amber-700 font-black'
+                      : 'bg-white text-amber-800 border-amber-300 hover:bg-amber-50 hover:border-amber-400'
+                  }`}
+                  title="학부모 전체 선택 및 학부모 목록으로 이동"
                 >
-                  학부모 전체 ({filteredParents.length})
+                  <span>학부모 전체</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                    filteredParents.length > 0 && filteredParents.every(u => selectedUserIds.includes(u.id))
+                      ? 'bg-amber-700 text-white'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {filteredParents.length}
+                  </span>
                 </button>
                 {filteredAdmins.length > 0 && (
                   <button
                     type="button"
-                    onClick={() => handleToggleSelectRole(filteredAdmins)}
-                    className="px-2 py-1 text-xs font-bold rounded-lg bg-purple-100 text-purple-800 hover:bg-purple-200 transition cursor-pointer"
+                    onClick={() => handleToggleSelectRoleAndScroll(filteredAdmins, adminsSectionRef)}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-xl border transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                      filteredAdmins.length > 0 && filteredAdmins.every(u => selectedUserIds.includes(u.id))
+                        ? 'bg-purple-600 text-white border-purple-700 hover:bg-purple-700 font-black'
+                        : 'bg-white text-purple-800 border-purple-300 hover:bg-purple-50 hover:border-purple-400'
+                    }`}
+                    title="관리자 전체 선택 및 관리자 목록으로 이동"
                   >
-                    관리자 전체 ({filteredAdmins.length})
+                    <span>관리자 전체</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                      filteredAdmins.length > 0 && filteredAdmins.every(u => selectedUserIds.includes(u.id))
+                        ? 'bg-purple-700 text-white'
+                        : 'bg-purple-100 text-purple-800'
+                    }`}>
+                      {filteredAdmins.length}
+                    </span>
                   </button>
                 )}
               </div>
@@ -2433,8 +3137,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 <>
                   {/* Category 1: 기사 (Drivers) */}
                   {filteredDrivers.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-black text-blue-700 bg-blue-50/80 px-2.5 py-1.5 rounded-lg border border-blue-100">
+                    <div ref={driversSectionRef} className="space-y-1.5 scroll-mt-2">
+                      <div className="flex items-center justify-between text-xs font-black text-blue-700 bg-blue-50/80 px-3 py-2 rounded-xl border border-blue-100 shadow-2xs">
                         <div className="flex items-center gap-1.5">
                           <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
@@ -2444,7 +3148,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         <button
                           type="button"
                           onClick={() => handleToggleSelectRole(filteredDrivers)}
-                          className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                          className={`px-3 py-1 text-xs font-bold rounded-lg border transition-all shadow-2xs cursor-pointer active:scale-95 flex items-center gap-1 ${
+                            filteredDrivers.every(u => selectedUserIds.includes(u.id))
+                              ? 'bg-blue-600 text-white border-blue-700 hover:bg-blue-700 font-black'
+                              : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50 hover:border-blue-300'
+                          }`}
                         >
                           기사 전체 {filteredDrivers.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
                         </button>
@@ -2481,8 +3189,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
                   {/* Category 2: 교사 (Teachers) */}
                   {filteredTeachers.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-black text-emerald-700 bg-emerald-50/80 px-2.5 py-1.5 rounded-lg border border-emerald-100">
+                    <div ref={teachersSectionRef} className="space-y-1.5 scroll-mt-2">
+                      <div className="flex items-center justify-between text-xs font-black text-emerald-700 bg-emerald-50/80 px-3 py-2 rounded-xl border border-emerald-100 shadow-2xs">
                         <div className="flex items-center gap-1.5">
                           <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
@@ -2492,7 +3200,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         <button
                           type="button"
                           onClick={() => handleToggleSelectRole(filteredTeachers)}
-                          className="text-[11px] font-bold text-emerald-600 hover:text-emerald-800 hover:underline cursor-pointer"
+                          className={`px-3 py-1 text-xs font-bold rounded-lg border transition-all shadow-2xs cursor-pointer active:scale-95 flex items-center gap-1 ${
+                            filteredTeachers.every(u => selectedUserIds.includes(u.id))
+                              ? 'bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700 font-black'
+                              : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:border-emerald-300'
+                          }`}
                         >
                           교사 전체 {filteredTeachers.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
                         </button>
@@ -2529,8 +3241,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
                   {/* Category 3: 학생 (Students) - 유치원이 아닐 때(초등부, 중·고등부)만 노출 */}
                   {!isKindergarten && filteredStudents.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-black text-indigo-800 bg-indigo-50/80 px-2.5 py-1.5 rounded-lg border border-indigo-100">
+                    <div ref={studentsSectionRef} className="space-y-1.5 scroll-mt-2">
+                      <div className="flex items-center justify-between text-xs font-black text-indigo-800 bg-indigo-50/80 px-3 py-2 rounded-xl border border-indigo-100 shadow-2xs">
                         <div className="flex items-center gap-1.5">
                           <svg className="w-3.5 h-3.5 text-indigo-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l9-5-9-5-9 5 9 5z" />
@@ -2541,7 +3253,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         <button
                           type="button"
                           onClick={() => handleToggleSelectRole(filteredStudents)}
-                          className="text-[11px] font-bold text-indigo-800 hover:text-indigo-950 hover:underline cursor-pointer"
+                          className={`px-3 py-1 text-xs font-bold rounded-lg border transition-all shadow-2xs cursor-pointer active:scale-95 flex items-center gap-1 ${
+                            filteredStudents.every(u => selectedUserIds.includes(u.id))
+                              ? 'bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700 font-black'
+                              : 'bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50 hover:border-indigo-300'
+                          }`}
                         >
                           학생 전체 {filteredStudents.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
                         </button>
@@ -2578,8 +3294,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
                   {/* Category 4: 학부모 (Parents) - 유치원, 초등부, 중·고등부 모두 노출 */}
                   {filteredParents.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-black text-amber-800 bg-amber-50/80 px-2.5 py-1.5 rounded-lg border border-amber-100">
+                    <div ref={parentsSectionRef} className="space-y-1.5 scroll-mt-2">
+                      <div className="flex items-center justify-between text-xs font-black text-amber-800 bg-amber-50/80 px-3 py-2 rounded-xl border border-amber-100 shadow-2xs">
                         <div className="flex items-center gap-1.5">
                           <svg className="w-3.5 h-3.5 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -2589,7 +3305,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         <button
                           type="button"
                           onClick={() => handleToggleSelectRole(filteredParents)}
-                          className="text-[11px] font-bold text-amber-800 hover:text-amber-950 hover:underline cursor-pointer"
+                          className={`px-3 py-1 text-xs font-bold rounded-lg border transition-all shadow-2xs cursor-pointer active:scale-95 flex items-center gap-1 ${
+                            filteredParents.every(u => selectedUserIds.includes(u.id))
+                              ? 'bg-amber-600 text-white border-amber-700 hover:bg-amber-700 font-black'
+                              : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-50 hover:border-amber-300'
+                          }`}
                         >
                           학부모 전체 {filteredParents.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
                         </button>
@@ -2624,10 +3344,10 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     </div>
                   )}
 
-                  {/* Category 4: 관리자 (Admins) */}
+                  {/* Category 5: 관리자 (Admins) */}
                   {filteredAdmins.length > 0 && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs font-black text-purple-700 bg-purple-50/80 px-2.5 py-1.5 rounded-lg border border-purple-100">
+                    <div ref={adminsSectionRef} className="space-y-1.5 scroll-mt-2">
+                      <div className="flex items-center justify-between text-xs font-black text-purple-700 bg-purple-50/80 px-3 py-2 rounded-xl border border-purple-100 shadow-2xs">
                         <div className="flex items-center gap-1.5">
                           <svg className="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
@@ -2637,7 +3357,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         <button
                           type="button"
                           onClick={() => handleToggleSelectRole(filteredAdmins)}
-                          className="text-[11px] font-bold text-purple-600 hover:text-purple-800 hover:underline cursor-pointer"
+                          className={`px-3 py-1 text-xs font-bold rounded-lg border transition-all shadow-2xs cursor-pointer active:scale-95 flex items-center gap-1 ${
+                            filteredAdmins.every(u => selectedUserIds.includes(u.id))
+                              ? 'bg-purple-600 text-white border-purple-700 hover:bg-purple-700 font-black'
+                              : 'bg-white text-purple-700 border-purple-200 hover:bg-purple-50 hover:border-purple-300'
+                          }`}
                         >
                           관리자 전체 {filteredAdmins.every(u => selectedUserIds.includes(u.id)) ? '해제' : '선택'}
                         </button>
@@ -2733,6 +3457,300 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       )}
 
       {/* ============================================================ */}
+      {/* MODAL: 원아 결석계 및 출결 변동 신청서 (Absence Form Modal) */}
+      {/* ============================================================ */}
+      {isAbsenceModalOpen && (
+        <div className="fixed inset-0 z-[3200] bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-rose-200 w-full max-w-md overflow-hidden flex flex-col max-h-[90vh] animate-scale-up">
+            {/* Modal Header */}
+            <div className="px-5 py-4 bg-gradient-to-r from-rose-50 to-pink-50 border-b border-rose-100 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-rose-500 text-white flex items-center justify-center font-black text-sm">
+                  서
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-rose-950">원아 결석계 및 출결 변동 신청</h3>
+                  <p className="text-[11px] text-rose-600 font-medium">채팅 타이핑 없이 간편 선택으로 출결 및 캘린더에 즉시 등록합니다.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAbsenceModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleSubmitAbsenceForm} className="p-5 overflow-y-auto space-y-4 flex-1 text-xs">
+              {/* 1. 서식 종류 탭 */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">신청 서식 종류</label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAbsenceFormType('ABSENCE');
+                      setAbsenceReason('감기 및 몸살로 인한 가정 요양');
+                    }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                      absenceFormType === 'ABSENCE'
+                        ? 'bg-rose-50 border-rose-300 text-rose-700 shadow-2xs'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    결석계 (결석원)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAbsenceFormType('LATENESS');
+                      setAbsenceReason('병원 진료 후 등원');
+                    }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                      absenceFormType === 'LATENESS'
+                        ? 'bg-amber-50 border-amber-300 text-amber-700 shadow-2xs'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    등원 지각 알림
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAbsenceFormType('EXTENDED_CARE');
+                      setAbsenceReason('보호자 야근으로 인한 연장 보육 신청');
+                    }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                      absenceFormType === 'EXTENDED_CARE'
+                        ? 'bg-purple-50 border-purple-300 text-purple-700 shadow-2xs'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    연장 보육 신청
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAbsenceFormType('PARENT_PICKUP');
+                      setAbsenceReason('보호자 직접 픽업 (셔틀 미탑승)');
+                    }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                      absenceFormType === 'PARENT_PICKUP'
+                        ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-2xs'
+                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    직접 픽업
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. 대상 원아 선택 */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                  대상 원아 선택 <span className="text-red-500">*</span>
+                </label>
+                <div className="space-y-1.5">
+                  <input
+                    type="text"
+                    placeholder="원아 이름 또는 반명 검색..."
+                    value={absenceStudentSearch}
+                    onChange={(e) => setAbsenceStudentSearch(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:border-rose-400"
+                  />
+                  <div className="max-h-32 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 bg-slate-50/50">
+                    {(paymentContext.students || [])
+                      .filter((s) => {
+                        if (!absenceStudentSearch.trim()) return true;
+                        const kw = absenceStudentSearch.toLowerCase();
+                        const name = (s.name || '').toLowerCase();
+                        const c = (s.className || s.raw?.['반명'] || s.raw?.['반'] || '').toLowerCase();
+                        return name.includes(kw) || c.includes(kw);
+                      })
+                      .map((st) => {
+                        const isSelected = String(st.id) === String(absenceStudentId);
+                        const cName = st.className || st.raw?.['반명'] || st.raw?.['반'] || '';
+                        return (
+                          <div
+                            key={st.id}
+                            onClick={() => setAbsenceStudentId(String(st.id))}
+                            className={`p-2.5 flex items-center justify-between cursor-pointer transition-colors ${
+                              isSelected ? 'bg-rose-100/70 text-rose-900 font-black' : 'hover:bg-white text-slate-700'
+                            }`}
+                          >
+                            <span className="font-bold">{st.name}</span>
+                            <span className="text-[11px] text-slate-500">{cName || '반 미지정'}</span>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. 일자 / 기간 선택 */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-slate-700">적용 일자 / 기간</label>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const t = new Date().toISOString().split('T')[0];
+                        setAbsenceStartDate(t);
+                        setAbsenceEndDate(t);
+                      }}
+                      className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-bold hover:bg-slate-200"
+                    >
+                      오늘
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const tom = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+                        setAbsenceStartDate(tom);
+                        setAbsenceEndDate(tom);
+                      }}
+                      className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-bold hover:bg-slate-200"
+                    >
+                      내일
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block mb-0.5">시작일</span>
+                    <input
+                      type="date"
+                      value={absenceStartDate}
+                      onChange={(e) => setAbsenceStartDate(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-medium"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block mb-0.5">종료일</span>
+                    <input
+                      type="date"
+                      value={absenceEndDate}
+                      onChange={(e) => setAbsenceEndDate(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-xl text-xs font-medium"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. 사유 간편 선택 칩 */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">신청 사유 빠른 선택</label>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {absenceFormType === 'ABSENCE' && (
+                    <>
+                      {['감기 및 몸살', '병원 진료/치료', '가정 체험 학습', '집안 경조사/개인사정', '수두/유행성 질환'].map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => setAbsenceReason(r)}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all ${
+                            absenceReason === r
+                              ? 'bg-rose-50 border-rose-300 text-rose-700'
+                              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {absenceFormType === 'LATENESS' && (
+                    <>
+                      {['병원 진료 후 등원', '가정 사정 / 늦잠', '교통 정체 / 차량 지연'].map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => setAbsenceReason(r)}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all ${
+                            absenceReason === r
+                              ? 'bg-amber-50 border-amber-300 text-amber-700'
+                              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {absenceFormType === 'EXTENDED_CARE' && (
+                    <>
+                      {['학부모 야근으로 인한 연장 보육', '직접 픽업 (셔틀 미탑승)', '보호자 대리 픽업'].map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => setAbsenceReason(r)}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all ${
+                            absenceReason === r
+                              ? 'bg-purple-50 border-purple-300 text-purple-700'
+                              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {absenceFormType === 'PARENT_PICKUP' && (
+                    <>
+                      {['보호자 직접 픽업 (셔틀 미탑승)', '조부모 대리 픽업', '하원 후 병원 이동'].map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => setAbsenceReason(r)}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all ${
+                            absenceReason === r
+                              ? 'bg-blue-50 border-blue-300 text-blue-700'
+                              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </div>
+                <textarea
+                  rows={2}
+                  placeholder="추가 특이사항이나 상세 사유가 있으면 입력해주세요 (선택사항)..."
+                  value={absenceDetail}
+                  onChange={(e) => setAbsenceDetail(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:outline-hidden focus:border-rose-400"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAbsenceModalOpen(false)}
+                  className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingAbsence || !absenceStudentId}
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black shadow-xs transition-colors disabled:opacity-50"
+                >
+                  {isSubmittingAbsence ? '신청서 등록 중...' : '신청서 전송하기'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
       {/* MODAL: 신규 탑승 및 결재 신청서 (Payment Request Modal) */}
       {/* ============================================================ */}
       {isPaymentModalOpen && (
@@ -2748,7 +3766,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 </div>
                 <div>
                   <h3 className="text-sm font-extrabold text-indigo-950">신규 탑승 및 결재 신청</h3>
-                  <p className="text-[11px] text-indigo-600 font-medium">담당 차량 지도교사에게 탑승 승인 및 배정을 요청합니다.</p>
+                  <p className="text-[11px] text-indigo-600 font-medium">담당 차량선생님에게 탑승 승인 및 배정을 요청합니다.</p>
                 </div>
               </div>
               <button
@@ -2911,7 +3929,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                       <option value="">-- 차량(호차)을 선택하세요 --</option>
                       {(paymentContext.vehicles || []).map((v) => (
                         <option key={v.id} value={v.id}>
-                          {v.busNumber} (담당 지도교사: {formatTeacherName(v.teacherName)} / 기사: {v.driverName})
+                          {v.busNumber} (담당 차량선생님: {formatTeacherName(v.teacherName)} / 기사: {v.driverName})
                         </option>
                       ))}
                     </select>
@@ -3067,7 +4085,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                       rows={3}
                       value={paymentForm.note}
                       onChange={(e) => setPaymentForm((prev) => ({ ...prev, note: e.target.value }))}
-                      placeholder="지도교사에게 전달할 메시지를 입력하세요."
+                      placeholder="차량선생님에게 전달할 메시지를 입력하세요."
                       className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none font-medium leading-relaxed"
                     />
                   </div>
@@ -3097,7 +4115,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       )}
 
       {/* ============================================================ */}
-      {/* 지도교사 위치 수정 및 재결재 요청 모달 (Counter-Proposal) */}
+      {/* 차량선생님 위치 수정 및 재결재 요청 모달 (Counter-Proposal) */}
       {/* ============================================================ */}
       {counterModalMsg && (
         <div className="fixed inset-0 z-[3100] bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
@@ -3107,7 +4125,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
               <div>
                 <h3 className="text-sm font-black flex items-center gap-2">
                   <span>탑승 위치 변경 및 재결재 요청</span>
-                  <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-bold">지도교사 위치 역제안</span>
+                  <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-bold">차량선생님 위치 역제안</span>
                 </h3>
                 <p className="text-[11px] text-amber-100 mt-0.5">
                   통학버스 운행/회차 여건에 맞추어 다른 위치를 핀으로 찍어 관리자님께 재결재를 요청합니다.
@@ -3183,7 +4201,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                       빨간 핀: 관리자 원래 위치
                     </span>
                     <span className="bg-emerald-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow">
-                      초록 핀: 지도교사 제안 위치
+                      초록 핀: 차량선생님 제안 위치
                     </span>
                   </div>
                 </div>
@@ -3357,6 +4375,32 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fullscreen Image Zoom / Preview Modal */}
+      {previewImageUrl && (
+        <div
+          className="fixed inset-0 z-[2000] bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-4 animate-fade-in"
+          onClick={() => setPreviewImageUrl(null)}
+        >
+          <div className="relative max-w-4xl max-h-[92vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full flex justify-end pb-2">
+              <button
+                type="button"
+                onClick={() => setPreviewImageUrl(null)}
+                className="px-3.5 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+              >
+                <span>닫기</span>
+                <span className="text-xs font-black">✕</span>
+              </button>
+            </div>
+            <img
+              src={previewImageUrl}
+              alt="확대 이미지"
+              className="max-w-full max-h-[82vh] object-contain rounded-2xl shadow-2xl border border-white/20 bg-slate-900"
+            />
           </div>
         </div>
       )}

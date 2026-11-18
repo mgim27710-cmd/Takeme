@@ -92,6 +92,7 @@ class ChatRoomModel {
   final String type;
   final List<ChatMember> members;
   final ChatMessageModel? latestMessage;
+  ChatMessageModel? get lastMessage => latestMessage;
   final int unreadCount;
   final DateTime? updatedAt;
   /// 내 목록에서 맨 위 고정한 방인지
@@ -118,6 +119,8 @@ class ChatRoomModel {
     ChatMessageModel? latest;
     if (json['latestMessage'] is Map<String, dynamic>) {
       latest = ChatMessageModel.fromJson(json['latestMessage'] as Map<String, dynamic>);
+    } else if (json['lastMessage'] is Map<String, dynamic>) {
+      latest = ChatMessageModel.fromJson(json['lastMessage'] as Map<String, dynamic>);
     }
 
     final rawUpdated = json['updatedAt'] as String? ?? json['createdAt'] as String?;

@@ -181,7 +181,7 @@ class DriverNavigator extends ChangeNotifier {
   int _lastSyncedProgress = -1;
   DateTime _lastRoutePathSync = DateTime.fromMillisecondsSinceEpoch(0);
 
-  // ── 안전 운전 보조 & 지도교사 출발 신호 ──
+  // ── 안전 운전 보조 & 차량선생님 출발 신호 ──
   int speedKmh = 0;
   int _prevSpeedKmh = 0;
   DateTime _prevSpeedAt = DateTime.now();
@@ -190,7 +190,7 @@ class DriverNavigator extends ChangeNotifier {
   bool isOverspeeding = false;
   DateTime _lastOverspeedAlert = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastSuddenStopAlert = DateTime.fromMillisecondsSinceEpoch(0);
-  String? departSignalBanner; // 지도교사 "출발하셔도 됩니다" 배너 메시지
+  String? departSignalBanner; // 차량선생님 "출발하셔도 됩니다" 배너 메시지
   Timer? _departBannerTimer;
   bool emergencySending = false;
 
@@ -582,14 +582,14 @@ class DriverNavigator extends ChangeNotifier {
   }
 
   void _registerSocketListeners() {
-    // 1) 지도교사 "출발하셔도 됩니다" 신호 수신
+    // 1) 차량선생님 "출발하셔도 됩니다" 신호 수신
     SocketService().onDriverDepartSignal((data) {
       final vId = int.tryParse('${data['vehicleId'] ?? ''}');
       if (vehicleId != null && vId != null && vId != vehicleId) return;
       _onReceiveDepartSignal(stopName: data['stopName']?.toString());
     });
 
-    // 2) 지도교사 학부모 메시지 응답 등 기사 TTS 수신
+    // 2) 차량선생님 학부모 메시지 응답 등 기사 TTS 수신
     SocketService().onDriverTts((data) {
       final msg = data['message']?.toString();
       if (msg != null && msg.isNotEmpty) {
@@ -1327,7 +1327,7 @@ class DriverNavigator extends ChangeNotifier {
         s.passed = true;
         s.saidApproach = true;
         map.markStopPassed(i);
-        _speak('${s.name} 정류장에 도착했습니다. ${s.stopMemo}. 원아 탑승 후 지도교사의 출발 신호를 기다려 주세요.');
+        _speak('${s.name} 정류장에 도착했습니다. ${s.stopMemo}. 원아 탑승 후 차량선생님의 출발 신호를 기다려 주세요.');
       }
       break; // 다음 정류장 하나만 확인
     }

@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Param, Query, Res, Delete, Headers, Put, UseGuards, Req } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Query, Res, Delete, Headers, Put, UseGuards, Req, BadRequestException } from '@nestjs/common';
 import type { Response } from 'express';
 import { RoutingService } from './routing.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -311,6 +311,52 @@ export class RoutingController {
     return this.routingService.updateStudent(Number(id), body || {}, academyId, userId);
   }
 
+  @Post('student/:id')
+  async updateStudentPostAlias(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: any,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+    @Query('academyId') academyIdQuery?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, body?.academyId || academyIdHeader || academyIdQuery, userIdHeader);
+    return this.routingService.updateStudent(Number(id), body || {}, academyId, userId);
+  }
+
+  @Post('vehicle')
+  async createVehicle(
+    @Req() req: any,
+    @Body() body: any,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, body?.academyId || academyIdHeader, userIdHeader);
+    return this.routingService.createVehicle(body || {}, academyId, userId);
+  }
+
+  @Post('substitute-staff')
+  async saveSubstituteStaff(
+    @Req() req: any,
+    @Body() body: any,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, body?.academyId || academyIdHeader, userIdHeader);
+    return this.routingService.saveSubstituteStaff(body || {}, academyId, userId);
+  }
+
+  @Post('save-dispatch')
+  async saveDispatch(
+    @Req() req: any,
+    @Body() body: any,
+    @Headers('x-academy-id') academyIdHeader?: string,
+    @Headers('x-user-id') userIdHeader?: string,
+  ) {
+    const { academyId, userId } = this.resolveAcademyContext(req, body?.academyId || academyIdHeader, userIdHeader);
+    return this.routingService.saveDispatch(body || {}, academyId, userId);
+  }
+
   @Delete('vehicle/:id')
   async deleteVehicle(
     @Req() req: any,
@@ -381,6 +427,11 @@ export class RoutingController {
     return this.routingService.sendAdminMessage(body);
   }
 
+  @Post('admin/message')
+  async sendAdminMessageAlias(@Body() body: { targetRoles: string[], vehicleId: number | null, studentIds: number[], message: string }) {
+    return this.routingService.sendAdminMessage(body);
+  }
+
   // ===================== BOARD ROUTES =====================
   @Get('board/posts')
   async getBoardPosts(
@@ -419,8 +470,10 @@ export class RoutingController {
     @Param('id') id: string,
     @Body() body: any,
     @AuthUser() user?: JwtPayload,
+    @Req() req?: any,
   ) {
-    return this.routingService.updateBoardPost(Number(id), body, user?.sub, user?.role);
+    const { academyId, userId } = this.resolveAcademyContext(req);
+    return this.routingService.updateBoardPost(Number(id), body, userId || user?.sub, user?.role, academyId);
   }
 
   @Put('board/:id')
@@ -428,24 +481,30 @@ export class RoutingController {
     @Param('id') id: string,
     @Body() body: any,
     @AuthUser() user?: JwtPayload,
+    @Req() req?: any,
   ) {
-    return this.routingService.updateBoardPost(Number(id), body, user?.sub, user?.role);
+    const { academyId, userId } = this.resolveAcademyContext(req);
+    return this.routingService.updateBoardPost(Number(id), body, userId || user?.sub, user?.role, academyId);
   }
 
   @Delete('board/posts/:id')
   async deleteBoardPost(
     @Param('id') id: string,
     @AuthUser() user?: JwtPayload,
+    @Req() req?: any,
   ) {
-    return this.routingService.deleteBoardPost(Number(id), user?.sub, user?.role);
+    const { academyId, userId } = this.resolveAcademyContext(req);
+    return this.routingService.deleteBoardPost(Number(id), userId || user?.sub, user?.role, academyId);
   }
 
   @Delete('board/:id')
   async deleteBoardAlias(
     @Param('id') id: string,
     @AuthUser() user?: JwtPayload,
+    @Req() req?: any,
   ) {
-    return this.routingService.deleteBoardPost(Number(id), user?.sub, user?.role);
+    const { academyId, userId } = this.resolveAcademyContext(req);
+    return this.routingService.deleteBoardPost(Number(id), userId || user?.sub, user?.role, academyId);
   }
 
   @Post('board/posts/:id/like')
@@ -554,5 +613,45 @@ export class RoutingController {
   ) {
     const { academyId, userId } = this.resolveAcademyContext(req, academyIdHeader || academyIdQuery, userIdHeader || userIdQuery);
     return this.routingService.getAcademyAttendance(academyId, userId, dateQuery);
+  }
+
+  // ==================== CLOUD DOCUMENTS & LEGAL EXPIRIES ====================
+  @Get('documents')
+  async getDocuments(
+    @Query('academyId') academyId?: string,
+    @Query('educationLevel') educationLevel?: string,
+  ) {
+    return this.routingService.getDocuments(academyId ? Number(academyId) : undefined, educationLevel);
+  }
+
+  @Post('documents/upload')
+  async uploadDocument(
+    @Body() body: any,
+    @Req() req: any,
+  ) {
+    const host = req.headers['host'];
+    return this.routingService.uploadDocument(body, host);
+  }
+
+  @Delete('documents/:id')
+  async deleteDocument(@Param('id') id: string) {
+    return this.routingService.deleteDocument(id);
+  }
+
+  @Get('legal-expiry')
+  async getLegalExpiries(
+    @Query('academyId') academyId?: string,
+    @Query('educationLevel') educationLevel?: string,
+  ) {
+    return this.routingService.getLegalExpiries(academyId ? Number(academyId) : undefined, educationLevel);
+  }
+
+  @Post('legal-expiry')
+  async saveLegalExpiry(
+    @Body() body: any,
+  ) {
+    const vehicleId = Number(body.vehicleId || body.busId);
+    if (!vehicleId) throw new BadRequestException('차량 ID(vehicleId)가 필요합니다.');
+    return this.routingService.saveLegalExpiry(vehicleId, body);
   }
 }

@@ -104,7 +104,7 @@ class InitialRouterScreen extends StatelessWidget {
     if (role == 'HOMEROOM_TEACHER') {
       return const HomeroomTeacherHomeScreen();
     }
-    // 지도교사: 통학차량 동승, 탑승 관리 및 탑승 QR
+    // 차량선생님: 통학차량 동승, 탑승 관리 및 탑승 QR
     if (role == 'SHUTTLE_TEACHER') {
       return const StaffDashboardScreen();
     }

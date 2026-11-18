@@ -67,6 +67,9 @@ export class User {
   @Column({ type: 'timestamp', nullable: true })
   lockedAt: Date | null;
 
+  @Column({ type: 'varchar', nullable: true })
+  lastLoginIp: string | null;
+
   @Column({ default: 'APPROVED' })
   approvalStatus: string; // PENDING, APPROVED, UNREGISTERED
 

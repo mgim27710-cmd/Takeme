@@ -93,14 +93,34 @@ export default function TeacherDashboard({
   const [attendanceDate, setAttendanceDate] = useState(() => {
     return new Date().toISOString().slice(0, 10);
   });
-  const [attendanceData, setAttendanceData] = useState(null);
+  const [attendanceData, setAttendanceData] = useState(() => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const saved = localStorage.getItem(`takeme_attendance_cache_${today}`);
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return null;
+  });
   const [isAttendanceLoading, setIsAttendanceLoading] = useState(false);
   const [isSubmittingAttendance, setIsSubmittingAttendance] = useState(false);
 
   const fetchAttendance = useCallback(async (date) => {
     const targetDate = date || attendanceDate;
+    const cacheKey = `takeme_attendance_cache_${targetDate}`;
+
+    // 캐시가 있으면 스피너로 화면을 가리지 않고 즉시 화면에 노출 (0초 반응)
     try {
-      setIsAttendanceLoading(true);
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        setAttendanceData(JSON.parse(cached));
+      } else if (!attendanceData || attendanceData.date !== targetDate) {
+        setIsAttendanceLoading(true);
+      }
+    } catch (_) {
+      if (!attendanceData) setIsAttendanceLoading(true);
+    }
+
+    try {
       let token = localStorage.getItem('takeme_token');
       if (!token) {
         try {
@@ -116,13 +136,16 @@ export default function TeacherDashboard({
       if (res.ok) {
         const data = await res.json();
         setAttendanceData(data);
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(data));
+        } catch (_) {}
       }
     } catch (e) {
       console.error('Failed to fetch attendance:', e);
     } finally {
       setIsAttendanceLoading(false);
     }
-  }, [attendanceDate]);
+  }, [attendanceDate, attendanceData]);
 
   useEffect(() => {
     if (activeNavTab === 'attendance') {
@@ -132,18 +155,46 @@ export default function TeacherDashboard({
 
   const handleAttendanceStatusChange = (studentId, status) => {
     if (!attendanceData?.students) return;
-    setAttendanceData(prev => ({
-      ...prev,
-      students: prev.students.map(s => s.studentId === studentId ? { ...s, status } : s)
-    }));
+    setAttendanceData(prev => {
+      const updatedStudents = prev.students.map(s => s.studentId === studentId ? { ...s, status } : s);
+      const updated = {
+        ...prev,
+        students: updatedStudents,
+        summary: {
+          total: updatedStudents.length,
+          present: updatedStudents.filter(s => s.status === 'PRESENT').length,
+          absent: updatedStudents.filter(s => s.status === 'ABSENT').length,
+          late: updatedStudents.filter(s => s.status === 'LATE').length,
+          earlyLeave: updatedStudents.filter(s => s.status === 'EARLY_LEAVE').length,
+        }
+      };
+      try {
+        localStorage.setItem(`takeme_attendance_cache_${attendanceDate}`, JSON.stringify(updated));
+      } catch (_) {}
+      return updated;
+    });
   };
 
   const handleAllPresent = () => {
     if (!attendanceData?.students) return;
-    setAttendanceData(prev => ({
-      ...prev,
-      students: prev.students.map(s => ({ ...s, status: 'PRESENT' }))
-    }));
+    setAttendanceData(prev => {
+      const updatedStudents = prev.students.map(s => ({ ...s, status: 'PRESENT' }));
+      const updated = {
+        ...prev,
+        students: updatedStudents,
+        summary: {
+          total: updatedStudents.length,
+          present: updatedStudents.length,
+          absent: 0,
+          late: 0,
+          earlyLeave: 0,
+        }
+      };
+      try {
+        localStorage.setItem(`takeme_attendance_cache_${attendanceDate}`, JSON.stringify(updated));
+      } catch (_) {}
+      return updated;
+    });
   };
 
   const handleSubmitAttendance = async () => {
@@ -190,36 +241,52 @@ export default function TeacherDashboard({
     }
   };
 
-  // Temporary Cloud Storage State
-  const cloudStorageKey = `takeme_teacher_cloud_${currentUser?.id || 'default'}`;
+  // Temporary Cloud Storage State (동기화 키 통일)
+  const cloudStorageKey = 'takeme_teacher_cloud_photos';
   const [cloudPhotos, setCloudPhotos] = useState(() => {
     try {
-      const saved = localStorage.getItem(cloudStorageKey);
+      const saved = localStorage.getItem(cloudStorageKey) || localStorage.getItem(`takeme_teacher_cloud_${currentUser?.id || 'default'}`);
       if (saved) return JSON.parse(saved);
     } catch (e) {
       console.error(e);
     }
-    return [
-      {
-        id: 'sample-1',
-        name: '가을 소풍 단체 활동.jpg',
-        url: 'https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?w=800&auto=format&fit=crop&q=80',
-        size: '1.40 MB',
-        uploadedAt: '오늘 10:30'
-      },
-      {
-        id: 'sample-2',
-        name: '미술 시간 블록 쌓기.jpg',
-        url: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=800&auto=format&fit=crop&q=80',
-        size: '2.10 MB',
-        uploadedAt: '어제 15:40'
-      }
-    ];
+    return [];
   });
 
   const [isUploadingToCloud, setIsUploadingToCloud] = useState(false);
   const [isDraggingOverCloud, setIsDraggingOverCloud] = useState(false);
   const cloudFileInputRef = useRef(null);
+
+  // 서버 미디어 보관함(/routing/media)과 실시간 동기화
+  const fetchCloudPhotos = async () => {
+    try {
+      const token = localStorage.getItem('takeme_token');
+      if (!token) return;
+      const res = await fetch(`${API_BASE_URL}/routing/media`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          const formatted = data.map(item => ({
+            id: item.id,
+            name: item.filename || '활동_사진.jpg',
+            url: item.url,
+            size: item.size ? `${(item.size / (1024 * 1024)).toFixed(2)} MB` : '-',
+            uploadedAt: new Date(item.createdAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+          }));
+          setCloudPhotos(formatted);
+          localStorage.setItem(cloudStorageKey, JSON.stringify(formatted));
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch from media API', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchCloudPhotos();
+  }, [activeNavTab]);
 
   useEffect(() => {
     try {
@@ -233,6 +300,7 @@ export default function TeacherDashboard({
     if (!files || files.length === 0) return;
     setIsUploadingToCloud(true);
 
+    const token = localStorage.getItem('takeme_token');
     const newPhotos = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -251,26 +319,52 @@ export default function TeacherDashboard({
         });
 
         let finalUrl = base64Data;
+        let createdId = `${Date.now()}-${i}-${Math.random().toString(36).substring(2, 7)}`;
+
         try {
-          const res = await fetch(`${API_BASE_URL}/routing/board/upload`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              base64Data,
-              filename: file.name,
-              mimeType: file.type
-            })
-          });
-          const data = await res.json();
-          if (res.ok && data.url) {
-            finalUrl = data.url;
+          if (token) {
+            const res = await fetch(`${API_BASE_URL}/routing/media`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                photos: [{
+                  base64Data,
+                  filename: file.name,
+                  mimeType: file.type,
+                  className: teacherClass || undefined
+                }]
+              })
+            });
+            if (res.ok) {
+              const resData = await res.json();
+              const item = Array.isArray(resData) ? resData[0] : resData;
+              if (item?.url) finalUrl = item.url;
+              if (item?.id) createdId = item.id;
+            }
+          } else {
+            const res = await fetch(`${API_BASE_URL}/routing/board/upload`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                base64Data,
+                filename: file.name,
+                mimeType: file.type
+              })
+            });
+            const data = await res.json();
+            if (res.ok && data.url) {
+              finalUrl = data.url;
+            }
           }
         } catch (netErr) {
           console.warn('Server upload fallback to local data', netErr);
         }
 
         newPhotos.unshift({
-          id: `${Date.now()}-${i}-${Math.random().toString(36).substring(2, 7)}`,
+          id: createdId,
           name: file.name,
           url: finalUrl,
           size: (file.size / (1024 * 1024)).toFixed(2) + ' MB',
@@ -282,7 +376,11 @@ export default function TeacherDashboard({
     }
 
     if (newPhotos.length > 0) {
-      setCloudPhotos(prev => [...newPhotos, ...prev]);
+      setCloudPhotos(prev => {
+        const updated = [...newPhotos, ...prev];
+        localStorage.setItem(cloudStorageKey, JSON.stringify(updated));
+        return updated;
+      });
     }
     setIsUploadingToCloud(false);
   };
@@ -292,9 +390,24 @@ export default function TeacherDashboard({
     e.target.value = '';
   };
 
-  const handleDeleteCloudPhoto = (photoId) => {
+  const handleDeleteCloudPhoto = async (photoId) => {
     if (window.confirm('이 사진을 임시 보관함에서 삭제하시겠습니까?')) {
-      setCloudPhotos(prev => prev.filter(p => p.id !== photoId));
+      if (typeof photoId === 'number' || !isNaN(Number(photoId))) {
+        try {
+          const token = localStorage.getItem('takeme_token');
+          if (token) {
+            await fetch(`${API_BASE_URL}/routing/media/${photoId}`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${token}` }
+            });
+          }
+        } catch (_) {}
+      }
+      setCloudPhotos(prev => {
+        const next = prev.filter(p => p.id !== photoId);
+        localStorage.setItem(cloudStorageKey, JSON.stringify(next));
+        return next;
+      });
     }
   };
 
@@ -444,41 +557,34 @@ export default function TeacherDashboard({
     return { distance: minDist, label };
   };
 
-  // Fetch Payment Requests from Payment System Chat Room
+  // Fetch Payment Requests for Academy
   const fetchRideRequests = async () => {
     try {
       const token = localStorage.getItem('takeme_token');
-      const email = localTeacherUser?.email || currentUser?.email || '';
-      const res = await fetch(`${API_BASE_URL}/chat/rooms?email=${encodeURIComponent(email)}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
-      if (!res.ok) return;
-      const rooms = await res.json();
-      const paymentRoom = rooms.find(r => r.type === 'PAYMENT_SYSTEM' || r.name === '결제 시스템 방');
-      if (!paymentRoom) return;
-
-      const msgRes = await fetch(`${API_BASE_URL}/chat/rooms/${paymentRoom.id}/messages`, {
+      const acadId = selectedAcademyId || localTeacherUser?.academyId || currentUser?.academyId || '';
+      const msgRes = await fetch(`${API_BASE_URL}/chat/payment/requests${acadId ? `?academyId=${acadId}` : ''}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       if (!msgRes.ok) return;
       const messages = await msgRes.json();
 
       const map = {};
-      messages.forEach(msg => {
-        if (msg.type === 'PAYMENT_REQUEST' && msg.payload?.studentId) {
-          const stId = Number(msg.payload.studentId);
+      (Array.isArray(messages) ? messages : []).forEach(msg => {
+        const payload = msg.payload || msg;
+        const stId = Number(payload?.studentId || msg.studentId);
+        if (stId) {
           map[stId] = {
-            messageId: msg.id,
-            status: msg.payload.status || 'PENDING',
-            vehicleId: msg.payload.vehicleId,
-            busNumber: msg.payload.busNumber,
-            teacherName: msg.payload.teacherName,
-            driverName: msg.payload.driverName,
-            boardingLocation: msg.payload.boardingLocation,
-            note: msg.payload.note,
-            counterProposal: msg.payload.counterProposal,
-            counterNote: msg.payload.counterNote,
-            counterProposedBy: msg.payload.counterProposedBy,
+            messageId: msg.id || msg.messageId,
+            status: payload.status || msg.status || 'PENDING',
+            vehicleId: payload.vehicleId || msg.vehicleId,
+            busNumber: payload.busNumber || msg.busNumber,
+            teacherName: payload.teacherName || msg.teacherName,
+            driverName: payload.driverName || msg.driverName,
+            boardingLocation: payload.boardingLocation || msg.boardingLocation,
+            note: payload.note || msg.note,
+            counterProposal: payload.counterProposal || msg.counterProposal,
+            counterNote: payload.counterNote || msg.counterNote,
+            counterProposedBy: payload.counterProposedBy || msg.counterProposedBy,
             createdAt: msg.createdAt,
             updatedAt: msg.updatedAt
           };
@@ -648,7 +754,7 @@ export default function TeacherDashboard({
             status: 'PENDING',
             vehicleId: targetBus?.id,
             busNumber: targetBus?.name || targetBus?.busNumber,
-            teacherName: targetBus?.teacherName || targetBus?.teacherUser?.name || '담당 지도교사',
+            teacherName: targetBus?.teacherName || targetBus?.teacherUser?.name || '담당 차량선생님',
             driverName: targetBus?.driverName || '기사님',
             boardingLocation: dropoffLocation,
             rideType: quickRequestRideType,
@@ -656,7 +762,7 @@ export default function TeacherDashboard({
           }
         }));
 
-        alert(`[${student.name}] 원아의 ${isTodayOnly ? '당일 1회' : '정규'} 탑승 결제 요청이 ${targetBus.name} ${targetBus.teacherName || ''} 지도교사님께 자동으로 발송되었습니다.\n지도교사 수락 시 카드가 초록색으로 변경됩니다.`);
+        alert(`[${student.name}] 원아의 ${isTodayOnly ? '당일 1회' : '정규'} 탑승 결제 요청이 ${targetBus.name} ${targetBus.teacherName || ''} 차량선생님께 자동으로 발송되었습니다.\n차량선생님 수락 시 카드가 초록색으로 변경됩니다.`);
         setQuickRequestModal(null);
       } else {
         const err = await res.json().catch(() => ({}));
@@ -673,7 +779,7 @@ export default function TeacherDashboard({
   // Homeroom Teacher accepts or rejects the Guide Teacher's counter-proposal (재결재 새로운 위치 요청)
   const handleDecidePaymentRequest = async (messageId, decision) => {
     if (!messageId || isDecidingRequest) return;
-    const actionText = decision === 'APPROVED' ? '지도교사가 새로 제안한 위치로 탑승을 수락' : '탑승 요청을 반려하고 원래대로 픽업';
+    const actionText = decision === 'APPROVED' ? '차량선생님이 새로 제안한 위치로 탑승을 수락' : '탑승 요청을 반려하고 원래대로 픽업';
     if (!window.confirm(`${actionText}하시겠습니까?`)) return;
 
     setIsDecidingRequest(messageId);
@@ -858,6 +964,11 @@ export default function TeacherDashboard({
     return displayedStudents.filter(st => !changedStudents.some(cs => cs.id === st.id));
   }, [displayedStudents, changedStudents]);
 
+  // Card View용 정렬 (변동/신청 학생 우선 정렬)
+  const sortedDisplayedStudents = useMemo(() => {
+    return [...changedStudents, ...regularStudents];
+  }, [changedStudents, regularStudents]);
+
   // Group regular students by age and sort by gender (남, 여 살짝 띄워서)
   const groupedRegularStudents = useMemo(() => {
     const groups = {};
@@ -910,23 +1021,23 @@ export default function TeacherDashboard({
     return (
       <tr 
         key={st.id} 
-        className={`border-b transition-colors ${
-          isPinned ? 'bg-amber-50/50 hover:bg-amber-100/60' : 'hover:bg-slate-50/80'
+        className={`border-b border-slate-100 transition-colors ${
+          isPinned ? 'bg-amber-50/60 hover:bg-amber-100/70' : 'hover:bg-slate-50/80'
         }`}
       >
-        <td className="py-2.5 px-3 text-center text-xs text-slate-400 font-mono">{i + 1}</td>
+        <td className="py-2.5 px-3 text-center text-xs text-slate-400 font-mono font-medium">{i + 1}</td>
 
         {/* 1. 학생명 */}
         <td className="py-2.5 px-3">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="font-extrabold text-slate-900 text-xs sm:text-sm">{st.name}</span>
+            <span className="font-extrabold text-slate-900 text-xs sm:text-sm tracking-tight">{st.name}</span>
             {genderStr && genderStr !== '-' && (
-              <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${genderStr === '남' ? 'bg-blue-50 text-blue-700' : 'bg-pink-50 text-pink-700'}`}>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${genderStr === '남' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-pink-50 text-pink-700 border border-pink-200'}`}>
                 {genderStr}
               </span>
             )}
             {ageStr && ageStr !== '-' && (
-              <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-1 py-0.2 rounded">
+              <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                 {ageStr}세
               </span>
             )}
@@ -936,8 +1047,8 @@ export default function TeacherDashboard({
         {/* 2. 학부모 전화번호 */}
         <td className="py-2.5 px-3 text-xs font-mono">
           {phoneStr && phoneStr !== '-' ? (
-            <a href={`tel:${phoneStr}`} className="text-blue-600 hover:underline font-bold flex items-center gap-1">
-              <svg className="w-3.5 h-3.5 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <a href={`tel:${phoneStr}`} className="text-blue-700 hover:text-blue-900 hover:underline font-bold flex items-center gap-1">
+              <svg className="w-3.5 h-3.5 text-blue-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
               </svg>
               <span>{phoneStr}</span>
@@ -954,9 +1065,9 @@ export default function TeacherDashboard({
 
         {/* 4. 등원차량 */}
         <td className="py-2.5 px-3">
-          <span className={`text-xs font-bold px-2 py-0.5 rounded-md ${
+          <span className={`text-xs font-bold px-2 py-0.5 rounded-lg ${
             amBusName !== '미배정'
-              ? 'bg-blue-50 text-blue-700 border border-blue-200'
+              ? 'bg-blue-50 text-blue-800 border border-blue-200'
               : 'text-slate-400 bg-slate-50'
           }`}>
             {amBusName}
@@ -965,21 +1076,21 @@ export default function TeacherDashboard({
 
         {/* 5. 하원차량 */}
         <td className="py-2.5 px-3">
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className={`text-xs font-bold px-2 py-0.5 rounded-md ${
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className={`text-xs font-bold px-2 py-0.5 rounded-lg ${
               pmBusName !== '미배정'
-                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                ? 'bg-indigo-50 text-indigo-800 border border-indigo-200'
                 : 'text-slate-400 bg-slate-50'
             }`}>
               {pmBusName}
             </span>
             {isRidePending && (
-              <span className="text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.2 rounded-md animate-pulse">
+              <span className="text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded-md animate-pulse">
                 결재 대기
               </span>
             )}
             {isRideApproved && (
-              <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 px-1.5 py-0.2 rounded-md">
+              <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded-md">
                 승인 완료
               </span>
             )}
@@ -989,14 +1100,14 @@ export default function TeacherDashboard({
         {/* 6. 알레르기 */}
         <td className="py-2.5 px-3">
           {allergyStr && allergyStr !== '없음' && allergyStr !== '-' ? (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-black bg-rose-50 text-rose-700 border border-rose-200 shadow-2xs">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-extrabold bg-rose-50 text-rose-700 border border-rose-200 shadow-2xs">
               <svg className="w-3 h-3 text-rose-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
               <span>{allergyStr}</span>
             </span>
           ) : (
-            <span className="text-xs text-slate-400">없음</span>
+            <span className="text-xs text-slate-400 font-medium">없음</span>
           )}
         </td>
 
@@ -1007,10 +1118,10 @@ export default function TeacherDashboard({
             <button
               type="button"
               onClick={() => handleUpdateBoardStatus(st.id, 'ABSENT')}
-              className={`px-2.5 py-1 text-xs font-black rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+              className={`px-2.5 py-1 text-xs font-extrabold rounded-lg transition-all cursor-pointer active:scale-95 flex items-center gap-1 ${
                 isAbsent
                   ? 'bg-rose-600 text-white shadow-xs ring-2 ring-rose-200'
-                  : 'bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-slate-200'
+                  : 'bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200'
               }`}
               title="오늘 결석 처리"
             >
@@ -1027,16 +1138,16 @@ export default function TeacherDashboard({
                 }
                 handleUpdateBoardStatus(st.id, 'WAITING');
               }}
-              className={`px-2.5 py-1 text-xs font-black rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+              className={`px-2.5 py-1 text-xs font-extrabold rounded-lg transition-all cursor-pointer active:scale-95 flex items-center gap-1 ${
                 isShuttle
                   ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-200'
-                  : 'bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-700 border border-slate-200'
+                  : 'bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200'
               }`}
               title="셔틀 탑승 처리"
             >
               <span>셔틀 탑승</span>
               {isNonShuttle && !isRideApproved && !isRidePending && (
-                <span className="text-[10px] font-normal opacity-80">(신청)</span>
+                <span className="text-[10px] font-normal opacity-85">(신청)</span>
               )}
             </button>
 
@@ -1044,10 +1155,10 @@ export default function TeacherDashboard({
             <button
               type="button"
               onClick={() => handleUpdateBoardStatus(st.id, 'SELF_PICKUP')}
-              className={`px-2.5 py-1 text-xs font-black rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+              className={`px-2.5 py-1 text-xs font-extrabold rounded-lg transition-all cursor-pointer active:scale-95 flex items-center gap-1 ${
                 isPickup
                   ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-200'
-                  : 'bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 border border-slate-200'
+                  : 'bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200'
               }`}
               title="보호자 직접 픽업 (개별 하원)"
             >
@@ -1061,7 +1172,7 @@ export default function TeacherDashboard({
                 setSelectedStudentForMemo(st);
                 setMemoInput(st.attendanceMemo || st.teacherMemo || '');
               }}
-              className="ml-0.5 px-2 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-500 rounded-lg text-xs font-bold border border-slate-200 transition cursor-pointer"
+              className="ml-0.5 px-2.5 py-1 bg-slate-100 hover:bg-amber-50 hover:text-amber-800 text-slate-600 rounded-lg text-xs font-bold border border-slate-200 transition-all cursor-pointer active:scale-95"
               title="1:1 알림장 메모 작성"
             >
               알림장
@@ -1131,116 +1242,140 @@ export default function TeacherDashboard({
       {/* ======================================================== */}
       {/* 1. Left Navigation Rail (Matching Director Dashboard Layout) */}
       {/* ======================================================== */}
-      <div className="w-20 bg-blue-700 flex flex-col items-center py-8 gap-6 z-20 shadow-xl shrink-0">
-        <div className="text-white font-bold text-xs mb-1">Takeme</div>
-        <div className="text-[10px] text-blue-200 text-center truncate max-w-[70px] mb-4 font-medium" title={localTeacherUser?.name}>
+      <div className="w-24 h-full max-h-screen shrink-0 bg-blue-700 flex flex-col items-center py-5 gap-2 z-20 shadow-xl select-none overflow-y-auto overflow-x-hidden [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-white/40">
+        <div className="text-white font-extrabold text-sm tracking-wider shrink-0 mb-0.5">Takeme</div>
+        <div className="text-[10px] text-blue-200 text-center truncate max-w-[76px] mb-3 font-medium" title={localTeacherUser?.name}>
           {teacherClass ? `${localTeacherUser?.name || '교사'} (${teacherClass})` : (localTeacherUser?.name || '교사')}
         </div>
 
         {/* Tab 1: 교실 홈 */}
         <button
           onClick={() => setActiveNavTab('home')}
-          className={`p-4 rounded-2xl transition-all ${activeNavTab === 'home'
-              ? 'bg-white text-blue-700 shadow-lg scale-110'
-              : 'text-blue-200 hover:bg-blue-600'
-            }`}
+          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${
+            activeNavTab === 'home'
+              ? 'bg-white text-blue-700 shadow-md scale-105 font-extrabold'
+              : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'
+          }`}
           title="우리 반 교실 홈"
         >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">우리반홈</span>
         </button>
 
         {/* Tab 2: 오늘 셔틀 현황 */}
         <button
           onClick={() => setActiveNavTab('shuttle')}
-          className={`p-4 rounded-2xl transition-all ${activeNavTab === 'shuttle'
-              ? 'bg-white text-blue-700 shadow-lg scale-110'
-              : 'text-blue-200 hover:bg-blue-600'
-            }`}
+          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${
+            activeNavTab === 'shuttle'
+              ? 'bg-white text-blue-700 shadow-md scale-105 font-extrabold'
+              : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'
+          }`}
           title="오늘 셔틀 현황"
         >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h8m-8 4h8m-9 8h10a2 2 0 002-2V6a2 2 0 00-2-2H7a2 2 0 00-2 2v11a2 2 0 002 2zm1-2a1 1 0 11-2 0 1 1 0 012 0zm8 0a1 1 0 11-2 0 1 1 0 012 0z" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">셔틀현황</span>
         </button>
 
         {/* Tab: 캘린더 & 일정 관리 */}
         <button
           onClick={() => setActiveNavTab('calendar')}
-          className={`p-4 rounded-2xl transition-all ${activeNavTab === 'calendar'
-              ? 'bg-white text-blue-700 shadow-lg scale-110'
-              : 'text-blue-200 hover:bg-blue-600'
-            }`}
+          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${
+            activeNavTab === 'calendar'
+              ? 'bg-white text-blue-700 shadow-md scale-105 font-extrabold'
+              : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'
+          }`}
           title="반 및 학원 캘린더 & 일정"
         >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <rect x="3" y="4" width="18" height="18" rx="2" strokeWidth={2} />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 2v4M8 2v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">일정·일지</span>
         </button>
 
         {/* Tab: 출석부 관리 */}
         <button
           onClick={() => setActiveNavTab('attendance')}
-          className={`p-4 rounded-2xl transition-all ${activeNavTab === 'attendance'
-              ? 'bg-white text-blue-700 shadow-lg scale-110'
-              : 'text-blue-200 hover:bg-blue-600'
-            }`}
+          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${
+            activeNavTab === 'attendance'
+              ? 'bg-white text-blue-700 shadow-md scale-105 font-extrabold'
+              : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'
+          }`}
           title="출석부 관리"
         >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">출석부</span>
         </button>
 
         {/* Tab 3: 알림장 & 게시판 */}
         <button
           onClick={() => setActiveNavTab('board')}
-          className={`p-4 rounded-2xl transition-all ${activeNavTab === 'board'
-              ? 'bg-white text-blue-700 shadow-lg scale-110'
-              : 'text-blue-200 hover:bg-blue-600'
-            }`}
+          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${
+            activeNavTab === 'board'
+              ? 'bg-white text-blue-700 shadow-md scale-105 font-extrabold'
+              : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'
+          }`}
           title="알림장 & 앨범"
         >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">알림·게시</span>
         </button>
 
         {/* Tab 4: 사진 보관함 */}
         <button
           onClick={() => setActiveNavTab('cloud')}
-          className={`p-4 rounded-2xl transition-all ${activeNavTab === 'cloud'
-              ? 'bg-white text-blue-700 shadow-lg scale-110'
-              : 'text-blue-200 hover:bg-blue-600'
-            }`}
+          className={`w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${
+            activeNavTab === 'cloud'
+              ? 'bg-white text-blue-700 shadow-md scale-105 font-extrabold'
+              : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'
+          }`}
           title="사진 보관함"
         >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">사진보관</span>
         </button>
 
-        {/* Tab 4: 실시간 메시지 & 결재 승인 */}
+        {/* Tab 5: 실시간 메시지 & 결재 승인 */}
         <button
           onClick={() => setActiveNavTab('messages')}
-          className={`p-4 rounded-2xl transition-all ${activeNavTab === 'messages' ? 'bg-white text-blue-700 shadow-lg scale-110' : 'text-blue-200 hover:bg-blue-600'}`}
+          className={`relative w-20 py-2.5 px-1 rounded-xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-1.5 ${
+            activeNavTab === 'messages'
+              ? 'bg-white text-blue-700 shadow-md scale-105 font-extrabold'
+              : 'text-white/90 hover:bg-white/15 hover:text-white font-medium'
+          }`}
           title="실시간 메시지 & 결재 승인"
         >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-[26px] h-[26px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">소통·결재</span>
+          {Object.values(rideRequests || {}).filter(r => r && (r.status === 'PENDING' || r.status === 'RE_REQUESTED')).length > 0 && (
+            <span className="absolute top-0.5 right-1.5 bg-amber-500 text-white text-[10px] font-black w-4.5 h-4.5 rounded-full flex items-center justify-center border-2 border-blue-700 shadow-sm animate-pulse">
+              {Object.values(rideRequests || {}).filter(r => r && (r.status === 'PENDING' || r.status === 'RE_REQUESTED')).length}
+            </span>
+          )}
         </button>
 
         {/* Bottom: 로그아웃 */}
         <button
           onClick={onLogout}
-          className="p-4 rounded-2xl text-blue-200 hover:bg-blue-600 transition-all mt-auto"
+          className="w-20 py-2.5 px-1 rounded-xl transition-all mt-auto shrink-0 mb-1 cursor-pointer flex flex-col items-center justify-center gap-1.5 text-white/90 hover:bg-white/15 hover:text-white font-medium"
           title="로그아웃"
         >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-[24px] h-[24px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
           </svg>
+          <span className="text-[11px] font-bold tracking-tight">로그아웃</span>
         </button>
       </div>
 
@@ -1263,23 +1398,23 @@ export default function TeacherDashboard({
         ) : activeNavTab === 'shuttle' ? (
           <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
             {/* Header */}
-            <div className="bg-white border-b border-slate-200 px-8 py-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
-              <div className="flex items-center gap-3.5">
-                <div className="w-11 h-11 rounded-2xl bg-amber-500 text-white flex items-center justify-center font-bold shadow-xs">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="bg-white border-b border-slate-200 px-6 py-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h8m-8 4h8m-9 8h10a2 2 0 002-2V6a2 2 0 00-2-2H7a2 2 0 00-2 2v11a2 2 0 002 2zm1-2a1 1 0 11-2 0 1 1 0 012 0zm8 0a1 1 0 11-2 0 1 1 0 012 0z" />
                   </svg>
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h1 className="text-xl font-black text-slate-800 tracking-tight">
+                    <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">
                       {homeroomStatus?.assignedClass || teacherClass || '담임 반'} 오늘 셔틀 현황
                     </h1>
-                    <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full font-bold border border-emerald-200">
+                    <span className="text-[11px] bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full font-bold border border-emerald-200">
                       30초 자동 갱신
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
+                  <p className="text-xs text-slate-600 font-medium mt-0.5">
                     우리 반 원아들의 오늘 셔틀 호차 및 실시간 탑승 현황을 확인합니다.
                   </p>
                 </div>
@@ -1287,8 +1422,8 @@ export default function TeacherDashboard({
 
               {/* Stats and Refresh */}
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200 text-xs font-bold">
-                  <span className="px-2.5 py-1 rounded-lg bg-white text-slate-700 shadow-xs">
+                <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-bold">
+                  <span className="px-2.5 py-1 rounded-lg bg-white text-slate-800 shadow-xs">
                     전체 {homeroomStatus?.summary?.total || 0}명
                   </span>
                   <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -1297,7 +1432,7 @@ export default function TeacherDashboard({
                   <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-200">
                     대기 {homeroomStatus?.summary?.waiting || 0}명
                   </span>
-                  <span className="px-2.5 py-1 rounded-lg bg-red-50 text-red-700 border border-red-200">
+                  <span className="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-200">
                     결석 {homeroomStatus?.summary?.absent || 0}명
                   </span>
                 </div>
@@ -1306,7 +1441,7 @@ export default function TeacherDashboard({
                   type="button"
                   onClick={fetchHomeroomStatus}
                   disabled={isHomeroomLoading}
-                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5 disabled:opacity-50"
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
                   title="새로고침"
                 >
                   <svg className={`w-4 h-4 ${isHomeroomLoading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1318,7 +1453,7 @@ export default function TeacherDashboard({
             </div>
 
             {/* Student Cards Grid */}
-            <div className="flex-1 overflow-y-auto p-8">
+            <div className="flex-1 overflow-y-auto p-5 sm:p-6">
               {homeroomStatus?.students && homeroomStatus.students.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {homeroomStatus.students.map(st => {
@@ -1328,23 +1463,23 @@ export default function TeacherDashboard({
                     return (
                       <div
                         key={st.id}
-                        className={`bg-white rounded-2xl p-5 border shadow-xs transition-all flex flex-col justify-between ${
+                        className={`bg-white rounded-2xl p-4 border shadow-xs transition-all flex flex-col justify-between ${
                           isBoarded
                             ? 'border-emerald-300 bg-emerald-50/20'
                             : isAbsent
-                            ? 'border-red-300 bg-red-50/20'
+                            ? 'border-rose-300 bg-rose-50/20'
                             : 'border-slate-200 hover:border-slate-300'
                         }`}
                       >
                         <div>
                           <div className="flex items-center justify-between mb-2">
-                            <span className="text-base font-extrabold text-slate-800">{st.name}</span>
+                            <span className="text-sm font-extrabold text-slate-900">{st.name}</span>
                             <span
-                              className={`px-2.5 py-1 rounded-full text-xs font-extrabold ${
+                              className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold ${
                                 isBoarded
                                   ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                                   : isAbsent
-                                  ? 'bg-red-100 text-red-800 border border-red-200'
+                                  ? 'bg-rose-100 text-rose-800 border border-rose-200'
                                   : 'bg-amber-100 text-amber-800 border border-amber-200'
                               }`}
                             >
@@ -1352,24 +1487,24 @@ export default function TeacherDashboard({
                             </span>
                           </div>
 
-                          <div className="flex items-center gap-1.5 text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1.5 rounded-xl border border-blue-100 mb-3">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-blue-800 bg-blue-50 px-2.5 py-1.5 rounded-xl border border-blue-100 mb-2.5">
+                            <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h8m-8 4h8m-9 8h10a2 2 0 002-2V6a2 2 0 00-2-2H7a2 2 0 00-2 2v11a2 2 0 002 2zm1-2a1 1 0 11-2 0 1 1 0 012 0zm8 0a1 1 0 11-2 0 1 1 0 012 0z" />
                             </svg>
                             <span>배정: {st.vehicle}</span>
                           </div>
 
-                          <div className="space-y-1.5 text-xs text-slate-600">
-                            <div className="truncate text-slate-500" title={st.address}>
+                          <div className="space-y-1 text-xs text-slate-600">
+                            <div className="truncate text-slate-600 font-medium" title={st.address}>
                               📍 {st.address || '주소 미입력'}
                             </div>
                             {st.parentPhone && (
-                              <div className="flex items-center gap-1 text-slate-700 font-semibold">
+                              <div className="flex items-center gap-1 text-slate-800 font-semibold">
                                 <span>📞 {st.parentPhone}</span>
                               </div>
                             )}
                             {st.allergies && (
-                              <div className="text-red-600 font-bold bg-red-50 px-2 py-0.5 rounded text-[11px] border border-red-100 inline-block">
+                              <div className="text-rose-700 font-bold bg-rose-50 px-2 py-0.5 rounded text-[11px] border border-rose-200 inline-block">
                                 ⚠️ 알레르기: {st.allergies}
                               </div>
                             )}
@@ -1377,9 +1512,9 @@ export default function TeacherDashboard({
                         </div>
 
                         {/* Footer Status Time */}
-                        <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
-                          <span>상태 확인</span>
-                          <span className="font-bold text-slate-600">
+                        <div className="mt-3.5 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                          <span className="font-medium">상태 확인</span>
+                          <span className="font-bold text-slate-800">
                             {isBoarded && st.boardedAt
                               ? `${new Date(st.boardedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 탑승`
                               : st.statusText}
@@ -1409,38 +1544,38 @@ export default function TeacherDashboard({
         ) : activeNavTab === 'attendance' ? (
           <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
             {/* Attendance Header */}
-            <div className="bg-white border-b border-slate-200 px-8 py-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
-              <div className="flex items-center gap-3.5">
-                <div className="w-11 h-11 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-xs">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="bg-white border-b border-slate-200 px-6 py-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                   </svg>
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h1 className="text-xl font-black text-slate-800 tracking-tight">
+                    <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">
                       {attendanceData?.assignedClass || teacherClass || '우리 반'} 일일 출석부
                     </h1>
                     {attendanceData?.isSubmitted ? (
-                      <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full font-bold border border-emerald-200">
+                      <span className="text-[11px] bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full font-bold border border-emerald-200">
                         제출 완료
                       </span>
                     ) : (
-                      <span className="text-xs bg-amber-50 text-amber-700 px-2.5 py-0.5 rounded-full font-bold border border-amber-200">
+                      <span className="text-[11px] bg-amber-50 text-amber-700 px-2.5 py-0.5 rounded-full font-bold border border-amber-200">
                         미제출 (체크 후 제출)
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
+                  <p className="text-xs text-slate-600 font-medium mt-0.5">
                     원아별 출석 상태를 확인하고 출석부를 제출합니다. 관리자 웹으로 실시간 전송됩니다.
                   </p>
                 </div>
               </div>
 
               {/* Actions & Date */}
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2.5">
                 <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
-                  <span className="text-xs font-bold text-slate-500">날짜:</span>
+                  <span className="text-xs font-bold text-slate-600">날짜:</span>
                   <input
                     type="date"
                     value={attendanceDate}
@@ -1448,14 +1583,14 @@ export default function TeacherDashboard({
                       setAttendanceDate(e.target.value);
                       fetchAttendance(e.target.value);
                     }}
-                    className="bg-transparent text-xs font-bold text-slate-700 border-none outline-hidden cursor-pointer"
+                    className="bg-transparent text-xs font-bold text-slate-800 border-none outline-hidden cursor-pointer"
                   />
                 </div>
 
                 <button
                   type="button"
                   onClick={handleAllPresent}
-                  className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5"
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5 cursor-pointer"
                 >
                   전원 출석
                 </button>
@@ -1464,7 +1599,7 @@ export default function TeacherDashboard({
                   type="button"
                   onClick={handleSubmitAttendance}
                   disabled={isSubmittingAttendance}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition flex items-center gap-1.5 disabled:opacity-50"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
                 >
                   {isSubmittingAttendance ? '제출 중...' : attendanceData?.isSubmitted ? '출석부 수정 제출' : '출석부 제출'}
                 </button>
@@ -1472,30 +1607,30 @@ export default function TeacherDashboard({
             </div>
 
             {/* Attendance Summary Bar */}
-            <div className="bg-white border-b border-slate-200 px-8 py-3 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2 text-xs">
-                <span className="font-bold text-slate-600">출석 요약:</span>
-                <span className="px-2 py-0.5 bg-slate-100 rounded-md font-bold text-slate-700">전체 {attendanceData?.summary?.total || 0}명</span>
-                <span className="px-2 py-0.5 bg-emerald-100 rounded-md font-bold text-emerald-800">출석 {attendanceData?.summary?.present || 0}명</span>
-                <span className="px-2 py-0.5 bg-red-100 rounded-md font-bold text-red-800">결석 {attendanceData?.summary?.absent || 0}명</span>
-                <span className="px-2 py-0.5 bg-amber-100 rounded-md font-bold text-amber-800">지각 {attendanceData?.summary?.late || 0}명</span>
-                <span className="px-2 py-0.5 bg-purple-100 rounded-md font-bold text-purple-800">조퇴 {attendanceData?.summary?.earlyLeave || 0}명</span>
+            <div className="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2 text-xs flex-wrap">
+                <span className="font-extrabold text-slate-700">출석 요약:</span>
+                <span className="px-2.5 py-1 bg-slate-100 rounded-lg font-bold text-slate-800 border border-slate-200">전체 {attendanceData?.summary?.total || 0}명</span>
+                <span className="px-2.5 py-1 bg-emerald-50 rounded-lg font-bold text-emerald-700 border border-emerald-200">출석 {attendanceData?.summary?.present || 0}명</span>
+                <span className="px-2.5 py-1 bg-rose-50 rounded-lg font-bold text-rose-700 border border-rose-200">결석 {attendanceData?.summary?.absent || 0}명</span>
+                <span className="px-2.5 py-1 bg-amber-50 rounded-lg font-bold text-amber-700 border border-amber-200">지각 {attendanceData?.summary?.late || 0}명</span>
+                <span className="px-2.5 py-1 bg-purple-50 rounded-lg font-bold text-purple-700 border border-purple-200">조퇴 {attendanceData?.summary?.earlyLeave || 0}명</span>
               </div>
               {attendanceData?.submission?.submittedAt && (
-                <span className="text-xs text-slate-400">
+                <span className="text-xs text-slate-500 font-medium">
                   최종 제출: {new Date(attendanceData.submission.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ({attendanceData.submission.teacherName})
                 </span>
               )}
             </div>
 
             {/* Students List */}
-            <div className="flex-1 overflow-y-auto p-8">
-              {isAttendanceLoading ? (
+            <div className="flex-1 overflow-y-auto p-5 sm:p-6">
+              {isAttendanceLoading && (!attendanceData?.students || attendanceData.students.length === 0) ? (
                 <div className="flex items-center justify-center py-20">
                   <div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                 </div>
               ) : attendanceData?.students && attendanceData.students.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {[...attendanceData.students].sort((a, b) => {
                     const aChanged = a.boardStatus === 'ABSENT' || a.status === 'ABSENT' || a.status === 'LATE' || a.status === 'EARLY_LEAVE' || a.boardStatus === 'SELF_PICKUP' ? 1 : 0;
                     const bChanged = b.boardStatus === 'ABSENT' || b.status === 'ABSENT' || b.status === 'LATE' || b.status === 'EARLY_LEAVE' || b.boardStatus === 'SELF_PICKUP' ? 1 : 0;
@@ -1504,24 +1639,24 @@ export default function TeacherDashboard({
                     return (
                       <div
                         key={st.studentId}
-                        className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between gap-3"
+                        className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex flex-col justify-between gap-3 hover:border-slate-300 transition-all"
                       >
                         <div className="flex items-start justify-between">
                           <div>
-                            <div className="flex items-center gap-2">
-                              <h3 className="font-black text-slate-800 text-base">{st.name}</h3>
+                            <div className="flex items-center gap-1.5">
+                              <h3 className="font-extrabold text-slate-900 text-sm sm:text-base">{st.name}</h3>
                               {st.boardStatus === 'BOARDED' && (
-                                <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold rounded-md">
+                                <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold rounded-md">
                                   셔틀탑승 완료
                                 </span>
                               )}
                               {st.boardStatus === 'ABSENT' && (
-                                <span className="px-2 py-0.5 bg-red-50 text-red-700 border border-red-200 text-[11px] font-bold rounded-md">
+                                <span className="px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold rounded-md">
                                   결석 신청
                                 </span>
                               )}
                             </div>
-                            <p className="text-xs text-slate-400 mt-1">배정차량: {st.vehicleName || '미지정'}</p>
+                            <p className="text-xs text-slate-500 font-medium mt-1">배정차량: {st.vehicleName || '미지정'}</p>
                           </div>
                         </div>
 
@@ -1530,10 +1665,10 @@ export default function TeacherDashboard({
                           <button
                             type="button"
                             onClick={() => handleAttendanceStatusChange(st.studentId, 'PRESENT')}
-                            className={`py-2 text-xs font-bold rounded-xl transition ${
+                            className={`py-2 text-xs font-extrabold rounded-xl transition-all cursor-pointer active:scale-95 ${
                               st.status === 'PRESENT'
-                                ? 'bg-emerald-600 text-white shadow-xs'
-                                : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                                ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-200'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
                             }`}
                           >
                             출석
@@ -1541,10 +1676,10 @@ export default function TeacherDashboard({
                           <button
                             type="button"
                             onClick={() => handleAttendanceStatusChange(st.studentId, 'ABSENT')}
-                            className={`py-2 text-xs font-bold rounded-xl transition ${
+                            className={`py-2 text-xs font-extrabold rounded-xl transition-all cursor-pointer active:scale-95 ${
                               st.status === 'ABSENT'
-                                ? 'bg-red-600 text-white shadow-xs'
-                                : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                                ? 'bg-rose-600 text-white shadow-xs ring-2 ring-rose-200'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
                             }`}
                           >
                             결석
@@ -1552,10 +1687,10 @@ export default function TeacherDashboard({
                           <button
                             type="button"
                             onClick={() => handleAttendanceStatusChange(st.studentId, 'LATE')}
-                            className={`py-2 text-xs font-bold rounded-xl transition ${
+                            className={`py-2 text-xs font-extrabold rounded-xl transition-all cursor-pointer active:scale-95 ${
                               st.status === 'LATE'
-                                ? 'bg-amber-500 text-white shadow-xs'
-                                : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                                ? 'bg-amber-500 text-white shadow-xs ring-2 ring-amber-200'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
                             }`}
                           >
                             지각
@@ -1563,10 +1698,10 @@ export default function TeacherDashboard({
                           <button
                             type="button"
                             onClick={() => handleAttendanceStatusChange(st.studentId, 'EARLY_LEAVE')}
-                            className={`py-2 text-xs font-bold rounded-xl transition ${
+                            className={`py-2 text-xs font-extrabold rounded-xl transition-all cursor-pointer active:scale-95 ${
                               st.status === 'EARLY_LEAVE'
-                                ? 'bg-purple-600 text-white shadow-xs'
-                                : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                                ? 'bg-purple-600 text-white shadow-xs ring-2 ring-purple-200'
+                                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
                             }`}
                           >
                             조퇴
@@ -1620,17 +1755,24 @@ export default function TeacherDashboard({
           /* VIEW C: Temporary Photo Cloud Mode */
           <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
             {/* Cloud Header */}
-            <div className="bg-white border-b border-slate-200 px-8 py-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
-              <div>
-                <div className="flex items-center gap-3">
-                  <h1 className="text-xl font-black text-slate-800 tracking-tight">임시 사진 보관함</h1>
-                  <span className="text-xs bg-blue-50 text-blue-700 px-3 py-1 rounded-full font-bold border border-blue-200">
-                    총 {cloudPhotos.length}장 보관 중
-                  </span>
+            <div className="bg-white border-b border-slate-200 px-6 py-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
                 </div>
-                <p className="text-xs text-slate-500 mt-1">
-                  모바일 앱이나 PC에서 촬영한 사진을 임시 보관하고, 원아 앨범 게시판 작성 및 알림장 작성 시 바로 다운로드하거나 활용할 수 있습니다.
-                </p>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">임시 사진 보관함</h1>
+                    <span className="text-[11px] bg-blue-50 text-blue-700 px-2.5 py-0.5 rounded-full font-bold border border-blue-200">
+                      총 {cloudPhotos.length}장 보관 중
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 font-medium mt-0.5">
+                    모바일 앱이나 PC에서 촬영한 사진을 임시 보관하고, 원아 앨범 게시판 작성 및 알림장 작성 시 바로 다운로드하거나 활용할 수 있습니다.
+                  </p>
+                </div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -1645,7 +1787,7 @@ export default function TeacherDashboard({
                 <button
                   onClick={() => cloudFileInputRef.current?.click()}
                   disabled={isUploadingToCloud}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-2 disabled:opacity-50"
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-xl text-xs font-bold shadow-xs transition flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -1655,7 +1797,7 @@ export default function TeacherDashboard({
                 {cloudPhotos.length > 0 && (
                   <button
                     onClick={handleClearAllCloudPhotos}
-                    className="px-3 py-2 bg-white border border-slate-200 text-slate-600 hover:text-red-600 hover:border-red-200 rounded-xl text-xs font-semibold shadow-xs transition"
+                    className="px-3 py-2 bg-white border border-slate-200 text-slate-700 hover:text-rose-600 hover:border-rose-200 rounded-xl text-xs font-bold shadow-2xs transition active:scale-95 cursor-pointer"
                   >
                     전체 비우기
                   </button>
@@ -1664,7 +1806,7 @@ export default function TeacherDashboard({
             </div>
 
             {/* Cloud Content Body */}
-            <div className="flex-1 overflow-y-auto p-8 space-y-6">
+            <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5">
               {/* Drag & Drop Zone */}
               <div
                 onDragOver={(e) => { e.preventDefault(); setIsDraggingOverCloud(true); }}
@@ -1822,12 +1964,12 @@ export default function TeacherDashboard({
               </div>
             ) : (
               /* Assigned Teacher: Full Classroom Dashboard */
-              <div className="flex-1 p-6 lg:p-8 space-y-6">
+              <div className="flex-1 p-5 lg:p-6 space-y-5">
                 {/* Header Banner */}
                 <section className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-6 text-white shadow-lg shadow-blue-500/10">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div>
-                      <h2 className="text-xl font-black tracking-tight mb-1">
+                      <h2 className="text-xl font-black tracking-tight mb-1 !text-white text-white">
                         {academy?.name || '우리 유치원'} · {teacherClass} 교실
                       </h2>
                       <p className="text-blue-100 text-xs sm:text-sm">
@@ -1839,7 +1981,7 @@ export default function TeacherDashboard({
                     <div className="grid grid-cols-4 gap-2 sm:gap-3">
                       <div className="bg-white/10 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center border border-white/15">
                         <p className="text-[11px] text-blue-200 font-medium">우리 반 전체</p>
-                        <p className="text-lg sm:text-2xl font-black">{summary.total}명</p>
+                        <p className="text-lg sm:text-2xl font-black text-white">{summary.total}명</p>
                       </div>
                       <div className="bg-white/15 backdrop-blur-md rounded-xl p-2.5 sm:p-3 text-center border border-white/20">
                         <p className="text-[11px] text-blue-100 font-medium">셔틀 탑승</p>
@@ -1858,29 +2000,29 @@ export default function TeacherDashboard({
                 </section>
 
                 {/* 2-Column Upper Grid: [Schedule] + [Shuttle] */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
                   {/* Left Column: 수업 일정 & 하루 일과 타임라인 */}
-                  <section className="lg:col-span-7 bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col">
+                  <section className="lg:col-span-7 bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col">
                     <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
                       <div className="flex items-center gap-2">
-                        <h3 className="font-extrabold text-slate-900 text-base">오늘의 수업 및 일과 일정</h3>
+                        <h3 className="font-extrabold text-slate-900 text-sm sm:text-base">오늘의 수업 및 일과 일정</h3>
                         <button
                           type="button"
                           onClick={() => {
                             setEditingScheduleList([...scheduleItems]);
                             setIsScheduleModalOpen(true);
                           }}
-                          className="px-2.5 py-1 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors border border-blue-200"
+                          className="px-2.5 py-1 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-all border border-blue-200 cursor-pointer active:scale-95 shadow-2xs"
                         >
                           일정 수정
                         </button>
                       </div>
-                      <span className="text-xs text-slate-500 font-medium bg-slate-100 px-2 py-1 rounded-lg">
+                      <span className="text-xs text-slate-600 font-bold bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
                         현재 시각: {currentHourMinute}
                       </span>
                     </div>
 
-                    <div className="space-y-3 overflow-y-auto max-h-[360px] pr-1">
+                    <div className="space-y-2.5 overflow-y-auto max-h-[360px] pr-1">
                       {scheduleItems.map((item, idx) => {
                         const [start, end] = item.time.split(' ~ ');
                         const isCurrent = currentHourMinute >= start && currentHourMinute <= end;
@@ -1889,25 +2031,25 @@ export default function TeacherDashboard({
                           <div
                             key={idx}
                             className={`flex items-start gap-3 p-3 rounded-xl transition-all border ${isCurrent
-                                ? 'bg-blue-50/80 border-blue-300 shadow-sm'
-                                : 'bg-slate-50/70 border-slate-200/80 hover:bg-slate-50'
+                                ? 'bg-blue-50/90 border-blue-400 ring-2 ring-blue-100 shadow-xs'
+                                : 'bg-slate-50/70 border-slate-200 hover:bg-slate-50'
                               }`}
                           >
-                            <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${isCurrent ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-200 text-slate-600'
+                            <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${isCurrent ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-200 text-slate-700'
                               }`}>
                               {idx + 1}
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between gap-2">
-                                <h4 className={`text-sm font-bold ${isCurrent ? 'text-blue-900' : 'text-slate-800'}`}>
+                                <h4 className={`text-sm font-bold ${isCurrent ? 'text-blue-900' : 'text-slate-900'}`}>
                                   {item.title}
                                 </h4>
-                                <span className={`text-[11px] font-mono px-2 py-0.5 rounded-md font-semibold shrink-0 ${isCurrent ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'
+                                <span className={`text-[11px] font-mono px-2 py-0.5 rounded-md font-bold shrink-0 ${isCurrent ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'
                                   }`}>
                                   {item.time}
                                 </span>
                               </div>
-                              <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">{item.desc}</p>
+                              <p className="text-xs text-slate-600 mt-0.5 leading-relaxed font-medium">{item.desc}</p>
                             </div>
                           </div>
                         );
@@ -1916,17 +2058,17 @@ export default function TeacherDashboard({
                   </section>
 
                   {/* Right Column: 오늘 셔틀 현황 & 차량 위치 간이 확인 */}
-                  <section className="lg:col-span-5 bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col">
+                  <section className="lg:col-span-5 bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col">
                     <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
-                      <h3 className="font-extrabold text-slate-900 text-base">오늘 우리 반 셔틀 현황</h3>
-                      <span className="text-xs text-blue-600 font-bold bg-blue-50 px-2 py-1 rounded-lg">
+                      <h3 className="font-extrabold text-slate-900 text-sm sm:text-base">오늘 우리 반 셔틀 현황</h3>
+                      <span className="text-xs text-blue-700 font-bold bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
                         실시간 연동
                       </span>
                     </div>
 
                     {buses.length === 0 ? (
                       <div className="text-center py-10 text-slate-400">
-                        <p className="text-xs">배정된 셔틀 차량이 없습니다.</p>
+                        <p className="text-xs font-medium">배정된 셔틀 차량이 없습니다.</p>
                       </div>
                     ) : (
                       <div className="space-y-3 flex-1 overflow-y-auto max-h-[360px] pr-1">
@@ -1938,36 +2080,36 @@ export default function TeacherDashboard({
                           return (
                             <div
                               key={bus.id}
-                              className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl hover:border-slate-300 transition-all"
+                              className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl hover:border-slate-300 transition-all shadow-2xs"
                             >
                               <div className="flex items-center justify-between mb-2">
                                 <div className="flex items-center gap-2">
                                   <span
-                                    className="w-3.5 h-3.5 rounded-full shadow-sm shrink-0"
+                                    className="w-3.5 h-3.5 rounded-full shadow-xs shrink-0"
                                     style={{ backgroundColor: bus.colorHex || '#f59e0b' }}
                                   />
                                   <span className="font-extrabold text-sm text-slate-900">{bus.name}</span>
-                                  <span className="text-xs text-slate-500 font-mono">({bus.licensePlate || '차량번호 미등록'})</span>
+                                  <span className="text-xs text-slate-500 font-mono font-medium">({bus.licensePlate || '차량번호 미등록'})</span>
                                 </div>
-                                <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                                <span className="text-xs font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-lg border border-amber-200">
                                   우리 반 {ridingCount}명 탑승
                                 </span>
                               </div>
 
-                              <div className="text-xs text-slate-600 space-y-1 mb-3">
+                              <div className="text-xs text-slate-600 space-y-1 mb-3 font-medium">
                                 <div className="flex justify-between">
-                                  <span className="text-slate-400">기사님:</span>
-                                  <span className="font-medium text-slate-700">{bus.driverName || '미배정'}</span>
+                                  <span className="text-slate-500">기사님:</span>
+                                  <span className="font-bold text-slate-800">{bus.driverName || '미배정'}</span>
                                 </div>
                                 <div className="flex justify-between">
-                                  <span className="text-slate-400">정원:</span>
-                                  <span className="font-medium text-slate-700">{bus.capacity || 15}인승</span>
+                                  <span className="text-slate-500">정원:</span>
+                                  <span className="font-bold text-slate-800">{bus.capacity || 15}인승</span>
                                 </div>
                               </div>
 
                               <button
                                 onClick={() => setSelectedBusForMap(bus)}
-                                className="w-full py-2 bg-white hover:bg-slate-100 text-blue-700 border border-blue-200 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-xs"
+                                className="w-full py-2 bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 text-xs font-extrabold rounded-lg flex items-center justify-center gap-1.5 transition-all shadow-xs active:scale-95 cursor-pointer"
                               >
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
@@ -1984,18 +2126,19 @@ export default function TeacherDashboard({
                 </div>
 
                 {/* Lower Section: 원아 명단 & 출결 / 알림장 관리 */}
-                <section className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-sm space-y-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                <section className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-xs space-y-4">
+                  {/* Section Header with Primary Actions */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
                     <div>
-                      <h3 className="text-lg font-black text-slate-900 tracking-tight">
+                      <h3 className="text-lg font-extrabold text-slate-900 tracking-tight">
                         {teacherClass} 학원생 정보
                       </h3>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        학원생별 기본 정보(전화번호, 생일, 등하원 차량, 알레르기)를 확인하고, 하원 방법(결석 / 셔틀 탑승 / 픽업)을 원클릭으로 변경하세요.
+                      <p className="text-xs text-slate-600 font-medium mt-0.5">
+                        원아별 기본 정보를 확인하고, 하원 방법(결석 / 셔틀 탑승 / 픽업)을 원클릭으로 변경하세요.
                       </p>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <button
                         type="button"
                         onClick={() => {
@@ -2004,7 +2147,7 @@ export default function TeacherDashboard({
                           setIsCreatingBoardPost(true);
                           setActiveNavTab('board');
                         }}
-                        className="px-3.5 py-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all shadow-sm shadow-orange-500/20 flex items-center justify-center gap-1.5 shrink-0"
+                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center justify-center gap-1.5 shrink-0"
                       >
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
@@ -2012,48 +2155,91 @@ export default function TeacherDashboard({
                         <span>우리 반 전체 알림장 작성</span>
                       </button>
 
-                      <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowApprovalHistory(true)}
+                        className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl border border-indigo-200 transition-all flex items-center gap-1.5 shadow-2xs active:scale-95 cursor-pointer shrink-0"
+                      >
+                        <svg className="w-3.5 h-3.5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <span>결재 내역</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Filter Tabs & Search & View Mode Toolbar */}
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                    {/* Left: Filter Tabs */}
+                    <div className="flex bg-slate-200/80 p-0.5 rounded-lg text-xs font-bold shrink-0">
+                      <button
+                        onClick={() => setFilterMode('ALL')}
+                        className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${filterMode === 'ALL' ? 'bg-white text-blue-700 shadow-xs font-extrabold' : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                      >
+                        전체 ({myStudents.length})
+                      </button>
+                      <button
+                        onClick={() => setFilterMode('SHUTTLE')}
+                        className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${filterMode === 'SHUTTLE' ? 'bg-white text-blue-700 shadow-xs font-extrabold' : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                      >
+                        셔틀 ({summary.shuttle})
+                      </button>
+                      <button
+                        onClick={() => setFilterMode('PICKUP')}
+                        className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${filterMode === 'PICKUP' ? 'bg-white text-blue-700 shadow-xs font-extrabold' : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                      >
+                        픽업 ({summary.pickup})
+                      </button>
+                      <button
+                        onClick={() => setFilterMode('ABSENT')}
+                        className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${filterMode === 'ABSENT' ? 'bg-white text-blue-700 shadow-xs font-extrabold' : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                      >
+                        결석 ({summary.absent})
+                      </button>
+                    </div>
+
+                    {/* Right: View Mode + Search */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex bg-slate-200/80 p-0.5 rounded-lg text-xs font-bold shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setViewMode('cell')}
+                          className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                            viewMode === 'cell'
+                              ? 'bg-white text-blue-700 shadow-xs font-extrabold'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          셀(테이블)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setViewMode('card')}
+                          className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                            viewMode === 'card'
+                              ? 'bg-white text-blue-700 shadow-xs font-extrabold'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          카드
+                        </button>
+                      </div>
+
+                      <div className="relative flex-1 sm:flex-none">
                         <input
                           type="text"
                           placeholder="원아명 또는 연락처 검색"
                           value={searchQuery}
                           onChange={e => setSearchQuery(e.target.value)}
-                          className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-52"
+                          className="pl-8 pr-3 py-1.5 text-xs font-medium border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-52 shadow-2xs"
                         />
                         <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </svg>
-                      </div>
-
-                      <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs font-bold">
-                        <button
-                          onClick={() => setFilterMode('ALL')}
-                          className={`px-2.5 py-1.5 rounded-lg transition-all ${filterMode === 'ALL' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-700'
-                            }`}
-                        >
-                          전체 ({myStudents.length})
-                        </button>
-                        <button
-                          onClick={() => setFilterMode('SHUTTLE')}
-                          className={`px-2.5 py-1.5 rounded-lg transition-all ${filterMode === 'SHUTTLE' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-700'
-                            }`}
-                        >
-                          셔틀 ({summary.shuttle})
-                        </button>
-                        <button
-                          onClick={() => setFilterMode('PICKUP')}
-                          className={`px-2.5 py-1.5 rounded-lg transition-all ${filterMode === 'PICKUP' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-700'
-                            }`}
-                        >
-                          픽업 ({summary.pickup})
-                        </button>
-                        <button
-                          onClick={() => setFilterMode('ABSENT')}
-                          className={`px-2.5 py-1.5 rounded-lg transition-all ${filterMode === 'ABSENT' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-700'
-                            }`}
-                        >
-                          결석 ({summary.absent})
-                        </button>
                       </div>
                     </div>
                   </div>
@@ -2106,14 +2292,14 @@ export default function TeacherDashboard({
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <span className="text-[11px] font-extrabold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-md border border-purple-200">
-                              지도교사 새 위치 제안 도착
+                              차량선생님 새 위치 제안 도착
                             </span>
                             <span className="text-xs text-purple-700 font-bold">
                               {Object.entries(rideRequests).filter(([_, r]) => r && r.status === 'RE_REQUESTED').length}건 확인 필요
                             </span>
                           </div>
                           <p className="text-xs text-purple-900 mt-1 font-semibold leading-relaxed">
-                            지도교사님이 안전한 승하차를 위해 새로운 위치를 제안했습니다. 아래 보라색 원아 카드에서 새 위치를 확인하시고 [새 위치로 수락] 또는 [픽업 유지]를 선택해주세요.
+                            차량선생님이 안전한 승하차를 위해 새로운 위치를 제안했습니다. 아래 보라색 원아 카드에서 새 위치를 확인하시고 [새 위치로 수락] 또는 [픽업 유지]를 선택해주세요.
                           </p>
                         </div>
                       </div>
@@ -2131,73 +2317,30 @@ export default function TeacherDashboard({
                   )}
 
                   
-                  {/* View Mode Switcher and Approval History Toolbar */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 mb-4 bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-black text-slate-700">학원생 정보 보기 모드:</span>
-                      <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setViewMode('cell')}
-                          className={`px-3 py-1 text-xs font-black rounded-lg transition-all ${
-                            viewMode === 'cell'
-                              ? 'bg-blue-600 text-white shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          셀(테이블) 형식
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setViewMode('card')}
-                          className={`px-3 py-1 text-xs font-black rounded-lg transition-all ${
-                            viewMode === 'card'
-                              ? 'bg-blue-600 text-white shadow-xs'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          카드 형식
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowApprovalHistory(true)}
-                        className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-black rounded-xl border border-indigo-200 transition-all flex items-center gap-1.5 shadow-2xs"
-                      >
-                        <svg className="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        <span>결재 내역 히스토리</span>
-                      </button>
-                    </div>
-                  </div>
-
                   {displayedStudents.length === 0 ? (
-                    <div className="text-center py-12 text-slate-400">
-                      <p className="text-sm font-semibold">해당하는 원아가 없습니다.</p>
+                    <div className="text-center py-12 text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                      <p className="text-sm font-bold text-slate-600">해당하는 원아가 없습니다.</p>
+                      <p className="text-xs text-slate-400 mt-1">검색어나 필터 조건을 변경해 보세요.</p>
                     </div>
                   ) : viewMode === 'cell' ? (
                     /* Cell / Table View */
-                    <div className="space-y-6">
+                    <div className="space-y-5">
                       {/* Pinned Changes & Pending Approvals Section */}
                       {changedStudents.length > 0 && (
-                        <div className="bg-amber-50/50 border-2 border-amber-300 rounded-2xl overflow-hidden shadow-xs">
-                          <div className="bg-amber-100/80 px-4 py-2.5 border-b border-amber-200 flex items-center justify-between">
+                        <div className="bg-amber-50/40 border border-amber-300 rounded-2xl overflow-hidden shadow-xs">
+                          <div className="bg-amber-100/70 px-4 py-2.5 border-b border-amber-200 flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
-                              <h4 className="font-black text-amber-950 text-sm">
+                              <h4 className="font-extrabold text-amber-950 text-sm">
                                 오늘 변동사항 및 결재 진행 학생 ({changedStudents.length}명)
                               </h4>
                             </div>
-                            <span className="text-[11px] font-bold text-amber-800">우선 관리 대상</span>
+                            <span className="text-[11px] font-extrabold text-amber-800 bg-amber-200/60 px-2 py-0.5 rounded-md">우선 관리 대상</span>
                           </div>
                           <div className="overflow-x-auto">
                             <table className="w-full text-left border-collapse">
                               <thead>
-                                <tr className="bg-amber-100/40 text-[11px] font-extrabold text-amber-900 border-b border-amber-200 uppercase">
+                                <tr className="bg-amber-100/40 text-xs font-extrabold text-amber-950 border-b border-amber-200">
                                   <th className="py-2.5 px-3 text-center w-12">No</th>
                                   <th className="py-2.5 px-3">학생명</th>
                                   <th className="py-2.5 px-3">학부모 전화번호</th>
@@ -2224,24 +2367,24 @@ export default function TeacherDashboard({
                         return (
                           <div key={ageKey} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
                             <div className="bg-slate-100/80 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
-                              <h4 className="font-black text-slate-800 text-sm">
+                              <h4 className="font-extrabold text-slate-900 text-sm">
                                 {ageKey} 학원생 명단 (총 {boys.length + girls.length}명: 남 {boys.length}명, 여 {girls.length}명)
                               </h4>
-                              <span className="text-xs font-semibold text-slate-500">{teacherClass}</span>
+                              <span className="text-xs font-bold text-slate-600 bg-white px-2 py-0.5 rounded-md border border-slate-200">{teacherClass}</span>
                             </div>
 
                             <div className="overflow-x-auto">
                               <table className="w-full text-left border-collapse">
                                 <thead>
-                                  <tr className="bg-slate-50 text-[11px] font-extrabold text-slate-600 border-b border-slate-200 uppercase">
+                                  <tr className="bg-slate-50 text-xs font-extrabold text-slate-800 border-b border-slate-200">
                                     <th className="py-2.5 px-3 text-center w-12">No</th>
                                     <th className="py-2.5 px-3">학생명</th>
-                                  <th className="py-2.5 px-3">학부모 전화번호</th>
-                                  <th className="py-2.5 px-3">생일</th>
-                                  <th className="py-2.5 px-3">등원차량</th>
-                                  <th className="py-2.5 px-3">하원차량</th>
-                                  <th className="py-2.5 px-3">알레르기</th>
-                                  <th className="py-2.5 px-3 text-center">하원 상태 (결석 / 셔틀 탑승 / 픽업)</th>
+                                    <th className="py-2.5 px-3">학부모 전화번호</th>
+                                    <th className="py-2.5 px-3">생일</th>
+                                    <th className="py-2.5 px-3">등원차량</th>
+                                    <th className="py-2.5 px-3">하원차량</th>
+                                    <th className="py-2.5 px-3">알레르기</th>
+                                    <th className="py-2.5 px-3 text-center">하원 상태 (결석 / 셔틀 탑승 / 픽업)</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -2250,8 +2393,8 @@ export default function TeacherDashboard({
 
                                   {/* Slight spacing / Divider between Boys and Girls per requirement */}
                                   {boys.length > 0 && girls.length > 0 && (
-                                    <tr className="bg-slate-100/50">
-                                      <td colSpan={8} className="py-1 px-4 text-[10px] font-bold text-slate-400 text-center border-y border-dashed border-slate-200">
+                                    <tr className="bg-slate-50">
+                                      <td colSpan={8} className="py-1 px-4 text-[11px] font-extrabold text-slate-500 text-center border-y border-dashed border-slate-200">
                                         남아 / 여아 구분
                                       </td>
                                     </tr>
@@ -2267,9 +2410,8 @@ export default function TeacherDashboard({
                       })}
                     </div>
                   ) : (
-                    /* Existing Card View */
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-
+                    /* Slim Clean Card View */
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
                       {sortedDisplayedStudents.map(student => {
                         const isNonShuttle = checkIsNonShuttle(student);
                         const effectiveStatus = getStudentEffectiveBoardStatus(student);
@@ -2286,113 +2428,106 @@ export default function TeacherDashboard({
                         const targetBusId = rideReq?.vehicleId || student.assignedBusId || student.assignedDepartureBusId;
                         const bus = buses.find(b => b.id === Number(targetBusId));
                         const busNameDisplay = rideReq?.busNumber || bus?.name || (targetBusId ? `${targetBusId}호차` : '배정 대기');
-                        const departureTimeDisplay = bus?.departureTime || (busNameDisplay?.includes('2') ? '16:30 하원 출발' : '15:30 하원 출발');
+                        const departureTimeDisplay = bus?.departureTime || (busNameDisplay?.includes('2') ? '16:30 하원' : '15:30 하원');
 
-                        const parentPhone = student.raw?.['학부모전화번호'] || student.raw?.['연락처'] || '';
-                        const age = student.raw?.['연령'] || '';
-                        const gender = student.raw?.['성별'] || '';
+                        const parentPhone = student.raw?.['학부모전화번호'] || student.raw?.['보호자연락처'] || student.raw?.['연락처'] || student.parentPhone || '';
+                        const age = student.raw?.['만나이'] || student.raw?.['나이'] || student.raw?.['연령'] || student.age || '';
+                        const gender = student.raw?.['성별'] || student.gender || '';
+                        const allergyStr = student.allergies || student.raw?.['알레르기'] || student.raw?.['알러지'] || '';
 
                         return (
                           <div
                             key={student.id}
-                            className={`rounded-2xl p-4 border transition-all flex flex-col justify-between ${isRideApproved
-                                ? 'bg-emerald-50/80 border-2 border-emerald-500 ring-2 ring-emerald-100 shadow-md'
+                            className={`rounded-2xl p-4 border transition-all flex flex-col justify-between gap-3 shadow-xs ${
+                              isRideApproved
+                                ? 'bg-emerald-50/30 border-emerald-300 ring-1 ring-emerald-200'
                                 : isRideReRequested
-                                  ? 'bg-purple-50/90 border-2 border-purple-400 ring-2 ring-purple-100 shadow-md animate-pulse-subtle'
-                                  : isRidePending
-                                    ? 'bg-amber-50/90 border-2 border-amber-400 ring-2 ring-amber-100 shadow-md'
-                                    : isAbsent
-                                      ? 'bg-slate-100/70 border-slate-300 opacity-75'
-                                      : isPickup
-                                        ? 'bg-amber-50/30 border border-amber-200'
-                                        : 'bg-white border-slate-200 shadow-xs hover:border-blue-300'
-                              }`}
+                                ? 'bg-purple-50/40 border-purple-300 ring-1 ring-purple-200'
+                                : isRidePending
+                                ? 'bg-amber-50/40 border-amber-300 ring-1 ring-amber-200'
+                                : isAbsent
+                                ? 'bg-slate-50/80 border-slate-200 opacity-80'
+                                : isPickup
+                                ? 'bg-amber-50/20 border-slate-200'
+                                : 'bg-white border-slate-200 hover:border-slate-300'
+                            }`}
                           >
-                            <div>
-                              <div className="flex items-start justify-between gap-2 mb-2">
+                            <div className="space-y-2.5">
+                              {/* 1. Header: Avatar + Name + Tags + Status Badge */}
+                              <div className="flex items-start justify-between gap-2">
                                 <div className="flex items-center gap-2.5">
-                                  <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-sm shrink-0 shadow-xs ${isRideApproved
-                                      ? 'bg-emerald-600 text-white ring-2 ring-emerald-200'
+                                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shrink-0 shadow-2xs ${
+                                    isRideApproved
+                                      ? 'bg-emerald-600 text-white'
                                       : isRidePending
-                                        ? 'bg-amber-500 text-white ring-2 ring-amber-200 animate-pulse'
-                                        : isAbsent
-                                          ? 'bg-slate-300 text-slate-600'
-                                          : isPickup
-                                            ? 'bg-amber-100 text-amber-800'
-                                            : 'bg-blue-100 text-blue-800'
-                                    }`}>
+                                      ? 'bg-amber-500 text-white animate-pulse'
+                                      : isAbsent
+                                      ? 'bg-slate-300 text-slate-700'
+                                      : isPickup
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-blue-100 text-blue-800'
+                                  }`}>
                                     {student.name.substring(0, 1)}
                                   </div>
                                   <div>
-                                    <div className="flex items-center gap-1.5">
-                                      <h4 className="font-extrabold text-slate-900 text-base">{student.name}</h4>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <h4 className="font-extrabold text-slate-900 text-sm tracking-tight">{student.name}</h4>
                                       {gender && (
-                                        <span className={`text-[11px] font-bold px-1.5 py-0.2 rounded ${gender === '남' ? 'bg-blue-100 text-blue-700' : 'bg-pink-100 text-pink-700'
-                                          }`}>
+                                        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${gender === '남' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-pink-50 text-pink-700 border border-pink-200'}`}>
                                           {gender}
                                         </span>
                                       )}
                                       {age && (
-                                        <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded">
-                                          {age}
+                                        <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
+                                          {age}세
                                         </span>
                                       )}
                                     </div>
-                                    <p className="text-xs text-slate-500 truncate max-w-[200px]" title={student.address}>
+                                    <p className="text-xs text-slate-500 truncate max-w-[190px] font-medium mt-0.5" title={student.address}>
                                       {student.address || '주소 미등록'}
                                     </p>
                                   </div>
                                 </div>
 
-                                {/* Status Badges */}
+                                {/* Status Badge */}
                                 {isRideApproved ? (
-                                  <span className="text-[11px] font-black px-2.5 py-1 rounded-full shrink-0 border bg-emerald-100 text-emerald-800 border-emerald-300 flex items-center gap-1">
-                                    <svg className="w-3.5 h-3.5 text-emerald-600" fill="currentColor" viewBox="0 0 20 20">
-                                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                                    </svg>
-                                    탑승 승인 완료
+                                  <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full shrink-0 border bg-emerald-100 text-emerald-800 border-emerald-300 flex items-center gap-1">
+                                    ✓ 승인 완료
                                   </span>
                                 ) : isRideReRequested ? (
-                                  <span className="text-[11px] font-black px-2.5 py-1 rounded-full shrink-0 border bg-purple-100 text-purple-800 border-purple-300 flex items-center gap-1 animate-pulse">
-                                    <span className="w-2 h-2 rounded-full bg-purple-600"></span>
-                                    새 위치 제안됨 (재결재 요청)
+                                  <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full shrink-0 border bg-purple-100 text-purple-800 border-purple-300 flex items-center gap-1 animate-pulse">
+                                    새 위치 제안
                                   </span>
                                 ) : isRidePending ? (
-                                  <span className="text-[11px] font-black px-2.5 py-1 rounded-full shrink-0 border bg-amber-100 text-amber-800 border-amber-300 flex items-center gap-1 animate-pulse">
-                                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                                    승인 대기 중
+                                  <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full shrink-0 border bg-amber-100 text-amber-800 border-amber-300 flex items-center gap-1 animate-pulse">
+                                    결재 대기
                                   </span>
                                 ) : (
-                                  <span className={`text-[11px] font-extrabold px-2 py-0.5 rounded-full shrink-0 border ${isAbsent
+                                  <span className={`text-[11px] font-extrabold px-2 py-0.5 rounded-full shrink-0 border ${
+                                    isAbsent
                                       ? 'bg-rose-100 text-rose-700 border-rose-200'
                                       : isPickup
-                                        ? 'bg-amber-100 text-amber-800 border-amber-200'
-                                        : 'bg-blue-100 text-blue-800 border-blue-200'
-                                    }`}>
+                                      ? 'bg-amber-100 text-amber-800 border-amber-200'
+                                      : 'bg-blue-100 text-blue-800 border-blue-200'
+                                  }`}>
                                     {isAbsent ? '결석' : isPickup ? '직접 픽업' : '셔틀 하원'}
                                   </span>
                                 )}
                               </div>
 
-                              {/* Card Middle Info Box: APPROVED vs RE_REQUESTED vs PENDING vs Normal */}
+                              {/* 2. Detail Info Box */}
                               {isRideApproved ? (
-                                <div className="bg-emerald-100/70 rounded-xl p-2.5 my-2.5 text-xs space-y-1.5 border border-emerald-300 shadow-2xs">
+                                <div className="bg-emerald-50/80 rounded-xl p-2.5 text-xs space-y-1 border border-emerald-200 shadow-2xs font-medium">
                                   <div className="flex items-center justify-between">
-                                    <span className="font-bold text-emerald-900">탑승 버스:</span>
-                                    <span className="font-black text-emerald-950 bg-white px-2 py-0.5 rounded border border-emerald-200">
-                                      {busNameDisplay} {bus?.licensePlate ? `(${bus.licensePlate})` : ''}
+                                    <span className="text-emerald-900 font-bold">탑승 차량:</span>
+                                    <span className="font-extrabold text-emerald-950 bg-white px-2 py-0.5 rounded border border-emerald-200">
+                                      {busNameDisplay} ({departureTimeDisplay})
                                     </span>
                                   </div>
                                   <div className="flex items-center justify-between">
-                                    <span className="font-bold text-emerald-900">출발 시간:</span>
-                                    <span className="font-extrabold text-blue-700 bg-white px-2 py-0.5 rounded border border-blue-200">
-                                      {departureTimeDisplay}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-emerald-800">지도교사:</span>
+                                    <span className="text-emerald-800">차량선생님:</span>
                                     <span className="font-bold text-emerald-950">
-                                      {rideReq?.teacherName || bus?.teacherName || '배정 지도교사'}
+                                      {rideReq?.teacherName || bus?.teacherName || '배정 차량선생님'}
                                     </span>
                                   </div>
                                   <div className="flex items-center justify-between">
@@ -2403,92 +2538,66 @@ export default function TeacherDashboard({
                                   </div>
                                 </div>
                               ) : isRideReRequested ? (
-                                <div className="bg-purple-50 rounded-xl p-3 my-2.5 text-xs space-y-2 border-2 border-purple-300 shadow-2xs">
-                                  <div className="flex items-center gap-1.5 font-black text-purple-900">
-                                    <svg className="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                    </svg>
-                                    <span>지도교사 새 위치 제안</span>
-                                  </div>
-                                  <div className="bg-white p-2 rounded-lg border border-purple-200">
-                                    <span className="text-[10px] text-purple-600 font-bold block">새 하차 희망 위치:</span>
-                                    <span className="font-black text-purple-950 block">
+                                <div className="bg-purple-50 rounded-xl p-2.5 text-xs space-y-1.5 border border-purple-300 shadow-2xs">
+                                  <div className="flex items-center justify-between font-bold text-purple-900">
+                                    <span>차량선생님 새 위치 제안:</span>
+                                    <span className="font-extrabold text-purple-950 truncate max-w-[160px]" title={rideReq.counterProposal?.suggestedLocation?.boardingLocation || rideReq.boardingLocation}>
                                       {rideReq.counterProposal?.suggestedLocation?.boardingLocation || rideReq.boardingLocation}
                                     </span>
-                                    {rideReq.counterProposal?.note && (
-                                      <p className="text-[11px] text-slate-600 mt-1 italic">
-                                        사유: "{rideReq.counterProposal.note}"
-                                      </p>
-                                    )}
                                   </div>
                                   <div className="flex gap-1.5 pt-1">
                                     <button
                                       type="button"
                                       disabled={isDecidingRequest === rideReq.messageId}
                                       onClick={() => handleDecidePaymentRequest(rideReq.messageId, 'APPROVED')}
-                                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-black text-[11px] shadow-2xs transition disabled:opacity-50"
+                                      className="flex-1 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg font-extrabold text-[11px] shadow-2xs transition cursor-pointer"
                                     >
-                                      새 위치로 수락
+                                      새 위치 수락
                                     </button>
                                     <button
                                       type="button"
                                       disabled={isDecidingRequest === rideReq.messageId}
                                       onClick={() => handleDecidePaymentRequest(rideReq.messageId, 'REJECTED')}
-                                      className="py-1.5 px-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 border border-slate-200 rounded-lg font-bold text-[11px] transition disabled:opacity-50"
+                                      className="py-1 px-2.5 bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 rounded-lg font-bold text-[11px] transition cursor-pointer"
                                     >
                                       픽업 유지
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setActiveNavTab('messages')}
-                                      className="py-1.5 px-2 bg-purple-100 hover:bg-purple-200 text-purple-800 rounded-lg font-bold text-[11px] transition"
-                                      title="메시지함에서 지도 확인"
-                                    >
-                                      지도비교
                                     </button>
                                   </div>
                                 </div>
                               ) : isRidePending ? (
-                                <div className="bg-amber-100/80 rounded-xl p-2.5 my-2.5 text-xs space-y-1.5 border border-amber-300 shadow-2xs">
+                                <div className="bg-amber-50 rounded-xl p-2.5 text-xs space-y-1 border border-amber-300 shadow-2xs">
                                   <div className="flex items-center justify-between">
                                     <span className="font-bold text-amber-900">신청 차량:</span>
-                                    <span className="font-black text-amber-950">
-                                      {busNameDisplay}
-                                    </span>
+                                    <span className="font-extrabold text-amber-950">{busNameDisplay}</span>
                                   </div>
                                   <div className="flex items-center justify-between">
-                                    <span className="text-amber-800">담당 지도교사:</span>
+                                    <span className="text-amber-800">담당 차량선생님:</span>
                                     <span className="font-bold text-amber-950">
-                                      {rideReq?.teacherName || '지도교사 승인 대기'}
+                                      {rideReq?.teacherName || '차량선생님 승인 대기'}
                                     </span>
                                   </div>
-                                  <div className="pt-1">
-                                    <button
-                                      type="button"
-                                      onClick={() => setActiveNavTab('messages')}
-                                      className="w-full py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-[11px] shadow-2xs transition flex items-center justify-center gap-1"
-                                    >
-                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                                      </svg>
-                                      <span>메시지함에서 결제 확인하기</span>
-                                    </button>
-                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveNavTab('messages')}
+                                    className="w-full mt-1 py-1 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg font-bold text-[11px] shadow-2xs transition flex items-center justify-center gap-1 cursor-pointer"
+                                  >
+                                    <span>메시지함에서 결재 상태 확인</span>
+                                  </button>
                                 </div>
                               ) : (
-                                <div className="bg-slate-50 rounded-xl p-2.5 my-2.5 text-xs space-y-1.5 border border-slate-100">
+                                <div className="bg-slate-50 rounded-xl p-2.5 text-xs space-y-1 border border-slate-100 font-medium">
                                   <div className="flex items-center justify-between">
-                                    <span className="text-slate-400">하원 구분:</span>
-                                    <span className="font-bold text-slate-700">
-                                      {isNonShuttle ? '직접 픽업 (미탑승 원아)' : (bus ? `${bus.name} (${bus.licensePlate || '1차'})` : '배정 대기')}
+                                    <span className="text-slate-500">하원 구분:</span>
+                                    <span className="font-bold text-slate-800">
+                                      {isNonShuttle ? '직접 픽업 (미탑승)' : (bus ? `${bus.name} (${bus.licensePlate || '1차'})` : '배정 대기')}
                                     </span>
                                   </div>
                                   <div className="flex items-center justify-between">
-                                    <span className="text-slate-400">보호자 연락처:</span>
+                                    <span className="text-slate-500">보호자 연락처:</span>
                                     {parentPhone ? (
                                       <a
                                         href={`tel:${parentPhone}`}
-                                        className="font-bold text-blue-600 hover:underline flex items-center gap-1"
+                                        className="font-bold text-blue-700 hover:underline flex items-center gap-1"
                                       >
                                         <span>{parentPhone}</span>
                                       </a>
@@ -2496,36 +2605,41 @@ export default function TeacherDashboard({
                                       <span className="text-slate-400">미등록</span>
                                     )}
                                   </div>
+                                  {allergyStr && (
+                                    <div className="flex items-center justify-between pt-0.5">
+                                      <span className="text-rose-600 font-bold">알레르기:</span>
+                                      <span className="font-extrabold text-rose-700 bg-rose-50 px-1.5 py-0.2 rounded border border-rose-200 text-[11px]">{allergyStr}</span>
+                                    </div>
+                                  )}
                                 </div>
                               )}
 
                               {student.teacherMemo ? (
                                 <div
                                   onClick={() => handleOpenMemoModal(student)}
-                                  className="bg-amber-50 border border-amber-200/80 rounded-xl p-2.5 mb-3 cursor-pointer hover:bg-amber-100/70 transition-colors"
+                                  className="bg-amber-50 border border-amber-200 rounded-xl p-2 cursor-pointer hover:bg-amber-100/70 transition-colors"
                                   title="클릭하여 개별 알림장 수정"
                                 >
-                                  <div className="flex items-center justify-between mb-1">
-                                    <span className="text-[11px] font-bold text-amber-800">
-                                      개별 알림장 (1:1)
-                                    </span>
-                                    <span className="text-[10px] text-amber-600 font-semibold">수정</span>
+                                  <div className="flex items-center justify-between mb-0.5">
+                                    <span className="text-[11px] font-bold text-amber-800">개별 알림장 (1:1)</span>
+                                    <span className="text-[10px] text-amber-700 font-bold">수정</span>
                                   </div>
-                                  <p className="text-xs text-amber-950 font-medium line-clamp-2 leading-relaxed">
+                                  <p className="text-xs text-amber-950 font-medium line-clamp-1 leading-relaxed">
                                     {student.teacherMemo}
                                   </p>
                                 </div>
                               ) : null}
                             </div>
 
-                            <div className="space-y-2 pt-2 border-t border-slate-100">
+                            {/* 3. Footer Action Buttons */}
+                            <div className="space-y-1.5 pt-2 border-t border-slate-100">
                               <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold">
                                 <button
                                   type="button"
                                   onClick={() => {
                                     if (isNonShuttle) {
                                       if (isRidePending) {
-                                        alert(`[${student.name}] 원아는 이미 ${rideReq?.busNumber || '셔틀 차량'} 지도교사님께 탑승 및 결재 승인 요청 중입니다.`);
+                                        alert(`[${student.name}] 원아는 이미 ${rideReq?.busNumber || '셔틀 차량'} 차량선생님께 탑승 및 결재 승인 요청 중입니다.`);
                                         return;
                                       }
                                       if (isRideApproved) {
@@ -2533,7 +2647,6 @@ export default function TeacherDashboard({
                                         return;
                                       }
                                       if (isRideReRequested) {
-                                        // Open messages or prompt
                                         setActiveNavTab('messages');
                                         return;
                                       }
@@ -2542,14 +2655,15 @@ export default function TeacherDashboard({
                                     }
                                     handleUpdateBoardStatus(student.id, 'WAITING');
                                   }}
-                                  className={`py-1.5 rounded-lg transition-all flex items-center justify-center font-bold ${isRideApproved
-                                      ? 'bg-emerald-600 text-white shadow-xs font-black'
+                                  className={`py-1.5 rounded-lg transition-all cursor-pointer active:scale-95 flex items-center justify-center font-extrabold ${
+                                    isRideApproved
+                                      ? 'bg-emerald-600 text-white shadow-xs'
                                       : isRidePending
-                                        ? 'bg-amber-500 text-white shadow-xs font-black'
-                                        : isShuttle && !isNonShuttle
-                                          ? 'bg-white text-blue-700 shadow-xs'
-                                          : 'text-slate-500 hover:text-slate-800'
-                                    }`}
+                                      ? 'bg-amber-500 text-white shadow-xs'
+                                      : isShuttle && !isNonShuttle
+                                      ? 'bg-white text-blue-700 shadow-xs'
+                                      : 'text-slate-600 hover:text-slate-900'
+                                  }`}
                                 >
                                   셔틀 {isNonShuttle && !isRideApproved && !isRidePending ? '(신청)' : ''}
                                 </button>
@@ -2557,8 +2671,9 @@ export default function TeacherDashboard({
                                 <button
                                   type="button"
                                   onClick={() => handleUpdateBoardStatus(student.id, 'SELF_PICKUP')}
-                                  className={`py-1.5 rounded-lg transition-all flex items-center justify-center font-bold ${isPickup ? 'bg-white text-emerald-700 shadow-xs font-black' : 'text-slate-500 hover:text-slate-800'
-                                    }`}
+                                  className={`py-1.5 rounded-lg transition-all cursor-pointer active:scale-95 flex items-center justify-center font-extrabold ${
+                                    isPickup ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                                  }`}
                                 >
                                   픽업 {isNonShuttle ? '(기본)' : ''}
                                 </button>
@@ -2566,8 +2681,9 @@ export default function TeacherDashboard({
                                 <button
                                   type="button"
                                   onClick={() => handleUpdateBoardStatus(student.id, 'ABSENT')}
-                                  className={`py-1.5 rounded-lg transition-all flex items-center justify-center font-bold ${isAbsent ? 'bg-white text-rose-700 shadow-xs font-black' : 'text-slate-500 hover:text-slate-800'
-                                    }`}
+                                  className={`py-1.5 rounded-lg transition-all cursor-pointer active:scale-95 flex items-center justify-center font-extrabold ${
+                                    isAbsent ? 'bg-white text-rose-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                                  }`}
                                 >
                                   결석
                                 </button>
@@ -2576,9 +2692,9 @@ export default function TeacherDashboard({
                               <button
                                 type="button"
                                 onClick={() => handleOpenMemoModal(student)}
-                                className="w-full py-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center transition-colors"
+                                className="w-full py-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95"
                               >
-                                {student.teacherMemo ? '개별 알림장 수정' : '+ 개별 알림장 작성'}
+                                {student.teacherMemo ? '개별 알림장 수정' : '+ 1:1 개별 알림장 작성'}
                               </button>
                             </div>
                           </div>
@@ -2658,7 +2774,7 @@ export default function TeacherDashboard({
               <button
                 type="button"
                 onClick={() => setSelectedStudentForMemo(null)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer active:scale-95"
               >
                 취소
               </button>
@@ -2666,7 +2782,7 @@ export default function TeacherDashboard({
                 type="button"
                 onClick={handleSaveMemo}
                 disabled={isSavingMemo}
-                className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md shadow-blue-500/20 disabled:opacity-50"
+                className="px-5 py-2 text-xs font-extrabold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
               >
                 {isSavingMemo ? '저장 중...' : '개별 알림장 저장 완료'}
               </button>
@@ -2744,6 +2860,7 @@ export default function TeacherDashboard({
           </div>
         </div>
       )}
+
 
       {/* --- MODAL 4: Schedule Edit Modal (일과 및 수업 일정 수정) --- */}
       {isScheduleModalOpen && (
@@ -3001,9 +3118,9 @@ export default function TeacherDashboard({
                     )}
 
                     <div className="flex items-center justify-between text-xs pt-1">
-                      <span className="text-slate-500 font-bold">담당 지도교사:</span>
+                      <span className="text-slate-500 font-bold">담당 차량선생님:</span>
                       <span className="font-extrabold text-slate-800">
-                        {quickRequestModal.targetBus.teacherName || quickRequestModal.targetBus.teacherUser?.name || '담당 지도교사'}
+                        {quickRequestModal.targetBus.teacherName || quickRequestModal.targetBus.teacherUser?.name || '담당 차량선생님'}
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-xs">
@@ -3023,12 +3140,12 @@ export default function TeacherDashboard({
               {/* Full Capacity Warning Alert */}
               {quickRequestMode !== 'CONTEST' && quickRequestModal.allEvaluatedBuses?.every(b => !b.hasSeats) && (
                 <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-800 font-bold leading-relaxed">
-                  주의: 모든 통학버스가 만차(승차 정원 초과) 상태입니다. 원장님 및 담당 지도교사님과 사전 상의 후 신청해주세요.
+                  주의: 모든 통학버스가 만차(승차 정원 초과) 상태입니다. 원장님 및 담당 차량선생님과 사전 상의 후 신청해주세요.
                 </div>
               )}
 
               <p className="text-xs text-slate-600 font-medium leading-relaxed text-center px-2">
-                위 원아의 하차 위치를 담당하는 <strong className="text-indigo-600">{quickRequestModal.targetBus?.name} {quickRequestModal.targetBus?.teacherName || ''} 지도교사님</strong>께 {quickRequestRideType === 'TODAY_ONLY' ? '오늘 하루 하원 탑승' : '정규 셔틀 등록'} 결제를 신청하시겠습니까?
+                위 원아의 하차 위치를 담당하는 <strong className="text-indigo-600">{quickRequestModal.targetBus?.name} {quickRequestModal.targetBus?.teacherName || ''} 차량선생님</strong>께 {quickRequestRideType === 'TODAY_ONLY' ? '오늘 하루 하원 탑승' : '정규 셔틀 등록'} 결제를 신청하시겠습니까?
               </p>
             </div>
 
@@ -3071,7 +3188,7 @@ export default function TeacherDashboard({
                   셔틀 탑승 전자 결재 히스토리
                 </h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  담임교사 및 지도교사 간 진행된 모든 셔틀 결재 신청 및 승인/반려 이력을 조회합니다.
+                  담임교사 및 차량선생님 간 진행된 모든 셔틀 결재 신청 및 승인/반려 이력을 조회합니다.
                 </p>
               </div>
               <button
@@ -3096,7 +3213,7 @@ export default function TeacherDashboard({
                         <th className="py-2.5 px-3">원아명</th>
                         <th className="py-2.5 px-3">탑승 희망 차량</th>
                         <th className="py-2.5 px-3">하차 / 탑승 위치</th>
-                        <th className="py-2.5 px-3">담당 지도교사</th>
+                        <th className="py-2.5 px-3">담당 차량선생님</th>
                         <th className="py-2.5 px-3">결재 상태</th>
                         <th className="py-2.5 px-3">신청 / 처리 일시</th>
                       </tr>
@@ -3114,7 +3231,7 @@ export default function TeacherDashboard({
                             {req.boardingLocation || '위치 정보 없음'}
                           </td>
                           <td className="py-3 px-3 text-slate-700 font-semibold">
-                            {req.teacherName || '배정 지도교사'}
+                            {req.teacherName || '배정 차량선생님'}
                           </td>
                           <td className="py-3 px-3">
                             {req.status === 'APPROVED' ? (
@@ -3150,7 +3267,7 @@ export default function TeacherDashboard({
               <button
                 type="button"
                 onClick={() => setShowApprovalHistory(false)}
-                className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition"
+                className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer active:scale-95"
               >
                 닫기
               </button>

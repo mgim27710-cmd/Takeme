@@ -37,6 +37,11 @@ import { Attendance, AttendanceStatus } from '../entities/attendance.entity';
 import { AttendanceSubmission } from '../entities/attendance-submission.entity';
 import { MediaAsset } from '../entities/media-asset.entity';
 import { formatTeacherName, cleanTeacherBaseName } from '../utils/teacher.util';
+import { CloudDocument } from '../entities/cloud-document.entity';
+import { LegalExpiry } from '../entities/legal-expiry.entity';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class RoutingService {
@@ -74,6 +79,10 @@ export class RoutingService {
     private attendanceRepository: Repository<Attendance>,
     @InjectRepository(AttendanceSubmission)
     private submissionRepository: Repository<AttendanceSubmission>,
+    @InjectRepository(CloudDocument)
+    private cloudDocumentRepository: Repository<CloudDocument>,
+    @InjectRepository(LegalExpiry)
+    private legalExpiryRepository: Repository<LegalExpiry>,
     @InjectRepository(MediaAsset)
     private mediaAssetRepository: Repository<MediaAsset>,
     private httpService: HttpService,
@@ -351,10 +360,18 @@ export class RoutingService {
     '#78350f', // 8: warm chocolate (브라운)
   ];
   private colorIndex = 0;
-  private routeUpdateNotifier?: (academyId?: number, message?: string) => void;
+  private routeUpdateNotifiers: Array<(academyId?: number, message?: string) => void> = [];
+  private substituteStaffMap: Map<number, {
+    isDriverResting?: boolean;
+    substituteDriver?: any;
+    isTeacherResting?: boolean;
+    substituteTeacher?: any;
+    origDriverUserId?: number | null;
+    origTeacherUserId?: number | null;
+  }> = new Map();
 
   public registerRouteUpdateNotifier(fn: (academyId?: number, message?: string) => void) {
-    this.routeUpdateNotifier = fn;
+    this.routeUpdateNotifiers.push(fn);
   }
 
   private systemNotificationHandler?: (academyId: number | null, category: string, title: string, content: string, extra?: any) => Promise<any>;
@@ -383,9 +400,11 @@ export class RoutingService {
   }
 
   public notifyRouteUpdated(academyId?: number, message?: string) {
-    try {
-      this.routeUpdateNotifier?.(academyId, message);
-    } catch {}
+    for (const fn of this.routeUpdateNotifiers) {
+      try {
+        fn(academyId, message);
+      } catch {}
+    }
   }
 
   private getDistinctColor(): string {
@@ -1190,7 +1209,7 @@ export class RoutingService {
           return dA - dB;
         });
 
-        // Retain 25 closest students, spill surplus to nearest available vehicle
+        // Retain 25 closest students, spill surplus to nearest available vehicle within 5km
         const surplus = vs.assignedStudents.splice(CAPACITY);
         for (const st of surplus) {
           let bestNeighbor: VehicleZoneState | null = null;
@@ -1200,7 +1219,7 @@ export class RoutingService {
               const oLat = otherVs.centroid[0] !== 0 ? otherVs.centroid[0] : avgLat;
               const oLng = otherVs.centroid[1] !== 0 ? otherVs.centroid[1] : avgLng;
               const d = this.getDistanceKm(Number(st.latitude), Number(st.longitude), oLat, oLng);
-              if (d < minNeighborDist) {
+              if (d < minNeighborDist && d <= 5.0) {
                 minNeighborDist = d;
                 bestNeighbor = otherVs;
               }
@@ -1209,50 +1228,32 @@ export class RoutingService {
           if (bestNeighbor) {
             bestNeighbor.assignedStudents.push(st);
           } else {
-            vs.assignedStudents.push(st);
+            // 정원 초과 또는 주변 5km 이내 여유 차량 없음 -> 증차 필요 상태로 설정하고 배차 해제
+            st.needsExtraBus = true;
+            st.unassignedReason = 'SURPLUS_NO_NEIGHBOR_5KM';
+            st.assignedVehicle = null;
+            st.assignedDepartureVehicle = null;
+            await this.studentRepository.update(st.id, { assignedVehicle: null, assignedDepartureVehicle: null }).catch(() => {});
           }
         }
       }
     }
 
-    // Now auto-expand each vehicle's zone to encompass all its assigned students!
-    // Buffer = 0.35km ensures tight envelope coverage while bisector clipping guarantees 0% overlap
+    // Now form dedicated, seamless, non-overlapping vehicle zones that touch along shared borders
     const studentPointsList = vehicleStates.map(vs => {
       const studentPts = vs.assignedStudents.map(s => [Number(s.latitude), Number(s.longitude)] as [number, number]);
       const basePts = vs.polygon.length > 0 ? vs.polygon : [];
       return studentPts.length > 0 ? studentPts : basePts;
     });
 
-    const expandedPolygons = this.partitionVehicleZones(studentPointsList, 0.35);
+    const partitionedPolys = this.partitionVehicleZones(studentPointsList, 0.25);
 
-    // Save expanded polygons to DB
     for (let i = 0; i < vehicleStates.length; i++) {
       const vs = vehicleStates[i];
-      const poly = expandedPolygons[i];
+      const poly = partitionedPolys[i];
       if (poly && poly.length >= 3) {
         vs.vehicle.polygonCoordinates = poly;
         await this.vehicleRepository.save(vs.vehicle);
-      }
-    }
-
-    // Strict containment enforcement:
-    // Green zone has green students only, Pink zone has pink students only!
-    // Any student falling inside vehicle V's polygon is strictly assigned to vehicle V.
-    for (let i = 0; i < vehicleStates.length; i++) {
-      const vs = vehicleStates[i];
-      const poly = vs.vehicle.polygonCoordinates;
-      if (!poly || !Array.isArray(poly) || poly.length < 3) continue;
-
-      for (let j = 0; j < vehicleStates.length; j++) {
-        if (i === j) continue;
-        const otherVs = vehicleStates[j];
-        for (let k = otherVs.assignedStudents.length - 1; k >= 0; k--) {
-          const st = otherVs.assignedStudents[k];
-          if (this.isPointInPolygon([Number(st.latitude), Number(st.longitude)], poly)) {
-            otherVs.assignedStudents.splice(k, 1);
-            vs.assignedStudents.push(st);
-          }
-        }
       }
     }
 
@@ -1289,7 +1290,7 @@ export class RoutingService {
       busNumber: vs.vehicle.busNumber,
       studentCount: vs.assignedStudents.length,
       capacity: vs.vehicle.capacity || 25,
-      vertices: (expandedPolygons[idx] || []).length
+      vertices: Array.isArray(vs.vehicle.polygonCoordinates) ? vs.vehicle.polygonCoordinates.length : 0
     }));
 
     return {
@@ -1315,6 +1316,7 @@ export class RoutingService {
       }
       if (!Array.isArray(parsedPoints)) parsedPoints = [];
       
+      const subState = this.substituteStaffMap.get(v.id);
       return {
         id: v.id,
         name: v.busNumber,
@@ -1337,6 +1339,10 @@ export class RoutingService {
         isDriverLocked: !!v.driverUser?.isLocked,
         teacherUserId: v.teacherUser?.id || null,
         isTeacherLocked: !!v.teacherUser?.isLocked,
+        isDriverResting: Boolean(subState?.isDriverResting),
+        substituteDriver: subState?.substituteDriver || null,
+        isTeacherResting: Boolean(subState?.isTeacherResting),
+        substituteTeacher: subState?.substituteTeacher || null,
       };
     });
     
@@ -1428,6 +1434,7 @@ export class RoutingService {
         lat: (override && override.latitude) ? Number(override.latitude) : st.latitude,
         lng: (override && override.longitude) ? Number(override.longitude) : st.longitude,
         isNotRiding,
+        boardingType: parsedRaw['탑승구분'] || (isNotRiding ? 'NONE' : (st.assignedDepartureVehicle && !st.assignedVehicle ? 'AFTERNOON_ONLY' : (!st.assignedDepartureVehicle && st.assignedVehicle ? 'MORNING_ONLY' : 'BOTH'))),
         isOneTimeRide,
         oneTimeType: override?.overrideType || (parsedRaw.isTemporaryLocation ? 'CHANGE_LOCATION' : (isOneTimeBoarding ? 'ONE_TIME_BOARDING' : null)),
         addressNeedsInput: needsAddress,
@@ -1475,7 +1482,7 @@ export class RoutingService {
             );
           }
         } else if (!isAdminOrDesk) {
-          // 관리자·담당 담임교사 외(기사, 지도교사 등)는 개인정보(전화번호·생년월일) 마스킹 처리
+          // 관리자·담당 담임교사 외(기사, 차량선생님 등)는 개인정보(전화번호·생년월일) 마스킹 처리
           formattedStudents = formattedStudents.map(s => ({
             ...s,
             parentPhone: null,
@@ -1780,42 +1787,46 @@ export class RoutingService {
     return lower.concat(upper);
   }
 
-  public generateZonePolygon(points: [number, number][], bufferKm: number = 1.8): [number, number][] {
+  public generateZonePolygon(points: [number, number][], bufferKm: number = 0): [number, number][] {
     if (!points || points.length === 0) return [];
 
     // Deduplicate points
     const pointMap = new Map<string, [number, number]>();
     for (const p of points) {
       if (Array.isArray(p) && p.length >= 2 && !isNaN(p[0]) && !isNaN(p[1])) {
-        pointMap.set(`${p[0].toFixed(5)},${p[1].toFixed(5)}`, [p[0], p[1]]);
+        pointMap.set(`${p[0].toFixed(6)},${p[1].toFixed(6)}`, [p[0], p[1]]);
       }
     }
     const uniquePoints = Array.from(pointMap.values());
     if (uniquePoints.length === 0) return [];
-
-    // Generous service buffer around student stops (~1.8km radius for realistic neighborhood sector)
-    // 1 deg lat ≈ 111.0 km, 1 deg lng ≈ 111.0 * cos(lat) ≈ 88.0 km in Korea
-    const avgLat = uniquePoints.reduce((s, p) => s + p[0], 0) / uniquePoints.length;
-    const dLat = bufferKm / 111.0;
-    const cosLat = Math.cos((avgLat * Math.PI) / 180);
-    const dLng = bufferKm / (111.0 * (cosLat > 0.1 ? cosLat : 0.8));
-
-    const expandedPoints: [number, number][] = [];
-    for (const p of uniquePoints) {
-      const lat = p[0];
-      const lng = p[1];
-      // 12-direction expansion for smooth natural perimeter
-      for (let a = 0; a < 12; a++) {
-        const rad = (a * 2 * Math.PI) / 12;
-        expandedPoints.push([
-          lat + dLat * Math.sin(rad),
-          lng + dLng * Math.cos(rad)
-        ]);
-      }
+    if (uniquePoints.length === 1) {
+      const [lat, lng] = uniquePoints[0];
+      const d = 0.0008;
+      return [
+        [lat - d, lng - d],
+        [lat - d, lng + d],
+        [lat + d, lng + d],
+        [lat + d, lng - d]
+      ];
+    }
+    if (uniquePoints.length === 2) {
+      const [p1, p2] = uniquePoints;
+      const dy = p2[0] - p1[0];
+      const dx = p2[1] - p1[1];
+      const len = Math.sqrt(dy * dy + dx * dx) || 1e-6;
+      const d = 0.0007; // ~70m corridor half-width along the route
+      const perpY = (-dx / len) * d;
+      const perpX = (dy / len) * d;
+      return [
+        [p1[0] + perpY, p1[1] + perpX],
+        [p2[0] + perpY, p2[1] + perpX],
+        [p2[0] - perpY, p2[1] - perpX],
+        [p1[0] - perpY, p1[1] - perpX]
+      ];
     }
 
-    const hull = this.computeConvexHull(expandedPoints);
-    return hull && hull.length >= 3 ? hull : expandedPoints.slice(0, 4);
+    const hull = this.computeConvexHull(uniquePoints);
+    return hull && hull.length >= 3 ? hull : uniquePoints.slice(0, 4);
   }
 
   // Sutherland-Hodgman polygon clipping against a perpendicular bisector half-plane
@@ -1901,7 +1912,8 @@ export class RoutingService {
       : 37.8;
     const cosLat = Math.cos((avgLat * Math.PI) / 180);
 
-    // 2. Expand each vehicle's student stops with generous service buffer
+    // 2. Generate tight polygon around each vehicle's actual student stops (default buffer 0.25km)
+    // Connecting actual student stops tightly without ballooning into empty terrain where no one rides
     const initialPolygons = vehiclePointsList.map((pts, idx) => {
       if (!pts || pts.length === 0) {
         if (centroids[idx]) return this.generateZonePolygon([centroids[idx]!], bufferKm);
@@ -1910,13 +1922,13 @@ export class RoutingService {
       return this.generateZonePolygon(pts, bufferKm);
     });
 
-    // 3. Clip each vehicle's polygon against the bisector half-planes of all other vehicles
+    // 3. Clip ONLY where adjacent vehicle polygons overlap along their shared bisector line
     // Mathematically guarantees:
     // - ZERO overlap between any two vehicle zones (interiors are disjoint)
-    // - Adjacent zones TOUCH seamlessly along the bisector boundary
+    // - Adjacent zones TOUCH seamlessly along shared borderlines
     const clippedPolygons: [number, number][][] = [];
     for (let i = 0; i < n; i++) {
-      let poly = initialPolygons[i];
+      let poly = [...initialPolygons[i]];
       const c1 = centroids[i];
       if (!c1 || poly.length < 3) {
         clippedPolygons.push(poly);
@@ -2243,14 +2255,17 @@ export class RoutingService {
       where: academy ? { id: studentId, academy: { id: academy.id } } : { id: studentId },
       relations: { assignedVehicle: true, assignedDepartureVehicle: true, academy: true }
     });
+    if (!student) {
+      student = await this.studentRepository.findOne({
+        where: { id: studentId },
+        relations: { assignedVehicle: true, assignedDepartureVehicle: true, academy: true }
+      });
+    }
     if (!student) throw new NotFoundException('원아를 찾을 수 없습니다.');
-    if (!academy && student.academy) {
+    if (student.academy) {
       academy = student.academy;
     }
     if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
-
-    if (data.name !== undefined) student.name = data.name;
-    if (data.adminDisplayName !== undefined) student.adminDisplayName = data.adminDisplayName;
 
     let parsedRaw: any = {};
     if (student.raw) {
@@ -2261,18 +2276,42 @@ export class RoutingService {
       }
     }
 
+    if (data.name !== undefined) {
+      const cleanName = String(data.name).trim();
+      student.name = cleanName;
+      student.adminDisplayName = data.adminDisplayName !== undefined ? String(data.adminDisplayName).trim() : cleanName;
+      parsedRaw['원아명'] = cleanName;
+      parsedRaw['이름'] = cleanName;
+      parsedRaw['학생이름/영문이름'] = cleanName;
+    } else if (data.adminDisplayName !== undefined) {
+      student.adminDisplayName = String(data.adminDisplayName).trim();
+    }
+
     if (data.address !== undefined) {
       const trimmedAddress = String(data.address || '').trim();
       student.address = trimmedAddress;
-      student.boardingLocation = trimmedAddress;
-      if (trimmedAddress) {
+      student.boardingLocation = String(data.boardingLocation || data.inLocation || trimmedAddress).trim();
+      parsedRaw['도로명주소'] = trimmedAddress;
+      parsedRaw['주소'] = trimmedAddress;
+      parsedRaw['등원지'] = student.boardingLocation;
+      parsedRaw['탑승지'] = student.boardingLocation;
+
+      const providedLat = data.lat !== undefined && data.lat !== null && !isNaN(parseFloat(data.lat)) ? parseFloat(data.lat) : undefined;
+      const providedLng = data.lng !== undefined && data.lng !== null && !isNaN(parseFloat(data.lng)) ? parseFloat(data.lng) : undefined;
+
+      if (providedLat !== undefined && providedLng !== undefined) {
+        student.latitude = providedLat;
+        student.longitude = providedLng;
+        delete parsedRaw['주소입력필요'];
+        delete parsedRaw['실패주소'];
+      } else if (trimmedAddress) {
         const coords = await this.geocodeAddress(trimmedAddress);
         if (coords) {
           student.latitude = coords.lat;
           student.longitude = coords.lng;
           delete parsedRaw['주소입력필요'];
           delete parsedRaw['실패주소'];
-        } else {
+        } else if (!student.latitude || !student.longitude) {
           student.latitude = null as any;
           student.longitude = null as any;
           parsedRaw['주소입력필요'] = true;
@@ -2283,26 +2322,107 @@ export class RoutingService {
         student.longitude = null as any;
         parsedRaw['주소입력필요'] = true;
       }
+    } else if (data.boardingLocation !== undefined || data.inLocation !== undefined) {
+      student.boardingLocation = String(data.boardingLocation || data.inLocation || '').trim();
+      parsedRaw['등원지'] = student.boardingLocation;
+      parsedRaw['탑승지'] = student.boardingLocation;
     }
 
-    if (data.className !== undefined) parsedRaw['반명'] = data.className;
-    if (data.age !== undefined) parsedRaw['연령'] = data.age;
-    if (data.gender !== undefined) parsedRaw['성별'] = data.gender;
-    if (data.parentName !== undefined) parsedRaw['보호자 성함'] = data.parentName;
-    if (data.parentPhone !== undefined) {
-      parsedRaw['부모연락처'] = data.parentPhone;
-      parsedRaw['보호자연락처'] = data.parentPhone;
+    if (data.className !== undefined) {
+      student.className = String(data.className).trim();
+      parsedRaw['반명'] = student.className;
+      parsedRaw['반'] = student.className;
+      parsedRaw['학급'] = student.className;
     }
+    if (data.age !== undefined) parsedRaw['연령'] = data.age;
+    if (data.birthDate !== undefined) {
+      student.birthDate = data.birthDate;
+      parsedRaw['생년월일'] = data.birthDate;
+    }
+    if (data.gender !== undefined) {
+      student.gender = data.gender;
+      parsedRaw['성별'] = data.gender;
+    }
+    if (data.parentName !== undefined) {
+      parsedRaw['보호자 성함'] = data.parentName;
+      parsedRaw['보호자성함'] = data.parentName;
+      parsedRaw['학부모성함'] = data.parentName;
+      parsedRaw['보호자1 성함'] = data.parentName;
+    }
+    if (data.parentPhone !== undefined || data.phone !== undefined) {
+      const ph = data.parentPhone !== undefined ? data.parentPhone : data.phone;
+      student.phone = ph;
+      parsedRaw['부모연락처'] = ph;
+      parsedRaw['보호자연락처'] = ph;
+      parsedRaw['학부모연락처'] = ph;
+      parsedRaw['연락처'] = ph;
+      parsedRaw['보호자1 연락처'] = ph;
+    }
+    if (data.parentRelation !== undefined) {
+      parsedRaw['보호자 관계'] = data.parentRelation;
+      parsedRaw['보호자1 관계'] = data.parentRelation;
+    }
+    if (data.parent2Name !== undefined) {
+      parsedRaw['보호자2 성함'] = data.parent2Name;
+      parsedRaw['보호자2성함'] = data.parent2Name;
+    }
+    if (data.parent2Phone !== undefined) {
+      parsedRaw['보호자2 연락처'] = data.parent2Phone;
+      parsedRaw['보호자2연락처'] = data.parent2Phone;
+      parsedRaw['부모연락처2'] = data.parent2Phone;
+      parsedRaw['비상연락처'] = data.parent2Phone;
+    }
+    if (data.parent2Relation !== undefined) {
+      parsedRaw['보호자2 관계'] = data.parent2Relation;
+      parsedRaw['보호자2관계'] = data.parent2Relation;
+    }
+    if (data.teacherName !== undefined) {
+      parsedRaw['담임명'] = data.teacherName;
+    }
+    if (data.departureType !== undefined) {
+      parsedRaw['하원구분'] = data.departureType;
+    }
+    if (data.inTime !== undefined) parsedRaw['등원시간'] = data.inTime;
+    if (data.outTime !== undefined) parsedRaw['하원시간'] = data.outTime;
     if (data.allergies !== undefined) {
       student.allergies = data.allergies;
       parsedRaw['알레르기'] = data.allergies;
     }
-    if (data.note !== undefined) parsedRaw['비고'] = data.note;
+    if (data.note !== undefined) {
+      student.teacherMemo = data.note;
+      parsedRaw['비고'] = data.note;
+    }
 
-    if (data.isNotRiding !== undefined) {
+    if (data.boardingType !== undefined) {
+      parsedRaw['탑승구분'] = data.boardingType;
+      if (data.boardingType === 'NONE') {
+        student.isNotRiding = true;
+        parsedRaw['차량미탑승'] = true;
+        parsedRaw['미탑승'] = true;
+        delete parsedRaw['주소입력필요'];
+        delete parsedRaw['실패주소'];
+        student.assignedVehicle = null as any;
+        student.assignedDepartureVehicle = null as any;
+      } else {
+        student.isNotRiding = false;
+        parsedRaw['차량미탑승'] = false;
+        parsedRaw['미탑승'] = false;
+        if (data.boardingType === 'MORNING_ONLY') {
+          student.assignedDepartureVehicle = null as any;
+          delete parsedRaw['하원차량'];
+        } else if (data.boardingType === 'AFTERNOON_ONLY') {
+          student.assignedVehicle = null as any;
+          delete parsedRaw['등원차량'];
+          delete parsedRaw['호차'];
+          delete parsedRaw['차량'];
+        }
+      }
+    } else if (data.isNotRiding !== undefined) {
       student.isNotRiding = Boolean(data.isNotRiding);
       parsedRaw['차량미탑승'] = student.isNotRiding;
+      parsedRaw['미탑승'] = student.isNotRiding;
       if (student.isNotRiding) {
+        parsedRaw['탑승구분'] = 'NONE';
         delete parsedRaw['주소입력필요'];
         delete parsedRaw['실패주소'];
         student.assignedVehicle = null as any;
@@ -2310,17 +2430,26 @@ export class RoutingService {
       }
     }
 
-    if (data.dropoffLocation !== undefined) {
-      student.dropoffLocation = data.dropoffLocation;
-      parsedRaw['하차지'] = data.dropoffLocation;
+    if (data.weeklySchedules !== undefined) {
+      parsedRaw['요일별일정'] = data.weeklySchedules;
+      parsedRaw.weeklySchedules = data.weeklySchedules;
+    }
+
+    if (data.dropoffLocation !== undefined || data.outLocation !== undefined) {
+      const dropLoc = data.dropoffLocation !== undefined ? data.dropoffLocation : data.outLocation;
+      student.dropoffLocation = dropLoc;
+      parsedRaw['하차지'] = dropLoc;
+      parsedRaw['하원지'] = dropLoc;
     }
 
     const inBus = data.assignedBusId !== undefined ? data.assignedBusId : (data.inBusId !== undefined ? data.inBusId : data.assignedVehicleId);
+    let explicitVehicle: Vehicle | null = null;
     if (inBus) {
       const vehicle = await this.vehicleRepository.findOne({
         where: { id: Number(inBus), academy: { id: academy.id } }
       });
       if (vehicle) {
+        explicitVehicle = vehicle;
         student.assignedVehicle = vehicle;
         parsedRaw['등원차량'] = vehicle.busNumber;
         parsedRaw['호차'] = vehicle.busNumber;
@@ -2331,12 +2460,14 @@ export class RoutingService {
     }
 
     const outBus = data.assignedDepartureBusId !== undefined ? data.assignedDepartureBusId : (data.outBusId !== undefined ? data.outBusId : data.assignedDepartureVehicleId);
+    let explicitDepVehicle: Vehicle | null = null;
     if (outBus !== undefined) {
       if (outBus) {
         const dVehicle = await this.vehicleRepository.findOne({
           where: { id: Number(outBus), academy: { id: academy.id } }
         });
         if (dVehicle) {
+          explicitDepVehicle = dVehicle;
           student.assignedDepartureVehicle = dVehicle;
           parsedRaw['하원차량'] = dVehicle.busNumber;
         }
@@ -2349,9 +2480,15 @@ export class RoutingService {
     await this.studentRepository.save(student);
 
     // If student now has valid coordinates, auto-expand vehicle zone!
-    if (student.latitude && student.longitude) {
+    if (student.latitude && student.longitude && !student.isNotRiding) {
       try {
         await this.expandZonesToStudents(academy.id, userId);
+        // Preserve admin's explicit vehicle assignment if expandZonesToStudents altered it
+        if (explicitVehicle) {
+          student.assignedVehicle = explicitVehicle;
+          if (explicitDepVehicle) student.assignedDepartureVehicle = explicitDepVehicle;
+          await this.studentRepository.save(student);
+        }
       } catch (e: any) {
         console.warn('Auto zone expansion on student update:', e?.message || e);
       }
@@ -2362,6 +2499,10 @@ export class RoutingService {
   }
 
   async addStudent(studentData: any, academyId?: number, userId?: number) {
+    const existingId = studentData?.id || studentData?.editingStudentId || studentData?.studentId;
+    if (existingId && !isNaN(Number(existingId))) {
+      return this.updateStudent(Number(existingId), studentData, academyId, userId);
+    }
     const academy = await this.getAcademy(academyId, userId);
     if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
 
@@ -2487,8 +2628,15 @@ export class RoutingService {
       '학년': age,
       '성별': studentData.gender || studentData.raw?.['성별'] || '',
       '보호자 성함': studentData.parentName || studentData.raw?.['보호자 성함'] || '',
+      '보호자1 성함': studentData.parentName || studentData.raw?.['보호자1 성함'] || studentData.raw?.['보호자 성함'] || '',
+      '보호자 관계': studentData.parentRelation || studentData.raw?.['보호자 관계'] || '모',
+      '보호자1 관계': studentData.parentRelation || studentData.raw?.['보호자1 관계'] || '모',
       '부모연락처': parentPhone,
       '보호자연락처': parentPhone,
+      '보호자1 연락처': parentPhone,
+      '보호자2 성함': studentData.parent2Name || studentData.raw?.['보호자2 성함'] || '',
+      '보호자2 연락처': studentData.parent2Phone || studentData.raw?.['보호자2 연락처'] || studentData.raw?.['부모연락처2'] || studentData.raw?.['비상연락처'] || '',
+      '보호자2 관계': studentData.parent2Relation || studentData.raw?.['보호자2 관계'] || '부',
       '주소': studentData.address || '',
       '등원지': studentData.inLocation || studentData.boardingLocation || studentData.address || '',
       '하원지': studentData.outLocation || studentData.address || '',
@@ -2765,6 +2913,180 @@ export class RoutingService {
     Object.assign(vehicle, data);
     await this.vehicleRepository.save(vehicle);
     return vehicle;
+  }
+
+  async createVehicle(data: any, academyId?: number, userId?: number) {
+    const targetAcademyId = data?.academyId || academyId;
+    const academy = await this.getAcademy(targetAcademyId, userId);
+    if (!academy) throw new BadRequestException('유치원 정보를 찾을 수 없습니다.');
+
+    const busNumber = String(data.busNumber || data.name || '신규호차').trim();
+    const vehicle = this.vehicleRepository.create({
+      busNumber,
+      plateNumber: data.plateNumber ? String(data.plateNumber).trim() : '',
+      driverName: data.driverName ? String(data.driverName).trim() : '미정',
+      driverPhone: data.driverPhone ? String(data.driverPhone).trim() : '000-0000-0000',
+      teacherName: data.teacherName ? formatTeacherName(String(data.teacherName).trim()) : '미정',
+      teacherPhone: data.teacherPhone ? String(data.teacherPhone).trim() : '000-0000-0000',
+      capacity: Number(data.capacity) || 25,
+      colorHex: data.color || data.colorHex || this.getDistinctColor(),
+      polygonCoordinates: Array.isArray(data.polygonCoordinates) ? data.polygonCoordinates : [],
+      academy,
+    });
+
+    const saved = await this.vehicleRepository.save(vehicle);
+    const allCount = await this.vehicleRepository.count({ where: { academy: { id: academy.id } } });
+    academy.vehicleCount = allCount;
+    await this.academyRepository.save(academy).catch(() => {});
+
+    this.notifyRouteUpdated(academy.id);
+    return {
+      id: saved.id,
+      name: saved.busNumber,
+      busNumber: saved.busNumber,
+      plateNumber: saved.plateNumber,
+      driverName: saved.driverName,
+      driverPhone: saved.driverPhone,
+      teacherName: saved.teacherName,
+      teacherPhone: saved.teacherPhone,
+      capacity: saved.capacity,
+      color: saved.colorHex,
+      points: [],
+      polygon: [],
+      polygonCoordinates: [],
+      driverApprovalStatus: saved.driverApprovalStatus,
+      teacherApprovalStatus: saved.teacherApprovalStatus,
+    };
+  }
+
+  async saveSubstituteStaff(body: any, academyId?: number, userId?: number) {
+    const busId = Number(body.busId || body.vehicleId);
+    if (!busId) throw new BadRequestException('차량 ID가 필요합니다.');
+
+    const vehicle = await this.vehicleRepository.findOne({
+      where: { id: busId },
+      relations: { academy: true, driverUser: true, teacherUser: true },
+    });
+    if (!vehicle) throw new BadRequestException('해당 차량을 찾을 수 없습니다.');
+
+    const bcrypt = require('bcrypt');
+    const prevState = this.substituteStaffMap.get(busId) || {};
+    const origDriverUserId = prevState.origDriverUserId !== undefined ? prevState.origDriverUserId : (vehicle.driverUser?.id || null);
+    const origTeacherUserId = prevState.origTeacherUserId !== undefined ? prevState.origTeacherUserId : (vehicle.teacherUser?.id || null);
+
+    // Handle Substitute Driver Account
+    if (body.substituteDriver?.email) {
+      const subEmail = String(body.substituteDriver.email).trim().toLowerCase();
+      const subPass = body.substituteDriver.password || 'password123!';
+      const passHash = await bcrypt.hash(subPass, 10);
+      let subUser = await this.userRepository.findOne({ where: { email: subEmail } });
+      if (!subUser) {
+        subUser = this.userRepository.create({
+          email: subEmail,
+          passwordHash: passHash,
+          role: UserRole.DRIVER,
+          name: body.substituteDriver.name || '대체 기사님',
+          phone: body.substituteDriver.phone || '010-9999-1001',
+          academy: vehicle.academy,
+          academyId: vehicle.academy?.id,
+          approvalStatus: 'APPROVED',
+          isLocked: !body.isDriverResting,
+        });
+      } else {
+        subUser.passwordHash = passHash;
+        subUser.name = body.substituteDriver.name || subUser.name;
+        subUser.phone = body.substituteDriver.phone || subUser.phone;
+        subUser.academyId = vehicle.academy?.id || subUser.academyId;
+        subUser.approvalStatus = 'APPROVED';
+        subUser.isLocked = !body.isDriverResting;
+        subUser.failedLoginAttempts = 0;
+      }
+      await this.userRepository.save(subUser);
+    }
+
+    // Handle Substitute Teacher Account
+    if (body.substituteTeacher?.email) {
+      const subEmail = String(body.substituteTeacher.email).trim().toLowerCase();
+      const subPass = body.substituteTeacher.password || 'password123!';
+      const passHash = await bcrypt.hash(subPass, 10);
+      let subUser = await this.userRepository.findOne({ where: { email: subEmail } });
+      if (!subUser) {
+        subUser = this.userRepository.create({
+          email: subEmail,
+          passwordHash: passHash,
+          role: UserRole.SHUTTLE_TEACHER,
+          name: body.substituteTeacher.name || '대체 교사님',
+          phone: body.substituteTeacher.phone || '010-9999-2001',
+          academy: vehicle.academy,
+          academyId: vehicle.academy?.id,
+          approvalStatus: 'APPROVED',
+          isLocked: !body.isTeacherResting,
+        });
+      } else {
+        subUser.passwordHash = passHash;
+        subUser.name = body.substituteTeacher.name || subUser.name;
+        subUser.phone = body.substituteTeacher.phone || subUser.phone;
+        subUser.academyId = vehicle.academy?.id || subUser.academyId;
+        subUser.approvalStatus = 'APPROVED';
+        subUser.isLocked = !body.isTeacherResting;
+        subUser.failedLoginAttempts = 0;
+      }
+      await this.userRepository.save(subUser);
+    }
+
+    this.substituteStaffMap.set(busId, {
+      isDriverResting: Boolean(body.isDriverResting),
+      substituteDriver: body.substituteDriver || null,
+      isTeacherResting: Boolean(body.isTeacherResting),
+      substituteTeacher: body.substituteTeacher || null,
+      origDriverUserId,
+      origTeacherUserId,
+    });
+
+    return {
+      success: true,
+      busId,
+      isDriverResting: Boolean(body.isDriverResting),
+      substituteDriver: body.substituteDriver,
+      isTeacherResting: Boolean(body.isTeacherResting),
+      substituteTeacher: body.substituteTeacher,
+    };
+  }
+
+  async saveDispatch(body: any, academyId?: number, userId?: number) {
+    const academy = await this.getAcademy(academyId, userId);
+    if (Array.isArray(body.buses)) {
+      for (const b of body.buses) {
+        if (!b.id) continue;
+        const v = await this.vehicleRepository.findOne({ where: { id: Number(b.id) } });
+        if (!v) continue;
+        if (b.points || b.polygonCoordinates) {
+          v.polygonCoordinates = b.points || b.polygonCoordinates;
+        }
+        if (b.driverName !== undefined) v.driverName = b.driverName;
+        if (b.teacherName !== undefined) v.teacherName = b.teacherName;
+        if (b.plateNumber !== undefined) v.plateNumber = b.plateNumber;
+        if (b.capacity !== undefined) v.capacity = Number(b.capacity) || 25;
+        await this.vehicleRepository.save(v);
+      }
+    }
+    if (Array.isArray(body.students) && body.students.length > 0) {
+      await this.batchUpdateStudents(
+        body.students.map((s: any) => ({
+          id: s.id,
+          inBusId: s.assignedBusId,
+          outBusId: s.assignedDepartureBusId !== undefined ? s.assignedDepartureBusId : s.assignedBusId,
+          isNotRiding: s.isNotRiding,
+          boardingLocation: s.boardingLocation,
+        })),
+        academy?.id || academyId,
+        userId,
+      );
+    }
+    if (academy?.id) {
+      this.notifyRouteUpdated(academy.id);
+    }
+    return { success: true };
   }
 
   async getDailyLogs(date: string, vehicleId: number) {
@@ -3218,8 +3540,10 @@ export class RoutingService {
 
   private async hydratePostMedia(post: BoardPost): Promise<BoardPost> {
     if (!post) return post;
-    const resolvedImageUrl = await resolveMediaRef(post.imageUrl);
-    const resolvedImages = await resolveMediaRefs(post.images);
+    const [resolvedImageUrl, resolvedImages] = await Promise.all([
+      resolveMediaRef(post.imageUrl),
+      resolveMediaRefs(post.images),
+    ]);
     return {
       ...post,
       imageUrl: resolvedImageUrl,
@@ -3354,10 +3678,17 @@ export class RoutingService {
     visibility?: string;
     targetClass?: string;
     postType?: string;
-  }, userId?: number, userRole?: string) {
-    const post = await this.boardPostRepository.findOne({ where: { id } });
+  }, userId?: number, userRole?: string, academyId?: number) {
+    const post = await this.boardPostRepository.findOne({ where: { id }, relations: { academy: true } });
     if (!post) throw new BadRequestException('게시글을 찾을 수 없습니다.');
-    const isAdmin = userRole === 'ADMIN' || userRole === 'ACADEMY_ADMIN';
+    const isSuper = userRole === 'SUPER_ADMIN';
+    const isAdmin = isSuper || userRole === 'ADMIN' || userRole === 'ACADEMY_ADMIN';
+
+    // 테넌트 격리 검증: 타 기관 게시글 수정 원천 차단
+    if (!isSuper && academyId && post.academy?.id && post.academy.id !== academyId) {
+      throw new ForbiddenException('타 기관의 게시글은 수정할 수 없습니다.');
+    }
+
     if (!isAdmin && userId && post.authorUserId && post.authorUserId !== userId) {
       throw new ForbiddenException('작성자 본인 또는 기관 관리자만 수정할 수 있습니다.');
     }
@@ -3389,10 +3720,17 @@ export class RoutingService {
     return this.hydratePostMedia(saved);
   }
 
-  async deleteBoardPost(id: number, userId?: number, userRole?: string) {
-    const post = await this.boardPostRepository.findOne({ where: { id } });
+  async deleteBoardPost(id: number, userId?: number, userRole?: string, academyId?: number) {
+    const post = await this.boardPostRepository.findOne({ where: { id }, relations: { academy: true } });
     if (!post) throw new BadRequestException('게시글을 찾을 수 없습니다.');
-    const isAdmin = userRole === 'ADMIN' || userRole === 'ACADEMY_ADMIN';
+    const isSuper = userRole === 'SUPER_ADMIN';
+    const isAdmin = isSuper || userRole === 'ADMIN' || userRole === 'ACADEMY_ADMIN';
+
+    // 테넌트 격리 검증: 타 기관 게시글 삭제 원천 차단
+    if (!isSuper && academyId && post.academy?.id && post.academy.id !== academyId) {
+      throw new ForbiddenException('타 기관의 게시글은 삭제할 수 없습니다.');
+    }
+
     if (!isAdmin && userId && post.authorUserId && post.authorUserId !== userId) {
       throw new ForbiddenException('작성자 본인 또는 기관 관리자만 삭제할 수 있습니다.');
     }
@@ -3767,7 +4105,7 @@ export class RoutingService {
     fs.writeFileSync(filePath, buffer);
 
     const host = reqHost || '52.63.245.203.sslip.io';
-    const protocol = host.includes('localhost') ? 'http' : 'https';
+    const protocol = (host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':3000')) ? 'http' : 'https';
     const url = `${protocol}://${host}/uploads/board/${randomName}`;
 
     return {
@@ -4081,5 +4419,142 @@ export class RoutingService {
       submissions,
       classes: classesList,
     };
+  }
+
+  // ==================== CLOUD DOCUMENTS & LEGAL EXPIRIES ====================
+  async getDocuments(academyId?: number, educationLevel?: string) {
+    const qb = this.cloudDocumentRepository.createQueryBuilder('doc');
+    if (academyId) {
+      qb.andWhere('(doc.academyId = :academyId OR doc.academyId IS NULL)', { academyId });
+    }
+    if (educationLevel && educationLevel !== 'ALL') {
+      qb.andWhere('doc.educationLevel = :educationLevel', { educationLevel });
+    }
+    qb.orderBy('doc.uploadedAt', 'DESC');
+    return qb.getMany();
+  }
+
+  async uploadDocument(body: {
+    academyId?: number;
+    educationLevel?: string;
+    title?: string;
+    category?: string;
+    note?: string;
+    uploadedBy?: string;
+    fileName: string;
+    fileType?: string;
+    fileBase64: string;
+  }, reqHost?: string) {
+    const { academyId, educationLevel, title, category, note, uploadedBy, fileName, fileType, fileBase64 } = body;
+    if (!fileBase64 || !fileName) {
+      throw new BadRequestException('파일 데이터와 파일명이 필요합니다.');
+    }
+
+    const base64Clean = fileBase64.replace(/^data:.*?;base64,/, '');
+    const buffer = Buffer.from(base64Clean, 'base64');
+    const MAX_SIZE = 30 * 1024 * 1024; // 30MB
+    if (buffer.length > MAX_SIZE) {
+      throw new BadRequestException('파일 크기는 30MB를 초과할 수 없습니다.');
+    }
+
+    const ext = fileName.split('.').pop()?.toLowerCase() || 'bin';
+    const randomName = `doc_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
+
+    const uploadsDir = path.join(process.cwd(), 'uploads', 'documents');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    const filePath = path.join(uploadsDir, randomName);
+    fs.writeFileSync(filePath, buffer);
+
+    const host = reqHost || '52.63.245.203.sslip.io';
+    const protocol = (host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':3000')) ? 'http' : 'https';
+    const fileUrl = `${protocol}://${host}/uploads/documents/${randomName}`;
+
+    const doc = this.cloudDocumentRepository.create({
+      academyId: academyId ? Number(academyId) : undefined,
+      educationLevel: educationLevel || '유치원',
+      title: title || fileName,
+      category: category || 'etc',
+      fileName,
+      fileSize: buffer.length,
+      fileType: fileType || 'application/octet-stream',
+      fileUrl,
+      uploadedBy: uploadedBy || '관리자',
+      note: note || '',
+    });
+
+    const saved = await this.cloudDocumentRepository.save(doc);
+    return saved;
+  }
+
+  async deleteDocument(id: string) {
+    const doc = await this.cloudDocumentRepository.findOne({ where: { id } });
+    if (!doc) {
+      throw new NotFoundException('해당 서류를 찾을 수 없습니다.');
+    }
+    try {
+      if (doc.fileUrl && doc.fileUrl.includes('/uploads/documents/')) {
+        const fname = doc.fileUrl.split('/uploads/documents/').pop();
+        if (fname) {
+          const p = path.join(process.cwd(), 'uploads', 'documents', fname);
+          if (fs.existsSync(p)) fs.unlinkSync(p);
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    await this.cloudDocumentRepository.delete(id);
+    return { success: true };
+  }
+
+  async getLegalExpiries(academyId?: number, educationLevel?: string) {
+    const qb = this.legalExpiryRepository.createQueryBuilder('exp')
+      .leftJoinAndSelect('exp.vehicle', 'vehicle');
+    if (academyId) {
+      qb.andWhere('(exp.academyId = :academyId OR vehicle.academyId = :academyId)', { academyId });
+    }
+    if (educationLevel && educationLevel !== 'ALL') {
+      qb.andWhere('exp.educationLevel = :educationLevel', { educationLevel });
+    }
+    const list = await qb.getMany();
+    const result: Record<string, any> = {};
+    for (const item of list) {
+      result[String(item.vehicleId)] = {
+        insuranceExpiry: item.insuranceExpiry || '',
+        inspectionExpiry: item.inspectionExpiry || '',
+        driverEduExpiry: item.driverEduExpiry || '',
+        companionEduExpiry: item.companionEduExpiry || '',
+      };
+    }
+    return result;
+  }
+
+  async saveLegalExpiry(vehicleId: number, data: {
+    insuranceExpiry?: string;
+    inspectionExpiry?: string;
+    driverEduExpiry?: string;
+    companionEduExpiry?: string;
+    academyId?: number;
+    educationLevel?: string;
+  }) {
+    let rec = await this.legalExpiryRepository.findOne({ where: { vehicleId } });
+    if (!rec) {
+      rec = this.legalExpiryRepository.create({
+        vehicleId,
+        academyId: data.academyId,
+        educationLevel: data.educationLevel || '유치원',
+      });
+    }
+    if (data.insuranceExpiry !== undefined) rec.insuranceExpiry = data.insuranceExpiry;
+    if (data.inspectionExpiry !== undefined) rec.inspectionExpiry = data.inspectionExpiry;
+    if (data.driverEduExpiry !== undefined) rec.driverEduExpiry = data.driverEduExpiry;
+    if (data.companionEduExpiry !== undefined) rec.companionEduExpiry = data.companionEduExpiry;
+    if (data.educationLevel) rec.educationLevel = data.educationLevel;
+    if (data.academyId) rec.academyId = data.academyId;
+
+    await this.legalExpiryRepository.save(rec);
+    return { success: true, record: rec };
   }
 }

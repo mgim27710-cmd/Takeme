@@ -141,13 +141,21 @@ export class ApprovalService {
     const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
     const dayOfWeek = days[dateObj.getUTCDay()];
 
-    // 1. 해당 차량에 배정된 기본 스케줄 원아 수 (해당 요일)
-    const baseCount = await this.scheduleRepo.count({
+    // 1. 해당 차량에 배정된 기본 원아 수 (students 테이블 우선, 없을 경우 schedule 테이블 폴백)
+    let baseCount = await this.studentRepo.count({
       where: {
         assignedVehicle: { id: vehicleId },
-        dayOfWeek,
+        isNotRiding: false,
       },
     });
+    if (baseCount === 0) {
+      baseCount = await this.scheduleRepo.count({
+        where: {
+          assignedVehicle: { id: vehicleId },
+          dayOfWeek,
+        },
+      });
+    }
 
     // 2. 해당 날짜 승인된 결석 수 (제외)
     const absenceCount = await this.overrideRepo.count({
@@ -617,7 +625,7 @@ export class ApprovalService {
       }
     }
 
-    // 2. 차량 기사 및 지도교사 알림 (승인인 경우, 기사 알림 수신 설정 확인)
+    // 2. 차량 기사 및 차량선생님 알림 (승인인 경우, 기사 알림 수신 설정 확인)
     const affectedVehicle = req.targetVehicle || student.assignedVehicle;
     if (decision === ApprovalStatus.APPROVED && affectedVehicle) {
       const driver = affectedVehicle.driverUser;
@@ -683,9 +691,27 @@ export class ApprovalService {
       studentId?: string;
       search?: string;
       mode?: string;
+      academyId?: string;
     },
   ) {
-    const academyId = callingUser.academyId;
+    let academyId = query.academyId && !isNaN(Number(query.academyId))
+      ? Number(query.academyId)
+      : callingUser.academyId;
+
+    if (!academyId && callingUser.role === UserRole.PARENT) {
+      const st = await this.studentRepo.findOne({
+        where: [{ parentUser: { id: callingUser.id } }, { studentUser: { id: callingUser.id } }],
+        relations: { academy: true },
+      });
+      if (st?.academy?.id) academyId = st.academy.id;
+    } else if (!academyId && (callingUser.role === UserRole.DRIVER || callingUser.role === UserRole.SHUTTLE_TEACHER)) {
+      const vh = await this.vehicleRepo.findOne({
+        where: [{ driverUser: { id: callingUser.id } }, { teacherUser: { id: callingUser.id } }],
+        relations: { academy: true },
+      });
+      if (vh?.academy?.id) academyId = vh.academy.id;
+    }
+
     const todayStr = kstDateString();
 
     const now = new Date();
@@ -700,13 +726,13 @@ export class ApprovalService {
     const holidayQb = this.holidayRepo.createQueryBuilder('h')
       .where('h.startDate <= :endDate AND h.endDate >= :startDate', { startDate, endDate });
 
-    if (callingUser.role !== UserRole.SUPER_ADMIN && academyId) {
-      holidayQb.andWhere('(h.academyId = :academyId OR h.academyId IS NULL)', { academyId });
+    if (academyId) {
+      holidayQb.andWhere('h.academyId = :academyId', { academyId });
     }
 
     // 역할별 열람 범위 차등화:
     // 학부모: 기관 전체 + 자녀 반 행사만
-    // 지도교사: 기관 전체 + 담당 반(있다면) 행사만
+    // 차량선생님: 기관 전체 + 담당 반(있다면) 행사만
     // 담임교사: 기관 전체 + 자기 반 행사만
     // 원장/관리자: 모든 일정 반 구분 없이 전체 열람 (특정 반 선택 시 필터링)
     if (callingUser.role === UserRole.PARENT) {
@@ -744,14 +770,14 @@ export class ApprovalService {
       .leftJoinAndSelect('student.assignedVehicle', 'assignedVehicle')
       .where('o.startDate <= :endDate AND o.endDate >= :startDate', { startDate, endDate });
 
-    if (callingUser.role !== UserRole.SUPER_ADMIN && academyId) {
+    if (academyId) {
       overrideQb.andWhere('student.academyId = :academyId', { academyId });
     }
 
     // 역할별 범위 제한:
     // 학부모: 자녀 관련 결석/변동만
     // 담임교사: 담당 반 학생들만
-    // 지도교사/기사: 담당 차량 또는 담당 학생들만
+    // 차량선생님/기사: 담당 차량 또는 담당 학생들만
     // 원장/관리자: 전체 학생 (반별 필터 선택 시 해당 반만)
     if (callingUser.role === UserRole.PARENT) {
       overrideQb.andWhere('(student.parentUserId = :uid OR student.studentUserId = :uid OR student.phone = :uphone)', {
@@ -864,7 +890,7 @@ export class ApprovalService {
    * 역할별 등록 권한:
    * - 원장/관리자: 학원/유치원 행사, 휴업일, 방학 등 전체 및 모든 반 일정 등록
    * - 담임교사: 학원/유치원 행사 일정, 휴업일, 담당 반 행사 일정 등록
-   * - 교사(지도교사): 반 행사 일정 등록
+   * - 교사(차량선생님): 반 행사 일정 등록
    */
   async createCalendarEvent(callingUser: User, data: {
     type: CalendarEventType;
@@ -873,6 +899,7 @@ export class ApprovalService {
     endDate: string;
     targetClass?: string;
     reason?: string;
+    academyId?: number;
   }) {
     const isAdmin = [UserRole.ACADEMY_ADMIN, UserRole.SUPER_ADMIN, UserRole.DESK_STAFF].includes(callingUser.role as UserRole);
     const isHomeroom = callingUser.role === UserRole.HOMEROOM_TEACHER;
@@ -888,7 +915,7 @@ export class ApprovalService {
       }
     }
 
-    const academyId = callingUser.academyId;
+    const academyId = data.academyId || callingUser.academyId;
     const academy = academyId ? await this.academyRepo.findOne({ where: { id: academyId } }) : null;
 
     const holiday = this.holidayRepo.create({

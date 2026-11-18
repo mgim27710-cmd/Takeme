@@ -235,16 +235,16 @@ export class AuthService {
     throw new BadRequestException('OTP 번호가 올바르지 않습니다.');
   }
 
-  async login(data: any) {
+  async login(data: any, clientIp?: string) {
     let { email, password, otpToken, clientType } = data;
     const cleanEmail = (email || '').trim().toLowerCase();
     let user = await this.usersRepository.findOne({ where: { email: cleanEmail } });
     
     // 교수님 평가/테스트용 유치원 관리자 계정
-    const isProfessorTestAccount = (cleanEmail === 'professor@takeme.com');
+    const isProfessorTestAccount = (cleanEmail === 'professor@takeme.com' || cleanEmail === 'director@takeme.com' || cleanEmail === 'director12@takeme.com');
     const isTeacherTest = (cleanEmail === 'teacher@takeme.com' || cleanEmail === 'teacher_prof@takeme.com');
     const isDriverTest = (cleanEmail === 'driver@takeme.com' || cleanEmail === 'driver_prof@takeme.com');
-    const isParentTest = (cleanEmail === 'parent@takeme.com' || cleanEmail === 'parent_prof@takeme.com');
+    const isParentTest = (cleanEmail === 'parent@takeme.com' || cleanEmail === 'parent_prof@takeme.com' || cleanEmail === 'parent_seoa@takeme.com');
 
     if (!user) {
       if (cleanEmail === 'kdu2224capstone@gmail.com' || cleanEmail === '2224kducapstone@gmail.com' || isProfessorTestAccount) {
@@ -258,24 +258,26 @@ export class AuthService {
       } else if (isTeacherTest) {
         user = await this.usersRepository.findOne({
           where: [
+            { email: 'teacher_prof@takeme.com' },
             { email: 'teacher@takeme.com' },
-            { role: UserRole.TEACHER },
-            { role: UserRole.HOMEROOM_TEACHER },
-            { role: UserRole.SHUTTLE_TEACHER },
+            { role: UserRole.HOMEROOM_TEACHER, academyId: 21 },
+            { role: UserRole.TEACHER, academyId: 21 },
           ],
         });
       } else if (isDriverTest) {
         user = await this.usersRepository.findOne({
           where: [
+            { email: 'driver_prof@takeme.com' },
             { email: 'driver@takeme.com' },
-            { role: UserRole.DRIVER },
+            { role: UserRole.DRIVER, academyId: 21 },
           ],
         });
       } else if (isParentTest) {
         user = await this.usersRepository.findOne({
           where: [
+            { email: 'parent_prof@takeme.com' },
             { email: 'parent@takeme.com' },
-            { role: UserRole.PARENT },
+            { role: UserRole.PARENT, academyId: 21 },
           ],
         });
       }
@@ -358,14 +360,16 @@ export class AuthService {
     }
 
     if (user.role === UserRole.ACADEMY_ADMIN) {
-      if (user.isOtpEnabled || isProfessorTestAccount) {
+      if (isProfessorTestAccount) {
+        // 테스트 원장님 계정은 OTP 설정 없이 바로 로그인, OTP 전달 시 123456 통과
+        if (otpToken && otpToken !== '123456') {
+          throw new UnauthorizedException('OTP 번호가 올바르지 않습니다. (테스트 고정 OTP: 123456)');
+        }
+      } else if (user.isOtpEnabled) {
         if (!otpToken) return { success: false, requireOtp: true, userId: user.id };
         
         let verified = false;
-        // 오직 교수님 테스트 관리자 계정만 고정 OTP 123456 허용
-        if (isProfessorTestAccount && otpToken === '123456') {
-          verified = true;
-        } else if (user.otpSecret) {
+        if (user.otpSecret) {
           // 그 외 모든 일반 계정은 실제 Google Authenticator TOTP 정상 검증
           verified = speakeasy.totp.verify({
             secret: user.otpSecret,
@@ -444,8 +448,13 @@ export class AuthService {
         while (await this.academyRepository.findOne({ where: { authCode } })) {
           authCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         }
+        const userMeta = `${user.name || ''} ${user.email || ''}`.toLowerCase();
+        let defaultSuffix = '유치원';
+        if (userMeta.includes('초등') || userMeta.includes('elem')) defaultSuffix = '초등학교';
+        else if (userMeta.includes('중등') || userMeta.includes('고등') || userMeta.includes('middle') || userMeta.includes('high')) defaultSuffix = '중·고등학교';
+
         academy = this.academyRepository.create({
-          name: user.name ? `${user.name} 유치원` : '신규 유치원',
+          name: user.name ? `${user.name} ${defaultSuffix}` : `신규 ${defaultSuffix}`,
           owner: user,
           authCode,
           businessNumber: data.businessNumber || null,
@@ -501,6 +510,9 @@ export class AuthService {
 
     const rawRefreshToken = crypto.randomBytes(32).toString('hex');
     user.refreshToken = await bcrypt.hash(rawRefreshToken, 10);
+    if (clientIp) {
+      user.lastLoginIp = clientIp;
+    }
     await this.usersRepository.save(user);
 
     // 승인까지 끝난 사용자에게만 토큰 발급 (승인 대기·OTP 미통과는 위에서 이미 return 됨)
@@ -510,7 +522,16 @@ export class AuthService {
       role: user.role,
       academyId,
       sessionId,
+      clientIp: clientIp || undefined,
     });
+
+    const combinedMeta = `${academyName || ''} ${user.name || ''} ${user.email || ''}`.toLowerCase();
+    let detectedEduLevel = '유치원';
+    if (combinedMeta.includes('초등') || combinedMeta.includes('elem')) {
+      detectedEduLevel = '초등부';
+    } else if (combinedMeta.includes('중등') || combinedMeta.includes('고등') || combinedMeta.includes('middle') || combinedMeta.includes('high')) {
+      detectedEduLevel = '중,고등부';
+    }
 
     return {
       success: true,
@@ -523,7 +544,8 @@ export class AuthService {
         name: user.name,
         assignedClass: user.assignedClass || null,
         academyId,
-        academyName
+        academyName,
+        educationLevel: detectedEduLevel
       }
     };
   }
@@ -672,8 +694,14 @@ export class AuthService {
         while (await this.academyRepository.findOne({ where: { authCode } })) {
           authCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         }
+        const edu = (data.educationLevel || '').trim().toLowerCase();
+        const userMeta = `${name || ''} ${email || ''}`.toLowerCase();
+        let defaultSuffix = '유치원';
+        if (edu.includes('초등') || userMeta.includes('초등') || userMeta.includes('elem')) defaultSuffix = '초등학교';
+        else if (edu.includes('중') || edu.includes('고') || userMeta.includes('중등') || userMeta.includes('고등') || userMeta.includes('middle') || userMeta.includes('high')) defaultSuffix = '중·고등학교';
+
         const academy = this.academyRepository.create({
-          name: name ? `${name} 유치원` : '신규 유치원',
+          name: name ? `${name} ${defaultSuffix}` : `신규 ${defaultSuffix}`,
           owner: savedUser,
           authCode,
           vehicleCount: 0,
@@ -751,7 +779,7 @@ export class AuthService {
           success: true,
           message: isHomeroom
             ? `${targetAcademy.name} 담임교사(${savedUser.assignedClass || '학급'})로 등록되었습니다.`
-            : `${targetAcademy.name} 셔틀버스 지도교사로 등록되었습니다.`,
+            : `${targetAcademy.name} 통학차량 차량선생님으로 등록되었습니다.`,
           userId: savedUser.id,
           role: userRole,
           assignedClass: savedUser.assignedClass || '',

@@ -939,7 +939,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: const Text(
-          '지도교사 셔틀 탑승 관리',
+          '차량선생님 셔틀 탑승 관리',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF1E293B)),
         ),
         backgroundColor: Colors.white,

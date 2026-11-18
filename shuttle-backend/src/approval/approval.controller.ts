@@ -121,8 +121,10 @@ export class ApprovalController {
     @Query('studentId') studentId?: string,
     @Query('search') search?: string,
     @Query('mode') mode?: string,
+    @Query('academyId') academyId?: string,
   ) {
     const user = req.dbUser;
+    const headerAcademyId = req.headers?.['x-academy-id'];
     return this.approvalService.getCalendar(user, {
       year,
       month,
@@ -132,6 +134,7 @@ export class ApprovalController {
       studentId,
       search,
       mode,
+      academyId: academyId || headerAcademyId,
     });
   }
 
@@ -182,10 +185,15 @@ export class ApprovalController {
       endDate: string;
       targetClass?: string;
       reason?: string;
+      academyId?: number;
     },
   ) {
     const user = req.dbUser;
-    return this.approvalService.createCalendarEvent(user, body);
+    const headerAcademyId = req.headers?.['x-academy-id'];
+    return this.approvalService.createCalendarEvent(user, {
+      ...body,
+      academyId: body.academyId || (headerAcademyId ? Number(headerAcademyId) : undefined),
+    });
   }
 
   /**

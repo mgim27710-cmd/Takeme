@@ -15,7 +15,7 @@ import 'operation_log_screen.dart';
 /// - 2단계(경로 탐색·선택): 전체 경로 축소 보기 + 안전 경로/빠른 경로 비교 카드 + '운행 시작' 버튼
 /// - 3단계(운행 중): 티맵 스타일 주행 화면
 ///   · 시속 5km 이상 주행 중 조작 잠금 & 화면 켜짐 유지
-///   · 지도교사 "출발하셔도 됩니다" 신호 수신 배너·음성
+///   · 차량선생님 "출발하셔도 됩니다" 신호 수신 배너·음성
 ///   · 정차 지점 메모 음성·화면 안내
 ///   · 현재 속도 크게 표시 & 어린이 보호구역(30km/h) 경고 + 급정거·과속 자동 일지 기록
 ///   · 길게 눌러 작동하는 SOS 긴급 버튼
@@ -381,7 +381,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                 // 우측 상단: 길게 눌러 작동하는 SOS 긴급 버튼
                 Positioned(right: 12, top: 12, child: _sosLongPressButton()),
               ],
-              // 지도교사 "출발하셔도 됩니다" 실시간 신호 배너
+              // 차량선생님 "출발하셔도 됩니다" 실시간 신호 배너
               if (_nav.driving && _nav.departSignalBanner != null)
                 Positioned(
                   left: 14,

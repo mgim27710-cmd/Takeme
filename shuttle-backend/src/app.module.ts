@@ -23,6 +23,8 @@ import { AuditLog } from './entities/audit-log.entity';
 import { YearlyZoneMapping } from './entities/yearly-zone-mapping.entity';
 import { Attendance } from './entities/attendance.entity';
 import { AttendanceSubmission } from './entities/attendance-submission.entity';
+import { CloudDocument } from './entities/cloud-document.entity';
+import { LegalExpiry } from './entities/legal-expiry.entity';
 import { ParentModule } from './parent/parent.module';
 import { TeacherModule } from './teacher/teacher.module';
 import { ChatModule } from './chat/chat.module';
@@ -70,6 +72,8 @@ import { MediaModule } from './media/media.module';
           YearlyZoneMapping,
           Attendance,
           AttendanceSubmission,
+          CloudDocument,
+          LegalExpiry,
           MediaAsset,
         ],
         synchronize: true,

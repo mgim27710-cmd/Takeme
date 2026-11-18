@@ -10,6 +10,8 @@ class ParentChatRoomScreen extends StatefulWidget {
   final String roomName;
   final String? opponentRole;
   final String? opponentName;
+  final bool isGroup;
+  final int? memberCount;
 
   const ParentChatRoomScreen({
     super.key,
@@ -17,6 +19,8 @@ class ParentChatRoomScreen extends StatefulWidget {
     required this.roomName,
     this.opponentRole,
     this.opponentName,
+    this.isGroup = false,
+    this.memberCount,
   });
 
   @override
@@ -175,7 +179,9 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
   @override
   Widget build(BuildContext context) {
     final title = widget.opponentName ?? widget.roomName;
-    final subtitle = widget.opponentRole ?? '1:1 소통 채널';
+    final subtitle = widget.isGroup
+        ? '${widget.memberCount ?? "다수"}명 참여 중'
+        : (widget.opponentRole ?? '1:1 소통 채널');
 
     return Scaffold(
       backgroundColor: const Color(0xFFF1F5F9), // 부드러운 메신저 배경색
@@ -190,23 +196,47 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
           children: [
             CircleAvatar(
               radius: 18,
-              backgroundColor: const Color(0xFFEFF6FF),
-              child: const Icon(Icons.school_rounded, color: Color(0xFF2563EB), size: 20),
+              backgroundColor: widget.isGroup ? const Color(0xFFEDE9FE) : const Color(0xFFEFF6FF),
+              child: Icon(
+                widget.isGroup ? Icons.groups_rounded : Icons.school_rounded,
+                color: widget.isGroup ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
+                size: 20,
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: Color(0xFF0F172A),
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          title,
+                          style: const TextStyle(
+                            color: Color(0xFF0F172A),
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (widget.isGroup && widget.memberCount != null) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEDE9FE),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '${widget.memberCount}명',
+                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF7C3AED)),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   Row(
                     children: [
@@ -235,6 +265,43 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
           ],
         ),
         actions: [
+          if (widget.isGroup)
+            IconButton(
+              icon: const Icon(Icons.people_alt_outlined, color: Color(0xFF64748B)),
+              tooltip: '대화방 참여자',
+              onPressed: () {
+                showModalBottomSheet(
+                  context: context,
+                  backgroundColor: Colors.white,
+                  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                  builder: (ctx) => Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              '그룹 참여자 (${widget.memberCount ?? 0}명)',
+                              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                            ),
+                            IconButton(icon: const Icon(Icons.close_rounded), onPressed: () => Navigator.pop(ctx)),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        const Text(
+                          '담임교사, 통학버스 기사님, 학부모님이 함께 참여 중인 그룹 대화방입니다.',
+                          style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+                        ),
+                        const SizedBox(height: 20),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded, color: Color(0xFF64748B)),
             tooltip: '새로고침',
@@ -249,17 +316,23 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: const Color(0xFFE0E7FF),
+              color: widget.isGroup ? const Color(0xFFEDE9FE) : const Color(0xFFE0E7FF),
               child: Row(
                 children: [
-                  const Icon(Icons.shield_outlined, size: 16, color: Color(0xFF3730A3)),
+                  Icon(
+                    widget.isGroup ? Icons.groups_rounded : Icons.shield_outlined,
+                    size: 16,
+                    color: widget.isGroup ? const Color(0xFF6D28D9) : const Color(0xFF3730A3),
+                  ),
                   const SizedBox(width: 8),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      '원아 보호 및 교원 소통을 위한 공식 1:1 안심 메신저입니다.',
+                      widget.isGroup
+                          ? '원아 지도와 통학 안전을 위해 학부모 및 교직원이 소통하는 그룹 대화방입니다.'
+                          : '원아 보호 및 교원 소통을 위한 공식 1:1 안심 메신저입니다.',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Color(0xFF3730A3),
+                        color: widget.isGroup ? const Color(0xFF6D28D9) : const Color(0xFF3730A3),
                         fontWeight: FontWeight.w500,
                       ),
                     ),

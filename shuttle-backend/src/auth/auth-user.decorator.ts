@@ -7,6 +7,7 @@ export interface JwtPayload {
   role: string;
   academyId: number | null;
   sessionId?: string;
+  clientIp?: string;
 }
 
 export const ROLES_KEY = 'roles';

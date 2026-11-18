@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import '../../config.dart';
 import '../../models/user_model.dart';
 import '../../services/api_service.dart';
 
@@ -44,6 +45,195 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  String _resolveImageUrl(String? url) {
+    if (url == null || url.trim().isEmpty) return '';
+    final trimmed = url.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+    final host = AppConfig.apiHost.endsWith('/')
+        ? AppConfig.apiHost.substring(0, AppConfig.apiHost.length - 1)
+        : AppConfig.apiHost;
+    if (trimmed.startsWith('/')) {
+      return '$host$trimmed';
+    }
+    return '$host/$trimmed';
+  }
+
+  void _openImageViewer(BuildContext context, String imageUrl, String title) {
+    final fullUrl = _resolveImageUrl(imageUrl);
+    if (fullUrl.isEmpty) return;
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.9),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(
+          children: [
+            Center(
+              child: InteractiveViewer(
+                minScale: 0.8,
+                maxScale: 4.0,
+                child: Image.network(
+                  fullUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (c, e, s) => const Center(
+                    child: Text('이미지를 불러올 수 없습니다.', style: TextStyle(color: Colors.white)),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: MediaQuery.of(ctx).padding.top + 10,
+              right: 16,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                onPressed: () => Navigator.pop(ctx),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCloudPhotoPicker({
+    required BuildContext context,
+    required List<dynamic> mediaList,
+    required Function(List<String>) onSelected,
+  }) {
+    final Set<String> selectedUrls = {};
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (context, setPickerState) {
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.7,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      '클라우드 보관함 사진 선택',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Color(0xFF64748B)),
+                      onPressed: () => Navigator.pop(sheetCtx),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '게시물에 첨부할 사진을 선택하세요. (${selectedUrls.length}장 선택됨)',
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: mediaList.isEmpty
+                      ? const Center(child: Text('보관함에 등록된 사진이 없습니다.', style: TextStyle(color: Color(0xFF94A3B8))))
+                      : GridView.builder(
+                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 3,
+                            crossAxisSpacing: 8,
+                            mainAxisSpacing: 8,
+                          ),
+                          itemCount: mediaList.length,
+                          itemBuilder: (context, i) {
+                            final item = mediaList[i];
+                            final rawUrl = item['url']?.toString() ?? '';
+                            final fullUrl = _resolveImageUrl(rawUrl);
+                            final isSelected = selectedUrls.contains(fullUrl);
+
+                            return GestureDetector(
+                              onTap: () {
+                                setPickerState(() {
+                                  if (isSelected) {
+                                    selectedUrls.remove(fullUrl);
+                                  } else {
+                                    selectedUrls.add(fullUrl);
+                                  }
+                                });
+                              },
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Image.network(
+                                      fullUrl,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (c, e, s) => Container(
+                                        color: const Color(0xFFF1F5F9),
+                                        child: const Icon(Icons.broken_image_outlined, color: Color(0xFF94A3B8)),
+                                      ),
+                                    ),
+                                  ),
+                                  if (isSelected)
+                                    Container(
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF2563EB).withOpacity(0.35),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: const Color(0xFF2563EB), width: 2.5),
+                                      ),
+                                    ),
+                                  Positioned(
+                                    top: 6,
+                                    right: 6,
+                                    child: Container(
+                                      width: 22,
+                                      height: 22,
+                                      decoration: BoxDecoration(
+                                        color: isSelected ? const Color(0xFF2563EB) : Colors.black.withOpacity(0.4),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(color: Colors.white, width: 1.5),
+                                      ),
+                                      child: isSelected
+                                          ? const Icon(Icons.check, size: 14, color: Colors.white)
+                                          : null,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+                const SizedBox(height: 12),
+                ElevatedButton(
+                  onPressed: selectedUrls.isEmpty
+                      ? null
+                      : () {
+                          onSelected(selectedUrls.toList());
+                          Navigator.pop(sheetCtx);
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text(
+                    '선택한 사진 ${selectedUrls.length}장 추가하기',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _loadPosts() async {
@@ -149,6 +339,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
     String visibility = canUseMyClass ? 'CLASS' : 'ALL';
     final String selectedClass = hasClass ? currentUser.assignedClass! : '';
     final List<XFile> pickedImages = [];
+    final List<String> selectedCloudUrls = [];
     bool isUploading = false;
 
     showModalBottomSheet(
@@ -375,6 +566,97 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                         ),
                       ),
 
+                      // Cloud Photos Button (클라우드 보관함 사진 가져오기)
+                      InkWell(
+                        onTap: isUploading
+                            ? null
+                            : () async {
+                                final mediaList = await ApiService().getMediaAssets();
+                                if (!ctx.mounted) return;
+                                if (mediaList.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('클라우드 보관함에 저장된 사진이 없습니다.')),
+                                  );
+                                  return;
+                                }
+                                _showCloudPhotoPicker(
+                                  context: ctx,
+                                  mediaList: mediaList,
+                                  onSelected: (selectedUrls) {
+                                    setModalState(() {
+                                      for (final u in selectedUrls) {
+                                        if (!selectedCloudUrls.contains(u)) {
+                                          selectedCloudUrls.add(u);
+                                        }
+                                      }
+                                    });
+                                  },
+                                );
+                              },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEFF6FF),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFBFDBFE), style: BorderStyle.solid),
+                          ),
+                          child: const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.cloud_download_outlined, color: Color(0xFF1D4ED8), size: 24),
+                              SizedBox(height: 4),
+                              Text('클라우드', style: TextStyle(fontSize: 10, color: Color(0xFF1D4ED8), fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      // Selected Cloud Images Previews
+                      ...selectedCloudUrls.asMap().entries.map((entry) {
+                        final idx = entry.key;
+                        final url = entry.value;
+                        return Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Container(
+                              width: 72,
+                              height: 72,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFF93C5FD)),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: Image.network(
+                                _resolveImageUrl(url),
+                                fit: BoxFit.cover,
+                                errorBuilder: (ctx, err, stack) => const Icon(Icons.broken_image, color: Color(0xFF94A3B8)),
+                              ),
+                            ),
+                            Positioned(
+                              top: -6,
+                              right: -6,
+                              child: InkWell(
+                                onTap: () {
+                                  setModalState(() {
+                                    selectedCloudUrls.removeAt(idx);
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFDC2626),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.close, color: Colors.white, size: 14),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }),
+
                       // Image Previews
                       ...pickedImages.asMap().entries.map((entry) {
                         final idx = entry.key;
@@ -473,17 +755,18 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             final user = ApiService().currentUser;
                             final authorName = user?.name.isNotEmpty == true
                                 ? user!.name
-                                : (user?.role == 'HOMEROOM_TEACHER' ? '담임교사' : '지도교사');
+                                : (user?.role == 'HOMEROOM_TEACHER' ? '담임교사' : '차량선생님');
                             final authorRole = user?.role == 'HOMEROOM_TEACHER' ? 'HOMEROOM_TEACHER' : (user?.role ?? 'TEACHER');
 
+                            final allImages = [...selectedCloudUrls, ...uploadedCloudUrls];
                             final res = await ApiService().createBoardPost(
                               title: title,
                               content: content,
                               visibility: visibility,
                               targetClass: visibility == 'CLASS' ? selectedClass : null,
                               postType: selectedCategory,
-                              imageUrl: uploadedCloudUrls.isNotEmpty ? uploadedCloudUrls.first : null,
-                              images: uploadedCloudUrls,
+                              imageUrl: allImages.isNotEmpty ? allImages.first : null,
+                              images: allImages,
                               authorName: authorName,
                               authorRole: authorRole,
                               academyId: user?.academyId,
@@ -777,6 +1060,52 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                           ),
                         ),
                       ),
+                      // Cloud Photos Button (클라우드 보관함 사진 가져오기)
+                      InkWell(
+                        onTap: isSaving
+                            ? null
+                            : () async {
+                                final mediaList = await ApiService().getMediaAssets();
+                                if (!ctx.mounted) return;
+                                if (mediaList.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('클라우드 보관함에 저장된 사진이 없습니다.')),
+                                  );
+                                  return;
+                                }
+                                _showCloudPhotoPicker(
+                                  context: ctx,
+                                  mediaList: mediaList,
+                                  onSelected: (selectedUrls) {
+                                    setModalState(() {
+                                      for (final u in selectedUrls) {
+                                        if (!existingImages.contains(u)) {
+                                          existingImages.add(u);
+                                        }
+                                      }
+                                    });
+                                  },
+                                );
+                              },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          width: 72,
+                          height: 72,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEFF6FF),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFBFDBFE)),
+                          ),
+                          child: const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.cloud_download_outlined, color: Color(0xFF1D4ED8), size: 24),
+                              SizedBox(height: 4),
+                              Text('클라우드', style: TextStyle(fontSize: 10, color: Color(0xFF1D4ED8), fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      ),
                       // Existing images
                       ...existingImages.asMap().entries.map((entry) {
                         final idx = entry.key;
@@ -792,7 +1121,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                 border: Border.all(color: const Color(0xFFE2E8F0)),
                               ),
                               clipBehavior: Clip.antiAlias,
-                              child: Image.network(url, fit: BoxFit.cover, errorBuilder: (ctx, err, stack) => const Icon(Icons.broken_image)),
+                              child: Image.network(_resolveImageUrl(url), fit: BoxFit.cover, errorBuilder: (ctx, err, stack) => const Icon(Icons.broken_image)),
                             ),
                             Positioned(
                               top: -6,
@@ -1085,7 +1414,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                           final user = ApiService().currentUser;
                           final authorName = user?.name.isNotEmpty == true
                               ? user!.name
-                              : (user?.role == 'HOMEROOM_TEACHER' ? '담임교사' : '지도교사');
+                              : (user?.role == 'HOMEROOM_TEACHER' ? '담임교사' : '차량선생님');
                           final authorRole = user?.role == 'HOMEROOM_TEACHER' ? 'HOMEROOM_TEACHER' : (user?.role ?? 'TEACHER');
 
                           final res = await ApiService().addPostComment(
@@ -1487,20 +1816,23 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                       separatorBuilder: (ctx, idx) => const SizedBox(width: 8),
                                       itemBuilder: (context, imgIdx) {
                                         final imgUrl = images[imgIdx];
-                                        return Container(
-                                          width: 240,
-                                          decoration: BoxDecoration(
-                                            borderRadius: BorderRadius.circular(12),
-                                            border: Border.all(color: const Color(0xFFE2E8F0)),
-                                          ),
-                                          clipBehavior: Clip.antiAlias,
-                                          child: Image.network(
-                                            imgUrl,
-                                            fit: BoxFit.cover,
-                                            errorBuilder: (ctx, err, stack) => Container(
-                                              color: const Color(0xFFF1F5F9),
-                                              child: const Center(
-                                                child: Icon(Icons.broken_image_outlined, color: Color(0xFF94A3B8)),
+                                        return GestureDetector(
+                                          onTap: () => _openImageViewer(context, imgUrl, post['title'] ?? '활동사진'),
+                                          child: Container(
+                                            width: 240,
+                                            decoration: BoxDecoration(
+                                              borderRadius: BorderRadius.circular(12),
+                                              border: Border.all(color: const Color(0xFFE2E8F0)),
+                                            ),
+                                            clipBehavior: Clip.antiAlias,
+                                            child: Image.network(
+                                              _resolveImageUrl(imgUrl),
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (ctx, err, stack) => Container(
+                                                color: const Color(0xFFF1F5F9),
+                                                child: const Center(
+                                                  child: Icon(Icons.broken_image_outlined, color: Color(0xFF94A3B8)),
+                                                ),
                                               ),
                                             ),
                                           ),

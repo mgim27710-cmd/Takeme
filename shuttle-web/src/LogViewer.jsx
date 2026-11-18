@@ -80,6 +80,9 @@ export default function LogViewer({
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const selectedDateStr = useMemo(() => toDateStr(selectedDate), [selectedDate]);
 
+  // Calendar top filter buttons: 'SELECTED_DATE' | 'HOLIDAY' | 'EVENT' | 'ABSENCE' | 'CHANGE' | 'APPROVAL'
+  const [calendarFilter, setCalendarFilter] = useState('SELECTED_DATE');
+
   // Class Selection: Replace vehicle tabs with Class tabs ("지금 호차별로 되어 있는거 빼고 반별로 바꿔주고")
   // "원장은 모든 일정 반별 말고 볼 수 있게 해줘" -> Director defaults to 'ALL' (전체 반)
   const classList = useMemo(() => {
@@ -105,13 +108,37 @@ export default function LogViewer({
     return 'ALL'; // Director defaults to all classes
   });
 
-  // Bus selection for LOG mode
+  // Bus selection for LOG mode & Approval Vehicle Filter
   const [selectedBusId, setSelectedBusId] = useState(buses?.length > 0 ? buses[0].id : null);
   useEffect(() => {
     if ((!selectedBusId || !buses?.some(b => b.id === selectedBusId)) && buses?.length > 0) {
       setSelectedBusId(buses[0].id);
     }
   }, [buses, selectedBusId]);
+
+  // 호차별 결재란 전용 상태 (호차 필터 & 조회 범위)
+  const [selectedVehicleFilter, setSelectedVehicleFilter] = useState('ALL');
+  const [approvalViewScope, setApprovalViewScope] = useState('SELECTED_DATE'); // 'SELECTED_DATE' | 'ALL_SUMMARY'
+
+  // 전체 호차 목록 계산 (buses 기반 + 결재 데이터에 존재하는 호차)
+  const vehicleList = useMemo(() => {
+    const set = new Set();
+    buses.forEach(b => {
+      const label = b.busNumber || (b.name ? `${b.name}호차` : `${b.id}호차`);
+      if (label) set.add(label);
+    });
+    return Array.from(set);
+  }, [buses]);
+
+  // 결재 건의 호차 번호/명칭 추출 헬퍼
+  const getRideBusLabel = useCallback((ride) => {
+    if (ride.busNumber) return ride.busNumber;
+    if (ride.vehicleId) {
+      const found = buses.find(b => String(b.id) === String(ride.vehicleId));
+      if (found) return found.busNumber || (found.name ? `${found.name}호차` : `${found.id}호차`);
+    }
+    return '호차 미지정';
+  }, [buses]);
 
   // Integrated Calendar Data (Events, Holidays, Schedule Overrides/Absences)
   const [calendarHolidays, setCalendarHolidays] = useState([]);
@@ -296,6 +323,14 @@ export default function LogViewer({
     });
   }, [calendarHolidays, selectedDateStr, selectedClass]);
 
+  const holidaysOnDate = useMemo(() => {
+    return selectedDateEvents.filter(e => e.type === 'ACADEMY_HOLIDAY' || e.type === 'CLASS_HOLIDAY' || e.type === 'HOLIDAY' || e.type === 'VACATION');
+  }, [selectedDateEvents]);
+
+  const regularEventsOnDate = useMemo(() => {
+    return selectedDateEvents.filter(e => e.type !== 'ACADEMY_HOLIDAY' && e.type !== 'CLASS_HOLIDAY' && e.type !== 'HOLIDAY' && e.type !== 'VACATION');
+  }, [selectedDateEvents]);
+
   const selectedDateOverrides = useMemo(() => {
     return calendarOverrides.filter(o => {
       const s = toDateStr(o.startDate);
@@ -343,7 +378,35 @@ export default function LogViewer({
     });
   }, [approvedRides, selectedDateStr, selectedClass, students]);
 
-  // Calendar dot flags precomputation
+  // 결재란 필터링 (최종 승인 APPROVED 건만, PENDING/REJECTED 일체 제외)
+  const filteredApprovedRides = useMemo(() => {
+    return approvedRides.filter(r => {
+      // 결재 요청(PENDING)과 거절(REJECTED)은 철저히 제외하고 최종 승인(APPROVED)만 노출
+      if (r.status !== 'APPROVED') return false;
+
+      const rideDate = (r.createdAt && r.createdAt.split('T')[0]) || r.rideDate || r.requestDate;
+      if (approvalViewScope === 'SELECTED_DATE' && rideDate !== selectedDateStr) {
+        return false;
+      }
+      if (selectedVehicleFilter !== 'ALL') {
+        const busLabel = getRideBusLabel(r);
+        if (busLabel !== selectedVehicleFilter) return false;
+      }
+      if (searchKeyword.trim()) {
+        const kw = searchKeyword.toLowerCase();
+        const sName = (r.studentName || r.student?.name || '').toLowerCase();
+        const loc = (r.boardingLocation || r.address || '').toLowerCase();
+        const note = (r.note || '').toLowerCase();
+        const cNote = (r.counterNote || '').toLowerCase();
+        if (!sName.includes(kw) && !loc.includes(kw) && !note.includes(kw) && !cNote.includes(kw)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [approvedRides, approvalViewScope, selectedDateStr, selectedVehicleFilter, getRideBusLabel, searchKeyword]);
+
+  // Calendar dot flags precomputation (결재 최종 승인 건수 포함)
   const dateIndicatorMap = useMemo(() => {
     const map = new Map();
     // Holidays & events
@@ -358,7 +421,7 @@ export default function LogViewer({
       const endD = new Date(e);
       while (cur <= endD) {
         const dStr = toDateStr(cur);
-        const existing = map.get(dStr) || { hasHoliday: false, hasVacation: false, hasEvent: false, absences: 0, changes: 0 };
+        const existing = map.get(dStr) || { hasHoliday: false, hasVacation: false, hasEvent: false, absences: 0, changes: 0, approvedCount: 0 };
         if (isHoliday) existing.hasHoliday = true;
         if (isVacation) existing.hasVacation = true;
         if (isEvent) existing.hasEvent = true;
@@ -377,7 +440,7 @@ export default function LogViewer({
       const endD = new Date(e);
       while (cur <= endD) {
         const dStr = toDateStr(cur);
-        const existing = map.get(dStr) || { hasHoliday: false, hasVacation: false, hasEvent: false, absences: 0, changes: 0 };
+        const existing = map.get(dStr) || { hasHoliday: false, hasVacation: false, hasEvent: false, absences: 0, changes: 0, approvedCount: 0 };
         if (isAbs) {
           existing.absences += 1;
         } else {
@@ -388,8 +451,19 @@ export default function LogViewer({
       }
     });
 
+    // Approved Payment Rides (최종 승인 건만 달력에 반영)
+    approvedRides.forEach(r => {
+      if (r.status !== 'APPROVED') return;
+      const dStr = (r.createdAt && r.createdAt.split('T')[0]) || r.rideDate || r.requestDate;
+      if (dStr) {
+        const existing = map.get(dStr) || { hasHoliday: false, hasVacation: false, hasEvent: false, absences: 0, changes: 0, approvedCount: 0 };
+        existing.approvedCount += 1;
+        map.set(dStr, existing);
+      }
+    });
+
     return map;
-  }, [calendarHolidays, calendarOverrides]);
+  }, [calendarHolidays, calendarOverrides, approvedRides]);
 
   // Handle Event / Holiday Submission
   const handleSaveEvent = async (e) => {
@@ -537,17 +611,20 @@ export default function LogViewer({
 
     return (
       <div className="absolute bottom-1 flex justify-center items-center gap-0.5 w-full pointer-events-none">
-        {info.hasHoliday && (
+        {info.hasHoliday && (calendarFilter === 'SELECTED_DATE' || calendarFilter === 'HOLIDAY') && (
           <span className="w-1.5 h-1.5 rounded-full bg-orange-500" title="휴업일" />
         )}
-        {info.hasEvent && (
+        {info.hasEvent && (calendarFilter === 'SELECTED_DATE' || calendarFilter === 'EVENT') && (
           <span className="w-1.5 h-1.5 rounded-full bg-blue-500" title="학원/반 행사" />
         )}
-        {info.absences > 0 && (
+        {info.absences > 0 && (calendarFilter === 'SELECTED_DATE' || calendarFilter === 'ABSENCE') && (
           <span className="w-1.5 h-1.5 rounded-full bg-rose-500" title={`결석 ${info.absences}명`} />
         )}
-        {info.changes > 0 && (
+        {info.changes > 0 && (calendarFilter === 'SELECTED_DATE' || calendarFilter === 'CHANGE') && (
           <span className="w-1.5 h-1.5 rounded-full bg-amber-500" title={`통학 변동 ${info.changes}건`} />
+        )}
+        {info.approvedCount > 0 && (calendarFilter === 'SELECTED_DATE' || calendarFilter === 'APPROVAL') && (
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title={`결재 승인 ${info.approvedCount}건`} />
         )}
       </div>
     );
@@ -583,7 +660,11 @@ export default function LogViewer({
         <div className="p-4 border-b border-slate-200 flex flex-col gap-2.5 bg-slate-50/70 backdrop-blur z-20">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="text-xl">📅</span>
+              <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
               <h2 className="text-base font-black text-slate-800">통합 캘린더</h2>
               <span className="text-xs px-2 py-0.5 rounded-md bg-blue-100 text-blue-700 font-bold">
                 {selectedDateStr}
@@ -605,28 +686,85 @@ export default function LogViewer({
             </button>
           </div>
 
-          {/* Color Legend for Calendar Dots */}
-          <div className="flex items-center gap-3.5 text-[11px] font-bold text-slate-500 pt-1 border-t border-slate-200/60 overflow-x-auto scrollbar-hide">
-            <div className="flex items-center gap-1.5 shrink-0">
-              <span className="w-2 h-2 rounded-full bg-orange-500" />
+          {/* Color Legend / Interactive Filter Buttons */}
+          <div className="flex flex-wrap items-center gap-1 text-[11px] font-bold pt-1.5 border-t border-slate-200/60">
+            <button
+              type="button"
+              onClick={() => setCalendarFilter(prev => prev === 'HOLIDAY' ? 'SELECTED_DATE' : 'HOLIDAY')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border transition-all cursor-pointer shrink-0 ${
+                calendarFilter === 'HOLIDAY'
+                  ? 'bg-orange-500 text-white border-orange-600 shadow-2xs font-extrabold'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-orange-50 hover:text-orange-600 hover:border-orange-200'
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${calendarFilter === 'HOLIDAY' ? 'bg-white' : 'bg-orange-500'}`} />
               <span>휴업일</span>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <span className="w-2 h-2 rounded-full bg-blue-500" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCalendarFilter(prev => prev === 'EVENT' ? 'SELECTED_DATE' : 'EVENT')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border transition-all cursor-pointer shrink-0 ${
+                calendarFilter === 'EVENT'
+                  ? 'bg-blue-500 text-white border-blue-600 shadow-2xs font-extrabold'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200'
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${calendarFilter === 'EVENT' ? 'bg-white' : 'bg-blue-500'}`} />
               <span>행사</span>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <span className="w-2 h-2 rounded-full bg-rose-500" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCalendarFilter(prev => prev === 'ABSENCE' ? 'SELECTED_DATE' : 'ABSENCE')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border transition-all cursor-pointer shrink-0 ${
+                calendarFilter === 'ABSENCE'
+                  ? 'bg-rose-500 text-white border-rose-600 shadow-2xs font-extrabold'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200'
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${calendarFilter === 'ABSENCE' ? 'bg-white' : 'bg-rose-500'}`} />
               <span>결석</span>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <span className="w-2 h-2 rounded-full bg-amber-500" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCalendarFilter(prev => prev === 'CHANGE' ? 'SELECTED_DATE' : 'CHANGE')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border transition-all cursor-pointer shrink-0 ${
+                calendarFilter === 'CHANGE'
+                  ? 'bg-amber-500 text-white border-amber-600 shadow-2xs font-extrabold'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200'
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${calendarFilter === 'CHANGE' ? 'bg-white' : 'bg-amber-500'}`} />
               <span>통학 변동</span>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <span className="w-2 h-2 rounded-full bg-blue-600" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCalendarFilter(prev => prev === 'APPROVAL' ? 'SELECTED_DATE' : 'APPROVAL')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border transition-all cursor-pointer shrink-0 ${
+                calendarFilter === 'APPROVAL'
+                  ? 'bg-emerald-500 text-white border-emerald-600 shadow-2xs font-extrabold'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200'
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${calendarFilter === 'APPROVAL' ? 'bg-white' : 'bg-emerald-500'}`} />
+              <span>결재 승인</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCalendarFilter('SELECTED_DATE')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border transition-all cursor-pointer shrink-0 ${
+                calendarFilter === 'SELECTED_DATE'
+                  ? 'bg-blue-600 text-white border-blue-700 shadow-2xs font-extrabold'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200'
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${calendarFilter === 'SELECTED_DATE' ? 'bg-white' : 'bg-blue-600'}`} />
               <span>선택일</span>
-            </div>
+            </button>
           </div>
         </div>
 
@@ -672,57 +810,37 @@ export default function LogViewer({
       {/* Right Area: Daily Variables & Event Management (50%) */}
       <div className="w-1/2 h-full flex flex-col bg-slate-50 overflow-hidden">
         
-        {/* Top Control Bar 1: View Mode Switcher (결석용이랑 행사용 분리) */}
+        {/* Top Control Bar: Class Select Dropdown & Action Buttons */}
         <div className="p-3.5 bg-white border-b border-slate-200 shrink-0">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
-              <button
-                type="button"
-                onClick={() => handleModeChange('ALL')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  activeMode === 'ALL'
-                    ? 'bg-white text-blue-700 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                전체 일정
-              </button>
-              <button
-                type="button"
-                onClick={() => handleModeChange('EVENT_HOLIDAY')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  activeMode === 'EVENT_HOLIDAY'
-                    ? 'bg-white text-indigo-700 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                행사 및 휴업일
-              </button>
-              <button
-                type="button"
-                onClick={() => handleModeChange('ABSENCE_VARIABLE')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  activeMode === 'ABSENCE_VARIABLE'
-                    ? 'bg-white text-rose-700 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                원아 결석 & 변동
-              </button>
-              <button
-                type="button"
-                onClick={() => handleModeChange('LOG')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  activeMode === 'LOG'
-                    ? 'bg-white text-slate-800 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                차량 운행 일지
-              </button>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {/* Class Dropdown (반별 버튼 대신 커서로 누르면 선택할 수 있는 드롭다운 메뉴) */}
+            <div className="flex items-center gap-2">
+              <label htmlFor="log-class-select" className="text-xs font-bold text-slate-500 shrink-0">
+                반 선택:
+              </label>
+              <div className="relative">
+                <select
+                  id="log-class-select"
+                  value={selectedClass}
+                  onChange={e => setSelectedClass(e.target.value)}
+                  className="appearance-none bg-white border border-slate-200 hover:border-blue-400 focus:border-blue-500 rounded-xl px-3 py-1.5 pr-8 text-xs font-bold text-slate-700 shadow-2xs outline-none cursor-pointer transition"
+                >
+                  <option value="ALL">전체 반 (기관 전체)</option>
+                  {classList.map(cName => (
+                    <option key={cName} value={cName}>
+                      {cName}
+                    </option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </div>
             </div>
 
-            {/* Quick Action Buttons (역할별 일정 추가) */}
+            {/* Quick Action Buttons (일정/휴업 등록, 결석 등록) */}
             <div className="flex items-center gap-2">
               {(isAdmin || isHomeroom || isTeacher) && (
                 <button
@@ -735,7 +853,7 @@ export default function LogViewer({
                     }));
                     setIsEventModalOpen(true);
                   }}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1 shrink-0"
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
@@ -755,7 +873,7 @@ export default function LogViewer({
                     }));
                     setIsAbsenceModalOpen(true);
                   }}
-                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 shrink-0"
+                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
                 >
                   <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
                   <span>결석 등록</span>
@@ -764,39 +882,8 @@ export default function LogViewer({
             </div>
           </div>
 
-          {/* Top Control Bar 2: Class Selection Tabs ("지금 호차별로 되어 있는거 빼고 반별로 바꿔주고") */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-            <span className="text-[11px] font-bold text-slate-400 shrink-0 mr-1">반 선택:</span>
-            <button
-              type="button"
-              onClick={() => setSelectedClass('ALL')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
-                selectedClass === 'ALL'
-                  ? 'bg-slate-800 text-white shadow-xs'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              전체 반 (기관 전체)
-            </button>
-
-            {classList.map(cName => (
-              <button
-                key={cName}
-                type="button"
-                onClick={() => setSelectedClass(cName)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
-                  selectedClass === cName
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {cName}
-              </button>
-            ))}
-          </div>
-
           {/* Student Search Bar ("원장의 경우에는 결석 학생 검색할 수 있게") */}
-          {(activeMode === 'ALL' || activeMode === 'ABSENCE_VARIABLE') && (
+          {(activeMode === 'ALL' || activeMode === 'ABSENCE_VARIABLE' || activeMode === 'PAYMENT_APPROVAL') && (
             <div className="relative mt-2.5">
               <input
                 type="text"
@@ -854,6 +941,15 @@ export default function LogViewer({
               <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
                 {selectedClass === 'ALL' ? '전체 반' : selectedClass}
               </span>
+              {calendarFilter !== 'SELECTED_DATE' && (
+                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
+                  {calendarFilter === 'HOLIDAY' && '휴업일만 보기'}
+                  {calendarFilter === 'EVENT' && '행사만 보기'}
+                  {calendarFilter === 'ABSENCE' && '결석만 보기'}
+                  {calendarFilter === 'CHANGE' && '통학 변동만 보기'}
+                  {calendarFilter === 'APPROVAL' && '결재 승인만 보기'}
+                </span>
+              )}
             </h3>
           </div>
 
@@ -862,7 +958,10 @@ export default function LogViewer({
               결석 {absencesOnDate.length}명
             </span>
             <span className="text-xs font-bold px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg">
-              변동 {locationChangesOnDate.length + otherChangesOnDate.length + approvedRidesOnDate.length}건
+              변동 {locationChangesOnDate.length + otherChangesOnDate.length}건
+            </span>
+            <span className="text-xs font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg">
+              결재 승인 {approvedRidesOnDate.length}건
             </span>
             <span className="text-xs font-bold px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg">
               행사/휴업 {selectedDateEvents.length}건
@@ -873,17 +972,192 @@ export default function LogViewer({
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto p-5 space-y-6">
           
+          {/* PAYMENT_APPROVAL Mode Content (호차별 결재란 - 최종 승인 건만 호차별 특이사항/결재내역 몰아보기) */}
+          {calendarFilter === 'SELECTED_DATE' && activeMode === 'PAYMENT_APPROVAL' && (
+            <div className="space-y-4">
+              {/* 호차 선택 필터 & 조회 범위 제어 바 */}
+              <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <span className="text-xs font-bold text-slate-500 block mb-1.5">호차별 필터</span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedVehicleFilter('ALL')}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                          selectedVehicleFilter === 'ALL'
+                            ? 'bg-blue-600 text-white shadow-xs'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        전체 호차
+                      </button>
+                      {vehicleList.map(vLabel => (
+                        <button
+                          key={vLabel}
+                          type="button"
+                          onClick={() => setSelectedVehicleFilter(vLabel)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                            selectedVehicleFilter === vLabel
+                              ? 'bg-blue-600 text-white shadow-xs'
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                        >
+                          {vLabel}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-xs font-bold text-slate-500 block mb-1.5">조회 범위</span>
+                    <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => setApprovalViewScope('SELECTED_DATE')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          approvalViewScope === 'SELECTED_DATE'
+                            ? 'bg-white text-blue-700 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        선택일 기준 ({selectedDateStr})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setApprovalViewScope('ALL_SUMMARY')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          approvalViewScope === 'ALL_SUMMARY'
+                            ? 'bg-white text-emerald-700 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        전체 승인 내역 몰아보기
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs text-slate-500 font-medium">
+                  <span>
+                    표시 조건: <strong className="text-slate-700">{selectedVehicleFilter === 'ALL' ? '전체 호차' : selectedVehicleFilter}</strong>
+                    {' / '}
+                    <strong className="text-slate-700">{approvalViewScope === 'SELECTED_DATE' ? `${selectedDateStr} 당일 승인 건` : '전체 승인 내역'}</strong>
+                  </span>
+                  <span className="text-emerald-600 font-bold">
+                    총 {filteredApprovedRides.length}건 승인 완료
+                  </span>
+                </div>
+              </div>
+
+              {/* 결재 내역 리스트 */}
+              {filteredApprovedRides.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 text-slate-400 bg-white rounded-2xl border border-dashed border-slate-200 p-8 text-center">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-50 text-slate-400 flex items-center justify-center font-bold text-lg mb-3">
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  </div>
+                  <p className="text-sm font-bold text-slate-700">해당 조건의 결재 승인 내역이 없습니다.</p>
+                  <p className="text-xs text-slate-400 mt-1 max-w-sm">
+                    캘린더에는 관리자/원장이 최종 승인(APPROVED)한 내역만 안전하게 표시되며, 결재 요청 대기나 거절 건은 조회되지 않습니다.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredApprovedRides.map((ride, idx) => {
+                    const busLabel = getRideBusLabel(ride);
+                    const rideDate = (ride.createdAt && ride.createdAt.split('T')[0]) || ride.rideDate || ride.requestDate || '-';
+                    const decTime = ride.decidedAt ? new Date(ride.decidedAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+
+                    return (
+                      <div
+                        key={`approval-item-${ride.id || idx}`}
+                        className="bg-white rounded-2xl border border-emerald-100 p-5 shadow-2xs hover:border-emerald-300 transition-all space-y-3.5"
+                      >
+                        {/* 상단: 호차 뱃지 + 원아명 + 승인 뱃지 */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <span className="px-2.5 py-1 rounded-xl bg-blue-50 text-blue-700 border border-blue-200 text-xs font-black">
+                              {busLabel}
+                            </span>
+                            <span className="font-black text-slate-800 text-sm">
+                              {ride.studentName || ride.student?.name || '원아명 미지정'}
+                            </span>
+                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                              {ride.student?.className || '반 미지정'}
+                            </span>
+                            <span className="text-xs font-bold text-slate-400">
+                              탑승일: {rideDate}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                              최종 승인 완료
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* 중단: 탑승 위치 및 승인 정보 */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-slate-50/70 p-3 rounded-xl border border-slate-100">
+                          <div>
+                            <span className="text-slate-400 font-bold block mb-0.5">탑승 및 하차 위치</span>
+                            <span className="text-slate-700 font-bold">
+                              {ride.boardingLocation || ride.address || '원내 지정 정류장'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 font-bold block mb-0.5">결재 승인자 및 일시</span>
+                            <span className="text-slate-700 font-medium">
+                              {ride.decidedBy || '원장/관리자'} {decTime && `(${decTime})`}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* 하단: 호차별 특이사항 및 결재 사유 (강조 박스) */}
+                        {ride.note && (
+                          <div className="p-3 bg-amber-50/70 rounded-xl border border-amber-200 text-xs text-amber-900">
+                            <div className="font-bold flex items-center gap-1 mb-1 text-amber-800">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                              신청 사유 및 호차 특이사항
+                            </div>
+                            <p className="leading-relaxed whitespace-pre-wrap">{ride.note}</p>
+                          </div>
+                        )}
+
+                        {/* 원장/관리자 역제안 및 변경 사유가 있는 경우 */}
+                        {(ride.counterProposal || ride.counterNote) && (
+                          <div className="p-3 bg-indigo-50/80 rounded-xl border border-indigo-200 text-xs text-indigo-900">
+                            <div className="font-bold flex items-center gap-1 mb-1 text-indigo-800">
+                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                              관리자 역제안 및 조정 사항
+                            </div>
+                            <p className="leading-relaxed whitespace-pre-wrap">
+                              {ride.counterNote || (typeof ride.counterProposal === 'string' ? ride.counterProposal : '노선 및 탑승 위치가 조정 승인되었습니다.')}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* LOG Mode Content */}
-          {activeMode === 'LOG' && (
+          {calendarFilter === 'SELECTED_DATE' && activeMode === 'LOG' && (
             <div className="h-full">
               {isLoadingLogs ? (
                 <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-                  <div className="text-3xl animate-bounce mb-2">📝</div>
+                  <div className="text-3xl animate-bounce mb-2"></div>
                   <p className="text-xs font-bold">운행 로그를 불러오는 중입니다...</p>
                 </div>
               ) : logs.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-64 text-slate-400 bg-white rounded-2xl border border-dashed border-slate-200 p-8">
-                  <div className="text-3xl mb-2 grayscale">📭</div>
+                  <div className="text-3xl mb-2 grayscale"></div>
                   <p className="text-sm font-bold text-slate-600">기록된 운행 로그가 없습니다.</p>
                   <p className="text-xs text-slate-400 mt-1">선택한 날짜 및 차량에 기록된 주행/탑승 일지가 없습니다.</p>
                 </div>
@@ -892,7 +1166,7 @@ export default function LogViewer({
                   {logs.map((log, index) => (
                     <div key={index} className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs flex items-start gap-3">
                       <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-base shrink-0">
-                        {log.icon || '🚍'}
+                        {log.icon || ''}
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center justify-between mb-1">
@@ -911,23 +1185,29 @@ export default function LogViewer({
           )}
 
           {/* Section 1: Events & Holidays on this date */}
-          {(activeMode === 'ALL' || activeMode === 'EVENT_HOLIDAY') && (
+          {(calendarFilter === 'HOLIDAY' || (calendarFilter === 'SELECTED_DATE' && activeMode !== 'LOG' && activeMode !== 'PAYMENT_APPROVAL')) && (
             <div>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-base">🎪</span>
-                  <h4 className="text-sm font-black text-slate-800">학원/유치원 행사 및 휴업일</h4>
-                  <span className="text-xs font-bold text-slate-400">({selectedDateEvents.length}건)</span>
+                  <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
+                  <h4 className="text-sm font-black text-slate-800">
+                    {calendarFilter === 'HOLIDAY' ? '학원/유치원 휴업일 및 방학' : '학원/유치원 행사 및 휴업일'}
+                  </h4>
+                  <span className="text-xs font-bold text-orange-600">
+                    ({calendarFilter === 'HOLIDAY' ? holidaysOnDate.length : selectedDateEvents.length}건)
+                  </span>
                 </div>
               </div>
 
-              {selectedDateEvents.length === 0 ? (
+              {(calendarFilter === 'HOLIDAY' ? holidaysOnDate : selectedDateEvents).length === 0 ? (
                 <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-6 text-center">
-                  <p className="text-xs font-bold text-slate-400">선택한 날짜에 등록된 행사나 휴업일이 없습니다.</p>
+                  <p className="text-xs font-bold text-slate-400">
+                    {calendarFilter === 'HOLIDAY' ? '선택한 날짜에 등록된 휴업일이나 방학이 없습니다.' : '선택한 날짜에 등록된 행사나 휴업일이 없습니다.'}
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-2.5">
-                  {selectedDateEvents.map(event => {
+                  {(calendarFilter === 'HOLIDAY' ? holidaysOnDate : selectedDateEvents).map(event => {
                     const isHoliday = event.type === 'ACADEMY_HOLIDAY' || event.type === 'CLASS_HOLIDAY' || event.type === 'HOLIDAY';
                     const isVacation = event.type === 'VACATION';
                     return (
@@ -942,14 +1222,14 @@ export default function LogViewer({
                         }`}
                       >
                         <div className="flex items-start gap-3">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base shrink-0 ${
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
                             isHoliday
                               ? 'bg-orange-100 text-orange-700'
                               : isVacation
                               ? 'bg-purple-100 text-purple-700'
                               : 'bg-blue-100 text-blue-700'
                           }`}>
-                            {isHoliday ? '🚨' : isVacation ? '🏖️' : '🎪'}
+                            {isHoliday ? '휴업' : isVacation ? '방학' : '행사'}
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
@@ -983,7 +1263,7 @@ export default function LogViewer({
                           <button
                             type="button"
                             onClick={() => setItemToDelete({ id: event.id, title: event.title, isOverride: false })}
-                            className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                            className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
                             title="일정 삭제"
                           >
                             삭제
@@ -997,217 +1277,292 @@ export default function LogViewer({
             </div>
           )}
 
+          {/* Section 1-B: Only Academy Events when EVENT filter is active */}
+          {calendarFilter === 'EVENT' && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
+                  <h4 className="text-sm font-black text-slate-800">학원/유치원 행사</h4>
+                  <span className="text-xs font-bold text-blue-600">({regularEventsOnDate.length}건)</span>
+                </div>
+              </div>
+
+              {regularEventsOnDate.length === 0 ? (
+                <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-6 text-center">
+                  <p className="text-xs font-bold text-slate-400">선택한 날짜에 등록된 학원/반 행사가 없습니다.</p>
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  {regularEventsOnDate.map(event => (
+                    <div
+                      key={event.id}
+                      className="bg-white rounded-2xl border border-blue-200 hover:border-blue-300 p-4 shadow-2xs flex items-center justify-between transition-all"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs shrink-0">
+                          행사
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-black text-slate-800 text-sm">{event.title}</span>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                              학원 행사
+                            </span>
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                              {event.targetClass ? `대상: ${event.targetClass}` : '전체 반 대상'}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
+                            <span>기간: {event.startDate} {event.startDate !== event.endDate ? `~ ${event.endDate}` : ''}</span>
+                            {event.reason && (
+                              <>
+                                <span className="text-slate-300">|</span>
+                                <span>{event.reason}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {(isAdmin || isHomeroom) && (
+                        <button
+                          type="button"
+                          onClick={() => setItemToDelete({ id: event.id, title: event.title, isOverride: false })}
+                          className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
+                          title="일정 삭제"
+                        >
+                          삭제
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Section 2: Student Absences & Daily Variables on this date */}
-          {(activeMode === 'ALL' || activeMode === 'ABSENCE_VARIABLE') && (
+          {(calendarFilter === 'ABSENCE' || calendarFilter === 'CHANGE' || calendarFilter === 'APPROVAL' || (calendarFilter === 'SELECTED_DATE' && activeMode !== 'LOG' && activeMode !== 'PAYMENT_APPROVAL')) && (
             <div className="space-y-5">
               
               {/* 2-1: 결석 원아 목록 */}
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-                    <h4 className="text-sm font-black text-slate-800">결석 원아</h4>
-                    <span className="text-xs font-bold text-rose-600">({absencesOnDate.length}명)</span>
+              {(calendarFilter === 'ABSENCE' || calendarFilter === 'SELECTED_DATE') && (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                      <h4 className="text-sm font-black text-slate-800">결석 원아</h4>
+                      <span className="text-xs font-bold text-rose-600">({absencesOnDate.length}명)</span>
+                    </div>
                   </div>
-                </div>
 
-                {absencesOnDate.length === 0 ? (
-                  <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-5 text-center">
-                    <p className="text-xs font-bold text-slate-400">선택한 날짜에 결석 처리된 원아가 없습니다.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    {absencesOnDate.map(abs => (
-                      <div
-                        key={abs.id}
-                        className="bg-white rounded-2xl border border-rose-100 p-4 shadow-2xs flex items-center justify-between hover:border-rose-300 transition-all"
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold text-sm shrink-0 border border-rose-100">
-                            결석
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-black text-slate-800 text-sm">{abs.student?.name}</span>
-                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                                {abs.student?.className || '반 미배정'}
-                              </span>
-                              {abs.student?.phone && (
-                                <span className="text-xs text-slate-400 font-medium">
-                                  {abs.student.phone}
+                  {absencesOnDate.length === 0 ? (
+                    <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-5 text-center">
+                      <p className="text-xs font-bold text-slate-400">선택한 날짜에 결석 처리된 원아가 없습니다.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {absencesOnDate.map(abs => (
+                        <div
+                          key={abs.id}
+                          className="bg-white rounded-2xl border border-rose-100 p-4 shadow-2xs flex items-center justify-between hover:border-rose-300 transition-all"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold text-xs shrink-0 border border-rose-100">
+                              결석
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-black text-slate-800 text-sm">{abs.student?.name}</span>
+                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                                  {abs.student?.className || '반 미배정'}
                                 </span>
-                              )}
-                            </div>
-                            <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
-                              <span className="font-bold text-rose-600">사유: {abs.reason || '사유 미기재'}</span>
-                              <span className="text-slate-300">|</span>
-                              <span>기간: {abs.startDate} {abs.startDate !== abs.endDate ? `~ ${abs.endDate}` : ''}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {(isAdmin || isHomeroom || isParent) && (
-                          <button
-                            type="button"
-                            onClick={() => setItemToDelete({ id: abs.id, title: `${abs.student?.name} 원아 결석`, isOverride: true })}
-                            className="px-3 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-100 transition-colors"
-                            title="결석 취소"
-                          >
-                            결석 취소
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* 2-2: 승하차 위치/정류장 변경 원아 목록 */}
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                    <h4 className="text-sm font-black text-slate-800">승하차 위치/정류장 변경</h4>
-                    <span className="text-xs font-bold text-amber-600">({locationChangesOnDate.length}건)</span>
-                  </div>
-                </div>
-
-                {locationChangesOnDate.length === 0 ? (
-                  <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-5 text-center">
-                    <p className="text-xs font-bold text-slate-400">선택한 날짜에 위치/정류장 변경 신청이 없습니다.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    {locationChangesOnDate.map(change => (
-                      <div
-                        key={change.id}
-                        className="bg-white rounded-2xl border border-amber-100 p-4 shadow-2xs flex items-center justify-between hover:border-amber-300 transition-all"
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center font-bold text-sm shrink-0 border border-amber-200">
-                            🚏
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-black text-slate-800 text-sm">{change.student?.name}</span>
-                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                                {change.student?.className || '반 미배정'}
-                              </span>
-                              <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-800">
-                                {change.direction === 'MORNING' ? '등원 변경' : change.direction === 'AFTERNOON' ? '하원 변경' : '등·하원 전체 변경'}
-                              </span>
-                            </div>
-                            <div className="text-xs text-slate-600 mt-1 flex flex-col gap-0.5">
-                              <div className="font-bold text-amber-900">
-                                변경 정류장/주소: {change.newAddress || '임시 지정 위치'}
-                              </div>
-                              <div className="text-slate-400 flex items-center gap-2">
-                                <span>사유: {change.reason || '개인 사정'}</span>
-                                {change.targetTime && (
-                                  <>
-                                    <span>|</span>
-                                    <span>예정 시각: {change.targetTime}</span>
-                                  </>
+                                {abs.student?.phone && (
+                                  <span className="text-xs text-slate-400 font-medium">
+                                    {abs.student.phone}
+                                  </span>
                                 )}
                               </div>
+                              <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
+                                <span className="font-bold text-rose-600">사유: {abs.reason || '사유 미기재'}</span>
+                                <span className="text-slate-300">|</span>
+                                <span>기간: {abs.startDate} {abs.startDate !== abs.endDate ? `~ ${abs.endDate}` : ''}</span>
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        {(isAdmin || isHomeroom) && (
-                          <button
-                            type="button"
-                            onClick={() => setItemToDelete({ id: change.id, title: `${change.student?.name} 원아 위치 변경`, isOverride: true })}
-                            className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
-                          >
-                            취소
-                          </button>
-                        )}
-                      </div>
-                    ))}
+                          {(isAdmin || isHomeroom || isParent) && (
+                            <button
+                              type="button"
+                              onClick={() => setItemToDelete({ id: abs.id, title: `${abs.student?.name} 원아 결석`, isOverride: true })}
+                              className="px-3 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-100 transition-colors cursor-pointer"
+                              title="결석 취소"
+                            >
+                              결석 취소
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 2-2: 승하차 위치/정류장 변경 원아 목록 */}
+              {(calendarFilter === 'CHANGE' || calendarFilter === 'SELECTED_DATE') && (
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                      <h4 className="text-sm font-black text-slate-800">승하차 위치/정류장 변경</h4>
+                      <span className="text-xs font-bold text-amber-600">({locationChangesOnDate.length}건)</span>
+                    </div>
                   </div>
-                )}
-              </div>
+
+                  {locationChangesOnDate.length === 0 ? (
+                    <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-5 text-center">
+                      <p className="text-xs font-bold text-slate-400">선택한 날짜에 위치/정류장 변경 신청이 없습니다.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {locationChangesOnDate.map(change => (
+                        <div
+                          key={change.id}
+                          className="bg-white rounded-2xl border border-amber-100 p-4 shadow-2xs flex items-center justify-between hover:border-amber-300 transition-all"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center font-bold text-xs shrink-0 border border-amber-200">
+                              정류장
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-black text-slate-800 text-sm">{change.student?.name}</span>
+                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                                  {change.student?.className || '반 미배정'}
+                                </span>
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-800">
+                                  {change.direction === 'MORNING' ? '등원 변경' : change.direction === 'AFTERNOON' ? '하원 변경' : '등·하원 전체 변경'}
+                                </span>
+                              </div>
+                              <div className="text-xs text-slate-600 mt-1 flex flex-col gap-0.5">
+                                <div className="font-bold text-amber-900">
+                                  변경 정류장/주소: {change.newAddress || '임시 지정 위치'}
+                                </div>
+                                <div className="text-slate-400 flex items-center gap-2">
+                                  <span>사유: {change.reason || '개인 사정'}</span>
+                                  {change.targetTime && (
+                                    <>
+                                      <span>|</span>
+                                      <span>예정 시각: {change.targetTime}</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {(isAdmin || isHomeroom) && (
+                            <button
+                              type="button"
+                              onClick={() => setItemToDelete({ id: change.id, title: `${change.student?.name} 원아 위치 변경`, isOverride: true })}
+                              className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
+                            >
+                              취소
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* 2-3: 결재 승인 일회성 셔틀 탑승 및 픽업 요청 */}
-              {(approvedRidesOnDate.length > 0 || otherChangesOnDate.length > 0) && (
+              {(calendarFilter === 'APPROVAL' || (calendarFilter === 'SELECTED_DATE' && (approvedRidesOnDate.length > 0 || otherChangesOnDate.length > 0))) && (
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                      <h4 className="text-sm font-black text-slate-800">일회성 탑승 & 픽업 요청</h4>
+                      <h4 className="text-sm font-black text-slate-800">결재 승인 내역 (일회성 탑승 & 픽업)</h4>
                       <span className="text-xs font-bold text-emerald-600">
                         ({approvedRidesOnDate.length + otherChangesOnDate.length}건)
                       </span>
                     </div>
                   </div>
 
-                  <div className="space-y-2.5">
-                    {approvedRidesOnDate.map((ride, idx) => (
-                      <div
-                        key={`ride-${idx}`}
-                        className="bg-white rounded-2xl border border-emerald-100 p-4 shadow-2xs flex items-center justify-between hover:border-emerald-300 transition-all"
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold text-sm shrink-0 border border-emerald-200">
-                            🎫
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-black text-slate-800 text-sm">{ride.studentName || ride.student?.name}</span>
-                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                                일회성 셔틀 탑승 승인
-                              </span>
+                  {approvedRidesOnDate.length === 0 && otherChangesOnDate.length === 0 ? (
+                    <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-5 text-center">
+                      <p className="text-xs font-bold text-slate-400">선택한 날짜에 결재 승인된 탑승/픽업 요청이 없습니다.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {approvedRidesOnDate.map((ride, idx) => (
+                        <div
+                          key={`ride-${idx}`}
+                          className="bg-white rounded-2xl border border-emerald-100 p-4 shadow-2xs flex items-center justify-between hover:border-emerald-300 transition-all"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold text-xs shrink-0 border border-emerald-200">
+                              승인
                             </div>
-                            <div className="text-xs text-slate-600 mt-1">
-                              탑승 요청 위치: {ride.boardingLocation || ride.location || '원내 지정 정류장'}
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-black text-slate-800 text-sm">{ride.studentName || ride.student?.name}</span>
+                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                                  일회성 셔틀 탑승 승인
+                                </span>
+                              </div>
+                              <div className="text-xs text-slate-600 mt-1">
+                                탑승 요청 위치: {ride.boardingLocation || ride.location || '원내 지정 정류장'}
+                              </div>
                             </div>
                           </div>
+
+                          <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                            승인 완료
+                          </span>
                         </div>
+                      ))}
 
-                        <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
-                          승인 완료
-                        </span>
-                      </div>
-                    ))}
-
-                    {otherChangesOnDate.map(change => (
-                      <div
-                        key={change.id}
-                        className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs flex items-center justify-between hover:border-slate-300 transition-all"
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center font-bold text-sm shrink-0 border border-purple-200">
-                            🚗
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-black text-slate-800 text-sm">{change.student?.name}</span>
-                              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                                {change.student?.className || '반 미배정'}
-                              </span>
-                              <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-purple-100 text-purple-800">
-                                {change.overrideType === 'TEMP_DROP' ? '학부모 직접 픽업' : '기타 통학 변동'}
-                              </span>
+                      {otherChangesOnDate.map(change => (
+                        <div
+                          key={change.id}
+                          className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs flex items-center justify-between hover:border-slate-300 transition-all"
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center font-bold text-xs shrink-0 border border-purple-200">
+                              변동
                             </div>
-                            <div className="text-xs text-slate-500 mt-1">
-                              사유: {change.reason || '사유 미작성'}
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-black text-slate-800 text-sm">{change.student?.name}</span>
+                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                                  {change.student?.className || '반 미배정'}
+                                </span>
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-purple-100 text-purple-800">
+                                  {change.overrideType === 'TEMP_DROP' ? '학부모 직접 픽업' : '기타 통학 변동'}
+                                </span>
+                              </div>
+                              <div className="text-xs text-slate-500 mt-1">
+                                사유: {change.reason || '사유 미작성'}
+                              </div>
                             </div>
                           </div>
+
+                          {(isAdmin || isHomeroom) && (
+                            <button
+                              type="button"
+                              onClick={() => setItemToDelete({ id: change.id, title: `${change.student?.name} 원아 변동`, isOverride: true })}
+                              className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
+                            >
+                              취소
+                            </button>
+                          )}
                         </div>
-
-                        {(isAdmin || isHomeroom) && (
-                          <button
-                            type="button"
-                            onClick={() => setItemToDelete({ id: change.id, title: `${change.student?.name} 원아 변동`, isOverride: true })}
-                            className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
-                          >
-                            취소
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1221,7 +1576,7 @@ export default function LogViewer({
           <div className="bg-white rounded-3xl p-7 max-w-lg w-full shadow-2xl mx-4 transform animate-scale-up">
             <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <span className="text-2xl">📝</span>
+                <span className="text-2xl"></span>
                 <h3 className="text-lg font-black text-slate-800">일정 및 휴업일 등록</h3>
               </div>
               <button

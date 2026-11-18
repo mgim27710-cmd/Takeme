@@ -104,7 +104,7 @@ class SocketService {
     }
   }
 
-  /// 지도교사가 정류장에서 원아 탑승 완료 후 기사에게 "출발하셔도 됩니다" 신호 발송
+  /// 차량선생님이 정류장에서 원아 탑승 완료 후 기사에게 "출발하셔도 됩니다" 신호 발송
   void sendReadyToDepart({required int vehicleId, String? stopName}) {
     final payload = <String, dynamic>{
       'vehicleId': vehicleId,
@@ -132,7 +132,7 @@ class SocketService {
     });
   }
 
-  /// 지도교사 원아 상태(탑승/하차/인계/인계실패) 변경 이벤트 수신
+  /// 차량선생님 원아 상태(탑승/하차/인계/인계실패) 변경 이벤트 수신
   void onStudentStatusUpdated(Function(Map<String, dynamic> data) callback) {
     _socket?.off('studentStatusUpdated');
     _socket?.on('studentStatusUpdated', (data) {
@@ -158,7 +158,7 @@ class SocketService {
     });
   }
 
-  /// 학부모 결석 신청 / 원장 탑승지 변경 / 지도교사 탑승·결석 처리 시 경로 자동 갱신 신호 수신
+  /// 학부모 결석 신청 / 원장 탑승지 변경 / 차량선생님 탑승·결석 처리 시 경로 자동 갱신 신호 수신
   void onRouteUpdated(Function(Map<String, dynamic> data) callback) {
     _socket?.off('routeUpdated');
     _socket?.on('routeUpdated', (data) {
@@ -172,7 +172,7 @@ class SocketService {
     });
   }
 
-  /// 지도교사의 "출발하셔도 됩니다" 신호 수신 (기사 앱)
+  /// 차량선생님의 "출발하셔도 됩니다" 신호 수신 (기사 앱)
   void onDriverDepartSignal(Function(Map<String, dynamic> data) callback) {
     _socket?.off('driverDepartSignal');
     _socket?.on('driverDepartSignal', (data) {
@@ -186,7 +186,7 @@ class SocketService {
     });
   }
 
-  /// 지도교사 학부모 메시지 응답 등에 따른 기사 음성 안내 수신
+  /// 차량선생님 학부모 메시지 응답 등에 따른 기사 음성 안내 수신
   void onDriverTts(Function(Map<String, dynamic> data) callback) {
     _socket?.off('driverTTS');
     _socket?.on('driverTTS', (data) {

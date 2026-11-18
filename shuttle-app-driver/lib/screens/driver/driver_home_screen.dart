@@ -24,7 +24,7 @@ import '../chat/chat_room_list_screen.dart';
 /// - 2단계(경로 탐색·선택): 전체 경로 축소 보기 + 안전 경로/빠른 경로 비교 카드 + '운행 시작' 버튼
 /// - 3단계(운행 중): 티맵 스타일 주행 화면
 ///   · 시속 5km 이상 주행 중 조작 잠금 & 화면 켜짐 유지
-///   · 지도교사 "출발하셔도 됩니다" 신호 수신 배너·음성
+///   · 차량선생님 "출발하셔도 됩니다" 신호 수신 배너·음성
 ///   · 정차 지점 메모 음성·화면 안내
 ///   · 현재 속도 크게 표시 & 어린이 보호구역(30km/h) 경고 + 급정거·과속 자동 일지 기록
 ///   · 길게 눌러 작동하는 SOS 긴급 버튼
@@ -109,10 +109,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
             !_escort5MinWarned &&
             DateTime.now().difference(_drivingStartTime!).inMinutes >= 5) {
           _escort5MinWarned = true;
-          _flutterTts.speak('주의: 운행 시작 5분이 지났으나 동승자 확인 전입니다.');
+          _flutterTts.speak('주의: 운행 시작 5분이 지났으나 차량선생님 탑승 확인 전입니다.');
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('⚠️ 동승 확인 전: 운행 시작 5분이 경과했습니다. 지도교사 동승을 확인해 주세요.'),
+              content: Text('⚠️ 동승 확인 전: 운행 시작 5분이 경과했습니다. 차량선생님 탑승을 확인해 주세요.'),
               backgroundColor: _C.orange,
               duration: Duration(seconds: 4),
             ),
@@ -154,7 +154,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
           _escortConfirmedAt = data['confirmedAt']?.toString() ?? DateTime.now().toIso8601String();
         }
       });
-      _flutterTts.speak('동승 확인되었습니다: ${_escortName ?? "지도교사"}');
+      _flutterTts.speak('동승 확인되었습니다: ${_escortName ?? "차량선생님"}');
     });
 
     _escortSocket!.on('changeRequestDecided', (data) {
@@ -268,11 +268,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
               children: [
                 Icon(Icons.warning_amber_rounded, color: _C.orange, size: 22),
                 SizedBox(width: 8),
-                Text('동승자 확인 전', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: _C.orange)),
+                Text('차량선생님 확인 전', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: _C.orange)),
               ],
             ),
             content: const Text(
-              '지도교사 동승 확인이 완료되지 않았습니다.\n동승자 확인 없이 종료할까요?',
+              '차량선생님 탑승 확인이 완료되지 않았습니다.\n동승자 확인 없이 종료할까요?',
               style: TextStyle(fontSize: 14, color: _C.slate800, height: 1.4),
             ),
             actions: [
@@ -685,7 +685,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                 // 우측 상단 SOS 아래: 동승 확인 배지
                 Positioned(right: 12, top: 56, child: _escortBadge()),
               ],
-              // 지도교사 "출발하셔도 됩니다" 실시간 신호 배너
+              // 차량선생님 "출발하셔도 됩니다" 실시간 신호 배너
               if (_nav.driving && _nav.departSignalBanner != null)
                 Positioned(
                   left: 14,
@@ -885,7 +885,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     );
   }
 
-  /// 운행 중 지도교사 동승 확인 상태 배지
+  /// 운행 중 차량선생님 탑승 확인 상태 배지
   Widget _escortBadge() {
     final confirmed = _escortConfirmedAt != null;
     final timeStr = _escortConfirmedAt != null ? _formatEscortTime(_escortConfirmedAt!) : '';

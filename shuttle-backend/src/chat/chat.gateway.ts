@@ -135,4 +135,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return this.chatService.markRoomAsRead(Number(data.roomId), user.sub);
     }
   }
+
+  @SubscribeMessage('markAsRead')
+  async handleMarkAsRead(
+    @MessageBody() data: { roomId: number; userId: number },
+  ) {
+    if (data && data.roomId && data.userId) {
+      return this.chatService.markRoomMessagesRead(data.roomId, data.userId);
+    }
+  }
 }

@@ -358,6 +358,8 @@ export default function Landing() {
       } else {
         localStorage.removeItem('takeme_academy');
         localStorage.removeItem('takeme_buses');
+        localStorage.removeItem('takeme_selected_academy_id');
+        localStorage.removeItem('takeme_custom_classes_default');
         if (data.accessToken) {
           localStorage.setItem('takeme_token', data.accessToken);
         }
@@ -368,21 +370,21 @@ export default function Landing() {
         let targetLevel = data.user?.educationLevel;
         if (!targetLevel || targetLevel === '전체') {
           const userMeta = `${data.user?.academyName || ''} ${data.user?.name || ''} ${data.user?.email || ''}`.toLowerCase();
-          if (userMeta.includes('초등') || userMeta.includes('elem')) {
-            targetLevel = '초등부';
-          } else if (userMeta.includes('중등') || userMeta.includes('고등') || userMeta.includes('middle') || userMeta.includes('high')) {
+          if (userMeta.includes('중등') || userMeta.includes('고등') || userMeta.includes('middle') || userMeta.includes('high')) {
             targetLevel = '중,고등부';
+          } else if (userMeta.includes('초등') || userMeta.includes('elem')) {
+            targetLevel = '초등부';
           } else {
             targetLevel = '유치원';
           }
         }
         
-        // 정규화
-        if (targetLevel.includes('초등')) {
-          targetLevel = '초등부';
-        } else if (targetLevel.includes('중') || targetLevel.includes('고')) {
+        // 정규화 (중·고등부 및 초등부 우선 매칭)
+        if (targetLevel.includes('중') || targetLevel.includes('고') || targetLevel.toLowerCase().includes('mid')) {
           targetLevel = '중,고등부';
-        } else if (targetLevel.includes('유치')) {
+        } else if (targetLevel.includes('초등') || targetLevel.toLowerCase().includes('elem')) {
+          targetLevel = '초등부';
+        } else {
           targetLevel = '유치원';
         }
 

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Req, Param, Headers, BadRequestException, UseGuards } from '@nestjs/common';
 import { ChatService } from './chat.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AuthUser } from '../auth/auth-user.decorator';
@@ -48,6 +48,27 @@ export class ChatController {
     return this.chatService.getMessages(parseInt(roomId, 10), user.sub);
   }
 
+  @Post('rooms/:roomId/read')
+  async markRoomRead(
+    @AuthUser() user: JwtPayload,
+    @Param('roomId') roomId: string,
+    @Body('userId') bodyUserId?: number,
+  ) {
+    const uid = user?.sub || bodyUserId;
+    if (!uid) return { success: false, message: '유저 정보를 확인할 수 없습니다.' };
+    return this.chatService.markRoomMessagesRead(parseInt(roomId, 10), uid);
+  }
+
+  @Get('rooms/:roomId/messages')
+  async getRoomMessagesAlias(
+    @AuthUser() user: JwtPayload,
+    @Param('roomId') roomId: string,
+    @Query('userId') userId?: string,
+  ) {
+    const uid = user?.sub || (userId ? parseInt(userId, 10) : undefined);
+    return this.chatService.getMessages(parseInt(roomId, 10), uid);
+  }
+
   @Post('rooms')
   async createRoom(
     @AuthUser() user: JwtPayload,
@@ -63,8 +84,23 @@ export class ChatController {
     @AuthUser() user: JwtPayload,
     @Body('roomId') roomId: number,
     @Body('text') text: string,
+    @Body('senderEmail') senderEmail?: string,
+    @Body('type') type?: string,
+    @Body('payload') payload?: any,
   ) {
-    return this.chatService.sendMessageAndBroadcast(Number(roomId), user.email, text);
+    const email = user?.email || senderEmail;
+    if (!email) {
+      throw new BadRequestException('발신자 이메일 정보가 필요합니다.');
+    }
+    return this.chatService.sendMessageAndBroadcast(Number(roomId), email, text, type, payload);
+  }
+
+  @Post('upload')
+  async uploadMedia(
+    @Body() body: { base64Data: string; filename?: string; mimeType?: string },
+    @Headers('host') host: string,
+  ) {
+    return this.chatService.uploadChatMedia(body, host);
   }
 
   /** 기관 전체 알림: 원장이 쓴 내용을 기관 전원의 TakeMe 알림으로 보낸다 (원장·통합 관리자만) */
@@ -99,7 +135,7 @@ export class ChatController {
     @AuthUser() user: JwtPayload,
     @Param('id') id: string,
   ) {
-    return this.chatService.markRoomAsRead(parseInt(id, 10), user.sub);
+    return this.chatService.markRoomMessagesRead(parseInt(id, 10), user.sub);
   }
 
   // ============================================================
