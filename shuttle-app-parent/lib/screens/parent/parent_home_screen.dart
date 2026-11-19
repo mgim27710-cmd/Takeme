@@ -52,6 +52,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   // 운행 상태: null = 아직 모름, true = 운행 중, false = 운행 안 함. 이번 화면에서 운행 중을 본 적이 있는지
   bool? _isOperating;
   bool _sawOperating = false;
+  // 내 아이 정류장 앞에 남은 정류장 수 (몇 정거장 전). null = 아직 모름
+  int? _stopsBefore;
   bool _isLoading = true;
   String? _loadError; // 홈 데이터 일부 불러오기 실패 이유 (null 이면 정상)
   bool _isScanning = false;
@@ -246,6 +248,12 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                 _sawOperating = true;
               });
             });
+            SocketService().onBusProgress((data) {
+              if (!mounted) return;
+              final sid = (data['studentId'] as num?)?.toInt();
+              if (sid == null || sid != _childInfo?.id) return;
+              setState(() => _stopsBefore = (data['stopsBefore'] as num?)?.toInt());
+            });
             SocketService().onVehicleOperatingStatus((data) {
               if (!mounted) return;
               final vid = (data['vehicleId'] as num?)?.toInt();
@@ -255,6 +263,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                 _isOperating = op;
                 if (op) _sawOperating = true;
                 if (!op) {
+                  _stopsBefore = null;
                   // 운행이 끝나면 버스 위치를 지운다 (지도에서 버스 표시가 사라지고 [버스 위치]는 '운행 중 아님' 안내)
                   _busLat = null;
                   _busLng = null;
@@ -1091,6 +1100,11 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                       eta['subtitle'],
                       style: const TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
                     ),
+                    // 몇 정거장 전: 버스 → 남은 정류장 → 우리 아이 정류장
+                    if (_stopsBefore != null && _isOperating != false && (eta['status'] == 'RUNNING' || eta['status'] == 'NEAR' || eta['status'] == 'ARRIVING') && (_childInfo?.boardStatus ?? 'WAITING') != 'DROPPED') ...[
+                      const SizedBox(height: 10),
+                      _buildStopsBeforeBar(_stopsBefore!),
+                    ],
                     // 지연("약 N분 늦어요") 또는 위치 끊김(5분) 안내
                     if (eta['notice'] != null) ...[
                       const SizedBox(height: 6),
@@ -1114,6 +1128,40 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  /// 몇 정거장 전 막대: 🚌 ● ● ● ★  (●는 우리 아이 정류장 앞에 남은 정류장, 최대 6개까지 그리고 나머지는 +N)
+  Widget _buildStopsBeforeBar(int stopsBefore) {
+    const shown = 6;
+    final dots = stopsBefore > shown ? shown : stopsBefore;
+    final label = stopsBefore == 0 ? '다음 정류장이 우리 아이 정류장이에요' : '우리 아이 정류장까지 $stopsBefore정거장 전';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF1E293B))),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            const Icon(Icons.directions_bus_filled, size: 20, color: Color(0xFFF59E0B)),
+            for (var i = 0; i < dots; i++) ...[
+              Expanded(child: Container(height: 3, color: const Color(0xFFCBD5E1))),
+              Container(
+                width: 10,
+                height: 10,
+                decoration: const BoxDecoration(color: Color(0xFF94A3B8), shape: BoxShape.circle),
+              ),
+            ],
+            if (stopsBefore > shown)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text('+${stopsBefore - shown}', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w700)),
+              ),
+            Expanded(child: Container(height: 3, color: const Color(0xFF7C3AED))),
+            const Icon(Icons.star_rounded, size: 22, color: Color(0xFF7C3AED), semanticLabel: '우리 아이 정류장'),
+          ],
+        ),
+      ],
     );
   }
 

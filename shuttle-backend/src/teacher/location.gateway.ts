@@ -560,7 +560,9 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       // 원아 이름이 담긴 접근 알림은 그 원아의 학부모 개인 방에만 보낸다(예전에는 차량 방·기관 방에 학부모 이메일까지 보냈다).
       for (const noti of notificationsToEmit) {
         const { parentUserId, ...rest } = noti as any;
-        if (parentUserId) this.server.to(`user_${parentUserId}`).emit('busArriving', rest);
+        if (!parentUserId) continue;
+        // PROGRESS: 학부모 화면의 '몇 정거장 전' 진행 막대 / 그 외: 도착 임박·유치원 도착
+        this.server.to(`user_${parentUserId}`).emit(rest.kind === 'PROGRESS' ? 'busProgress' : 'busArriving', rest);
       }
     } catch (e) {
       console.error('Error during checkArrivalAndNotify:', e);

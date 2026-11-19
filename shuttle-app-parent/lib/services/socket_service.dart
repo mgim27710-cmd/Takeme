@@ -75,6 +75,14 @@ class SocketService {
     });
   }
 
+  /// 내 아이 정류장까지 남은 정류장 수 (서버가 버스 위치가 올 때마다 보냄)
+  void onBusProgress(Function(Map<String, dynamic> data) callback) {
+    _socket?.off('busProgress');
+    _socket?.on('busProgress', (data) {
+      if (data is Map) callback(Map<String, dynamic>.from(data));
+    });
+  }
+
   /// 차량 운행 시작/종료 (차량 방에 들어가면 현재 상태도 한 번 온다)
   void onVehicleOperatingStatus(Function(Map<String, dynamic> data) callback) {
     _socket?.off('vehicleOperatingStatus');

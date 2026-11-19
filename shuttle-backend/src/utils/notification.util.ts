@@ -34,7 +34,7 @@ export function isNotificationEnabled(
   return true;
 }
 
-export function getUserNotificationSettings(user: User): Record<string, boolean> {
+export function getUserNotificationSettings(user: User): Record<string, boolean | number> {
   const settings = user.notificationSettings || {};
   const role = user.role;
 
@@ -61,6 +61,8 @@ export function getUserNotificationSettings(user: User): Record<string, boolean>
     };
   } else {
     // PARENT / ADMIN / etc.
+    // 도착 알림 시점(분): 2(기본) / 5 / 0(끄기)
+    const arrivalNoticeMinutes = Number.isFinite(Number(settings.arrivalNoticeMinutes)) ? Number(settings.arrivalNoticeMinutes) : 2;
     const legacyBoard = settings.notifyBoardPost ?? (user.notifyBoardPost !== false);
     const noticeVal = settings.notifyNotice ?? (user.notifyNotice !== undefined ? user.notifyNotice : legacyBoard);
     const postVal = settings.notifyPost ?? (user.notifyPost !== undefined ? user.notifyPost : legacyBoard);
@@ -76,6 +78,7 @@ export function getUserNotificationSettings(user: User): Record<string, boolean>
       notice: noticeVal,
       post: postVal,
       ...settings,
+      arrivalNoticeMinutes,
     };
   }
 }

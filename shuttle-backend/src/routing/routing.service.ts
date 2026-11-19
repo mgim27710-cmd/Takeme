@@ -131,22 +131,52 @@ export class RoutingService {
       relations: { parentUser: true },
     });
 
-    // 1) 도착 2분 전
+    // 아직 들르지 않은 정류장: 등원은 아직 안 탄 원아의 탑승지, 하원은 타고 있는 원아의 하차지
+    const pending = students.filter(st =>
+      st.latitude && st.longitude && !st.isNotRiding &&
+      (isMorning ? st.boardStatus === 'WAITING' : st.boardStatus === 'BOARDED'));
+
+    // 0) 몇 정거장 전: 기사 앱과 같은 방식(지금 위치에서 가장 가까운 정류장부터 차례로)으로 남은 순서를 정하고,
+    //    학부모에게는 '내 아이 정류장 앞에 남은 정류장 수'만 보낸다(다른 아이 정류장 이름·위치는 보내지 않음)
+    {
+      const left = [...pending];
+      let curLat = lat;
+      let curLng = lng;
+      let order = 0;
+      while (left.length > 0) {
+        let best = 0;
+        let bestD = Infinity;
+        for (let i = 0; i < left.length; i++) {
+          const d = RoutingService.distanceM(curLat, curLng, Number(left[i].latitude), Number(left[i].longitude));
+          if (d < bestD) { bestD = d; best = i; }
+        }
+        const st = left.splice(best, 1)[0];
+        if (st.parentUser?.id) {
+          events.push({ kind: 'PROGRESS', studentId: st.id, parentUserId: st.parentUser.id, stopsBefore: order, totalRemaining: pending.length });
+        }
+        curLat = Number(st.latitude);
+        curLng = Number(st.longitude);
+        order++;
+      }
+    }
+
+    // 1) 도착 N분 전: 학부모가 고른 시점(2분 전 기본, 5분 전, 끄기=0)에 한 번
     const speedMps = speedKmh && speedKmh > 10 ? speedKmh / 3.6 : 25 / 3.6;
-    for (const st of students) {
-      if (!st.latitude || !st.longitude || st.isNotRiding) continue;
-      // 등원: 아직 안 탄 원아(탑승지로 가는 중) / 하원: 타고 있는 원아(하차지로 가는 중)
-      if (isMorning ? st.boardStatus !== 'WAITING' : st.boardStatus !== 'BOARDED') continue;
+    for (const st of pending) {
+      const pref = Number((st.parentUser as any)?.notificationSettings?.arrivalNoticeMinutes);
+      const minutes = Number.isFinite(pref) ? pref : 2;
+      if (minutes <= 0) continue;
       const dist = RoutingService.distanceM(lat, lng, Number(st.latitude), Number(st.longitude));
       const etaSec = (dist * 1.3) / speedMps;
-      if (etaSec > 120) continue;
+      if (etaSec > minutes * 60) continue;
       const key = `soon:${st.id}:${slot}`;
       if (this.sentArrivalAlerts.has(key)) continue;
       this.sentArrivalAlerts.add(key);
 
       const name = st.adminDisplayName || st.name;
       const place = isMorning ? '탑승지' : '하차지';
-      const message = `차량이 ${name} 원아 ${place}에 약 2분 뒤 도착합니다. ${isMorning ? '미리 나와 주세요.' : '마중 나와 주세요.'}`;
+      const etaMin = Math.max(1, Math.round(etaSec / 60));
+      const message = `차량이 ${name} 원아 ${place}에 약 ${etaMin}분 뒤 도착합니다. ${isMorning ? '미리 나와 주세요.' : '마중 나와 주세요.'}`;
       this.notifyStudentRelated(st.id, '곧 도착해요', message, ['PARENT'], { type: 'shuttle' });
       events.push({ kind: 'SOON', studentId: st.id, studentName: name, parentUserId: st.parentUser?.id, message });
     }

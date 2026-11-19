@@ -408,6 +408,31 @@ class ApiService {
     };
   }
 
+  /// 도착 알림 시점(분): 2 / 5 / 0(끄기). 읽지 못하면 2
+  Future<int> getArrivalNoticeMinutes() async {
+    try {
+      final res = await getWithAuth(Uri.parse('${AppConfig.apiHost}/me/notification-settings'));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        final v = data is Map ? data['arrivalNoticeMinutes'] : null;
+        return v is num ? v.toInt() : (int.tryParse('$v') ?? 2);
+      }
+    } catch (_) {}
+    return 2;
+  }
+
+  Future<bool> setArrivalNoticeMinutes(int minutes) async {
+    try {
+      final res = await http
+          .put(Uri.parse('${AppConfig.apiHost}/me/notification-settings'),
+              headers: _headers(), body: jsonEncode({'arrivalNoticeMinutes': minutes}))
+          .timeout(const Duration(seconds: 8));
+      return res.statusCode == 200 || res.statusCode == 201;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> updateNotificationSettings({bool? notifyShuttleOperation, bool? notifyBoardPost}) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/parent/notification-settings');
