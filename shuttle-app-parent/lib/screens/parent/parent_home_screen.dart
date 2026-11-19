@@ -10,7 +10,6 @@ import '../../models/route_model.dart';
 import '../../widgets/kakao_map_view.dart';
 import 'change_request_modal.dart';
 import 'my_requests_screen.dart';
-import 'notification_list_screen.dart';
 import 'daily_notice_screen.dart';
 import 'board_community_screen.dart';
 import 'parent_chat_room_list_screen.dart';
@@ -120,7 +119,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     try {
       final user = ApiService().currentUser;
       if (user == null) return;
-      final count = await ApiService().getUnreadNotificationCount(user.email);
+      // 알림은 모두 메신저의 TakeMe 알림으로 오므로, 메신저 안 읽은 수(TakeMe 알림 포함)를 대화방 탭에 표시한다
+      final count = await ApiService().getChatTotalUnreadCount();
       if (mounted) {
         setState(() => _unreadNotificationCount = count);
       }
@@ -889,50 +889,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
             _loadUnreadCount();
           },
         ),
-        Stack(
-          clipBehavior: Clip.none,
-          alignment: Alignment.center,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.notifications_none_rounded, color: Color(0xFF0F172A), size: 24),
-              tooltip: '알림',
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const NotificationListScreen()),
-                ).then((_) {
-                  _loadUnreadCount();
-                  _loadAllData();
-                });
-              },
-            ),
-            if (_unreadNotificationCount > 0)
-              Positioned(
-                right: 6,
-                top: 8,
-                child: Container(
-                  padding: const EdgeInsets.all(3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEF4444),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
-                  ),
-                  constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-                  alignment: Alignment.center,
-                  child: Text(
-                    _unreadNotificationCount > 9 ? '9+' : '$_unreadNotificationCount',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w900,
-                      height: 1,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              ),
-          ],
-        ),
+        // 종(알림 목록) 버튼은 없앴다: 알림은 모두 대화방의 TakeMe 알림으로 오고, 안 읽은 수는 아래 대화방 탭에 보인다
         IconButton(
           icon: const Icon(Icons.settings_outlined, color: Color(0xFF475569)),
           tooltip: '설정',
@@ -1718,6 +1675,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
         currentIndex: _currentNavIndex,
         onTap: (index) {
           setState(() => _currentNavIndex = index);
+          _loadUnreadCount();
         },
         type: BottomNavigationBarType.fixed,
         backgroundColor: Colors.white,
@@ -1726,25 +1684,34 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
         selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
         unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 11),
         elevation: 8,
-        items: const [
-          BottomNavigationBarItem(
+        items: [
+          const BottomNavigationBarItem(
             icon: Icon(Icons.directions_bus_rounded),
             activeIcon: Icon(Icons.directions_bus_rounded, color: Color(0xFF2563EB)),
             label: '홈 / 셔틀',
           ),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
             icon: Icon(Icons.menu_book_outlined),
             activeIcon: Icon(Icons.menu_book_rounded, color: Color(0xFF2563EB)),
             label: '알림장',
           ),
-          BottomNavigationBarItem(
+          const BottomNavigationBarItem(
             icon: Icon(Icons.dashboard_outlined),
             activeIcon: Icon(Icons.dashboard_rounded, color: Color(0xFF2563EB)),
             label: '게시판',
           ),
+          // 메시지·TakeMe 알림이 오면 안 읽은 수를 빨간 배지로
           BottomNavigationBarItem(
-            icon: Icon(Icons.chat_bubble_outline_rounded),
-            activeIcon: Icon(Icons.chat_bubble_rounded, color: Color(0xFF2563EB)),
+            icon: Badge(
+              isLabelVisible: _unreadNotificationCount > 0,
+              label: Text(_unreadNotificationCount > 99 ? '99+' : '$_unreadNotificationCount'),
+              child: const Icon(Icons.chat_bubble_outline_rounded),
+            ),
+            activeIcon: Badge(
+              isLabelVisible: _unreadNotificationCount > 0,
+              label: Text(_unreadNotificationCount > 99 ? '99+' : '$_unreadNotificationCount'),
+              child: const Icon(Icons.chat_bubble_rounded, color: Color(0xFF2563EB)),
+            ),
             label: '대화방',
           ),
         ],

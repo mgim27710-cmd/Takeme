@@ -741,7 +741,8 @@ export class ChatService {
     if (currentUserId) {
       const toUpdate: ChatMessage[] = [];
       for (const m of messages) {
-        if (m.sender && m.sender.id !== currentUserId) {
+        // 보낸 사람이 없는 시스템 알림(TakeMe 알림)도 열어 보면 읽음 처리한다
+        if (!m.sender || m.sender.id !== currentUserId) {
           const readByList = (m.readBy || []).map(Number);
           if (!readByList.includes(currentUserId)) {
             readByList.push(currentUserId);

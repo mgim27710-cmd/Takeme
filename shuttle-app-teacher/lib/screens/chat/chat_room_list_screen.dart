@@ -242,10 +242,12 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
     } else if (role == 'STUDENT') {
       badgeLabel = '학생';
       badgeColor = const Color(0xFF8B5CF6);
-    } else {
+    } else if (role != null && role.isNotEmpty) {
       badgeLabel = UserModel.getRoleKorean(role);
       badgeColor = const Color(0xFF64748B);
     }
+    // 역할을 모르는 방(예전 공지사항 방 등)에는 '알 수 없음' 배지를 달지 않는다
+    if (badgeLabel == '알 수 없음') badgeLabel = '';
 
     final isPinned = room['isPinned'] == true;
 

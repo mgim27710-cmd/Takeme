@@ -1044,15 +1044,27 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
             padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                CircleAvatar(
-                  radius: 22,
-                  backgroundColor: isGroup ? const Color(0xFFEDE9FE) : const Color(0xFFEFF6FF),
-                  child: Icon(
-                    isGroup ? Icons.groups_rounded : Icons.person_rounded,
-                    color: isGroup ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
-                    size: 24,
+                if (room.type == 'NOTIFICATION_SYSTEM')
+                  // TakeMe 알림: 차량선생님·기사 앱과 같은 어두운 종 아이콘
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F172A),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(Icons.notifications_active, color: Colors.white, size: 22),
+                  )
+                else
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundColor: isGroup ? const Color(0xFFEDE9FE) : const Color(0xFFEFF6FF),
+                    child: Icon(
+                      isGroup ? Icons.groups_rounded : Icons.person_rounded,
+                      color: isGroup ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
+                      size: 24,
+                    ),
                   ),
-                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(

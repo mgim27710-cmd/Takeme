@@ -337,6 +337,24 @@ class ApiService {
     return [];
   }
 
+  /// 메신저 전체 안 읽은 메시지 수 (TakeMe 알림 포함)
+  Future<int> getChatTotalUnreadCount() async {
+    try {
+      final email = currentUser?.email;
+      if (email == null) return 0;
+      final rooms = await getChatRooms(email);
+      var sum = 0;
+      for (final r in rooms) {
+        final type = r['type']?.toString();
+        if (type == 'PAYMENT_SYSTEM') continue;
+        sum += (r['unreadCount'] as num?)?.toInt() ?? 0;
+      }
+      return sum;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   Future<int> getUnreadNotificationCount(String email) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/parent/notifications/unread-count?email=${Uri.encodeComponent(email)}');
