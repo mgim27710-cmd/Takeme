@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/route_model.dart';
+import 'naver_route_map.dart';
 import 'kakao_map_view_stub.dart' if (dart.library.html) 'kakao_map_view_web.dart';
 
 class KakaoMapView extends StatefulWidget {
@@ -159,19 +160,76 @@ class _KakaoMapViewState extends State<KakaoMapView> {
     _controller?.runJavaScript(js);
   }
 
+
+  // ───── 네이버 지도 (인증되면 사용, 아니면 아래 기존 지도) ─────
+  final GlobalKey<NaverRouteMapState> _naverKey = GlobalKey<NaverRouteMapState>();
+  bool get _useNaver => !kIsWeb && naverMapAvailable.value;
+
+  static List<List<double>> _latLngList(List<dynamic>? list) {
+    final out = <List<double>>[];
+    for (final p in list ?? const []) {
+      if (p is Map) {
+        final la = (p['lat'] ?? p['latitude']) as num?;
+        final ln = (p['lng'] ?? p['longitude']) as num?;
+        if (la != null && ln != null) out.add([la.toDouble(), ln.toDouble()]);
+      }
+    }
+    return out;
+  }
+
+  Widget _naverMap() {
+    // 학부모에게는 내 아이 정류장만 보여준다
+    final mine = widget.stops.where((s) => s.isMyChild).toList();
+    final label = widget.isGohome ? '내리는 곳' : '타는 곳';
+    final stops = <NaverStopPoint>[
+      if (mine.isNotEmpty)
+        NaverStopPoint(lat: mine.first.latitude, lng: mine.first.longitude, label: label, isMine: true)
+      else if (widget.myChildLat != null && widget.myChildLng != null)
+        NaverStopPoint(lat: widget.myChildLat!, lng: widget.myChildLng!, label: label, isMine: true),
+    ];
+    return NaverRouteMap(
+      key: _naverKey,
+      stops: stops,
+      fallbackPoints: _latLngList(widget.routePoints),
+      roadPath: _latLngList(widget.actualRoadPath),
+      progressIndex: widget.progressIndex,
+      busLat: widget.busLat,
+      busLng: widget.busLng,
+      academyLat: widget.academyLat,
+      academyLng: widget.academyLng,
+      academyName: widget.academyName,
+    );
+  }
+
   void _zoomIn() {
+    if (_useNaver) {
+      _naverKey.currentState?.zoomIn();
+      return;
+    }
     _runJs('if (window.zoomIn) { window.zoomIn(); }');
   }
 
   void _zoomOut() {
+    if (_useNaver) {
+      _naverKey.currentState?.zoomOut();
+      return;
+    }
     _runJs('if (window.zoomOut) { window.zoomOut(); }');
   }
 
   void _fitAll() {
+    if (_useNaver) {
+      _naverKey.currentState?.fitAll();
+      return;
+    }
     _runJs('if (window.fitAll) { window.fitAll(); }');
   }
 
   void _focusMyChild() {
+    if (_useNaver) {
+      _naverKey.currentState?.focusMyChild();
+      return;
+    }
     _runJs('if (window.focusMyChild) { window.focusMyChild(); }');
   }
 
@@ -499,9 +557,14 @@ class _KakaoMapViewState extends State<KakaoMapView> {
                   htmlContent: _generateHtml(autoInit: true),
                   isInteractive: widget.isInteractive,
                 )
-              : (_controller == null
-                  ? _buildWebPlaceholder()
-                  : WebViewWidget(controller: _controller!)),
+              : ValueListenableBuilder<bool>(
+                  valueListenable: naverMapAvailable,
+                  builder: (context, naverOk, _) => naverOk
+                      ? _naverMap()
+                      : (_controller == null
+                          ? _buildWebPlaceholder()
+                          : WebViewWidget(controller: _controller!)),
+                ),
         ),
 
         // Controls Overlay (전체화면에서는 화면 가장자리·카메라 구멍을 피한다)

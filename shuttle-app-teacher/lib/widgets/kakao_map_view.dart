@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/route_model.dart';
+import 'naver_route_map.dart';
 
 class KakaoMapView extends StatefulWidget {
   final List<RouteStop> stops;
@@ -157,19 +158,77 @@ class _KakaoMapViewState extends State<KakaoMapView> {
     _controller?.runJavaScript(js);
   }
 
+
+  // ───── 네이버 지도 (인증되면 사용, 아니면 아래 기존 지도) ─────
+  final GlobalKey<NaverRouteMapState> _naverKey = GlobalKey<NaverRouteMapState>();
+  bool get _useNaver => !kIsWeb && naverMapAvailable.value;
+
+  static List<List<double>> _latLngList(List<dynamic>? list) {
+    final out = <List<double>>[];
+    for (final p in list ?? const []) {
+      if (p is Map) {
+        final la = (p['lat'] ?? p['latitude']) as num?;
+        final ln = (p['lng'] ?? p['longitude']) as num?;
+        if (la != null && ln != null) out.add([la.toDouble(), ln.toDouble()]);
+      }
+    }
+    return out;
+  }
+
+  Widget _naverMap() {
+    final stops = <NaverStopPoint>[
+      for (var i = 0; i < widget.stops.length; i++)
+        NaverStopPoint(
+          lat: widget.stops[i].latitude,
+          lng: widget.stops[i].longitude,
+          label: widget.stops[i].isMyChild ? '우리 아이' : '${i + 1}',
+          isMine: widget.stops[i].isMyChild,
+        ),
+    ];
+    return NaverRouteMap(
+      key: _naverKey,
+      stops: stops,
+      fallbackPoints: _latLngList(widget.routePoints),
+      roadPath: _latLngList(widget.actualRoadPath),
+      progressIndex: widget.progressIndex,
+      busLat: widget.busLat,
+      busLng: widget.busLng,
+      academyLat: widget.academyLat,
+      academyLng: widget.academyLng,
+      academyName: widget.academyName,
+      onStopTap: widget.onStopTap == null ? null : (i) => widget.onStopTap!(i, widget.stops[i].name),
+    );
+  }
+
   void _zoomIn() {
+    if (_useNaver) {
+      _naverKey.currentState?.zoomIn();
+      return;
+    }
     _controller?.runJavaScript('if (window.zoomIn) { window.zoomIn(); }');
   }
 
   void _zoomOut() {
+    if (_useNaver) {
+      _naverKey.currentState?.zoomOut();
+      return;
+    }
     _controller?.runJavaScript('if (window.zoomOut) { window.zoomOut(); }');
   }
 
   void _fitAll() {
+    if (_useNaver) {
+      _naverKey.currentState?.fitAll();
+      return;
+    }
     _controller?.runJavaScript('if (window.fitAll) { window.fitAll(); }');
   }
 
   void _focusMyChild() {
+    if (_useNaver) {
+      _naverKey.currentState?.focusMyChild();
+      return;
+    }
     _controller?.runJavaScript('if (window.focusMyChild) { window.focusMyChild(); }');
   }
 
@@ -454,9 +513,14 @@ class _KakaoMapViewState extends State<KakaoMapView> {
         // Map Container
         ClipRRect(
           borderRadius: BorderRadius.circular(widget.isFullScreen ? 0 : 20),
-          child: (kIsWeb || _controller == null)
-              ? _buildWebPlaceholder()
-              : WebViewWidget(controller: _controller!),
+          child: ValueListenableBuilder<bool>(
+            valueListenable: naverMapAvailable,
+            builder: (context, naverOk, _) => (naverOk && !kIsWeb)
+                ? _naverMap()
+                : ((kIsWeb || _controller == null)
+                    ? _buildWebPlaceholder()
+                    : WebViewWidget(controller: _controller!)),
+          ),
         ),
 
         // Controls Overlay
