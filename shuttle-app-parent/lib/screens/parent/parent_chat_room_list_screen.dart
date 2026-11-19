@@ -1044,7 +1044,7 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
             padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                if (room.type == 'NOTIFICATION_SYSTEM')
+                if (room.type == 'NOTIFICATION_SYSTEM' && room.name == 'TakeMe 알림')
                   // TakeMe 알림: 차량선생님·기사 앱과 같은 어두운 종 아이콘
                   Container(
                     width: 44,
@@ -1054,6 +1054,17 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: const Icon(Icons.notifications_active, color: Colors.white, size: 22),
+                  )
+                else if (room.type == 'NOTIFICATION_SYSTEM')
+                  // 공지사항: 기관 전체 공지
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(Icons.campaign_rounded, color: Color(0xFF059669), size: 24),
                   )
                 else
                   CircleAvatar(

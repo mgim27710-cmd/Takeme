@@ -253,7 +253,8 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
 
     return InkWell(
       onTap: () => _enterRoom(room),
-      onLongPress: isSystem ? null : () => _showRoomActions(room),
+      // TakeMe 알림·공지사항(시스템 방)은 고정·삭제 대상이 아니다
+      onLongPress: (isSystem || room['type'] == 'NOTIFICATION_SYSTEM') ? null : () => _showRoomActions(room),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(

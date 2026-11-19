@@ -435,18 +435,73 @@ export class ChatService {
     content: string,
     extraData?: any,
   ) {
-    // 기관 전체 소식(휴업·방학·행사 등)은 공지사항 방 대신 기관 전원의 개인 알림("TakeMe 알림")으로 보낸다.
+    // 공지사항 채널은 기관 전체 공지(행사·휴원·규정 변경 등) 전용이다.
     // 결석·결재·운행 같은 개별 소식은 관련자에게만 개인 알림으로 보낸다(notifyStudentRelated 등).
     if (category !== 'GENERAL') {
-      console.warn(`[ChatService] 기관 전체 알림에는 개별 업무 알림(${category})을 보내지 않습니다. 개인 알림을 사용하세요.`);
+      console.warn(`[ChatService] 공지사항 채널에는 개별 업무 알림(${category})을 보내지 않습니다. 개인 알림을 사용하세요.`);
       return;
     }
-    if (!academyId) return;
     try {
-      const sent = await this.sendAcademyWideNotification(academyId, title, content, { category, extraData });
+      let notiRoom = await this.roomRepo.findOne({
+        where: {
+          type: ChatRoomType.NOTIFICATION_SYSTEM,
+          name: In(ACADEMY_NOTI_ROOM_NAMES),
+          ...(academyId ? { academyId } : {}),
+        },
+        relations: { members: { user: true } },
+      });
+
+      if (notiRoom && notiRoom.name !== ACADEMY_NOTI_ROOM_NAME) {
+        await this.roomRepo.update(notiRoom.id, { name: ACADEMY_NOTI_ROOM_NAME });
+        notiRoom.name = ACADEMY_NOTI_ROOM_NAME;
+      }
+
+      if (!notiRoom) {
+        notiRoom = this.roomRepo.create({
+          name: ACADEMY_NOTI_ROOM_NAME,
+          type: ChatRoomType.NOTIFICATION_SYSTEM,
+          academyId: academyId || null,
+        });
+        notiRoom = await this.roomRepo.save(notiRoom);
+      }
+
+      let senderUser: User | null = null;
+      if (academyId) {
+        senderUser = await this.userRepo.findOne({
+          where: { academyId, role: In([UserRole.ACADEMY_ADMIN, UserRole.SUPER_ADMIN]) },
+        });
+      }
+      if (!senderUser) {
+        senderUser = await this.userRepo.findOne({
+          where: { role: UserRole.SUPER_ADMIN },
+        });
+      }
+
+      const message = this.messageRepo.create({
+        room: notiRoom,
+        sender: senderUser || undefined,
+        text: `[${title}] ${content}`,
+        type: 'TEXT',
+        payload: {
+          isSystemAlert: true,
+          category,
+          title,
+          content,
+          extraData,
+          createdAt: new Date().toISOString(),
+        },
+        readBy: senderUser ? [senderUser.id] : [],
+      });
+
+      const saved = await this.messageRepo.save(message);
+      await this.roomRepo.update(notiRoom.id, { updatedAt: new Date() });
+
+      this.chatGateway.broadcastMessageToRoom(notiRoom.id, saved, (notiRoom.members || []).map(m => m.user?.id).filter(Boolean) as number[]);
+      this.chatGateway.server?.to(`chat_${notiRoom.id}`).emit('roomUpdated', { roomId: notiRoom.id });
+      if (academyId) this.chatGateway.server?.to(`academy_${academyId}`).emit('roomUpdated', { roomId: notiRoom.id });
 
       const alertPayload = {
-        id: sent[0]?.id,
+        id: saved.id,
         category,
         title,
         message: content,
@@ -469,54 +524,10 @@ export class ChatService {
         this.chatGateway?.server?.to(`user_${sa.id}`).emit('globalDirectorAlert', alertPayload);
       }
 
-      return sent;
+      return saved;
     } catch (err) {
       console.error('Failed to send system notification:', err);
     }
-  }
-
-  /** 기관 소속 전원(원장·교직원·기사·학부모·학생)의 사용자 ID */
-  private async getAcademyMemberIds(academyId: number): Promise<number[]> {
-    const users = await this.userRepo.find({ where: { academyId }, select: { id: true } });
-    const ids = new Set<number>(users.map(u => u.id));
-    (await this.getAcademyAdminIds(academyId)).forEach(id => ids.add(id));
-    return Array.from(ids);
-  }
-
-  /** 기관 전원에게 같은 개인 알림("TakeMe 알림")을 보낸다. 알림 설정에서 '공지'를 끈 사람은 받지 않는다. */
-  async sendAcademyWideNotification(
-    academyId: number,
-    title: string,
-    content: string,
-    metadata?: Record<string, any>,
-  ) {
-    const ids = await this.getAcademyMemberIds(academyId);
-    return this.sendSystemNotificationToUsers(ids, title, content, {
-      type: 'notice',
-      metadata: { type: 'notice', ...(metadata || {}) },
-    });
-  }
-
-  /** 원장이 웹에서 쓰는 기관 전체 알림 (원장·통합 관리자만) */
-  async sendAcademyAnnouncement(
-    requester: { sub: number; role: string; academyId: number | null },
-    title: string,
-    content: string,
-    academyIdOverride?: number,
-  ) {
-    const isSuper = requester.role === UserRole.SUPER_ADMIN;
-    if (!isSuper && requester.role !== UserRole.ACADEMY_ADMIN) {
-      throw new ForbiddenException('전체 알림은 원장님만 보낼 수 있습니다.');
-    }
-    const academyId = isSuper && academyIdOverride ? academyIdOverride : requester.academyId;
-    if (!academyId) throw new BadRequestException('기관 정보가 없습니다.');
-    const cleanTitle = (title || '').trim();
-    const cleanContent = (content || '').trim();
-    if (!cleanContent) throw new BadRequestException('알림 내용을 입력해 주세요.');
-    const sent = await this.sendAcademyWideNotification(academyId, cleanTitle || '기관 알림', cleanContent, {
-      announcedBy: requester.sub,
-    });
-    return { success: true, sentCount: sent.length };
   }
 
   async getRoomsByEmail(email: string, educationLevel?: string) {
@@ -527,7 +538,40 @@ export class ChatService {
 
     const targetAcademyId = user.academyId || null;
 
-    // 기관 공지사항 방은 더 이상 쓰지 않는다(기관 전체 소식도 TakeMe 알림으로 간다). 개인 알림방만 보장한다.
+    // Ensure '공지사항' exists and user is member
+    let notiSystemRoom = await this.roomRepo.findOne({
+      where: {
+        type: ChatRoomType.NOTIFICATION_SYSTEM,
+        name: In(ACADEMY_NOTI_ROOM_NAMES),
+        ...(targetAcademyId ? { academyId: targetAcademyId } : {}),
+      },
+      relations: { members: { user: true } },
+    });
+
+    if (notiSystemRoom && notiSystemRoom.name !== ACADEMY_NOTI_ROOM_NAME) {
+      await this.roomRepo.update(notiSystemRoom.id, { name: ACADEMY_NOTI_ROOM_NAME });
+      notiSystemRoom.name = ACADEMY_NOTI_ROOM_NAME;
+    }
+
+    if (!notiSystemRoom) {
+      notiSystemRoom = this.roomRepo.create({
+        name: ACADEMY_NOTI_ROOM_NAME,
+        type: ChatRoomType.NOTIFICATION_SYSTEM,
+        academyId: targetAcademyId,
+      });
+      notiSystemRoom = await this.roomRepo.save(notiSystemRoom);
+    }
+
+    const isNotiMember = (notiSystemRoom.members || []).some(m => m.user?.id === userId);
+    if (!isNotiMember) {
+      const notiMember = this.memberRepo.create({
+        room: notiSystemRoom,
+        user: { id: userId },
+      });
+      await this.memberRepo.save(notiMember);
+    }
+
+    // 개인 알림방 보장 ("TakeMe 알림")
     await this.getOrCreateNotificationRoom(userId);
 
     // Fetch all rooms the user is a member of
@@ -646,19 +690,21 @@ export class ChatService {
         continue;
       }
       if (room.type === ChatRoomType.NOTIFICATION_SYSTEM) {
-        // 개인 알림방(TakeMe 알림) 1개만 보여준다. 예전 기관 공지사항 방은 목록에서 뺀다.
-        if (room.name !== PERSONAL_NOTI_ROOM_NAME) continue;
-        if (seenSpecialTypes.has('PERSONAL')) continue;
-        seenSpecialTypes.add('PERSONAL');
+        // 개인 알림방(TakeMe 알림) 1개 + 기관 공지 채널(공지사항) 1개만 유지
+        const key = room.name === PERSONAL_NOTI_ROOM_NAME ? 'PERSONAL' : 'ACADEMY';
+        if (seenSpecialTypes.has(key)) continue;
+        seenSpecialTypes.add(key);
+        room.name = key === 'PERSONAL' ? PERSONAL_NOTI_ROOM_NAME : ACADEMY_NOTI_ROOM_NAME;
       }
       deduplicatedRooms.push(room);
     }
 
-    // 정렬: 1) TakeMe 알림 2) 내가 고정한 방(먼저 고정한 순서) 3) 나머지는 최신 메시지 순
+    // 정렬: 1) TakeMe 알림 2) 공지사항 3) 내가 고정한 방(먼저 고정한 순서) 4) 나머지는 최신 메시지 순
     deduplicatedRooms.sort((a: any, b: any) => {
       const aNoti = a.type === ChatRoomType.NOTIFICATION_SYSTEM;
       const bNoti = b.type === ChatRoomType.NOTIFICATION_SYSTEM;
       if (aNoti !== bNoti) return aNoti ? -1 : 1;
+      if (aNoti && bNoti) return a.name === PERSONAL_NOTI_ROOM_NAME ? -1 : 1; // TakeMe 알림 → 공지사항
       const aPin = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0;
       const bPin = b.pinnedAt ? new Date(b.pinnedAt).getTime() : 0;
       if (!!aPin !== !!bPin) return aPin ? -1 : 1;

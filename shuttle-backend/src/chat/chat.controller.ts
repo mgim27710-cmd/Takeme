@@ -103,17 +103,6 @@ export class ChatController {
     return this.chatService.uploadChatMedia(body, host);
   }
 
-  /** 기관 전체 알림: 원장이 쓴 내용을 기관 전원의 TakeMe 알림으로 보낸다 (원장·통합 관리자만) */
-  @Post('announcement')
-  async sendAnnouncement(
-    @AuthUser() user: JwtPayload,
-    @Body('title') title: string,
-    @Body('content') content: string,
-    @Query('academyId') academyId?: string,
-  ) {
-    return this.chatService.sendAcademyAnnouncement(user, title, content, this.resolveAcademyId(user, academyId));
-  }
-
   /** 내 목록에서 대화방 맨 위 고정/해제 */
   @Post('rooms/:id/pin')
   async pinRoom(

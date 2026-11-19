@@ -730,37 +730,6 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     }
   };
 
-  const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
-  const [announcementForm, setAnnouncementForm] = useState({ title: '', content: '' });
-  const [isSendingAnnouncement, setIsSendingAnnouncement] = useState(false);
-  const [announcementError, setAnnouncementError] = useState('');
-
-  /** 원장 전체 알림: 기관 전원의 TakeMe 알림으로 보낸다 */
-  const handleSendAnnouncement = async () => {
-    const content = announcementForm.content.trim();
-    if (!content) return;
-    setIsSendingAnnouncement(true);
-    setAnnouncementError('');
-    try {
-      const res = await fetch(`${API_BASE_URL}/chat/announcement`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ title: announcementForm.title.trim(), content }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setAnnouncementError(data?.message || `보내지 못했습니다. (${res.status})`);
-        return;
-      }
-      setShowAnnouncementModal(false);
-      alert(`전체 알림을 보냈습니다. (${data?.sentCount ?? 0}명)`);
-    } catch (e) {
-      setAnnouncementError('네트워크 오류로 보내지 못했습니다. 잠시 후 다시 시도해 주세요.');
-    } finally {
-      setIsSendingAnnouncement(false);
-    }
-  };
-
   const handleSendMessage = async () => {
     const text = inputText.trim();
     if (!text || !activeRoom) return;
@@ -1565,10 +1534,10 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         if (r.type === 'PAYMENT_SYSTEM') {
           return false; // Hide payment system channel
         } else if (r.type === 'NOTIFICATION_SYSTEM') {
-          // 개인 알림방(TakeMe 알림) 1개만 표시. 예전 기관 공지사항 방은 숨긴다(기관 전체 소식도 TakeMe 알림으로 온다).
-          if (r.name !== 'TakeMe 알림') return false;
-          if (seenSpecial.has('PERSONAL')) return false;
-          seenSpecial.add('PERSONAL');
+          // 개인 알림방(TakeMe 알림) 1개 + 기관 공지 채널(공지사항) 1개만 표시
+          const key = r.name === 'TakeMe 알림' ? 'PERSONAL' : 'ACADEMY';
+          if (seenSpecial.has(key)) return false;
+          seenSpecial.add(key);
         }
         const title = getRoomTitle(r).toLowerCase();
         const lastText = (r.latestMessage?.text || '').toLowerCase();
@@ -1630,10 +1599,10 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
   const isCurrentRoomPaymentSystem = activeRoom?.type === 'PAYMENT_SYSTEM' || activeRoom?.name === '결재 전용 채널';
   const isCurrentRoomNotificationSystem = activeRoom?.type === 'NOTIFICATION_SYSTEM' || activeRoom?.name === '실시간 알림 채널' || activeRoom?.name === '공지사항';
-  // 알림방("TakeMe 알림")은 아무도 답장할 수 없다. 기관 전체 소식은 원장이 [전체 알림 보내기]로 보낸다.
-  const isPersonalNotificationRoom = isCurrentRoomNotificationSystem;
-  const canSendAnnouncement = myUser.role === 'ACADEMY_ADMIN' || myUser.role === 'SUPER_ADMIN';
-  const isNoticeReadOnly = isCurrentRoomNotificationSystem;
+  // 개인 알림방("TakeMe 알림")은 아무도 답장할 수 없고, 공지사항(기관 전체 공지)은 기관 관리자만 글을 쓸 수 있다.
+  const isPersonalNotificationRoom = isCurrentRoomNotificationSystem && activeRoom?.name === 'TakeMe 알림';
+  const canWriteNotice = myUser.role === 'ACADEMY_ADMIN' || myUser.role === 'SUPER_ADMIN';
+  const isNoticeReadOnly = isCurrentRoomNotificationSystem && (isPersonalNotificationRoom || !canWriteNotice);
 
   const activeOtherUser = (activeRoom?.members || [])
     .map((m) => m.user)
@@ -1685,17 +1654,6 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
-          {/* 전체 알림 보내기 (원장만): 기관 전원의 TakeMe 알림으로 전송 */}
-          {canSendAnnouncement && (
-            <button
-              onClick={() => { setAnnouncementForm({ title: '', content: '' }); setShowAnnouncementModal(true); }}
-              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs py-2 px-3 rounded-xl shadow-sm transition-all"
-              title="기관 전원(교직원·기사·학부모)에게 TakeMe 알림 보내기"
-            >
-              <span>전체 알림</span>
-            </button>
-          )}
           {/* 메세지 보내기 (새 대화) 버튼 */}
           <button
             onClick={handleOpenNewChatModal}
@@ -1707,50 +1665,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             </svg>
             <span>메세지 보내기</span>
           </button>
-          </div>
         </div>
-
-        {showAnnouncementModal && (
-          <div className="fixed inset-0 z-[3000] bg-black/40 flex items-center justify-center p-4" onClick={() => !isSendingAnnouncement && setShowAnnouncementModal(false)}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
-              <h3 className="text-base font-extrabold text-slate-800">전체 알림 보내기</h3>
-              <p className="text-xs text-slate-500">기관의 교직원·기사·학부모 모두의 TakeMe 알림으로 갑니다. 알림 설정에서 공지를 끈 사람은 받지 않습니다.</p>
-              <input
-                type="text"
-                placeholder="제목 (예: 내일 현장학습 안내)"
-                value={announcementForm.title}
-                onChange={(e) => setAnnouncementForm((f) => ({ ...f, title: e.target.value }))}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
-              />
-              <textarea
-                rows={5}
-                placeholder="내용을 입력하세요."
-                value={announcementForm.content}
-                onChange={(e) => setAnnouncementForm((f) => ({ ...f, content: e.target.value }))}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
-              />
-              {announcementError && <p className="text-xs font-bold text-red-600">{announcementError}</p>}
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  disabled={isSendingAnnouncement}
-                  onClick={() => setShowAnnouncementModal(false)}
-                  className="px-4 py-2 text-sm font-bold text-slate-600 rounded-lg hover:bg-slate-100"
-                >
-                  취소
-                </button>
-                <button
-                  type="button"
-                  disabled={isSendingAnnouncement || !announcementForm.content.trim()}
-                  onClick={handleSendAnnouncement}
-                  className="px-4 py-2 text-sm font-bold text-white rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  {isSendingAnnouncement ? '보내는 중...' : '보내기'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Room Search Bar */}
         <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100">
@@ -1905,7 +1820,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                       </span>
                     ) : isCurrentRoomNotificationSystem ? (
                       <span className="text-[11px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
-                        알림
+                        공지사항
                       </span>
                     ) : (
                       <span className="text-xs text-slate-400 font-bold">
@@ -1917,7 +1832,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     {isCurrentRoomPaymentSystem
                       ? '신규 학생 탑승 요청 및 담당 차량선생님 수락/거절 시스템 채널입니다.'
                       : isCurrentRoomNotificationSystem
-                      ? '나와 관련된 알림과 기관 전체 소식(휴업·방학·행사, 원장님 알림)이 옵니다.'
+                      ? '결재 완료(지도교사/학부모/원장 승인) 및 출결/통학 변동 알림 전용 채널입니다.'
                       : (activeRoom.members || [])
                           .map((m) => m.user)
                           .filter(Boolean)
@@ -2771,9 +2686,9 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
               <div className="p-4 bg-slate-50 border-t border-slate-200 text-center text-xs font-bold text-slate-500 flex items-center justify-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
                 <span>
-                  {canSendAnnouncement
-                    ? 'TakeMe 알림은 답장할 수 없습니다. 기관 전체에 알리려면 위의 [전체 알림]을 누르세요.'
-                    : 'TakeMe 알림입니다. 답장할 수 없습니다.'}
+                  {isPersonalNotificationRoom
+                    ? 'TakeMe 알림입니다. 나와 관련된 알림만 표시되며 답장할 수 없습니다.'
+                    : '공지사항입니다. 기관 공지는 원장님만 작성할 수 있습니다.'}
                 </span>
               </div>
             ) : (
