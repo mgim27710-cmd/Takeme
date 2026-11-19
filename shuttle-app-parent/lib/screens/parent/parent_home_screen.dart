@@ -482,9 +482,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     final out = <List<double>>[];
     for (final p in _roadPath ?? const []) {
       if (p is Map) {
-        final lat = (p['lat'] ?? p['latitude']) as num?;
-        final lng = (p['lng'] ?? p['longitude']) as num?;
-        if (lat != null && lng != null) out.add([lat.toDouble(), lng.toDouble()]);
+        final lat = double.tryParse((p['lat'] ?? p['latitude'])?.toString() ?? '');
+        final lng = double.tryParse((p['lng'] ?? p['longitude'])?.toString() ?? '');
+        if (lat != null && lng != null) out.add([lat, lng]);
       }
     }
     return out;

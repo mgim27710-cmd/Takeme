@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/route_model.dart';
 import 'naver_route_map.dart';
+import 'package:geolocator/geolocator.dart';
 import 'kakao_map_view_stub.dart' if (dart.library.html) 'kakao_map_view_web.dart';
 
 class KakaoMapView extends StatefulWidget {
@@ -169,9 +170,10 @@ class _KakaoMapViewState extends State<KakaoMapView> {
     final out = <List<double>>[];
     for (final p in list ?? const []) {
       if (p is Map) {
-        final la = (p['lat'] ?? p['latitude']) as num?;
-        final ln = (p['lng'] ?? p['longitude']) as num?;
-        if (la != null && ln != null) out.add([la.toDouble(), ln.toDouble()]);
+        // 서버가 좌표를 숫자 또는 글자("37.78")로 보낼 수 있다
+        final la = double.tryParse((p['lat'] ?? p['latitude'])?.toString() ?? '');
+        final ln = double.tryParse((p['lng'] ?? p['longitude'])?.toString() ?? '');
+        if (la != null && ln != null) out.add([la, ln]);
       }
     }
     return out;
@@ -199,6 +201,49 @@ class _KakaoMapViewState extends State<KakaoMapView> {
       academyLng: widget.academyLng,
       academyName: widget.academyName,
     );
+  }
+
+  bool _locating = false;
+
+  /// [내 위치] 버튼: 위치 권한을 확인하고 현재 위치를 작은 빨간 점으로 표시
+  Future<void> _goToMyLocation() async {
+    if (_locating) return;
+    void tell(String msg) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+
+    _locating = true;
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        tell('휴대폰 위치(GPS)가 꺼져 있습니다. 설정에서 위치를 켜 주세요.');
+        return;
+      }
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
+      if (perm == LocationPermission.denied) {
+        tell('위치 권한을 허용해야 내 위치를 볼 수 있어요.');
+        return;
+      }
+      if (perm == LocationPermission.deniedForever) {
+        tell('위치 권한이 꺼져 있습니다. 휴대폰 설정 > 앱 > 위치에서 허용해 주세요.');
+        await Geolocator.openAppSettings();
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 10)),
+      );
+      if (!mounted) return;
+      if (_useNaver) {
+        await _naverKey.currentState?.showMyLocation(pos.latitude, pos.longitude);
+      } else {
+        _runJs('if (window.showMe) { window.showMe(${pos.latitude}, ${pos.longitude}); }');
+      }
+    } catch (e) {
+      tell('현재 위치를 가져오지 못했습니다. 잠시 후 다시 눌러 주세요.');
+    } finally {
+      _locating = false;
+    }
   }
 
   void _zoomIn() {
@@ -422,6 +467,19 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           }
         };
 
+        var meMarker = null;
+        window.showMe = function(lat, lng) {
+          if (!lat || !lng) return;
+          if (meMarker) {
+            meMarker.setLatLng([lat, lng]);
+          } else {
+            meMarker = L.circleMarker([lat, lng], {
+              radius: 7, color: '#ffffff', weight: 3, fillColor: '#ef4444', fillOpacity: 1
+            }).addTo(map);
+          }
+          map.setView([lat, lng], 16);
+        };
+
         window.updateBus = function(lat, lng) {
           if (!lat || !lng) return;
           if (busMarker) {
@@ -615,6 +673,15 @@ class _KakaoMapViewState extends State<KakaoMapView> {
                 icon: Icons.crop_free,
                 tooltip: '전체 노선 한눈에 보기',
                 onTap: _fitAll,
+              ),
+              const SizedBox(height: 8),
+
+              // 내 위치 (작은 빨간 점으로 표시)
+              _buildControlBtn(
+                icon: Icons.my_location,
+                tooltip: '내 위치 보기',
+                iconColor: const Color(0xFFEF4444),
+                onTap: _goToMyLocation,
               ),
             ],
           ),

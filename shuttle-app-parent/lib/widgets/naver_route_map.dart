@@ -82,6 +82,26 @@ class NaverRouteMapState extends State<NaverRouteMap> {
   bool _pending = false;
   bool _fitted = false;
   final Map<String, NOverlayImage> _images = {};
+  NLatLng? _myPos;
+  NMarker? _myMarker;
+
+  /// 내 위치를 작은 빨간 점으로 표시하고 그곳으로 이동
+  Future<void> showMyLocation(double lat, double lng) async {
+    _myPos = NLatLng(lat, lng);
+    final map = _map;
+    if (map == null) return;
+    if (_myMarker != null) {
+      _myMarker!.setPosition(_myPos!);
+    } else {
+      final icon = await _image('me', const _MyLocationDot(), const Size(30, 30));
+      if (!mounted) return;
+      final m = NMarker(id: 'me', position: _myPos!, icon: icon, anchor: NPoint.relativeCenter);
+      m.setGlobalZIndex(250000);
+      _myMarker = m;
+      await map.addOverlay(m);
+    }
+    map.updateCamera(NCameraUpdate.withParams(target: _myPos!, zoom: 16));
+  }
 
   // ───── 지도 버튼에서 부르는 동작 ─────
   void zoomIn() => _map?.updateCamera(NCameraUpdate.zoomIn());
@@ -249,6 +269,17 @@ class NaverRouteMapState extends State<NaverRouteMap> {
         overlays.add(m);
       }
 
+      // 내 위치 점 (버튼으로 켠 경우만)
+      _myMarker = null;
+      if (_myPos != null) {
+        final icon = await _image('me', const _MyLocationDot(), const Size(30, 30));
+        if (!mounted) return;
+        final m = NMarker(id: 'me', position: _myPos!, icon: icon, anchor: NPoint.relativeCenter);
+        m.setGlobalZIndex(250000);
+        _myMarker = m;
+        overlays.add(m);
+      }
+
       await map.clearOverlays();
       if (overlays.isNotEmpty) await map.addOverlayAll(overlays);
       if (!_fitted && _allPoints().isNotEmpty) {
@@ -292,6 +323,35 @@ class NaverRouteMapState extends State<NaverRouteMap> {
         _map = controller;
         _requestSync();
       },
+    );
+  }
+}
+
+/// 내 위치: 작은 빨간 점 + 흰 테두리 + 옅은 번짐 (눈에 거슬리지 않게)
+class _MyLocationDot extends StatelessWidget {
+  const _MyLocationDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        width: 26,
+        height: 26,
+        decoration: BoxDecoration(
+          color: const Color(0xFFEF4444).withValues(alpha: 0.18),
+          shape: BoxShape.circle,
+        ),
+        alignment: Alignment.center,
+        child: Container(
+          width: 13,
+          height: 13,
+          decoration: BoxDecoration(
+            color: const Color(0xFFEF4444),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2.5),
+          ),
+        ),
+      ),
     );
   }
 }
