@@ -255,7 +255,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                 _isOperating = op;
                 if (op) _sawOperating = true;
                 if (!op) {
-                  // 운행이 끝나면 지도의 버스 표시는 마지막 위치로 두고, 남은 시간 계산은 멈춘다
+                  // 운행이 끝나면 버스 위치를 지운다 (지도에서 버스 표시가 사라지고 [버스 위치]는 '운행 중 아님' 안내)
+                  _busLat = null;
+                  _busLng = null;
                   _nextStopEtaSec = null;
                   _nextStopName = null;
                 }

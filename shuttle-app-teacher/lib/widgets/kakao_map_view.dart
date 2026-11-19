@@ -190,7 +190,8 @@ class _KakaoMapViewState extends State<KakaoMapView> {
     return NaverRouteMap(
       key: _naverKey,
       stops: stops,
-      fallbackPoints: _latLngList(widget.routePoints),
+      // 차량선생님 지도에는 정류장끼리 이은 점선을 그리지 않는다 (실제 도로 경로만)
+      fallbackPoints: const [],
       roadPath: _latLngList(widget.actualRoadPath),
       progressIndex: widget.progressIndex,
       busLat: widget.busLat,
@@ -476,11 +477,7 @@ class _KakaoMapViewState extends State<KakaoMapView> {
             }
             return roadPath;
           }
-          // 기사 앱이 아직 도로 경로를 올리지 않았으면 정류장끼리 이은 점선으로 대신 보여준다
-          if (fallbackPoints && fallbackPoints.length > 1) {
-            polyline = L.polyline(fallbackPoints, { color: '#3b82f6', weight: 4, opacity: 0.8, dashArray: '8 8' }).addTo(routeLayer);
-            return fallbackPoints;
-          }
+          // 도로 경로가 아직 없으면 선을 그리지 않는다 (정류장끼리 이은 점선은 쓰지 않음)
           return [];
         }
         var lastFallbackPoints = [];

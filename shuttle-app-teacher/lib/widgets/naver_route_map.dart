@@ -117,6 +117,13 @@ class NaverRouteMapState extends State<NaverRouteMap> {
     _map!.updateCamera(NCameraUpdate.fitBounds(NLatLngBounds.from(pts), padding: const EdgeInsets.all(48)));
   }
 
+  /// 운행 중인 버스 위치로 이동. 버스 위치가 없으면 false
+  bool focusBus() {
+    if (_map == null || widget.busLat == null || widget.busLng == null) return false;
+    _map!.updateCamera(NCameraUpdate.withParams(target: NLatLng(widget.busLat!, widget.busLng!), zoom: 16));
+    return true;
+  }
+
   void focusMyChild() {
     final mine = widget.stops.where((s) => s.isMine).toList();
     if (_map == null || mine.isEmpty) return;
