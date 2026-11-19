@@ -264,14 +264,15 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
               Stack(
                 clipBehavior: Clip.none,
                 children: [
+                  // TakeMe 알림: 어두운 사각형 종 아이콘 (학부모 앱과 같은 모양)
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
                       color: const Color(0xFF0F172A),
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    child: const Icon(Icons.notifications_active, color: Colors.white, size: 24),
+                    child: const Icon(Icons.notifications_active, color: Colors.white, size: 22),
                   ),
                   if (unreadCount > 0)
                     Positioned(
@@ -297,6 +298,17 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
                       ),
                     ),
                 ],
+              )
+            else if (room['type'] == 'NOTIFICATION_SYSTEM')
+              // 공지사항: 연한 초록 사각형 확성기 아이콘 (학부모 앱과 같은 모양)
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFECFDF5),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.campaign_rounded, color: Color(0xFF059669), size: 24),
               )
             else
               CircleAvatar(

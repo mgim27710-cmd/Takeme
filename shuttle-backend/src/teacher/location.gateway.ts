@@ -54,6 +54,73 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     // 예전에는 여기서 한 번 더 등록해(앞의 것을 덮어씀) 원아 이름이 담긴 메시지를 기관 전체(학부모 포함)로 보냈다.
   }
 
+  /**
+   * 소켓 신원 확인. 운행 중 앱이 다시 연결될 때 로그인 토큰이 막 만료됐을 수 있으므로,
+   * 서명이 맞고 만료된 지 12시간 이내면 신원 확인에는 그대로 쓴다(HTTP API 는 기존대로 만료 토큰을 거부).
+   */
+  private async verifyTokenForSocket(token: string): Promise<JwtPayload> {
+    try {
+      return await this.jwtService.verifyAsync<JwtPayload>(token);
+    } catch (e: any) {
+      if (e?.name !== 'TokenExpiredError') throw e;
+      const payload = await this.jwtService.verifyAsync<JwtPayload & { exp?: number }>(token, { ignoreExpiration: true });
+      const expiredSec = payload.exp ? Date.now() / 1000 - payload.exp : Infinity;
+      if (expiredSec > 12 * 3600) throw e;
+      return payload;
+    }
+  }
+
+  /** 그 차량을 운행하는 사람인지: 차량 기사·차량선생님, 그 기관 원장·데스크, 통합 관리자 */
+  private async canControlVehicle(client: Socket, vehicleId: number): Promise<boolean> {
+    const user = client.data.user as JwtPayload | undefined;
+    if (!user?.sub || !vehicleId) return false;
+    const allowed: Set<number> = client.data.allowedSend || (client.data.allowedSend = new Set<number>());
+    if (allowed.has(vehicleId)) return true;
+    let ok = user.role === 'SUPER_ADMIN';
+    if (!ok) {
+      const v = await this.vehicleRepository.findOne({
+        where: { id: vehicleId },
+        relations: { driverUser: true, teacherUser: true, academy: true },
+      });
+      if (v) {
+        ok =
+          v.driverUser?.id === user.sub ||
+          v.teacherUser?.id === user.sub ||
+          (ADMIN_ROLES.has(String(user.role)) && !!user.academyId && v.academy?.id === Number(user.academyId));
+      }
+    }
+    if (ok) allowed.add(vehicleId);
+    return ok;
+  }
+
+  /** 그 차량의 실시간 위치를 볼 수 있는지: 운행하는 사람, 같은 기관 교직원, 그 차를 타는 아이의 학부모·학생 */
+  private async canWatchVehicle(client: Socket, vehicleId: number): Promise<boolean> {
+    const user = client.data.user as JwtPayload | undefined;
+    if (!user?.sub || !vehicleId) return false;
+    const allowed: Set<number> = client.data.allowedJoin || (client.data.allowedJoin = new Set<number>());
+    if (allowed.has(vehicleId)) return true;
+    let ok = await this.canControlVehicle(client, vehicleId);
+    const role = String(user.role);
+    if (!ok && (ADMIN_ROLES.has(role) || STAFF_ROLES.has(role)) && user.academyId) {
+      const v = await this.vehicleRepository.findOne({ where: { id: vehicleId }, relations: { academy: true } });
+      ok = v?.academy?.id === Number(user.academyId);
+    }
+    if (!ok && (role === 'PARENT' || role === 'STUDENT')) {
+      const count = await this.studentRepository
+        .createQueryBuilder('s')
+        .leftJoin('s.parentUser', 'p')
+        .leftJoin('s.studentUser', 'u')
+        .leftJoin('s.assignedVehicle', 'av')
+        .leftJoin('s.assignedDepartureVehicle', 'dv')
+        .where('(p.id = :uid OR u.id = :uid)', { uid: user.sub })
+        .andWhere('(av.id = :vid OR dv.id = :vid)', { vid: vehicleId })
+        .getCount();
+      ok = count > 0;
+    }
+    if (ok) allowed.add(vehicleId);
+    return ok;
+  }
+
   /** 역할별 소켓 방에 넣는다. 원아 이름이 담긴 알림은 기관 전체 방이 아니라 이 방들로만 보낸다. */
   private joinRoleRooms(client: Socket, user?: JwtPayload | null) {
     if (!user) return;
@@ -86,7 +153,7 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     client.data.allowedJoin = new Set<number>();
     if (token) {
       try {
-        client.data.user = await this.jwtService.verifyAsync<JwtPayload>(token);
+        client.data.user = await this.verifyTokenForSocket(token);
         if (client.data.user?.sub) {
           client.join(`user_${client.data.user.sub}`);
         }
@@ -302,6 +369,12 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     const vehicleId = Number(data?.vehicleId);
     if (!vehicleId) return;
 
+    // 그 차와 관계있는 사람만 차량 방(실시간 위치)에 들어올 수 있다
+    if (!(await this.canWatchVehicle(client, vehicleId))) {
+      console.warn(`[joinVehicleRoom] 거부: ${client.id} (user ${client.data.user?.sub ?? '없음'}) → vehicle ${vehicleId}`);
+      return { success: false, message: '이 차량의 위치를 볼 수 있는 계정이 아닙니다.' };
+    }
+
     const room = `vehicle_${vehicleId}`;
     client.join(room);
     console.log(`Client ${client.id} joined room ${room}`);
@@ -404,20 +477,24 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
 
   @SubscribeMessage('driverOperationStatus')
-  handleDriverOperationStatus(
+  async handleDriverOperationStatus(
     @MessageBody() data: { vehicleId: number; isOperating: boolean },
+    @ConnectedSocket() client: Socket,
   ) {
     const vehicleId = Number(data?.vehicleId);
     if (!vehicleId) return;
+    if (!(await this.canControlVehicle(client, vehicleId))) return; // 그 차를 운행하는 사람만
     this.broadcastOperationStatus(vehicleId, !!data.isOperating);
   }
 
   @SubscribeMessage('teacherReadyToDepart')
-  handleTeacherReadyToDepart(
+  async handleTeacherReadyToDepart(
     @MessageBody() data: { vehicleId: number; stopName?: string },
+    @ConnectedSocket() client: Socket,
   ) {
     const vehicleId = Number(data?.vehicleId);
     if (!vehicleId) return;
+    if (!(await this.canControlVehicle(client, vehicleId))) return; // 그 차의 기사·차량선생님만
     this.broadcastDepartSignal(vehicleId, data?.stopName);
   }
 
@@ -441,6 +518,8 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     const lat = Number(data?.lat);
     const lng = Number(data?.lng);
     if (!vehicleId || isNaN(lat) || isNaN(lng)) return;
+    // 위치는 그 차를 운행하는 사람(기사·차량선생님)만 보낼 수 있다 (가짜 위치 방지)
+    if (!(await this.canControlVehicle(client, vehicleId))) return;
 
     // Mark vehicle as operating
     this.operatingVehicles.set(vehicleId, true);
