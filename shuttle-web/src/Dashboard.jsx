@@ -118,16 +118,17 @@ const calcDistToBusKm = (stLat, stLng, bus) => {
   return minDist;
 };
 
-// 학원 기준 6KM 반경 및 버스 구역 예외 검사 헬퍼
-const checkSixKmRule = (st, buses = [], academy = null) => {
+// 학원 기준 운행 반경 및 버스 구역 예외 검사 헬퍼
+const checkSixKmRule = (st, buses = [], academy = null, maxRadiusKm = 6.0) => {
   if (!academy || isNaN(academy.lat) || isNaN(academy.lng) || !st.lat || !st.lng) {
     return { isOutside6km: false, distKm: 0 };
   }
   const distKm = calcDistKm(academy.lat, academy.lng, st.lat, st.lng);
-  if (distKm <= 6.0) {
+  const limitKm = Number(maxRadiusKm || 6.0);
+  if (distKm <= limitKm) {
     return { isOutside6km: false, distKm };
   }
-  // 6KM 밖이지만, 6KM 밖에 버스 구역(폴리곤)이 있어서 그 안에 위치하면 정상 탑승 예외 인정
+  // 운행 반경 밖이지만, 반경 밖에 버스 구역(폴리곤)이 있어서 그 안에 위치하면 정상 탑승 예외 인정
   const isInsideBusZone = buses.some(b => {
     if (!b.turfPolygon) return false;
     try {
@@ -886,6 +887,24 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       } catch (_) {}
       return next;
     });
+  };
+
+  // Academy Operating Radius Setting (학원 기준 운행 권역 반경 KM 설정, 기본 6KM)
+  const [academyRadiusKm, setAcademyRadiusKm] = useState(() => {
+    try {
+      const saved = localStorage.getItem('takeme_academy_radius_km');
+      if (saved && !isNaN(Number(saved)) && Number(saved) > 0) return Number(saved);
+    } catch (_) {}
+    return 6;
+  });
+  const [isRadiusLegendOpen, setIsRadiusLegendOpen] = useState(false);
+
+  const updateAcademyRadiusKm = (val) => {
+    const num = Math.max(0.5, Math.min(50, parseFloat(val) || 6));
+    setAcademyRadiusKm(num);
+    try {
+      localStorage.setItem('takeme_academy_radius_km', String(num));
+    } catch (_) {}
   };
 
   // Student Addition Modal State
@@ -3736,8 +3755,8 @@ const parseKindergartenExcelSheet = (sheet) => {
           if (st.isNotRiding || getStudentBoardingType(st) === 'NONE') continue;
           if (!st.lat || !st.lng) continue;
 
-          // 6KM 밖 구역 외 미탑승 체크 (6KM 밖이지만 버스 구역 내는 정상 탑승 예외)
-          const sixKm = checkSixKmRule(st, updatedBuses, academy);
+          // 학원 운행 반경 밖 구역 외 미탑승 체크 (반경 밖이지만 버스 구역 내는 정상 탑승 예외)
+          const sixKm = checkSixKmRule(st, updatedBuses, academy, academyRadiusKm);
           if (sixKm.isOutside6km) {
             updatedStudents[i] = {
               ...st,
@@ -5175,7 +5194,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             {(() => {
               const isExtraBusStudent = (st) => {
                 if (st.isNotRiding || getStudentBoardingType(st) === 'NONE') return false;
-                const sixKm = checkSixKmRule(st, buses, academy);
+                const sixKm = checkSixKmRule(st, buses, academy, academyRadiusKm);
                 if (sixKm.isOutside6km) return false;
                 if (st.needsExtraBus || st.raw?.needsExtraBus || st.raw?.['증차필요']) return true;
 
@@ -5209,7 +5228,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                 if (st.isNotRiding || getStudentBoardingType(st) === 'NONE') return false;
                 if (st.assignedBusId || st.assignedVehicle?.id) return false;
                 if (isExtraBusStudent(st)) return false;
-                const sixKm = checkSixKmRule(st, buses, academy);
+                const sixKm = checkSixKmRule(st, buses, academy, academyRadiusKm);
                 if (sixKm.isOutside6km) return false;
                 return true;
               });
@@ -7356,11 +7375,12 @@ const parseKindergartenExcelSheet = (sheet) => {
             </Marker>
           )}
 
-          {/* Draw Academy 6KM Radius Circle (옅은 실선) */}
+          {/* Draw Academy Operating Radius Circle (실선 원, 반경 동적 설정 지원) */}
           {academy && !isNaN(academy.lat) && !isNaN(academy.lng) && (
             <Circle
+              key={`academy-circle-${academyRadiusKm}`}
               center={[Number(academy.lat), Number(academy.lng)]}
-              radius={6000}
+              radius={academyRadiusKm * 1000}
               pathOptions={{
                 color: '#6366f1',
                 weight: 1.5,
@@ -7371,10 +7391,70 @@ const parseKindergartenExcelSheet = (sheet) => {
               }}
             >
               <Popup>
-                <div className="text-center p-1.5 text-xs min-w-[200px]">
-                  <span className="font-extrabold text-indigo-700 block mb-1">{academy.name} 기준 6KM 운행 권역</span>
-                  <div className="text-[11px] text-slate-600 leading-snug">
-                    학원 반경 6km 초과 시 구역 외 미탑승으로 자동 분류됩니다. (버스 구역 내 위치 시 탑승 예외 인정)
+                <div className="p-2 text-xs min-w-[220px]">
+                  <div className="flex items-center justify-between gap-2 border-b border-indigo-100 pb-1.5 mb-2">
+                    <span className="font-black text-indigo-950 text-xs">학원 기준 반경 설정</span>
+                    <span className="font-black text-xs px-2 py-0.5 rounded-full bg-indigo-600 text-white shadow-2xs">
+                      {academyRadiusKm} KM
+                    </span>
+                  </div>
+
+                  <div className="text-[10px] font-bold text-slate-500 mb-1">빠른 반경 선택:</div>
+                  <div className="grid grid-cols-5 gap-1 mb-2">
+                    {[3, 5, 6, 8, 10].map(km => (
+                      <button
+                        key={km}
+                        type="button"
+                        onClick={() => updateAcademyRadiusKm(km)}
+                        className={`py-1 rounded text-center text-[11px] font-black transition-all cursor-pointer ${
+                          Number(academyRadiusKm) === km
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200'
+                        }`}
+                      >
+                        {km}km
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => updateAcademyRadiusKm(Math.max(1, academyRadiusKm - 1))}
+                      className="w-6 h-6 rounded bg-white hover:bg-slate-200 text-slate-700 font-black flex items-center justify-center border border-slate-300 shadow-2xs cursor-pointer active:scale-95"
+                      title="1km 감소"
+                    >
+                      -
+                    </button>
+                    <input
+                      type="range"
+                      min="1"
+                      max="20"
+                      step="0.5"
+                      value={academyRadiusKm}
+                      onChange={(e) => updateAcademyRadiusKm(parseFloat(e.target.value))}
+                      className="flex-1 accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => updateAcademyRadiusKm(Math.min(30, academyRadiusKm + 1))}
+                      className="w-6 h-6 rounded bg-white hover:bg-slate-200 text-slate-700 font-black flex items-center justify-center border border-slate-300 shadow-2xs cursor-pointer active:scale-95"
+                      title="1km 증가"
+                    >
+                      +
+                    </button>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <input
+                        type="number"
+                        min="1"
+                        max="30"
+                        step="0.5"
+                        value={academyRadiusKm}
+                        onChange={(e) => updateAcademyRadiusKm(e.target.value)}
+                        className="w-11 px-1 py-0.5 text-center font-black text-xs text-indigo-900 bg-white border border-indigo-300 rounded outline-none"
+                      />
+                      <span className="text-[10px] font-black text-slate-500">km</span>
+                    </div>
                   </div>
                 </div>
               </Popup>
@@ -7654,8 +7734,8 @@ const parseKindergartenExcelSheet = (sheet) => {
               st.raw?.isTemporaryLocation
             );
 
-            // 2. 학원 기준 6KM 반경 및 버스 구역 예외 검사 (6KM 밖 탑승 희망자 -> 구역 외 미탑승)
-            const sixKmCheck = checkSixKmRule(st, buses, academy);
+            // 2. 학원 기준 운행 반경 및 버스 구역 예외 검사 (반경 밖 탑승 희망자 -> 구역 외 미탑승)
+            const sixKmCheck = checkSixKmRule(st, buses, academy, academyRadiusKm);
             const isOutside6kmNotRiding = Boolean(sixKmCheck.isOutside6km && !st.isNotRiding && bType !== 'NONE' && !isOneTimeStudent);
 
             // 3. 미탑승 원아 판별 (도보 등원, 자가 픽업, 6KM 반경 초과 구역 외 등 - 회색 표시)
@@ -7868,7 +7948,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                 {isOutside6kmNotRiding && (
                   <div className="bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold p-2 rounded-lg mb-2 flex items-center justify-center gap-1.5 shadow-2xs">
                     <span className="w-2 h-2 rounded-full bg-slate-400"></span>
-                    <span>[구역 외 미탑승] 학원 반경 6km 초과 (운행 구역 없음, {sixKmCheck.distKm.toFixed(1)}km)</span>
+                    <span>[구역 외 미탑승] 학원 반경 {academyRadiusKm}km 초과 (운행 구역 없음, {sixKmCheck.distKm.toFixed(1)}km)</span>
                   </div>
                 )}
 
@@ -7921,7 +8001,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                     : needsExtraBus
                     ? '증차 필요 (주변 5KM 내 다른 배차 차량 없음)'
                     : isOutside6kmNotRiding
-                    ? `구역 외 미탑승 (학원 기준 ${sixKmCheck.distKm.toFixed(1)}km, 6km 초과)`
+                    ? `구역 외 미탑승 (학원 기준 ${sixKmCheck.distKm.toFixed(1)}km, ${academyRadiusKm}km 초과)`
                     : isPureNotRiding
                     ? '셔틀 미탑승 (도보/자차)'
                     : isOneTimeStudent 
@@ -8027,17 +8107,74 @@ const parseKindergartenExcelSheet = (sheet) => {
                 </div>
               </div>
               <div className="space-y-1 text-xs font-bold text-slate-700">
-                {/* 6KM circle indicator (학원 반경 6km 권역 옅은 실선) */}
-                <div className="w-full flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border border-indigo-100 bg-indigo-50/70 text-indigo-950">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="w-3.5 h-3.5 rounded-full border border-indigo-400 bg-indigo-100/90 shrink-0"></span>
-                    <span className="text-[11px] font-black truncate">
-                      학원 반경 6KM
+                {/* Academy Operating Radius indicator & controller */}
+                <div className="w-full rounded-lg border border-indigo-100 bg-indigo-50/70 text-indigo-950 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setIsRadiusLegendOpen(!isRadiusLegendOpen)}
+                    className="w-full flex items-center justify-between gap-1.5 px-2 py-1.5 text-left cursor-pointer hover:bg-indigo-100/60 transition-colors"
+                    title="클릭 시 반경 기준 설정 열기/닫기"
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="w-3.5 h-3.5 rounded-full border border-indigo-400 bg-indigo-100/90 shrink-0"></span>
+                      <span className="text-[11px] font-black truncate">
+                        학원 반경 {academyRadiusKm}KM
+                      </span>
+                    </div>
+                    <span className="shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 border border-indigo-200 flex items-center gap-0.5">
+                      설정 {isRadiusLegendOpen ? '▲' : '▼'}
                     </span>
-                  </div>
-                  <span className="shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 border border-indigo-200">
-                    실선 원
-                  </span>
+                  </button>
+
+                  {isRadiusLegendOpen && (
+                    <div className="p-2 border-t border-indigo-100 bg-white/95 space-y-2">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-slate-500">
+                        <span>기준 반경 변경</span>
+                        <span className="font-black text-indigo-700 text-xs">{academyRadiusKm} km</span>
+                      </div>
+                      <div className="grid grid-cols-5 gap-1">
+                        {[3, 5, 6, 8, 10].map(km => (
+                          <button
+                            key={km}
+                            type="button"
+                            onClick={() => updateAcademyRadiusKm(km)}
+                            className={`py-1 rounded text-center text-[10px] font-black transition-all cursor-pointer ${
+                              Number(academyRadiusKm) === km
+                                ? 'bg-indigo-600 text-white shadow-xs'
+                                : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200'
+                            }`}
+                          >
+                            {km}k
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => updateAcademyRadiusKm(Math.max(1, academyRadiusKm - 1))}
+                          className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs flex items-center justify-center cursor-pointer"
+                        >
+                          -
+                        </button>
+                        <input
+                          type="range"
+                          min="1"
+                          max="20"
+                          step="0.5"
+                          value={academyRadiusKm}
+                          onChange={(e) => updateAcademyRadiusKm(parseFloat(e.target.value))}
+                          className="flex-1 accent-indigo-600 cursor-pointer h-1 bg-slate-200 rounded"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => updateAcademyRadiusKm(Math.min(30, academyRadiusKm + 1))}
+                          className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs flex items-center justify-center cursor-pointer"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Needs Extra Bus indicator (!) */}
