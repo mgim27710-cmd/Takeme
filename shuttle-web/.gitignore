@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 인증키 등 환경변수 파일 (예시 파일 .env.example 만 올린다)
+.env
+.env.*
+!.env.example

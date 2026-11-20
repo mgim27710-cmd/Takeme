@@ -58,7 +58,6 @@ class KakaoMapView extends StatefulWidget {
 class _KakaoMapViewState extends State<KakaoMapView> {
   WebViewController? _controller;
   final GlobalKey _webMapKey = GlobalKey();
-  bool _isMapLoaded = false;
 
   @override
   void initState() {
@@ -69,9 +68,6 @@ class _KakaoMapViewState extends State<KakaoMapView> {
         ..setNavigationDelegate(
           NavigationDelegate(
             onPageFinished: (_) {
-              setState(() {
-                _isMapLoaded = true;
-              });
               _updateMapData();
             },
           ),

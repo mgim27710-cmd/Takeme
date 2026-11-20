@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup } from './map/MapKit';
 import L from 'leaflet';
 import BoardViewer from './board/BoardViewer';
 import MessagePanel from './MessagePanel';

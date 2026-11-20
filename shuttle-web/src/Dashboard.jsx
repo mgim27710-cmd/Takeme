@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, Polygon, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Polygon, Marker, Popup, useMap, useMapEvents } from './map/MapKit';
 import L from 'leaflet';
 import * as turf from '@turf/turf';
 import * as XLSX from 'xlsx';

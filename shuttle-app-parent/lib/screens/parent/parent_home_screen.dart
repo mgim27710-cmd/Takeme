@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
+import '../../services/local_push.dart';
 import '../../models/student_model.dart';
 import '../../models/route_model.dart';
 import '../../widgets/kakao_map_view.dart';
@@ -67,6 +68,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
   @override
   void initState() {
     super.initState();
+    // 운행 시작·도착 임박·하차 휴대폰 알림을 받으려면 알림 권한이 필요하다 (안드로이드 13+)
+    LocalPush.instance.requestPermission();
     _loadAllData();
     _loadUnreadCount();
     WidgetsBinding.instance.addPostFrameCallback((_) => _ensureChildInfo());
@@ -76,6 +79,12 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
       // 위치가 끊겼는지(5분)·남은 시간 표시를 새로 계산하도록 다시 그린다
       setState(() {});
     });
+  }
+
+  /// 같은 날 같은 오전/오후 운행의 알림은 한 번만 (예: 20261120AM)
+  String _pushDay() {
+    final n = DateTime.now();
+    return '${n.year}${n.month.toString().padLeft(2, '0')}${n.day.toString().padLeft(2, '0')}${n.hour < 12 ? 'AM' : 'PM'}';
   }
 
   @override
@@ -254,11 +263,36 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
               if (sid == null || sid != _childInfo?.id) return;
               setState(() => _stopsBefore = (data['stopsBefore'] as num?)?.toInt());
             });
+            // 도착 N분 전: 휴대폰 알림
+            SocketService().onBusArriving((data) {
+              final sid = (data['studentId'] as num?)?.toInt();
+              if (sid == null || sid != _childInfo?.id) return;
+              if (data['kind'] != 'SOON') return;
+              final name = (data['studentName'] ?? _childInfo?.name ?? '아이').toString();
+              LocalPush.instance.show(
+                dedupeKey: 'soon_${sid}_${_pushDay()}',
+                title: '🚌 곧 버스가 도착해요',
+                body: (data['message']?.toString().isNotEmpty ?? false)
+                    ? data['message'].toString()
+                    : '$name 정류장에 버스가 곧 도착합니다. 나와서 기다려 주세요.',
+                within: const Duration(hours: 2),
+              );
+            });
             SocketService().onVehicleOperatingStatus((data) {
               if (!mounted) return;
               final vid = (data['vehicleId'] as num?)?.toInt();
               if (vid != null && vid != routeVehicleId) return;
               final op = data['isOperating'] == true;
+              // 운행 시작: 휴대폰 알림 (차량 방에 들어갈 때 오는 '현재 상태'는 initial=true 라 알리지 않는다)
+              if (op && data['initial'] != true) {
+                final bus = (data['busNumber'] ?? '').toString();
+                LocalPush.instance.show(
+                  dedupeKey: 'opstart_${vid ?? routeVehicleId}_${_pushDay()}',
+                  title: '🚌 통학버스 운행 시작',
+                  body: '${bus.isEmpty ? '버스' : bus}가 운행을 시작했어요. 앱에서 버스 위치를 볼 수 있어요.',
+                  within: const Duration(hours: 2),
+                );
+              }
               setState(() {
                 _isOperating = op;
                 if (op) _sawOperating = true;
@@ -288,6 +322,15 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
               setState(() {
                 _childInfo!.boardStatus = newBoardStatus;
               });
+              // 하차: 휴대폰 알림
+              if (newBoardStatus == 'DROPPED') {
+                LocalPush.instance.show(
+                  dedupeKey: 'drop_${targetStudentId}_${_pushDay()}',
+                  title: '✅ $studentName 하차 완료',
+                  body: '$studentName 원아가 버스에서 안전하게 내렸어요.',
+                  within: const Duration(hours: 2),
+                );
+              }
               final statusKr = newBoardStatus == 'BOARDED' ? '탑승 완료' : (newBoardStatus == 'DROPPED' ? '하차 완료' : (newBoardStatus == 'ABSENT' ? '결석' : '탑승 대기'));
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(

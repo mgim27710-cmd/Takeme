@@ -83,6 +83,14 @@ class SocketService {
     });
   }
 
+  /// 내 아이 정류장 도착 임박(SOON) / 유치원 도착(ARRIVED_ACADEMY) 알림 (서버가 그 원아 학부모에게만 보냄)
+  void onBusArriving(Function(Map<String, dynamic> data) callback) {
+    _socket?.off('busArriving');
+    _socket?.on('busArriving', (data) {
+      if (data is Map) callback(Map<String, dynamic>.from(data));
+    });
+  }
+
   /// 차량 운행 시작/종료 (차량 방에 들어가면 현재 상태도 한 번 온다)
   void onVehicleOperatingStatus(Function(Map<String, dynamic> data) callback) {
     _socket?.off('vehicleOperatingStatus');

@@ -60,6 +60,17 @@ class SocketService {
     debugPrint('[socket] flushed ${batch.length} queued offline locations');
   }
 
+  /// 화면이 자기 리스너만 붙이고 떼는 용도 (같은 이벤트의 다른 화면 리스너는 지우지 않는다).
+  /// 돌려받은 함수를 dispose 에서 부르면 해제된다.
+  VoidCallback listen(String event, void Function(dynamic data) handler) {
+    final s = _socket;
+    if (s == null) return () {};
+    s.on(event, handler);
+    return () => s.off(event, handler);
+  }
+
+  int? get joinedVehicleId => _joinedVehicleId;
+
   void joinVehicleRoom(int vehicleId) {
     _joinedVehicleId = vehicleId;
     _socket?.emit('joinVehicleRoom', {'vehicleId': vehicleId});

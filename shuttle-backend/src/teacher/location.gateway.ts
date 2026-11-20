@@ -381,9 +381,11 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
 
     // If vehicle is currently operating, inform client immediately
     const isOp = this.operatingVehicles.get(vehicleId) || false;
+    // initial: 방에 들어올 때 알려주는 '현재 상태'. 앱은 이것으로 '운행 시작' 푸시를 띄우지 않는다.
     client.emit('vehicleOperatingStatus', {
       vehicleId,
       isOperating: isOp,
+      initial: true,
       timestamp: new Date().toISOString(),
     });
   }

@@ -58,12 +58,12 @@ class NavMapView extends StatelessWidget {
       children: [
         Positioned.fill(child: map),
         Positioned(
-          top: 4,
-          right: 4,
-          left: warning == null ? null : 4,
+          bottom: 4,
+          left: warning == null ? 90 : 4,
+          right: warning == null ? 90 : 4,
           child: IgnorePointer(
             child: Align(
-              alignment: Alignment.topRight,
+              alignment: Alignment.bottomCenter,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                 decoration: BoxDecoration(

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from './map/MapKit';
 import L from 'leaflet';
 import { API_BASE_URL } from './config';
 import { formatTeacherName } from './utils/teacherUtil';
