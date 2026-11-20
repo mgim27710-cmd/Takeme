@@ -103,6 +103,18 @@ export class ChatController {
     return this.chatService.uploadChatMedia(body, host);
   }
 
+  /** 공지사항 읽음 현황 (원장·데스크) */
+  @Get('rooms/:id/notice-read-status')
+  async getNoticeReadStatus(@AuthUser() user: JwtPayload, @Param('id') id: string) {
+    return this.chatService.getNoticeReadStatus(Number(id), user);
+  }
+
+  /** 공지를 안 읽은 사람에게만 다시 알림 (원장·데스크) */
+  @Post('messages/:id/remind-unread')
+  async remindUnread(@AuthUser() user: JwtPayload, @Param('id') id: string) {
+    return this.chatService.remindUnreadNotice(Number(id), user);
+  }
+
   /** 내 목록에서 대화방 맨 위 고정/해제 */
   @Post('rooms/:id/pin')
   async pinRoom(

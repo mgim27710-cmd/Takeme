@@ -717,6 +717,79 @@ export class ChatService {
     return deduplicatedRooms;
   }
 
+  // ============================================================
+  // 공지사항 읽음 확인 (원장·데스크·통합 관리자)
+  // ============================================================
+
+  /** 공지를 받아야 하는 사람: 그 기관의 학부모·학생·교사·기사 (원장·데스크 제외) */
+  private async getNoticeAudience(academyId: number) {
+    const users = await this.userRepo.find({ where: { academyId }, select: { id: true, name: true, email: true, role: true } });
+    const audienceRoles = new Set<string>([
+      UserRole.PARENT, UserRole.STUDENT, UserRole.DRIVER,
+      UserRole.TEACHER, UserRole.HOMEROOM_TEACHER, UserRole.SHUTTLE_TEACHER,
+    ]);
+    return users.filter(u => audienceRoles.has(u.role));
+  }
+
+  /** 공지사항 방이고, 요청한 사람이 그 기관 원장·데스크(또는 통합 관리자)인지 확인 */
+  private async assertNoticeManager(roomId: number, requester: { sub: number; role: string; academyId: number | null }) {
+    const room = await this.roomRepo.findOne({ where: { id: roomId } });
+    if (!room || room.type !== ChatRoomType.NOTIFICATION_SYSTEM || room.name === PERSONAL_NOTI_ROOM_NAME) {
+      throw new BadRequestException('공지사항 방이 아닙니다.');
+    }
+    const isSuper = requester.role === UserRole.SUPER_ADMIN;
+    const isManager = requester.role === UserRole.ACADEMY_ADMIN || requester.role === UserRole.DESK_STAFF;
+    if (!isSuper && !(isManager && requester.academyId && room.academyId === Number(requester.academyId))) {
+      throw new ForbiddenException('공지 읽음 확인은 원장님(데스크)만 볼 수 있습니다.');
+    }
+    if (!room.academyId) throw new BadRequestException('기관 정보가 없는 공지사항 방입니다.');
+    return room;
+  }
+
+  /** 최근 공지별 읽음 현황: 읽은 수/대상 수, 안 읽은 사람 */
+  async getNoticeReadStatus(roomId: number, requester: { sub: number; role: string; academyId: number | null }) {
+    const room = await this.assertNoticeManager(roomId, requester);
+    const audience = await this.getNoticeAudience(room.academyId!);
+    const messages = await this.messageRepo.find({
+      where: { room: { id: roomId } },
+      order: { createdAt: 'DESC' },
+      take: 20,
+      relations: { sender: true },
+    });
+    return messages.map(m => {
+      const reads = new Set((m.readBy || []).map(Number));
+      const unread = audience.filter(u => u.id !== m.sender?.id && !reads.has(u.id));
+      const total = audience.filter(u => u.id !== m.sender?.id).length;
+      return {
+        messageId: m.id,
+        text: m.text,
+        createdAt: m.createdAt,
+        total,
+        readCount: total - unread.length,
+        unread: unread.map(u => ({ id: u.id, name: u.name || u.email, role: u.role })),
+      };
+    });
+  }
+
+  /** 안 읽은 사람에게만 TakeMe 알림으로 다시 알림 */
+  async remindUnreadNotice(messageId: number, requester: { sub: number; role: string; academyId: number | null }) {
+    const msg = await this.messageRepo.findOne({ where: { id: messageId }, relations: { room: true, sender: true } });
+    if (!msg?.room) throw new BadRequestException('공지를 찾을 수 없습니다.');
+    const room = await this.assertNoticeManager(msg.room.id, requester);
+    const audience = await this.getNoticeAudience(room.academyId!);
+    const reads = new Set((msg.readBy || []).map(Number));
+    const targets = audience.filter(u => u.id !== msg.sender?.id && !reads.has(u.id)).map(u => u.id);
+    if (targets.length === 0) return { success: true, sentCount: 0 };
+    const preview = (msg.text || '').replace(/\s+/g, ' ').slice(0, 60);
+    const sent = await this.sendSystemNotificationToUsers(
+      targets,
+      '공지 확인 부탁드려요',
+      `아직 확인하지 않은 공지가 있어요: "${preview}${(msg.text || '').length > 60 ? '…' : ''}" 메신저의 공지사항에서 확인해 주세요.`,
+      { type: 'notice' },
+    );
+    return { success: true, sentCount: sent.length };
+  }
+
   /** 내 목록에서 대화방 맨 위 고정/해제 (TakeMe 알림은 항상 맨 위라 고정 대상이 아님) */
   async setRoomPinned(roomId: number, userId: number, pinned: boolean) {
     const member = await this.memberRepo.findOne({
