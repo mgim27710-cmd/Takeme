@@ -68,7 +68,15 @@ function makeAdapter(map) {
       map.fitBounds(nb, { top: pad, right: pad, bottom: pad, left: pad });
       if (opts.maxZoom && map.getZoom() > opts.maxZoom) map.setZoom(opts.maxZoom, false);
     },
-    getPanes: () => ({}), // Leaflet SVG 레이어가 없다 (빗금 무늬 주입 코드는 그냥 건너뛴다)
+    getPanes: () => {
+      const p = map.getPanes ? map.getPanes() : {};
+      const el = map.getElement ? map.getElement() : null;
+      return {
+        ...p,
+        overlayPane: p.overlayLayer || el,
+        overlayLayer: p.overlayLayer || el,
+      };
+    },
     on: (names, fn) => {
       for (const n of String(names).split(/\s+/)) {
         const ev = EVENT_MAP[n];
@@ -213,16 +221,58 @@ export function Marker(props) {
 
 function polygonOptions(pathOptions = {}) {
   const color = pathOptions.color || '#2563eb';
-  const fill = pathOptions.fillColor && !String(pathOptions.fillColor).startsWith('url(') ? pathOptions.fillColor : color;
-  const hatched = String(pathOptions.fillColor || '').startsWith('url('); // 만석: 빗금 무늬 대신 진한 점선 테두리
   return {
     strokeColor: color,
-    strokeWeight: pathOptions.weight ?? 2,
+    strokeWeight: pathOptions.weight ?? 2.5,
     strokeOpacity: pathOptions.opacity ?? 1,
-    strokeStyle: pathOptions.dashArray || hatched ? 'shortdash' : 'solid',
-    fillColor: fill,
-    fillOpacity: hatched ? 0.45 : (pathOptions.fillOpacity ?? 0.2),
+    // 만석 여부와 무관하게 사용자가 dashArray를 준 경우에만 점선, 기본은 원래대로 실선(solid)
+    strokeStyle: pathOptions.dashArray ? 'shortdash' : 'solid',
+    fillColor: pathOptions.fillColor || color,
+    fillOpacity: pathOptions.fillOpacity ?? 0.2,
   };
+}
+
+function syncPolygonPattern(poly, pathOptions) {
+  if (!poly) return;
+  try {
+    const el = (typeof poly.getElement === 'function' ? poly.getElement() : null) || poly._shapeElement;
+    const isHatched = String(pathOptions?.fillColor || '').startsWith('url(');
+
+    // SVG 상위 요소 찾기
+    const svg = el?.ownerSVGElement || el?.closest?.('svg') || document.querySelector('svg');
+    if (svg) {
+      let defs = svg.querySelector('defs#naver-hatched-defs');
+      if (!defs) {
+        defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        defs.setAttribute('id', 'naver-hatched-defs');
+        svg.insertBefore(defs, svg.firstChild);
+      }
+      const globalPatterns = document.querySelectorAll('svg pattern[id^="stripe-pattern-"]');
+      globalPatterns.forEach((p) => {
+        if (!defs.querySelector(`#${p.id}`)) {
+          defs.appendChild(p.cloneNode(true));
+        }
+      });
+    }
+
+    if (el) {
+      if (isHatched) {
+        el.setAttribute('fill', pathOptions.fillColor);
+        el.style.fill = pathOptions.fillColor;
+        if (pathOptions.fillOpacity != null) {
+          el.setAttribute('fill-opacity', String(pathOptions.fillOpacity));
+          el.style.fillOpacity = String(pathOptions.fillOpacity);
+        }
+      }
+      // 테두리가 점선으로 칠해지는 문제 방지: dashArray가 없으면 실선(none) 보장
+      if (!pathOptions?.dashArray) {
+        el.removeAttribute('stroke-dasharray');
+        el.style.strokeDasharray = 'none';
+      }
+    }
+  } catch (err) {
+    // ignore
+  }
 }
 
 function NaverPolygon({ positions, pathOptions, children }) {
@@ -232,7 +282,10 @@ function NaverPolygon({ positions, pathOptions, children }) {
   useEffect(() => {
     const p = new (nm().Polygon)({ map, paths: [[]], clickable: true, ...polygonOptions(pathOptions) });
     setPoly(p);
+    syncPolygonPattern(p, pathOptions);
+    const timer = setTimeout(() => syncPolygonPattern(p, pathOptions), 50);
     return () => {
+      clearTimeout(timer);
       p.setMap(null);
       setPoly(null);
     };
@@ -244,8 +297,24 @@ function NaverPolygon({ positions, pathOptions, children }) {
   }, [poly, positions]);
 
   useEffect(() => {
-    if (poly) poly.setOptions(polygonOptions(pathOptions));
+    if (poly) {
+      poly.setOptions(polygonOptions(pathOptions));
+      syncPolygonPattern(poly, pathOptions);
+      const timer = setTimeout(() => syncPolygonPattern(poly, pathOptions), 50);
+      return () => clearTimeout(timer);
+    }
   }, [poly, pathOptions]);
+
+  useEffect(() => {
+    if (!poly || !map) return undefined;
+    const update = () => syncPolygonPattern(poly, pathOptions);
+    const l1 = nm().Event.addListener(map, 'idle', update);
+    const l2 = nm().Event.addListener(map, 'zoom_changed', update);
+    return () => {
+      nm().Event.removeListener(l1);
+      nm().Event.removeListener(l2);
+    };
+  }, [poly, map, pathOptions]);
 
   const ov = useMemo(() => (poly ? { overlay: poly, kind: 'shape' } : null), [poly]);
   return ov ? <OverlayCtx.Provider value={ov}>{children}</OverlayCtx.Provider> : null;
