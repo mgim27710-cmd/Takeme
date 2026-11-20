@@ -6,6 +6,7 @@ import 'screens/login_screen.dart';
 import 'screens/parent/parent_home_screen.dart';
 import 'utils/network_helper.dart';
 import 'services/local_push.dart';
+import 'services/push_notification_service.dart';
 import 'widgets/naver_route_map.dart';
 
 void main() async {
@@ -17,6 +18,7 @@ void main() async {
   await initNaverMap();
   // 휴대폰 알림창 알림 (운행 시작·도착 N분 전·하차)
   await LocalPush.instance.init();
+  await PushNotificationService().initialize();
   runApp(const TakeMeParentApp());
 }
 

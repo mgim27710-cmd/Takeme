@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "872080280934",
+    "project_id": "takeme-321d1",
+    "storage_bucket": "takeme-321d1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:872080280934:android:3981b560631e7a26fd4ca7",
+        "android_client_info": {
+          "package_name": "com.takeme.driver"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBPB5OMAEdLCZT7RgemXfq4m57ERBNnc_4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:872080280934:android:43d6469dec8cb8c7fd4ca7",
+        "android_client_info": {
+          "package_name": "com.takeme.parent"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBPB5OMAEdLCZT7RgemXfq4m57ERBNnc_4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:872080280934:android:4db2efc34db7bec0fd4ca7",
+        "android_client_info": {
+          "package_name": "com.takeme.teacher"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBPB5OMAEdLCZT7RgemXfq4m57ERBNnc_4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
