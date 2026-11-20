@@ -7,6 +7,7 @@ import '../models/user_model.dart';
 import '../models/student_model.dart';
 import '../models/notification_model.dart';
 import '../models/route_model.dart';
+import 'push_notification_service.dart';
 
 /// 서버가 응답은 했지만 처리하지 못한 경우(5xx) 등, 사용자에게 보여줄 수 있는 오류
 class ApiException implements Exception {
@@ -49,6 +50,7 @@ class ApiService {
   UserModel? _currentUser;
 
   String? get token => _accessToken;
+  String? get accessToken => _accessToken;
   String? get refreshToken => _refreshToken;
   UserModel? get currentUser => _currentUser;
   bool get isLoggedIn => _accessToken != null && _accessToken!.isNotEmpty;
@@ -63,6 +65,11 @@ class ApiService {
         _currentUser = UserModel.fromJson(jsonDecode(userJson), token: _accessToken);
       } catch (_) {}
     }
+    if (_accessToken != null && _accessToken!.isNotEmpty) {
+      PushNotificationService().initialize().then((_) {
+        PushNotificationService().registerTokenWithServer();
+      });
+    }
   }
 
   Future<void> setAuth(String? token, UserModel? user, {String? refreshToken}) async {
@@ -74,6 +81,9 @@ class ApiService {
     final prefs = await SharedPreferences.getInstance();
     if (token != null) {
       await prefs.setString('takeme_token', token);
+      PushNotificationService().initialize().then((_) {
+        PushNotificationService().registerTokenWithServer();
+      });
     } else {
       await prefs.remove('takeme_token');
     }

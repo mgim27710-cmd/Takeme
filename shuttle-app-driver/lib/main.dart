@@ -8,12 +8,14 @@ import 'screens/login_screen.dart';
 import 'screens/driver/driver_home_screen.dart';
 import 'widgets/nav_map_view.dart';
 import 'utils/network_helper.dart';
+import 'services/push_notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   setupNetworkSecurity();
   await initializeDateFormatting('ko_KR', null);
   await ApiService().init();
+  await PushNotificationService().initialize();
   if (naverMapClientId.isNotEmpty && !kIsWeb) {
     try {
       await FlutterNaverMap().init(

@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io_client;
 import '../config.dart';
+import 'push_notification_service.dart';
 
 class SocketService {
   static final SocketService _instance = SocketService._internal();
@@ -25,6 +27,20 @@ class SocketService {
 
     _socket!.onConnect((_) {
       debugPrint('Socket connected: ${_socket!.id}');
+    });
+
+    _socket!.off('notificationReceived');
+    _socket!.on('notificationReceived', (data) {
+      debugPrint('[Socket] notificationReceived: $data');
+      if (data is Map<String, dynamic>) {
+        final title = data['title']?.toString() ?? 'TakeMe 알림';
+        final message = data['message']?.toString() ?? '';
+        PushNotificationService().showNotification(
+          title: title,
+          body: message,
+          payload: jsonEncode(data),
+        );
+      }
     });
 
     _socket!.onDisconnect((_) {
