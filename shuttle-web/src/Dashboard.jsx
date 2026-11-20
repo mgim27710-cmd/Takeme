@@ -7375,7 +7375,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             </Marker>
           )}
 
-          {/* Draw Academy Operating Radius Circle (실선 원, 반경 동적 설정 지원) */}
+          {/* Draw Academy Operating Radius Circle (실선 원, 지도 클릭 시 팝업 미노출 / 범례에서만 설정) */}
           {academy && !isNaN(academy.lat) && !isNaN(academy.lng) && (
             <Circle
               key={`academy-circle-${academyRadiusKm}`}
@@ -7388,77 +7388,9 @@ const parseKindergartenExcelSheet = (sheet) => {
                 fillColor: '#818cf8',
                 fillOpacity: 0.03,
                 dashArray: null,
+                interactive: false,
               }}
-            >
-              <Popup>
-                <div className="p-2 text-xs min-w-[220px]">
-                  <div className="flex items-center justify-between gap-2 border-b border-indigo-100 pb-1.5 mb-2">
-                    <span className="font-black text-indigo-950 text-xs">학원 기준 반경 설정</span>
-                    <span className="font-black text-xs px-2 py-0.5 rounded-full bg-indigo-600 text-white shadow-2xs">
-                      {academyRadiusKm} KM
-                    </span>
-                  </div>
-
-                  <div className="text-[10px] font-bold text-slate-500 mb-1">빠른 반경 선택:</div>
-                  <div className="grid grid-cols-5 gap-1 mb-2">
-                    {[3, 5, 6, 8, 10].map(km => (
-                      <button
-                        key={km}
-                        type="button"
-                        onClick={() => updateAcademyRadiusKm(km)}
-                        className={`py-1 rounded text-center text-[11px] font-black transition-all cursor-pointer ${
-                          Number(academyRadiusKm) === km
-                            ? 'bg-indigo-600 text-white shadow-xs'
-                            : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200'
-                        }`}
-                      >
-                        {km}km
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="flex items-center gap-1.5 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
-                    <button
-                      type="button"
-                      onClick={() => updateAcademyRadiusKm(Math.max(1, academyRadiusKm - 1))}
-                      className="w-6 h-6 rounded bg-white hover:bg-slate-200 text-slate-700 font-black flex items-center justify-center border border-slate-300 shadow-2xs cursor-pointer active:scale-95"
-                      title="1km 감소"
-                    >
-                      -
-                    </button>
-                    <input
-                      type="range"
-                      min="1"
-                      max="20"
-                      step="0.5"
-                      value={academyRadiusKm}
-                      onChange={(e) => updateAcademyRadiusKm(parseFloat(e.target.value))}
-                      className="flex-1 accent-indigo-600 cursor-pointer h-1.5 bg-slate-200 rounded-lg"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => updateAcademyRadiusKm(Math.min(30, academyRadiusKm + 1))}
-                      className="w-6 h-6 rounded bg-white hover:bg-slate-200 text-slate-700 font-black flex items-center justify-center border border-slate-300 shadow-2xs cursor-pointer active:scale-95"
-                      title="1km 증가"
-                    >
-                      +
-                    </button>
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      <input
-                        type="number"
-                        min="1"
-                        max="30"
-                        step="0.5"
-                        value={academyRadiusKm}
-                        onChange={(e) => updateAcademyRadiusKm(e.target.value)}
-                        className="w-11 px-1 py-0.5 text-center font-black text-xs text-indigo-900 bg-white border border-indigo-300 rounded outline-none"
-                      />
-                      <span className="text-[10px] font-black text-slate-500">km</span>
-                    </div>
-                  </div>
-                </div>
-              </Popup>
-            </Circle>
+            />
           )}
           
           <ZoneEditEvents isAddingPoint={isAddingPoint} onAddPoint={handleAddPoint} />
