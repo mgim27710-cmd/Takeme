@@ -90,6 +90,58 @@ export const getStudentBoardingType = (st) => {
   return 'BOTH';
 };
 
+// 거리 계산 헬퍼 (Km 단위)
+const calcDistKm = (lat1, lon1, lat2, lon2) => {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
+  const R = 6371;
+  const dLat = (Number(lat2) - Number(lat1)) * Math.PI / 180;
+  const dLon = (Number(lon2) - Number(lon1)) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(Number(lat1) * Math.PI / 180) * Math.cos(Number(lat2) * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+};
+
+// 차량 구역(폴리곤)과의 거리 계산 헬퍼 (Km 단위, 구역 내부이면 0)
+const calcDistToBusKm = (stLat, stLng, bus) => {
+  if (!stLat || !stLng || !bus?.polygon || bus.polygon.length === 0) return Infinity;
+  if (bus.turfPolygon) {
+    try {
+      if (turf.booleanPointInPolygon(turf.point([Number(stLng), Number(stLat)]), bus.turfPolygon)) return 0;
+    } catch (_) {}
+  }
+  let minDist = Infinity;
+  for (const pt of bus.polygon) {
+    const d = calcDistKm(stLat, stLng, pt[0], pt[1]);
+    if (d < minDist) minDist = d;
+  }
+  return minDist;
+};
+
+// 학원 기준 6KM 반경 및 버스 구역 예외 검사 헬퍼
+const checkSixKmRule = (st, buses = [], academy = null) => {
+  if (!academy || isNaN(academy.lat) || isNaN(academy.lng) || !st.lat || !st.lng) {
+    return { isOutside6km: false, distKm: 0 };
+  }
+  const distKm = calcDistKm(academy.lat, academy.lng, st.lat, st.lng);
+  if (distKm <= 6.0) {
+    return { isOutside6km: false, distKm };
+  }
+  // 6KM 밖이지만, 6KM 밖에 버스 구역(폴리곤)이 있어서 그 안에 위치하면 정상 탑승 예외 인정
+  const isInsideBusZone = buses.some(b => {
+    if (!b.turfPolygon) return false;
+    try {
+      return turf.booleanPointInPolygon(turf.point([Number(st.lng), Number(st.lat)]), b.turfPolygon);
+    } catch (_) {
+      return false;
+    }
+  });
+  if (isInsideBusZone) {
+    return { isOutside6km: false, distKm, isCoveredByBusZone: true };
+  }
+  return { isOutside6km: true, distKm };
+};
+
 // 차량별 정규 탑승자와 당일 1회 탑승자 분류 및 총 탑승 인원 산출 헬퍼
 export const getBusRiderDetails = (bus, studentList = [], operationMode = 'ALL', selectedDay = 'ALL') => {
   if (!bus || !Array.isArray(studentList)) {
@@ -112,8 +164,7 @@ export const getBusRiderDetails = (bus, studentList = [], operationMode = 'ALL',
       st.oneTimeType ||
       st.raw?.isTemporaryRide ||
       st.raw?.rideType === 'TODAY_ONLY' ||
-      st.raw?.isTemporaryLocation ||
-      (st.isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))
+      st.raw?.isTemporaryLocation
     );
 
     if (bType === 'NONE' && !isOneTime) return false;
@@ -771,6 +822,8 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const [busLocations, setBusLocations] = useState({});
   const [operatingBuses, setOperatingBuses] = useState({}); // { [busId]: boolean }
   const [isUnassignedCollapsed, setIsUnassignedCollapsed] = useState(true); // 미배정 원아 셀 접이식 기본값 true
+  const [isExtraBusCollapsed, setIsExtraBusCollapsed] = useState(false); // 증차 필요 원아 셀 접이식 기본값 false (눈에 잘 띄게 펼침)
+  const [selectedExtraBusStudentIds, setSelectedExtraBusStudentIds] = useState(new Set());
 
   // Substitute Driver & Teacher Modal State
   const [substituteModalBus, setSubstituteModalBus] = useState(null);
@@ -1676,6 +1729,11 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         timestamp: new Date().toISOString(),
         data: req,
       });
+      const stId = req?.studentId || req?.student?.id;
+      if (stId) {
+        setStudents(prev => prev.map(s => s.id === stId ? { ...s, approvalStatus: req.decision, raw: { ...(s.raw || {}), approvalStatus: req.decision } } : s));
+        setHighlightedStudentId(prev => prev === stId ? null : prev);
+      }
     });
 
     return () => {
@@ -1914,7 +1972,11 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         body: JSON.stringify({ studentId })
       });
       if (res.ok) {
-        setStudents(students.map(s => s.id === studentId ? { ...s, approvalStatus: 'APPROVED' } : s));
+        setStudents(prev => prev.map(s => s.id === studentId ? { ...s, approvalStatus: 'APPROVED', raw: { ...(s.raw || {}), approvalStatus: 'APPROVED' } } : s));
+        if (highlightedStudentId === studentId) {
+          setHighlightedStudentId(null);
+          setHighlightedStudentLocation(null);
+        }
       }
     } catch (e) {
       console.error(e);
@@ -3646,21 +3708,148 @@ const parseKindergartenExcelSheet = (sheet) => {
         body: JSON.stringify({ polygonCoordinates: editingPolygon })
       });
       if (res.ok) {
-        const updatedBus = await res.json();
-        // Because backend saves polygonCoordinates as array of [lat, lng],
-        // and we might need to compute the hull again? 
-        // Wait, if user explicitly defines the polygon, we should NOT convex hull it!
-        // We just save it and use it as the polygon.
-        
-        const updated = buses.map(b => {
+        // 1. 수정된 버스 폴리곤 및 turfPolygon 업데이트
+        let updatedBuses = buses.map(b => {
           if (b.id === editingZoneBusId) {
-            return { ...b, polygon: editingPolygon, points: editingPolygon }; // Use exact polygon
+            let turfPoly = null;
+            if (editingPolygon && editingPolygon.length >= 3) {
+              const closed = editingPolygon.map(p => [p[1], p[0]]);
+              closed.push(closed[0]);
+              try { turfPoly = turf.polygon([closed]); } catch (_) {}
+            }
+            return {
+              ...b,
+              polygon: editingPolygon,
+              points: editingPolygon,
+              polygonCoordinates: editingPolygon,
+              turfPolygon: turfPoly
+            };
           }
           return b;
         });
-        setBuses(updated);
-        localStorage.setItem('takeme_buses', JSON.stringify(updated));
-        alert('구역이 저장되었습니다.');
+
+        // 2. 수동 구역 변경에 따른 원아 재배정 및 자동 확장 / 증차 필요 판정
+        let expandedVehiclesCount = 0;
+        let extraBusRequiredCount = 0;
+        let outside6kmCount = 0;
+        let updatedStudents = [...students];
+        const targetAcademyId = selectedAcademyId || currentUser?.academyId;
+
+        for (let i = 0; i < updatedStudents.length; i++) {
+          const st = updatedStudents[i];
+          if (st.isNotRiding || getStudentBoardingType(st) === 'NONE') continue;
+          if (!st.lat || !st.lng) continue;
+
+          // 6KM 밖 구역 외 미탑승 체크 (6KM 밖이지만 버스 구역 내는 정상 탑승 예외)
+          const sixKm = checkSixKmRule(st, updatedBuses, academy);
+          if (sixKm.isOutside6km) {
+            updatedStudents[i] = {
+              ...st,
+              isNotRiding: true,
+              boardingType: 'NONE',
+              assignedBusId: null,
+              assignedVehicle: null,
+              needsExtraBus: false
+            };
+            outside6kmCount++;
+            continue;
+          }
+
+          // 현재 배정된 버스 구역 내부인지 확인
+          const currentAssignedBus = updatedBuses.find(b => b.id === (st.assignedBusId || st.assignedVehicle?.id));
+          let isInsideCurrentZone = false;
+          if (currentAssignedBus?.turfPolygon) {
+            try {
+              isInsideCurrentZone = turf.booleanPointInPolygon(turf.point([Number(st.lng), Number(st.lat)]), currentAssignedBus.turfPolygon);
+            } catch (_) {}
+          }
+
+          // 만약 구역 밖이거나 미배정 상태라면:
+          if (!currentAssignedBus || !isInsideCurrentZone) {
+            // 근처 5KM 이내의 다른 여유있는(정원 25명 미만) 차량 탐색
+            const availableNearbyBuses = updatedBuses.filter(b => {
+              const busRiders = updatedStudents.filter(s => !s.isNotRiding && (s.assignedBusId === b.id || s.assignedVehicle?.id === b.id));
+              const capacity = Number(b.capacity) || 25;
+              if (busRiders.length >= capacity) return false; // 만석 차량 제외
+              const dist = calcDistToBusKm(st.lat, st.lng, b);
+              return dist <= 5.0; // 5KM 이내
+            }).sort((a, b) => calcDistToBusKm(st.lat, st.lng, a) - calcDistToBusKm(st.lat, st.lng, b));
+
+            if (availableNearbyBuses.length > 0) {
+              // 여유 차량이 있는 경우: 가장 가까운 여유 차량 구역을 자동으로 확장하여 이 학생을 포함시킴
+              const targetBus = availableNearbyBuses[0];
+              const expandedPoints = enforceConvexHull([...targetBus.polygon, [st.lat, st.lng]]);
+              
+              let newTurfPoly = null;
+              if (expandedPoints.length >= 3) {
+                const closed = expandedPoints.map(p => [p[1], p[0]]);
+                closed.push(closed[0]);
+                try { newTurfPoly = turf.polygon([closed]); } catch (_) {}
+              }
+
+              // updatedBuses에 확장된 폴리곤 반영
+              updatedBuses = updatedBuses.map(b => b.id === targetBus.id ? {
+                ...b,
+                polygon: expandedPoints,
+                points: expandedPoints,
+                polygonCoordinates: expandedPoints,
+                turfPolygon: newTurfPoly
+              } : b);
+
+              // 서버에 해당 차량의 확장된 구역 저장
+              fetch(`${API_BASE_URL}/routing/vehicle/${targetBus.id}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ polygonCoordinates: expandedPoints })
+              }).catch(err => console.error('Auto-expand vehicle save error:', err));
+
+              // 학생 배정 업데이트
+              updatedStudents[i] = {
+                ...st,
+                assignedBusId: targetBus.id,
+                assignedVehicle: targetBus,
+                needsExtraBus: false
+              };
+
+              // 서버에 학생 차량 배정 저장
+              fetch(`${API_BASE_URL}/routing/student/${st.id}${targetAcademyId ? `?academyId=${targetAcademyId}` : ''}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assignedVehicleId: targetBus.id, academyId: targetAcademyId })
+              }).catch(err => console.error('Student vehicle reassign save error:', err));
+
+              expandedVehiclesCount++;
+            } else {
+              // 근처 5KM 내에 여유있는 차량이 없는 경우: '증차 필요'로 전환
+              updatedStudents[i] = {
+                ...st,
+                needsExtraBus: true,
+                assignedBusId: null,
+                assignedVehicle: null
+              };
+              extraBusRequiredCount++;
+            }
+          }
+        }
+
+        setBuses(updatedBuses);
+        setStudents(updatedStudents);
+        localStorage.setItem('takeme_buses', JSON.stringify(updatedBuses));
+        
+        let feedbackMsg = '구역이 저장되었습니다.';
+        if (expandedVehiclesCount > 0 || extraBusRequiredCount > 0 || outside6kmCount > 0) {
+          feedbackMsg += `\n\n[구역 변경에 따른 원아 자동 조정 안내]`;
+          if (expandedVehiclesCount > 0) {
+            feedbackMsg += `\n- 주변 5km 여유 차량 구역 자동 확장 및 배정: ${expandedVehiclesCount}명`;
+          }
+          if (extraBusRequiredCount > 0) {
+            feedbackMsg += `\n- 주변 5km 내 여유 차량 부재로 인한 '증차 필요' 등록: ${extraBusRequiredCount}명`;
+          }
+          if (outside6kmCount > 0) {
+            feedbackMsg += `\n- 학원 반경 6km 초과 '구역 외 미탑승' 전환: ${outside6kmCount}명`;
+          }
+        }
+        alert(feedbackMsg);
         setEditingZoneBusId(null);
       } else {
         alert('구역 저장에 실패했습니다.');
@@ -4986,64 +5175,300 @@ const parseKindergartenExcelSheet = (sheet) => {
                 })
               )}
 
-            {/* Persistent Unassigned Students Panel (접이식 아코디언) */}
+            {/* Helper to determine if a student needs extra bus */}
             {(() => {
-              const unassignedList = students.filter(st => !st.assignedBusId && !st.isNotRiding);
+              const isExtraBusStudent = (st) => {
+                if (st.isNotRiding || getStudentBoardingType(st) === 'NONE') return false;
+                const sixKm = checkSixKmRule(st, buses, academy);
+                if (sixKm.isOutside6km) return false;
+                if (st.needsExtraBus) return true;
+
+                const assignedBus = buses.find(b => b.id === (st.assignedBusId || st.assignedVehicle?.id));
+                if (assignedBus) {
+                  const riders = students.filter(s => !s.isNotRiding && (s.assignedBusId === assignedBus.id || s.assignedVehicle?.id === assignedBus.id));
+                  if (riders.length > (assignedBus.capacity || 25)) return true;
+                }
+
+                const isUnassigned = !st.assignedBusId && !st.assignedVehicle?.id;
+                let isInside = false;
+                if (assignedBus?.turfPolygon && st.lat && st.lng) {
+                  try {
+                    isInside = turf.booleanPointInPolygon(turf.point([Number(st.lng), Number(st.lat)]), assignedBus.turfPolygon);
+                  } catch (_) {}
+                }
+
+                if (isUnassigned || !isInside) {
+                  const hasAvailableNearbyBus = buses.some(b => {
+                    if (b.id === assignedBus?.id) return false;
+                    const riders = students.filter(s => !s.isNotRiding && (s.assignedBusId === b.id || s.assignedVehicle?.id === b.id));
+                    if (riders.length >= (b.capacity || 25)) return false;
+                    return calcDistToBusKm(st.lat, st.lng, b) <= 5.0;
+                  });
+                  if (!hasAvailableNearbyBus) return true;
+                }
+                return false;
+              };
+
+              const unassignedList = students.filter(st => {
+                if (st.isNotRiding || getStudentBoardingType(st) === 'NONE') return false;
+                if (st.assignedBusId || st.assignedVehicle?.id) return false;
+                if (isExtraBusStudent(st)) return false;
+                const sixKm = checkSixKmRule(st, buses, academy);
+                if (sixKm.isOutside6km) return false;
+                return true;
+              });
+
+              const extraBusList = students.filter(isExtraBusStudent);
+
+              const allExtraSelected = extraBusList.length > 0 && extraBusList.every(s => selectedExtraBusStudentIds.has(s.id));
+
+              const handleToggleSelectAllExtra = () => {
+                if (allExtraSelected) {
+                  setSelectedExtraBusStudentIds(new Set());
+                } else {
+                  setSelectedExtraBusStudentIds(new Set(extraBusList.map(s => s.id)));
+                }
+              };
+
+              const handleToggleStudentCheck = (id) => {
+                setSelectedExtraBusStudentIds(prev => {
+                  const next = new Set(prev);
+                  if (next.has(id)) next.delete(id);
+                  else next.add(id);
+                  return next;
+                });
+              };
+
+              const handleConvertSelectedToNotRiding = async () => {
+                const targetIds = selectedExtraBusStudentIds.size > 0
+                  ? new Set([...selectedExtraBusStudentIds].filter(id => extraBusList.some(s => s.id === id)))
+                  : new Set(extraBusList.map(s => s.id));
+
+                if (targetIds.size === 0) {
+                  alert('미탑승으로 전환할 원아가 없습니다.');
+                  return;
+                }
+
+                if (!window.confirm(`선택한 증차 필요 원아 ${targetIds.size}명을 전원 '미탑승'(도보/자차)으로 전환하시겠습니까?`)) {
+                  return;
+                }
+
+                try {
+                  setIsProcessing(true);
+                  const targetList = extraBusList.filter(s => targetIds.has(s.id));
+                  const targetAcademyId = selectedAcademyId || currentUser?.academyId;
+
+                  setStudents(prev => prev.map(s => {
+                    if (targetIds.has(s.id)) {
+                      return {
+                        ...s,
+                        isNotRiding: true,
+                        boardingType: 'NONE',
+                        assignedBusId: null,
+                        assignedVehicle: null,
+                        needsExtraBus: false,
+                        raw: { ...(s.raw || {}), 차량미탑승: true, 미탑승: true, 탑승구분: 'NONE' }
+                      };
+                    }
+                    return s;
+                  }));
+
+                  await Promise.allSettled(
+                    targetList.map(st =>
+                      fetch(`${API_BASE_URL}/routing/student/${st.id}${targetAcademyId ? `?academyId=${targetAcademyId}` : ''}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          isNotRiding: true,
+                          boardingType: 'NONE',
+                          assignedVehicleId: null,
+                          academyId: targetAcademyId
+                        })
+                      })
+                    )
+                  );
+
+                  setSelectedExtraBusStudentIds(new Set());
+                  alert(`증차 필요 원아 ${targetIds.size}명이 '미탑승'으로 정상 전환되었습니다.\n지도에 회색(미탑승)으로 표시됩니다.`);
+                } catch (e) {
+                  console.error(e);
+                  alert('미탑승 전환 중 오류가 발생했습니다.');
+                } finally {
+                  setIsProcessing(false);
+                }
+              };
+
               return (
-                <div className="mt-3 p-3 bg-amber-50/80 border border-amber-300 rounded-2xl shadow-xs shrink-0 transition-all">
-                  <div 
-                    onClick={() => setIsUnassignedCollapsed(!isUnassignedCollapsed)}
-                    className="flex items-center justify-between cursor-pointer select-none"
-                    title={isUnassignedCollapsed ? '클릭하여 미배정 원아 명단 펼치기' : '클릭하여 접기'}
-                  >
-                    <div className="flex items-center gap-2">
-                      {unassignedList.length > 0 && (
-                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
-                      )}
-                      <h4 className="font-extrabold text-amber-950 text-xs">
-                        미배정 {terms.student} ({unassignedList.length}명)
-                      </h4>
+                <>
+                  {/* Persistent Unassigned Students Panel (미배정 원아 아코디언) */}
+                  <div className="mt-3 p-3 bg-amber-50/80 border border-amber-300 rounded-2xl shadow-xs shrink-0 transition-all">
+                    <div 
+                      onClick={() => setIsUnassignedCollapsed(!isUnassignedCollapsed)}
+                      className="flex items-center justify-between cursor-pointer select-none"
+                      title={isUnassignedCollapsed ? '클릭하여 미배정 원아 명단 펼치기' : '클릭하여 접기'}
+                    >
+                      <div className="flex items-center gap-2">
+                        {unassignedList.length > 0 && (
+                          <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                        )}
+                        <h4 className="font-extrabold text-amber-950 text-xs">
+                          미배정 {terms.student} ({unassignedList.length}명)
+                        </h4>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800">
+                        <span className="text-[11px] bg-amber-100 hover:bg-amber-200 px-2 py-0.5 rounded-md border border-amber-200 transition-colors">
+                          {isUnassignedCollapsed ? '+ 펼치기' : '− 접기'}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800">
-                      <span className="text-[11px] bg-amber-100 hover:bg-amber-200 px-2 py-0.5 rounded-md border border-amber-200 transition-colors">
-                        {isUnassignedCollapsed ? '+ 펼치기' : '− 접기'}
-                      </span>
-                    </div>
+
+                    {!isUnassignedCollapsed && (
+                      <div className="mt-2.5 pt-2 border-t border-amber-200/80 animate-fade-in">
+                        {unassignedList.length === 0 ? (
+                          <p className="text-[11px] text-amber-800/80 font-medium py-1">현재 모든 {terms.student}이 통학 차량에 배정되어 있습니다.</p>
+                        ) : (
+                          <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+                            {unassignedList.map(st => (
+                              <div key={st.id} className="flex items-center justify-between bg-white p-2 rounded-xl border border-amber-200 text-xs shadow-2xs">
+                                <div className="min-w-0 pr-2">
+                                  <span 
+                                    onClick={() => handleStudentMapClick(st)}
+                                    className="font-extrabold text-slate-800 hover:text-blue-600 underline cursor-pointer block truncate"
+                                    title="지도에서 위치 보기"
+                                  >
+                                    {st.name}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 block truncate font-medium">{st.address || '주소 미등록'}</span>
+                                </div>
+                                <select
+                                  onChange={(e) => {
+                                    const targetBid = Number(e.target.value);
+                                    if (!targetBid) return;
+                                    setStudents(prev => prev.map(s => s.id === st.id ? { ...s, assignedBusId: targetBid } : s));
+                                    const targetAcademyId = selectedAcademyId || currentUser?.academyId;
+                                    fetch(`${API_BASE_URL}/routing/student/${st.id}${targetAcademyId ? `?academyId=${targetAcademyId}` : ''}`, {
+                                      method: 'PUT',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ assignedVehicleId: targetBid, academyId: targetAcademyId })
+                                    }).catch(err => console.error(err));
+                                  }}
+                                  defaultValue=""
+                                  className="text-[11px] font-bold py-1 px-1.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg shrink-0 cursor-pointer"
+                                >
+                                  <option value="" disabled>차량 배정</option>
+                                  {buses.map(b => (
+                                    <option key={b.id} value={b.id}>{b.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  {!isUnassignedCollapsed && (
-                    <div className="mt-2.5 pt-2 border-t border-amber-200/80 animate-fade-in">
-                      {unassignedList.length === 0 ? (
-                        <p className="text-[11px] text-amber-800/80 font-medium py-1">현재 모든 {terms.student}이 통학 차량에 배정되어 있습니다.</p>
-                      ) : (
-                        <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
-                          {unassignedList.map(st => (
-                            <div key={st.id} className="flex items-center justify-between bg-white p-2 rounded-xl border border-amber-200 text-xs shadow-2xs">
-                              <div className="min-w-0 pr-2">
-                                <span className="font-extrabold text-slate-800 block truncate">{st.name}</span>
-                                <span className="text-[10px] text-slate-500 block truncate font-medium">{st.address || '주소 미등록'}</span>
-                              </div>
-                              <select
-                                onChange={(e) => {
-                                  const targetBid = Number(e.target.value);
-                                  if (!targetBid) return;
-                                  setStudents(prev => prev.map(s => s.id === st.id ? { ...s, assignedBusId: targetBid } : s));
-                                }}
-                                defaultValue=""
-                                className="text-[11px] font-bold py-1 px-1.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg shrink-0 cursor-pointer"
-                              >
-                                <option value="" disabled>차량 배정</option>
-                                {buses.map(b => (
-                                  <option key={b.id} value={b.id}>{b.name}</option>
-                                ))}
-                              </select>
-                            </div>
-                          ))}
+                  {/* Persistent Extra Bus Needed Students Panel (증차 필요 원아 아코디언 및 미탑승 일괄 전환) */}
+                  <div className="mt-2.5 p-3 bg-orange-50/90 border border-orange-300 rounded-2xl shadow-xs shrink-0 transition-all">
+                    <div 
+                      onClick={() => setIsExtraBusCollapsed(!isExtraBusCollapsed)}
+                      className="flex items-center justify-between cursor-pointer select-none"
+                      title={isExtraBusCollapsed ? '클릭하여 증차 필요 원아 명단 펼치기' : '클릭하여 접기'}
+                    >
+                      <div className="flex items-center gap-2">
+                        {extraBusList.length > 0 && (
+                          <span className="w-2.5 h-2.5 rounded-full bg-orange-600 animate-ping"></span>
+                        )}
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-1.5 py-0.5 rounded-md bg-orange-200 text-orange-900 text-[10px] font-black">!</span>
+                          <h4 className="font-extrabold text-orange-950 text-xs">
+                            증차 필요 {terms.student} ({extraBusList.length}명)
+                          </h4>
                         </div>
-                      )}
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-orange-800">
+                        <span className="text-[11px] bg-orange-100 hover:bg-orange-200 px-2 py-0.5 rounded-md border border-orange-200 transition-colors">
+                          {isExtraBusCollapsed ? '+ 펼치기' : '− 접기'}
+                        </span>
+                      </div>
                     </div>
-                  )}
-                </div>
+
+                    {!isExtraBusCollapsed && (
+                      <div className="mt-2.5 pt-2 border-t border-orange-200 animate-fade-in">
+                        {extraBusList.length === 0 ? (
+                          <p className="text-[11px] text-orange-800/80 font-medium py-1">현재 증차가 필요한 원아가 없습니다.</p>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between bg-orange-100/70 p-1.5 rounded-xl border border-orange-200 text-[11px]">
+                              <label className="flex items-center gap-1.5 cursor-pointer font-bold text-orange-950">
+                                <input 
+                                  type="checkbox" 
+                                  checked={allExtraSelected} 
+                                  onChange={handleToggleSelectAllExtra}
+                                  className="w-3.5 h-3.5 rounded text-orange-600 cursor-pointer"
+                                />
+                                <span>전체 선택 ({selectedExtraBusStudentIds.size > 0 ? selectedExtraBusStudentIds.size : extraBusList.length}/{extraBusList.length})</span>
+                              </label>
+                              <button
+                                type="button"
+                                onClick={handleConvertSelectedToNotRiding}
+                                className="px-2.5 py-1 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-[11px] rounded-lg shadow-xs transition-all flex items-center gap-1 cursor-pointer"
+                                title="선택한 증차 필요 원아를 미탑승(도보/자차)으로 일괄 전환합니다"
+                              >
+                                <span>전원 미탑승으로 전환</span>
+                              </button>
+                            </div>
+
+                            <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
+                              {extraBusList.map(st => {
+                                const isChecked = selectedExtraBusStudentIds.size === 0 || selectedExtraBusStudentIds.has(st.id);
+                                return (
+                                  <div 
+                                    key={st.id} 
+                                    className="flex items-center justify-between bg-white p-2 rounded-xl border border-orange-200 text-xs shadow-2xs hover:border-orange-400 transition-colors"
+                                  >
+                                    <label className="flex items-center gap-2 min-w-0 pr-2 cursor-pointer flex-1">
+                                      <input 
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={() => handleToggleStudentCheck(st.id)}
+                                        className="w-3.5 h-3.5 rounded text-orange-600 cursor-pointer shrink-0"
+                                      />
+                                      <div className="min-w-0">
+                                        <div className="flex items-center gap-1.5">
+                                          <span 
+                                            onClick={(e) => { e.preventDefault(); handleStudentMapClick(st); }}
+                                            className="font-black text-slate-900 hover:text-blue-600 underline cursor-pointer truncate"
+                                            title="지도에서 위치 확인"
+                                          >
+                                            {st.name}
+                                          </span>
+                                          <span className="text-[10px] font-bold text-orange-700 bg-orange-100 px-1.5 py-0.2 rounded shrink-0">
+                                            증차 필요
+                                          </span>
+                                        </div>
+                                        <span className="text-[10px] text-slate-500 block truncate font-medium">
+                                          {st.address || st.boardingLocation || '주소 미등록'}
+                                        </span>
+                                      </div>
+                                    </label>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleStudentMapClick(st)}
+                                      className="text-[10px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg shrink-0 transition"
+                                    >
+                                      위치보기
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </>
               );
             })()}
 
@@ -7191,12 +7616,21 @@ const parseKindergartenExcelSheet = (sheet) => {
               st.oneTimeType ||
               st.raw?.isTemporaryRide ||
               st.raw?.rideType === 'TODAY_ONLY' ||
-              st.raw?.isTemporaryLocation ||
-              (st.isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))
+              st.raw?.isTemporaryLocation
             );
 
-            // 2. 미탑승 원아 판별 (도보 등원, 자가 픽업 등 - 회색 표시)
-            const isPureNotRiding = Boolean((st.isNotRiding || bType === 'NONE') && !isOneTimeStudent);
+            // 2. 학원 기준 6KM 반경 및 버스 구역 예외 검사 (6KM 밖 탑승 희망자 -> 구역 외 미탑승)
+            const sixKmCheck = checkSixKmRule(st, buses, academy);
+            const isOutside6kmNotRiding = Boolean(sixKmCheck.isOutside6km && !st.isNotRiding && bType !== 'NONE' && !isOneTimeStudent);
+
+            // 3. 미탑승 원아 판별 (도보 등원, 자가 픽업, 6KM 반경 초과 구역 외 등 - 회색 표시)
+            const isPureNotRiding = Boolean((st.isNotRiding || bType === 'NONE' || isOutside6kmNotRiding) && !isOneTimeStudent);
+
+            // 4. 결재 승인 대기 여부 (결재 승인 대기중일 때만 지도에서 강조/대기 표시)
+            const isApprovalPending = Boolean(
+              (st.approvalStatus === 'PENDING' || st.raw?.approvalStatus === 'PENDING' || st.raw?.paymentStatus === 'PENDING') &&
+              st.approvalStatus !== 'APPROVED'
+            );
 
             // 거리 계산 헬퍼 (Km 단위)
             const calcDistKm = (lat1, lon1, lat2, lon2) => {
@@ -7210,7 +7644,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
             };
 
-            // 3. 구역 내 포함 여부 및 증차/미배차 판별
+            // 5. 구역 내 포함 여부 및 증차/미배차 판별
             // - 배정 차량이 있으면 해당 차량의 폴리곤 내부에 위치하는지 엄격히 검사
             // - 구역 밖이거나, 배정 차량이 없거나, 정원(25명) 초과인 경우 '!' (증차 필요/미배차)로 표시
             // - 구역 밖인 원아는 절대 차량 색상으로 구역 외부에 표시되지 않음!
@@ -7227,7 +7661,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             const currentBusRiders = displayBusId
               ? students.filter(s => {
                   const sBType = getStudentBoardingType(s);
-                  if (sBType === 'NONE') return false;
+                  if (sBType === 'NONE' || s.isNotRiding) return false;
                   if (operationMode === 'MORNING') {
                     if (sBType === 'AFTERNOON_ONLY') return false;
                     return s.assignedBusId === displayBusId || s.assignedVehicle?.id === displayBusId;
@@ -7243,7 +7677,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             const isUnassigned = !displayBusId;
 
             let needsExtraBus = Boolean(st.needsExtraBus);
-            if (!isPureNotRiding) {
+            if (!isPureNotRiding && !isApprovalPending) {
               if (isUnassigned || isOverCapacity || !isInsideAssignedZone) {
                 needsExtraBus = true;
               }
@@ -7259,8 +7693,11 @@ const parseKindergartenExcelSheet = (sheet) => {
             const ONE_TIME_COLOR = '#f43f5e'; // 핫핑크 (당일 1회)
             const NOT_RIDING_COLOR = '#94a3b8'; // 회색 (미탑승 학생)
             const EXTRA_BUS_COLOR = '#ea580c'; // 선명한 주황색 (증차 필요)
+            const APPROVAL_PENDING_COLOR = '#f59e0b'; // 호박색 (결재 대기)
             
-            const stColor = needsExtraBus
+            const stColor = isApprovalPending
+              ? APPROVAL_PENDING_COLOR
+              : needsExtraBus
               ? EXTRA_BUS_COLOR
               : isPureNotRiding
               ? NOT_RIDING_COLOR
@@ -7272,7 +7709,9 @@ const parseKindergartenExcelSheet = (sheet) => {
 
             const isHighlighted = highlightedStudentId === st.id;
             const studentIcon = L.divIcon({
-              className: isHighlighted 
+              className: isApprovalPending
+                ? 'custom-student-marker-approval-pending'
+                : isHighlighted 
                 ? 'custom-student-marker-highlighted' 
                 : needsExtraBus
                 ? 'custom-student-marker-extrabus'
@@ -7281,7 +7720,17 @@ const parseKindergartenExcelSheet = (sheet) => {
                 : isOneTimeStudent 
                 ? 'custom-student-marker-onetime' 
                 : 'custom-student-marker',
-              html: isHighlighted ? `
+              html: isApprovalPending ? `
+                <div style="position: relative; display: flex; flex-direction: column; align-items: center; z-index: 1000;">
+                  <div style="position: absolute; top: -30px; background: #d97706; color: white; padding: 2.5px 8px; border-radius: 9999px; font-size: 11px; font-weight: 900; white-space: nowrap; box-shadow: 0 4px 12px rgba(217,119,6,0.5); border: 2px solid #fde68a; animation: bounce 1s infinite;">
+                    ★ ${st.name} (결재 대기)
+                  </div>
+                  <div style="position: absolute; width: 42px; height: 42px; border-radius: 50%; background: #f59e0b; opacity: 0.35; animation: ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
+                  <div style="position: relative; background: #f59e0b; width: 26px; height: 26px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 14px rgba(245,158,11,0.8); display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: 900;">
+                    대기
+                  </div>
+                </div>
+              ` : isHighlighted ? `
                 <div style="position: relative; display: flex; flex-direction: column; align-items: center; z-index: 1000;">
                   <div style="position: absolute; top: -30px; background: #312e81; color: white; padding: 2.5px 8px; border-radius: 9999px; font-size: 11px; font-weight: 900; white-space: nowrap; box-shadow: 0 4px 12px rgba(49,46,129,0.5); border: 2px solid #818cf8; animation: bounce 1s infinite;">
                     ★ ${st.name} 탑승지
@@ -7299,7 +7748,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                   </div>
                 </div>
               ` : isPureNotRiding ? `
-                <div style="background-color: ${NOT_RIDING_COLOR}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.35);" title="미탑승 원아"></div>
+                <div style="background-color: ${NOT_RIDING_COLOR}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.35);" title="${isOutside6kmNotRiding ? '구역 외 미탑승 원아' : '미탑승 원아'}"></div>
               ` : isOneTimeStudent ? `
                 <div style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">
                   <span style="position: absolute; inset: -2px; border-radius: 50%; background: #f43f5e; opacity: 0.45; animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
@@ -7310,17 +7759,25 @@ const parseKindergartenExcelSheet = (sheet) => {
               ` : `
                 <div style="background-color: ${stColor}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>
               `,
-              iconSize: isHighlighted ? [44, 44] : needsExtraBus ? [26, 26] : isOneTimeStudent ? [24, 24] : [14, 14],
-              iconAnchor: isHighlighted ? [22, 22] : needsExtraBus ? [13, 13] : isOneTimeStudent ? [12, 12] : [7, 7]
+              iconSize: (isApprovalPending || isHighlighted) ? [44, 44] : needsExtraBus ? [26, 26] : isOneTimeStudent ? [24, 24] : [14, 14],
+              iconAnchor: (isApprovalPending || isHighlighted) ? [22, 22] : needsExtraBus ? [13, 13] : isOneTimeStudent ? [12, 12] : [7, 7]
             });
             return (
               <Marker key={st.id} position={[displayLat, displayLng]} icon={studentIcon}>
                 <Popup className="student-popup">
                 <div className="font-bold text-lg mb-1 flex items-center justify-between">
                   <span>{st.name} <span className="text-sm font-normal text-slate-500">{st.raw?.['성별']} / {st.raw?.['연령'] || st.raw?.['학년'] || ''}</span></span>
-                  {needsExtraBus ? (
+                  {isApprovalPending ? (
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-300">
+                      결재 승인 대기
+                    </span>
+                  ) : needsExtraBus ? (
                     <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-300">
                       증차 필요
+                    </span>
+                  ) : isOutside6kmNotRiding ? (
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300">
+                      구역 외 미탑승
                     </span>
                   ) : isPureNotRiding ? (
                     <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300">
@@ -7333,8 +7790,23 @@ const parseKindergartenExcelSheet = (sheet) => {
                   ) : null}
                 </div>
                 <div className="text-sm text-slate-700 mb-2">{st.raw?.['유치원명'] || st.raw?.['학교명']} {st.raw?.['반명'] ? `(${st.raw?.['반명']})` : ''} {st.raw?.['하원구분'] ? `[${st.raw?.['하원구분']}]` : ''}</div>
+
+                {isApprovalPending && (
+                  <div className="bg-amber-50 text-amber-900 border border-amber-300 text-xs font-bold p-2.5 rounded-xl mb-2 flex items-center justify-between shadow-2xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                      <span>[결재 승인 대기] 학부모 통학/결제 신청 검토 중</span>
+                    </div>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleApproveStudent(st.id); }}
+                      className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-[11px] font-black transition cursor-pointer"
+                    >
+                      승인
+                    </button>
+                  </div>
+                )}
                 
-                {needsExtraBus && (
+                {needsExtraBus && !isApprovalPending && (
                   <div className="bg-amber-50 text-amber-950 border border-amber-300 text-xs font-bold p-2.5 rounded-xl mb-2 flex items-start gap-2 shadow-2xs">
                     <span className="w-4 h-4 rounded-full bg-amber-500 text-white flex items-center justify-center text-[10px] font-black shrink-0 mt-0.5">!</span>
                     <div>
@@ -7346,7 +7818,14 @@ const parseKindergartenExcelSheet = (sheet) => {
                   </div>
                 )}
 
-                {isPureNotRiding && (
+                {isOutside6kmNotRiding && (
+                  <div className="bg-slate-100 text-slate-700 border border-slate-300 text-xs font-bold p-2 rounded-lg mb-2 flex items-center justify-center gap-1.5 shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                    <span>[구역 외 미탑승] 학원 반경 6km 초과 (운행 구역 없음, {sixKmCheck.distKm.toFixed(1)}km)</span>
+                  </div>
+                )}
+
+                {isPureNotRiding && !isOutside6kmNotRiding && (
                   <div className="bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold p-2 rounded-lg mb-2 flex items-center justify-center gap-1.5 shadow-2xs">
                     <span className="w-2 h-2 rounded-full bg-slate-400"></span>
                     <span>[셔틀 미탑승] 도보 또는 자가 등하원 원아</span>
@@ -7386,12 +7865,16 @@ const parseKindergartenExcelSheet = (sheet) => {
                 </div>
                 
                 <div className="text-sm font-bold text-center p-2 rounded border mb-2" style={{ 
-                  backgroundColor: needsExtraBus ? '#fff7ed' : isPureNotRiding ? '#f1f5f9' : isOneTimeStudent ? '#fff1f2' : (stColor + '20'), 
-                  color: needsExtraBus ? '#c2410c' : isPureNotRiding ? '#475569' : isOneTimeStudent ? '#e11d48' : stColor,
-                  borderColor: needsExtraBus ? '#fdba74' : isPureNotRiding ? '#cbd5e1' : isOneTimeStudent ? '#fecdd3' : 'transparent'
+                  backgroundColor: isApprovalPending ? '#fef3c7' : needsExtraBus ? '#fff7ed' : isPureNotRiding ? '#f1f5f9' : isOneTimeStudent ? '#fff1f2' : (stColor + '20'), 
+                  color: isApprovalPending ? '#92400e' : needsExtraBus ? '#c2410c' : isPureNotRiding ? '#475569' : isOneTimeStudent ? '#e11d48' : stColor,
+                  borderColor: isApprovalPending ? '#fde68a' : needsExtraBus ? '#fdba74' : isPureNotRiding ? '#cbd5e1' : isOneTimeStudent ? '#fecdd3' : 'transparent'
                 }}>
-                  {needsExtraBus
+                  {isApprovalPending
+                    ? '결재 승인 대기 중'
+                    : needsExtraBus
                     ? '증차 필요 (주변 5KM 내 다른 배차 차량 없음)'
+                    : isOutside6kmNotRiding
+                    ? `구역 외 미탑승 (학원 기준 ${sixKmCheck.distKm.toFixed(1)}km, 6km 초과)`
                     : isPureNotRiding
                     ? '셔틀 미탑승 (도보/자차)'
                     : isOneTimeStudent 
