@@ -433,12 +433,15 @@ export default function AdminMainHome({
 
     if (expirySummary.urgentItems && expirySummary.urgentItems.length > 0) {
       expirySummary.urgentItems.forEach(item => {
+        const days = typeof item.dday === 'object' && item.dday !== null ? (item.dday.days ?? 0) : Number(item.dday || 0);
+        const label = typeof item.dday === 'object' && item.dday !== null ? item.dday.label : (days <= 0 ? '만료' : `D-${days}`);
         items.push({
-          id: `expiry-${item.busId}-${item.key}`,
-          title: `${item.busName} ${item.label}`,
+          id: `expiry-${item.busId}-${item.key || item.fieldKey}`,
+          title: item.title || `${item.busName} ${item.fieldLabel || item.label || '서류'}`,
           target: `${item.busName}`,
-          dday: item.dday,
-          status: item.dday <= 0 ? 'EXPIRED' : 'URGENT',
+          dday: days,
+          ddayLabel: label,
+          status: days <= 0 ? 'EXPIRED' : 'URGENT',
           dateStr: item.dateStr || '만료 임박',
         });
       });
@@ -967,7 +970,7 @@ export default function AdminMainHome({
                           <span className={`px-2.5 py-0.5 rounded text-sm font-black border ${
                             isUrgent ? 'bg-rose-100 text-rose-700 border-rose-300' : 'bg-slate-100 text-slate-700 border-slate-200'
                           }`}>
-                            D-{item.dday}
+                            {item.ddayLabel || (item.dday <= 0 ? '만료' : `D-${item.dday}`)}
                           </span>
                         </div>
                         {/* Visual D-Day bar */}
