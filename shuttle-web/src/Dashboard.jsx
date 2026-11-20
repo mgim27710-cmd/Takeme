@@ -7836,6 +7836,20 @@ const parseKindergartenExcelSheet = (sheet) => {
           {/* Draw New Students */}
           {(selectedBusId ? students.filter(s => {
             const bType = getStudentBoardingType(s);
+            if (s.isNotRiding || bType === 'NONE') {
+              const bus = buses.find(b => b.id === selectedBusId);
+              const busName = bus?.name || '';
+              const matchesBus = (s.boardingLocation && busName && s.boardingLocation.includes(busName)) ||
+                                 (s.dropoffLocation && busName && s.dropoffLocation.includes(busName)) ||
+                                 (s.assignedBusId === selectedBusId || s.assignedDepartureBusId === selectedBusId);
+              if (matchesBus) return true;
+              if (bus?.turfPolygon && s.lat && s.lng) {
+                try {
+                  return turf.booleanPointInPolygon(turf.point([Number(s.lng), Number(s.lat)]), bus.turfPolygon);
+                } catch (_) {}
+              }
+              return false;
+            }
             if (operationMode === 'MORNING') {
               return s.assignedBusId === selectedBusId && bType !== 'AFTERNOON_ONLY';
             } else if (operationMode === 'AFTERNOON') {
