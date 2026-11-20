@@ -84,7 +84,8 @@ class ChatMessageModel {
       type: json['type'] as String? ?? 'TEXT',
       createdAt: parsedDate,
       senderId: sender['id'] as int? ?? 0,
-      senderName: sender['name'] as String? ?? '알 수 없음',
+      // 보낸 사람이 없는 메시지는 서버가 보낸 시스템 알림(TakeMe 알림)
+      senderName: sender['name'] as String? ?? ((json['payload'] is Map ? json['payload']['senderLabel'] : null)?.toString() ?? 'TakeMe 알림'),
       senderEmail: sender['email'] as String? ?? '',
       senderRole: sender['role'] as String? ?? '',
       readBy: readByList,

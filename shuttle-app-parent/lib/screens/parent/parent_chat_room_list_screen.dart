@@ -1009,7 +1009,11 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
     final memberCount = room.members.length;
 
     final lastMsg = room.lastMessage;
-    final lastText = lastMsg?.text ?? '대화 내용이 없습니다.';
+    // 알림 방에 아직 메시지가 없으면 무슨 방인지 설명을 보여준다
+    final lastText = lastMsg?.text ??
+        (room.type == 'NOTIFICATION_SYSTEM'
+            ? (room.name == 'TakeMe 알림' ? '나와 우리 아이 관련 알림이 오는 방이에요' : '유치원 전체 공지가 오는 방이에요')
+            : '대화 내용이 없습니다.');
     final dateStr = lastMsg != null ? _formatDate(lastMsg.createdAt) : '';
 
     return Container(
@@ -1032,8 +1036,9 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
           onTap: () => _enterRoom(
             room.id,
             title,
-            opponentRole,
-            opponent?.name ?? title,
+            // 알림 방(TakeMe 알림·공지사항)은 상대가 없으므로 방 이름 그대로, 역할은 SYSTEM
+            room.type == 'NOTIFICATION_SYSTEM' ? 'SYSTEM' : opponentRole,
+            room.type == 'NOTIFICATION_SYSTEM' ? title : (opponent?.name ?? title),
             isGroup: isGroup,
             memberCount: memberCount,
           ),

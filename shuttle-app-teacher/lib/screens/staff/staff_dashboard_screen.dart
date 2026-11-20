@@ -829,6 +829,14 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     }
   }
 
+  /// 성별 표시: 서버 값이 MALE/FEMALE/M/F/남/여 어느 것이어도 '남'/'여'로
+  String _genderKr(String g) {
+    final v = g.trim().toUpperCase();
+    if (v == 'FEMALE' || v == 'F' || v == '여' || v == '여자') return '여';
+    if (v == 'MALE' || v == 'M' || v == '남' || v == '남자') return '남';
+    return g;
+  }
+
   /// 원아 상태(색 + 문구 + 아이콘): 탑승 전 / 탑승 / 하차 / 결석
   ({String label, IconData icon, Color fg, Color bg, Color border}) _statusOf(StudentModel st) {
     if (st.absent) {
@@ -982,13 +990,17 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
           required VoidCallback onPressed,
           bool outlined = false,
         }) {
-          final child = Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 22, color: outlined ? color : Colors.white),
-              const SizedBox(width: 6),
-              Text(label, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: outlined ? color : Colors.white)),
-            ],
+          // 버튼 폭이 좁으면 글자·아이콘을 함께 줄여서 넘치지 않게 한다
+          final child = FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 22, color: outlined ? color : Colors.white),
+                const SizedBox(width: 6),
+                Text(label, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: outlined ? color : Colors.white)),
+              ],
+            ),
           );
           final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(12));
           return SizedBox(
@@ -1069,7 +1081,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                   ),
                   if (st.gender != null) ...[
                     const SizedBox(height: 4),
-                    Text('성별: ${st.gender}', style: const TextStyle(fontSize: 16, color: Color(0xFF475569))),
+                    Text('성별: ${_genderKr(st.gender!)}', style: const TextStyle(fontSize: 16, color: Color(0xFF475569))),
                   ],
                   const SizedBox(height: 4),
                   Text(

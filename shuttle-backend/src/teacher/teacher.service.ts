@@ -630,6 +630,7 @@ export class TeacherService {
       }
 
       const noti = this.notificationRepository.create({
+        type: 'VEHICLE_LOG', // 원장 화면 운행 기록용 (차량선생님·기사 알림 숫자에 넣지 않음)
         vehicle: vehicle,
         message: adminLogMessage
       });
@@ -724,6 +725,7 @@ export class TeacherService {
     }
     if (vehicle) {
       const adminNoti = this.notificationRepository.create({
+        type: 'VEHICLE_LOG', // 원장 화면 운행 기록용 (차량선생님·기사 알림 숫자에 넣지 않음)
         vehicle: vehicle,
         message: msg
       });
@@ -757,6 +759,7 @@ export class TeacherService {
     const vehicle = await this.findAssignedVehicle(user.id);
     if (vehicle) {
       const adminNoti = this.notificationRepository.create({
+        type: 'VEHICLE_LOG', // 원장 화면 운행 기록용 (차량선생님·기사 알림 숫자에 넣지 않음)
         vehicle: vehicle,
         message: `${vehicle.busNumber}호차 ${student.adminDisplayName || student.name} 원생 ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 결석/건너뛰기`
       });
@@ -831,6 +834,7 @@ export class TeacherService {
     const name = student.adminDisplayName || student.name;
     const whoText = who ? ` · 인수: ${who}` : '';
     await this.notificationRepository.save(this.notificationRepository.create({
+      type: 'VEHICLE_LOG', // 원장 화면 운행 기록용 (차량선생님·기사 알림 숫자에 넣지 않음)
       vehicle,
       message: `${vehicle.busNumber}호차 ${name} 원생 ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} 하차 완료${whoText}`,
     }));
@@ -1170,6 +1174,7 @@ export class TeacherService {
         await this.studentRepository.save(st);
 
         const absentNoti = this.notificationRepository.create({
+          type: 'VEHICLE_LOG', // 원장 화면 운행 기록용 (차량선생님·기사 알림 숫자에 넣지 않음)
           vehicle: vehicle,
           message: `${vehicle.busNumber}호차 ${st.adminDisplayName || st.name} 원생 미탑승(자동 결석 처리)`
         });
@@ -1218,6 +1223,7 @@ export class TeacherService {
 
     // 1. Create a Notification for the academy admin
     this.notificationRepository.save(this.notificationRepository.create({
+      type: 'VEHICLE_LOG', // 원장 화면 운행 기록용 (차량선생님·기사 알림 숫자에 넣지 않음)
       vehicle: vehicle,
       message: `${student.adminDisplayName || student.name} 학생이 셔틀버스에 탑승했습니다. ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 탑승 완료 (QR)`
     }));

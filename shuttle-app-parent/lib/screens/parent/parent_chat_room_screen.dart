@@ -187,10 +187,17 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
     }
   }
 
+  /// 알림 전용 방(TakeMe 알림·공지사항): 메시지를 보낼 수 없다
+  bool get _isAlertRoom =>
+      widget.opponentRole == 'SYSTEM' || widget.roomName == 'TakeMe 알림' || widget.roomName == '공지사항' || widget.roomName == '실시간 알림 채널';
+  bool get _isNoticeRoom => _isAlertRoom && widget.roomName != 'TakeMe 알림';
+
   @override
   Widget build(BuildContext context) {
-    final title = widget.opponentName ?? widget.roomName;
-    final subtitle = widget.isGroup
+    final title = _isAlertRoom ? widget.roomName : (widget.opponentName ?? widget.roomName);
+    final subtitle = _isAlertRoom
+        ? (_isNoticeRoom ? '유치원 전체 공지가 오는 방이에요' : '나와 우리 아이 관련 알림이 오는 방이에요')
+        : widget.isGroup
         ? '${widget.memberCount ?? "다수"}명 참여 중'
         : (widget.opponentRole ?? '1:1 소통 채널');
 
@@ -205,15 +212,30 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
         ),
         title: Row(
           children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: widget.isGroup ? const Color(0xFFEDE9FE) : const Color(0xFFEFF6FF),
-              child: Icon(
-                widget.isGroup ? Icons.groups_rounded : Icons.school_rounded,
-                color: widget.isGroup ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
-                size: 20,
+            if (_isAlertRoom)
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: _isNoticeRoom ? const Color(0xFFECFDF5) : const Color(0xFF0F172A),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  _isNoticeRoom ? Icons.campaign_rounded : Icons.notifications_active,
+                  color: _isNoticeRoom ? const Color(0xFF059669) : Colors.white,
+                  size: 20,
+                ),
+              )
+            else
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: widget.isGroup ? const Color(0xFFEDE9FE) : const Color(0xFFEFF6FF),
+                child: Icon(
+                  widget.isGroup ? Icons.groups_rounded : Icons.school_rounded,
+                  color: widget.isGroup ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
+                  size: 20,
+                ),
               ),
-            ),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -251,7 +273,7 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
                   ),
                   Row(
                     children: [
-                      Container(
+                      if (!_isAlertRoom) Container(
                         width: 7,
                         height: 7,
                         decoration: const BoxDecoration(
@@ -338,9 +360,13 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      widget.isGroup
-                          ? '원아 지도와 통학 안전을 위해 학부모 및 교직원이 소통하는 그룹 대화방입니다.'
-                          : '원아 보호 및 교원 소통을 위한 공식 1:1 안심 메신저입니다.',
+                      _isAlertRoom
+                          ? (_isNoticeRoom
+                              ? '휴업·방학·행사 등 유치원 전체 공지가 와요. 답장할 수 없어요.'
+                              : '버스 운행·탑승·하차, 결석·신청 결과 등 우리 아이 관련 알림이 와요. 답장할 수 없어요.')
+                          : widget.isGroup
+                              ? '원아 지도와 통학 안전을 위해 학부모 및 교직원이 소통하는 그룹 대화방입니다.'
+                              : '원아 보호 및 교원 소통을 위한 공식 1:1 안심 메신저입니다.',
                       style: TextStyle(
                         fontSize: 12,
                         color: widget.isGroup ? const Color(0xFF6D28D9) : const Color(0xFF3730A3),
@@ -385,8 +411,26 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
                         ),
             ),
 
+            if (_isAlertRoom)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: const BoxDecoration(
+                  color: Color(0xFFF8FAFC),
+                  border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.lock_outline, size: 16, color: Color(0xFF64748B)),
+                    SizedBox(width: 8),
+                    Text('알림 전용 방이라 메시지를 보낼 수 없어요.',
+                        style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
             // 빠른 메시지 템플릿 칩 가로 스크롤
-            Container(
+            if (!_isAlertRoom) Container(
               height: 44,
               color: Colors.white,
               child: ListView.separated(
@@ -425,7 +469,7 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
             ),
 
             // 하단 입력 바
-            Container(
+            if (!_isAlertRoom) Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: const BoxDecoration(
                 color: Colors.white,
@@ -598,6 +642,15 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (msg.senderId == 0)
+              // 시스템 알림(TakeMe 알림): 어두운 종 아이콘
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.notifications_active, color: Colors.white, size: 17),
+              )
+            else
             CircleAvatar(
               radius: 16,
               backgroundColor: const Color(0xFFE0E7FF),
