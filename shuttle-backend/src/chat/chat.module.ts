@@ -13,6 +13,7 @@ import { Academy } from '../entities/academy.entity';
 import { PickupPoint } from '../entities/pickup-point.entity';
 import { ParentMessage } from '../entities/parent-message.entity';
 import { Notification } from '../entities/notification.entity';
+import { UserDevice } from '../entities/user-device.entity';
 import { RoutingModule } from '../routing/routing.module';
 import { ApprovalModule } from '../approval/approval.module';
 
@@ -29,6 +30,7 @@ import { ApprovalModule } from '../approval/approval.module';
       PickupPoint,
       ParentMessage,
       Notification,
+      UserDevice,
     ]),
     forwardRef(() => RoutingModule),
     forwardRef(() => ApprovalModule),

@@ -11,12 +11,14 @@ import { Academy } from '../entities/academy.entity';
 import { PickupPoint } from '../entities/pickup-point.entity';
 import { ParentMessage } from '../entities/parent-message.entity';
 import { Notification } from '../entities/notification.entity';
+import { UserDevice } from '../entities/user-device.entity';
 import { ChatGateway } from './chat.gateway';
 import { RoutingService } from '../routing/routing.service';
 import { ApprovalService } from '../approval/approval.service';
 import { formatTeacherName } from '../utils/teacher.util';
 import { getStudentClassName, isSameClass } from '../utils/school.util';
 import { isNotificationEnabled } from '../utils/notification.util';
+import { sendSnsPushNotification } from '../utils/sns.util';
 
 /** 개인 알림방 이름 (NOTIFICATION_SYSTEM 타입, 사용자 1명 전용) */
 export const PERSONAL_NOTI_ROOM_NAME = 'TakeMe 알림';
@@ -39,6 +41,7 @@ export class ChatService implements OnModuleInit {
     @InjectRepository(PickupPoint) private pickupPointRepo: Repository<PickupPoint>,
     @InjectRepository(ParentMessage) private parentMessageRepo: Repository<ParentMessage>,
     @InjectRepository(Notification) private notificationRepo: Repository<Notification>,
+    @InjectRepository(UserDevice) private userDeviceRepo: Repository<UserDevice>,
     @Inject(forwardRef(() => ChatGateway))
     private readonly chatGateway: ChatGateway,
     @Inject(forwardRef(() => RoutingService))
@@ -348,6 +351,27 @@ export class ChatService implements OnModuleInit {
         createdAt: saved.createdAt,
       });
     }
+
+    // AWS SNS 모바일 푸시 알림 발송
+    try {
+      const devices = await this.userDeviceRepo.find({ where: { userId } });
+      const endpoints = new Set<string>();
+      if (user.snsEndpointArn) endpoints.add(user.snsEndpointArn);
+      for (const d of devices) {
+        if (d.endpointArn) endpoints.add(d.endpointArn);
+      }
+
+      for (const ep of endpoints) {
+        await sendSnsPushNotification(ep, title, message, {
+          roomId: room.id,
+          type: options?.type || 'SYSTEM',
+          ...(options?.metadata || {}),
+        });
+      }
+    } catch (snsErr) {
+      console.warn(`[SNS] Failed to send push to user ${userId}:`, snsErr);
+    }
+
     return saved;
   }
 

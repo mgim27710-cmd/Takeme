@@ -71,6 +71,12 @@ export class User {
   @Column({ type: 'varchar', nullable: true })
   refreshToken: string | null;
 
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  deviceToken: string | null;
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  snsEndpointArn: string | null;
+
   @Column({ type: 'simple-array', nullable: true })
   readNotificationKeys: string[];
 
