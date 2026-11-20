@@ -5182,7 +5182,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                 if (st.isNotRiding || getStudentBoardingType(st) === 'NONE') return false;
                 const sixKm = checkSixKmRule(st, buses, academy);
                 if (sixKm.isOutside6km) return false;
-                if (st.needsExtraBus) return true;
+                if (st.needsExtraBus || st.raw?.needsExtraBus || st.raw?.['증차필요']) return true;
 
                 const assignedBus = buses.find(b => b.id === (st.assignedBusId || st.assignedVehicle?.id));
                 if (assignedBus) {
@@ -7716,10 +7716,20 @@ const parseKindergartenExcelSheet = (sheet) => {
             const isOverCapacity = currentBusRiders.length > (assignedBus?.capacity || 25);
             const isUnassigned = !displayBusId;
 
-            let needsExtraBus = Boolean(st.needsExtraBus);
+            let needsExtraBus = Boolean(st.needsExtraBus || st.raw?.needsExtraBus || st.raw?.['증차필요']);
             if (!isPureNotRiding && !isApprovalPending) {
-              if (isUnassigned || isOverCapacity || !isInsideAssignedZone) {
+              if (isOverCapacity) {
                 needsExtraBus = true;
+              } else if (isUnassigned || !isInsideAssignedZone) {
+                const hasAvailableNearbyBus = buses.some(b => {
+                  if (b.id === assignedBus?.id) return false;
+                  const riders = students.filter(s => !s.isNotRiding && (s.assignedBusId === b.id || s.assignedVehicle?.id === b.id));
+                  if (riders.length >= (b.capacity || 25)) return false;
+                  return calcDistToBusKm(displayLat, displayLng, b) <= 5.0;
+                });
+                if (!hasAvailableNearbyBus) {
+                  needsExtraBus = true;
+                }
               }
             }
 
@@ -7745,6 +7755,8 @@ const parseKindergartenExcelSheet = (sheet) => {
               ? ONE_TIME_COLOR 
               : (displayBusId && isInsideAssignedZone)
               ? (assignedBus?.color || '#64748b') 
+              : isUnassigned
+              ? '#64748b'
               : EXTRA_BUS_COLOR;
 
             const isHighlighted = highlightedStudentId === st.id;
