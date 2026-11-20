@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../config.dart';
 import '../../models/user_model.dart';
 import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
@@ -109,6 +111,83 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
     _loadRooms(showLoading: false);
   }
 
+  /// 길게 누르면: 맨 위 고정/해제, 채팅방 삭제 (TakeMe 알림은 항상 맨 위라 해당 없음)
+  void _showRoomActions(Map<String, dynamic> room) {
+    final roomId = room['id'] as int;
+    final title = room['displayName'] ?? _normalizeRoomName(room['name']) ?? '대화방';
+    final isPinned = room['isPinned'] == true;
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+            ),
+            ListTile(
+              minTileHeight: 56,
+              leading: Icon(isPinned ? Icons.push_pin_outlined : Icons.push_pin),
+              title: Text(isPinned ? '고정 해제' : '맨 위에 고정', style: const TextStyle(fontSize: 16)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _roomAction('/chat/rooms/$roomId/pin', {'pinned': !isPinned},
+                    failText: isPinned ? '고정을 해제하지 못했습니다.' : '고정하지 못했습니다.');
+              },
+            ),
+            ListTile(
+              minTileHeight: 56,
+              leading: const Icon(Icons.delete_outline, color: Color(0xFFDC2626)),
+              title: const Text('채팅방 삭제', style: TextStyle(fontSize: 16, color: Color(0xFFDC2626))),
+              onTap: () {
+                Navigator.pop(ctx);
+                _confirmHideRoom(roomId, title);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _confirmHideRoom(int roomId, String title) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('채팅방 삭제'),
+        content: Text('"$title" 채팅방을 내 목록에서 삭제할까요?\n상대방에게는 그대로 남고, 새 메시지가 오면 다시 보입니다.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _roomAction('/chat/rooms/$roomId/hide', {}, failText: '채팅방을 삭제하지 못했습니다.');
+            },
+            child: const Text('삭제', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _roomAction(String path, Map<String, dynamic> body, {required String failText}) async {
+    try {
+      final res = await ApiService().postWithAuth(Uri.parse('${AppConfig.apiHost}$path'), jsonEncode(body));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        _loadRooms(showLoading: false);
+        return;
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$failText (${res.statusCode})')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$failText ${friendlyError(e)}')));
+    }
+  }
+
   String _formatRoomTime(dynamic createdAt) {
     if (createdAt == null) return '';
     try {
@@ -163,13 +242,19 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
     } else if (role == 'STUDENT') {
       badgeLabel = '학생';
       badgeColor = const Color(0xFF8B5CF6);
-    } else {
+    } else if (role != null && role.isNotEmpty) {
       badgeLabel = UserModel.getRoleKorean(role);
       badgeColor = const Color(0xFF64748B);
     }
+    // 역할을 모르는 방(예전 공지사항 방 등)에는 '알 수 없음' 배지를 달지 않는다
+    if (badgeLabel == '알 수 없음') badgeLabel = '';
+
+    final isPinned = room['isPinned'] == true;
 
     return InkWell(
       onTap: () => _enterRoom(room),
+      // TakeMe 알림·공지사항(시스템 방)은 고정·삭제 대상이 아니다
+      onLongPress: (isSystem || room['type'] == 'NOTIFICATION_SYSTEM') ? null : () => _showRoomActions(room),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
@@ -179,14 +264,15 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
               Stack(
                 clipBehavior: Clip.none,
                 children: [
+                  // TakeMe 알림: 어두운 사각형 종 아이콘 (학부모 앱과 같은 모양)
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
                       color: const Color(0xFF0F172A),
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    child: const Icon(Icons.notifications_active, color: Colors.white, size: 24),
+                    child: const Icon(Icons.notifications_active, color: Colors.white, size: 22),
                   ),
                   if (unreadCount > 0)
                     Positioned(
@@ -213,6 +299,17 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
                     ),
                 ],
               )
+            else if (room['type'] == 'NOTIFICATION_SYSTEM')
+              // 공지사항: 연한 초록 사각형 확성기 아이콘 (학부모 앱과 같은 모양)
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFECFDF5),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.campaign_rounded, color: Color(0xFF059669), size: 24),
+              )
             else
               CircleAvatar(
                 radius: 24,
@@ -230,6 +327,10 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
                 children: [
                   Row(
                     children: [
+                      if (isPinned) ...[
+                        const Icon(Icons.push_pin, size: 14, color: Color(0xFF64748B), semanticLabel: '고정됨'),
+                        const SizedBox(width: 4),
+                      ],
                       Flexible(
                         child: Text(
                           displayName,

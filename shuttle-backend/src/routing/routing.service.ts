@@ -89,34 +89,95 @@ export class RoutingService {
     private configService: ConfigService,
   ) {}
 
-  public async checkArrivalAndNotify(vehicleId: number, lat: number, lng: number): Promise<any[]> {
+  /** 같은 알림을 한 번만 보내기 위한 기록: `${종류}:${studentId}:${날짜}:${AM|PM}` */
+  private sentArrivalAlerts = new Set<string>();
+  /** 차량이 이번 운행에서 유치원을 벗어났었는지 (유치원 도착 판정용) */
+  private vehicleLeftAcademy = new Map<number, boolean>();
+
+  private static distanceM(lat1: number, lng1: number, lat2: number, lng2: number): number {
+    const dLat = (lat2 - lat1) * (Math.PI / 180);
+    const dLng = (lng2 - lng1) * (Math.PI / 180);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return 6371e3 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  /** 한국 시간 기준 날짜와 오전/오후 (오전 = 등원, 오후 = 하원 운행으로 본다) */
+  private static kstSlot(): { date: string; isMorning: boolean } {
+    const kst = new Date(Date.now() + 9 * 3600 * 1000);
+    return { date: kst.toISOString().slice(0, 10), isMorning: kst.getUTCHours() < 12 };
+  }
+
+  /**
+   * 차량 위치가 들어올 때마다 학부모 알림을 판단한다. (기사 앱 위치 전송 → LocationGateway 에서 호출)
+   * 1) 도착 2분 전: 등원은 아직 타지 않은(대기) 원아의 탑승지, 하원은 타고 있는 원아의 하차지까지
+   *    남은 시간이 2분 이하가 되면 그 원아의 학부모에게 한 번 알린다.
+   *    남은 시간 = 직선거리 × 1.3(도로 보정) ÷ 현재 속도(느리면 시속 25km 로 계산)
+   * 2) 유치원 도착(등원): 유치원에서 500m 넘게 벗어났던 차량이 150m 안으로 돌아오면
+   *    타고 있는 원아의 학부모에게 한 번 알린다.
+   * 알림은 학부모의 TakeMe 알림(개인 알림방)으로 가며, 실시간 화면용 소켓 이벤트 목록을 돌려준다.
+   */
+  public async checkArrivalAndNotify(vehicleId: number, lat: number, lng: number, speedKmh?: number | null): Promise<any[]> {
+    const { date, isMorning } = RoutingService.kstSlot();
+    const slot = `${date}:${isMorning ? 'AM' : 'PM'}`;
+    const events: any[] = [];
+
+    const vehicle = await this.vehicleRepository.findOne({ where: { id: vehicleId }, relations: { academy: true } });
     const students = await this.studentRepository.find({
-      where: { assignedVehicle: { id: vehicleId } },
-      relations: { parentUser: true }
+      where: isMorning
+        ? { assignedVehicle: { id: vehicleId } }
+        : [{ assignedDepartureVehicle: { id: vehicleId } }, { assignedVehicle: { id: vehicleId } }],
+      relations: { parentUser: true },
     });
 
-    const notifications: any[] = [];
-    for (const student of students) {
-      if (student.latitude && student.longitude) {
-        const dLat = (student.latitude - lat) * (Math.PI / 180);
-        const dLng = (student.longitude - lng) * (Math.PI / 180);
-        const a =
-          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-          Math.cos(lat * (Math.PI / 180)) * Math.cos(student.latitude * (Math.PI / 180)) *
-          Math.sin(dLng / 2) * Math.sin(dLng / 2);
-        const distanceMeters = 6371e3 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    // 1) 도착 2분 전
+    const speedMps = speedKmh && speedKmh > 10 ? speedKmh / 3.6 : 25 / 3.6;
+    for (const st of students) {
+      if (!st.latitude || !st.longitude || st.isNotRiding) continue;
+      // 등원: 아직 안 탄 원아(탑승지로 가는 중) / 하원: 타고 있는 원아(하차지로 가는 중)
+      if (isMorning ? st.boardStatus !== 'WAITING' : st.boardStatus !== 'BOARDED') continue;
+      const dist = RoutingService.distanceM(lat, lng, Number(st.latitude), Number(st.longitude));
+      const etaSec = (dist * 1.3) / speedMps;
+      if (etaSec > 120) continue;
+      const key = `soon:${st.id}:${slot}`;
+      if (this.sentArrivalAlerts.has(key)) continue;
+      this.sentArrivalAlerts.add(key);
 
-        if (distanceMeters <= 400) {
-          notifications.push({
-            studentId: student.id,
-            studentName: student.name,
-            parentEmail: student.parentUser?.email,
-            message: `${student.name} 학생 승하차 지점 부근에 차량이 접근 중입니다.`
-          });
+      const name = st.adminDisplayName || st.name;
+      const place = isMorning ? '탑승지' : '하차지';
+      const message = `차량이 ${name} 원아 ${place}에 약 2분 뒤 도착합니다. ${isMorning ? '미리 나와 주세요.' : '마중 나와 주세요.'}`;
+      this.notifyStudentRelated(st.id, '곧 도착해요', message, ['PARENT'], { type: 'shuttle' });
+      events.push({ kind: 'SOON', studentId: st.id, studentName: name, parentUserId: st.parentUser?.id, message });
+    }
+
+    // 2) 유치원 도착 (등원)
+    const acLat = vehicle?.academy?.latitude ? Number(vehicle.academy.latitude) : null;
+    const acLng = vehicle?.academy?.longitude ? Number(vehicle.academy.longitude) : null;
+    if (acLat && acLng) {
+      const toAcademy = RoutingService.distanceM(lat, lng, acLat, acLng);
+      if (toAcademy > 500) this.vehicleLeftAcademy.set(vehicleId, true);
+      if (isMorning && toAcademy <= 150 && this.vehicleLeftAcademy.get(vehicleId)) {
+        this.vehicleLeftAcademy.set(vehicleId, false);
+        const academyName = vehicle?.academy?.name || '유치원';
+        for (const st of students) {
+          if (st.boardStatus !== 'BOARDED') continue;
+          const key = `arrived:${st.id}:${slot}`;
+          if (this.sentArrivalAlerts.has(key)) continue;
+          this.sentArrivalAlerts.add(key);
+          const name = st.adminDisplayName || st.name;
+          const message = `${name} 원아가 ${academyName}에 도착했습니다.`;
+          this.notifyStudentRelated(st.id, '유치원 도착', message, ['PARENT'], { type: 'shuttle' });
+          events.push({ kind: 'ARRIVED_ACADEMY', studentId: st.id, studentName: name, parentUserId: st.parentUser?.id, message });
         }
       }
     }
-    return notifications;
+
+    // 지난 날짜 기록은 정리한다
+    if (this.sentArrivalAlerts.size > 5000) {
+      for (const k of this.sentArrivalAlerts) if (!k.includes(`:${date}:`)) this.sentArrivalAlerts.delete(k);
+    }
+    return events;
   }
 
   public async geocodeAddress(

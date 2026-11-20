@@ -41,6 +41,11 @@ class NavStop {
   final bool isOverride; // 탑승지/일정 변경
   final String? overrideType;
   bool passed = false;
+  /// 들르지 않고 지나침(계획 순서와 다름). passed 도 true 다
+  bool skipped = false;
+  /// 기사가 버튼으로 도착 처리함
+  bool manual = false;
+  DateTime? arrivedAt;
   bool saidApproach = false;
   int pathIndex = 0;
   NavStop(
@@ -230,6 +235,72 @@ class DriverNavigator extends ChangeNotifier {
   }
 
   int get passedCount => activeStops.where((s) => s.passed).length;
+
+  /// 남은 정류장 수 (다음 정류장 포함)
+  int get remainingStopCount => activeStops.where((s) => !s.passed).length;
+
+  /// 가장 최근에 도착한 정류장 (건너뛴 정류장 제외)
+  NavStop? get currentStop {
+    NavStop? last;
+    for (final s in activeStops) {
+      if (s.passed && !s.skipped) {
+        if (last == null || (s.arrivedAt != null && (last.arrivedAt == null || s.arrivedAt!.isAfter(last.arrivedAt!)))) last = s;
+      }
+    }
+    return last;
+  }
+
+  /// 계획 순서와 다르게 건너뛴 정류장 수
+  int get skippedCount => activeStops.where((s) => s.skipped).length;
+
+  /// 정류장 도착·건너뜀·수동 정정 기록을 서버 운행 일지에 남긴다
+  void _logStopEvent(String type, String detail) {
+    unawaited(_logSafetyEventToServer(type, detail));
+  }
+
+  /// 기사 수동 정정: 다음 정류장을 지금 도착 처리 (자동 판정이 안 될 때 운행이 막히지 않게)
+  void manualArriveNext() {
+    final s = nextStop;
+    if (s == null) return;
+    final idx = activeStops.indexOf(s);
+    s.passed = true;
+    s.manual = true;
+    s.arrivedAt = DateTime.now();
+    s.saidApproach = true;
+    if (idx >= 0) map.markStopPassed(idx);
+    _logStopEvent('STOP_MANUAL_ARRIVE', '${s.name} 정류장 수동 도착 처리');
+    final next = nextStop;
+    _speak(next != null ? '${s.name} 도착 처리했습니다. 다음은 ${next.name}입니다.' : '${s.name} 도착 처리했습니다. 유치원으로 이동합니다.');
+    _syncOverlay();
+    notifyListeners();
+  }
+
+  /// 기사 수동 정정: 마지막으로 도착(또는 건너뜀) 처리된 정류장을 다시 "남음"으로
+  void undoLastStop() {
+    final list = activeStops;
+    int idx = -1;
+    DateTime? latest;
+    for (var i = 0; i < list.length; i++) {
+      final s = list[i];
+      if (!s.passed) continue;
+      if (idx < 0 || (s.arrivedAt != null && (latest == null || !s.arrivedAt!.isBefore(latest)))) {
+        idx = i;
+        latest = s.arrivedAt;
+      }
+    }
+    if (idx < 0) return;
+    final s = list[idx];
+    s.passed = false;
+    s.skipped = false;
+    s.manual = false;
+    s.arrivedAt = null;
+    s.saidApproach = false;
+    map.markStopPending(idx);
+    _logStopEvent('STOP_MANUAL_UNDO', '${s.name} 정류장 도착 처리 취소');
+    _speak('${s.name} 정류장 도착 처리를 취소했습니다.');
+    _syncOverlay();
+    notifyListeners();
+  }
 
   double get remainingM {
     final a = active;
@@ -494,6 +565,7 @@ class DriverNavigator extends ChangeNotifier {
           academy = GeoPoint(route.academyLat!, route.academyLng!);
         }
         final passedNames = stops.where((s) => s.passed).map((s) => s.name).toSet();
+        final prevByName = {for (final s in stops) s.name: s};
         final approachedNames = stops.where((s) => s.saidApproach).map((s) => s.name).toSet();
         stops
           ..clear()
@@ -508,6 +580,12 @@ class DriverNavigator extends ChangeNotifier {
             );
             stop.passed = passedNames.contains(s.name);
             stop.saidApproach = approachedNames.contains(s.name);
+            final prev = prevByName[s.name];
+            if (prev != null) {
+              stop.skipped = prev.skipped;
+              stop.manual = prev.manual;
+              stop.arrivedAt = prev.arrivedAt;
+            }
             return stop;
           }));
       }
@@ -615,6 +693,7 @@ class DriverNavigator extends ChangeNotifier {
     if (s != null && position != null && distanceM(position!, s.point) <= 80) {
       final idx = activeStops.indexOf(s);
       s.passed = true;
+      s.arrivedAt ??= DateTime.now();
       if (idx >= 0) map.markStopPassed(idx);
     }
 
@@ -1095,19 +1174,56 @@ class DriverNavigator extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> stop({bool interiorChecked = true}) async {
+  /// 아직 하차 처리 안 된(차에 타고 있는) 원아 이름. 확인하지 못하면 null
+  Future<List<String>?> fetchUndroppedNames() async {
+    if (!serverLive || testMode) return const [];
+    try {
+      final res = await ApiService()
+          .getWithAuth(Uri.parse('${AppConfig.apiHost}/teacher/undropped-students'))
+          .timeout(const Duration(seconds: 6));
+      if (res.statusCode != 200) return null;
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      final list = data is Map ? data['students'] : null;
+      if (list is! List) return const [];
+      return list.whereType<Map>().map((e) => e['name']?.toString() ?? '').where((n) => n.isNotEmpty).toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 운행 종료. 서버가 "하차 안 된 원아가 있다"고 막으면 그 이름 목록을 돌려주고 운행은 그대로 둔다.
+  /// ignoreUndropped: 기사가 경고를 보고도 종료하기로 한 경우 (서버에 기록이 남고 원장님께 알림)
+  Future<List<String>?> stop({bool interiorChecked = true, bool ignoreUndropped = false}) async {
     busy = true;
     notifyListeners();
-    _stopSimulation();
-    unawaited(_setKeepScreenOn(false));
-    if (serverLive) {
+    if (serverLive && !testMode) {
       try {
-        await _post('/teacher/end-operation', {'interiorChecked': interiorChecked});
+        final res = await ApiService().postWithAuth(
+          Uri.parse('${AppConfig.apiHost}/teacher/end-operation'),
+          {'interiorChecked': interiorChecked, 'ignoreUndropped': ignoreUndropped},
+        );
+        if (res.statusCode == 409) {
+          final data = jsonDecode(utf8.decode(res.bodyBytes));
+          final list = data is Map ? (data['students'] ?? (data['message'] is Map ? data['message']['students'] : null)) : null;
+          final names = list is List
+              ? list.whereType<Map>().map((e) => e['name']?.toString() ?? '').where((n) => n.isNotEmpty).toList()
+              : <String>[];
+          busy = false;
+          notifyListeners();
+          return names.isEmpty ? ['(이름 확인 필요)'] : names;
+        }
+        if (res.statusCode >= 400) {
+          actionError = '운행 종료가 서버에 전달되지 않았습니다. (${res.statusCode}) 연결 후 다시 운행 종료를 눌러 주세요.';
+        }
       } catch (e) {
         // 화면상으로는 운행이 끝나지만 서버에는 아직 운행 중으로 남을 수 있다 -> 반드시 알린다
         actionError = '운행 종료가 서버에 전달되지 않았습니다. ${friendlyError(e)} 연결 후 다시 운행 종료를 눌러 주세요.';
       }
-      if (vehicleId != null) SocketService().sendOperationStatus(vehicleId: vehicleId!, isOperating: false);
+    }
+    _stopSimulation();
+    unawaited(_setKeepScreenOn(false));
+    if (serverLive && vehicleId != null) {
+      SocketService().sendOperationStatus(vehicleId: vehicleId!, isOperating: false);
     }
     _resetDriving();
     _syncOverlay();
@@ -1126,6 +1242,7 @@ class DriverNavigator extends ChangeNotifier {
       map.centerOn(position!, zoom: 15);
     }
     await previewRoutes();
+    return null;
   }
 
   void _resetDriving() {
@@ -1313,23 +1430,44 @@ class DriverNavigator extends ChangeNotifier {
 
   void _checkStopArrival(GeoPoint p) {
     final list = activeStops;
-    for (var i = 0; i < list.length; i++) {
+    final nextIdx = list.indexWhere((s) => !s.passed);
+    if (nextIdx < 0) return;
+
+    // 1) 다음 정류장 160m 전방 접근 시 정확한 정차 지점 메모 음성 안내
+    final next = list[nextIdx];
+    final nextDist = distanceM(p, next.point);
+    if (nextDist <= 160 && nextDist > 45 && !next.saidApproach) {
+      next.saidApproach = true;
+      _speak('잠시 후 다음 정류장, ${next.name}, ${next.stopMemo}해 주세요.');
+    }
+
+    // 2) 정류장 도착 (40m 이내). 다음 정류장이 아닌 뒤 정류장에 먼저 닿으면(순서가 바뀌거나 들르지 않음)
+    //    그 앞의 남은 정류장은 '건너뜀'으로 표시해서 다음 정류장이 막혀 있지 않게 한다.
+    for (var i = nextIdx; i < list.length; i++) {
       final s = list[i];
       if (s.passed) continue;
-      final dist = distanceM(p, s.point);
-      // 1) 정류장 160m 전방 접근 시 정확한 정차 지점 메모 음성 안내
-      if (dist <= 160 && dist > 45 && !s.saidApproach) {
-        s.saidApproach = true;
-        _speak('잠시 후 다음 정류장, ${s.name}, ${s.stopMemo}해 주세요.');
+      if (distanceM(p, s.point) >= 40) continue;
+      final skippedNames = <String>[];
+      for (var j = nextIdx; j < i; j++) {
+        final sk = list[j];
+        if (sk.passed) continue;
+        sk.passed = true;
+        sk.skipped = true;
+        sk.arrivedAt = DateTime.now();
+        map.markStopPassed(j);
+        skippedNames.add(sk.name);
       }
-      // 2) 정류장 도착 (40m 이내)
-      if (dist < 40) {
-        s.passed = true;
-        s.saidApproach = true;
-        map.markStopPassed(i);
-        _speak('${s.name} 정류장에 도착했습니다. ${s.stopMemo}. 원아 탑승 후 차량선생님의 출발 신호를 기다려 주세요.');
+      s.passed = true;
+      s.saidApproach = true;
+      s.arrivedAt = DateTime.now();
+      map.markStopPassed(i);
+      _logStopEvent('STOP_ARRIVED', '${s.name} 정류장 도착');
+      if (skippedNames.isNotEmpty) {
+        _logStopEvent('STOP_SKIPPED', '${skippedNames.join(', ')} 정류장을 들르지 않고 ${s.name} 정류장에 먼저 도착 (계획 순서와 다름)');
+        _speak('${skippedNames.join(', ')} 정류장을 들르지 않았습니다. 확인해 주세요.');
       }
-      break; // 다음 정류장 하나만 확인
+      _speak('${s.name} 정류장에 도착했습니다. ${s.stopMemo}. 원아 탑승 후 차량선생님의 출발 신호를 기다려 주세요.');
+      break;
     }
   }
 

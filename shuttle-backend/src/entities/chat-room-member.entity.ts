@@ -16,6 +16,14 @@ export class ChatRoomMember {
   @Column({ type: 'timestamp', nullable: true })
   lastReadAt: Date;
 
+  /** 내 목록에서 맨 위 고정한 시각 (null 이면 고정 안 함). TakeMe 알림 바로 아래에 고정 순서대로 보인다 */
+  @Column({ type: 'timestamp', nullable: true })
+  pinnedAt: Date | null;
+
+  /** 내 목록에서 삭제한 시각. 이 뒤로 새 메시지가 오면 다시 보인다 */
+  @Column({ type: 'timestamp', nullable: true })
+  hiddenAt: Date | null;
+
   @CreateDateColumn()
   joinedAt: Date;
 

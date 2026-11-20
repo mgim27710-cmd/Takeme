@@ -1898,7 +1898,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     {isCurrentRoomPaymentSystem
                       ? '신규 학생 탑승 요청 및 담당 차량선생님 수락/거절 시스템 채널입니다.'
                       : isCurrentRoomNotificationSystem
-                      ? '결재 완료(차량선생님/학부모/원장 승인) 및 출결/통학 변동 알림 전용 채널입니다.'
+                      ? '결재 완료(지도교사/학부모/원장 승인) 및 출결/통학 변동 알림 전용 채널입니다.'
                       : (activeRoom.members || [])
                           .map((m) => m.user)
                           .filter(Boolean)
@@ -2754,7 +2754,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 <span>
                   {isPersonalNotificationRoom
                     ? 'TakeMe 알림입니다. 나와 관련된 알림만 표시되며 답장할 수 없습니다.'
-                    : '공지사항입니다. 기관 공지는 원장님만 작성할 수 있습니다. (차량선생님/학부모 결재 승인 및 출결 변동 알림 자동 수신)'}
+                    : '공지사항입니다. 기관 공지는 원장님만 작성할 수 있습니다.'}
                 </span>
               </div>
             ) : (

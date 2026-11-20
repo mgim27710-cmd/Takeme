@@ -495,14 +495,11 @@ export class ParentService {
           ? `${s.adminDisplayName || s.name} (우리 아이 ${isGohome ? '하차지' : '탑승지'})` 
           : (s.adminDisplayName || s.name);
         
-        let expectedTime = isGohome ? '16:30' : '08:40';
-        if (s.raw) {
-          if (isGohome) {
-            expectedTime = s.raw['하원예상시간'] || s.raw['예상하차시간'] || '16:30';
-          } else {
-            expectedTime = s.raw['등원예상시간'] || s.raw['예상탑승시간'] || '08:40';
-          }
-        }
+        // 정류장 예정 시각: 원장 웹에 입력된 값만 보낸다(없으면 null). 지어낸 기본 시각은 지연 안내를 틀리게 만든다.
+        const rawT: any = s.raw || {};
+        const expectedTime: string | null = (isGohome
+          ? (rawT['하원예상시간'] || rawT['예상하차시간'] || rawT['하원시간'])
+          : (rawT['등원예상시간'] || rawT['예상탑승시간'] || rawT['등원시간'])) || null;
 
         const stopAddress = isGohome 
           ? (s.dropoffLocation || s.boardingLocation || s.address)
@@ -530,8 +527,9 @@ export class ParentService {
       });
     }
 
+    // 경로선용 좌표만 보낸다. 다른 원아의 이름은 학부모에게 보내지 않는다.
     stops.forEach(s => {
-      routePoints.push({ latitude: s.latitude, longitude: s.longitude, title: s.name });
+      routePoints.push({ latitude: s.latitude, longitude: s.longitude });
     });
 
     if (academy && academy.latitude && academy.longitude && stops.length > 0) {
@@ -877,6 +875,156 @@ export class ParentService {
       childName: child?.name || null,
       academyName: child?.academyName || null
     };
+  }
+
+  // ============================================================
+  // 원아·보호자 정보 (학부모가 가입 후 반드시 입력)
+  // 웹 원장 화면의 [원아 추가] 와 같은 칸, 같은 저장 위치(raw 키)를 쓴다.
+  // 보호자2 = 비상연락망: 주보호자가 전화를 받지 못할 때 차량선생님이 연락할 사람
+  // ============================================================
+
+  private static parseRawObj(raw: any): Record<string, any> {
+    if (typeof raw === 'string') {
+      try { return JSON.parse(raw) || {}; } catch { return {}; }
+    }
+    return raw && typeof raw === 'object' ? { ...raw } : {};
+  }
+
+  /** 학부모(또는 학생 본인) 계정에 연결된 원아. studentId 가 있으면 그 원아가 내 아이일 때만 */
+  private async findOwnStudent(email: string, studentId?: number) {
+    const qb = this.studentRepository.createQueryBuilder('student')
+      .leftJoinAndSelect('student.parentUser', 'parentUser')
+      .leftJoinAndSelect('student.studentUser', 'studentUser')
+      .leftJoinAndSelect('student.academy', 'academy')
+      .where('(parentUser.email = :email OR studentUser.email = :email)', { email });
+    if (studentId) qb.andWhere('student.id = :studentId', { studentId });
+    const student = await qb.getOne();
+    if (!student) throw new BadRequestException('연결된 원아 정보를 찾을 수 없습니다.');
+    return student;
+  }
+
+  private childInfoOf(student: Student) {
+    const raw = ParentService.parseRawObj(student.raw);
+    const info = {
+      studentId: student.id,
+      name: student.adminDisplayName || student.name,
+      academyName: student.academy?.name || raw['유치원명'] || '',
+      className: student.className || raw['반명'] || raw['반'] || '',
+      gender: student.gender || raw['성별'] || '',
+      age: raw['연령'] || '',
+      address: raw['주소입력필요'] ? '' : (student.address || ''),
+      isNotRiding: !!student.isNotRiding,
+      parentName: raw['보호자1 성함'] || raw['보호자 성함'] || raw['학부모성함'] || student.parentUser?.name || '',
+      parentRelation: raw['보호자1 관계'] || raw['보호자 관계'] || '',
+      parentPhone: raw['보호자1 연락처'] || raw['부모연락처'] || raw['보호자연락처'] || student.parentUser?.phone || student.phone || '',
+      parent2Name: raw['보호자2 성함'] || raw['보호자2성함'] || '',
+      parent2Relation: raw['보호자2 관계'] || raw['보호자2관계'] || '',
+      parent2Phone: raw['보호자2 연락처'] || raw['보호자2연락처'] || raw['비상연락처'] || '',
+      allergies: student.allergies || raw['알레르기'] || '',
+      parentNote: raw['보호자 전달사항'] || '',
+    };
+    // 반드시 입력해야 하는 칸 (비어 있으면 학부모 앱이 입력 화면을 먼저 보여준다)
+    const required: Array<[keyof typeof info, string]> = [
+      ['gender', '성별'],
+      ['age', '연령'],
+      ['parentName', '주보호자 성함'],
+      ['parentRelation', '주보호자 관계'],
+      ['parentPhone', '주보호자 연락처'],
+      ['parent2Name', '비상연락망 성함'],
+      ['parent2Relation', '비상연락망 관계'],
+      ['parent2Phone', '비상연락망 연락처'],
+      ['allergies', '알레르기 (없으면 "없음")'],
+    ];
+    if (!info.isNotRiding) required.push(['address', '집 주소']);
+    const missing = required.filter(([k]) => !String(info[k] ?? '').trim()).map(([, label]) => label);
+    return { ...info, missing, isComplete: missing.length === 0 };
+  }
+
+  /** 내 아이들의 원아·보호자 정보와 빠진 필수 칸 */
+  async getChildInfo(email: string, studentId?: number) {
+    if (studentId) return this.childInfoOf(await this.findOwnStudent(email, studentId));
+    const students = await this.studentRepository.createQueryBuilder('student')
+      .leftJoinAndSelect('student.parentUser', 'parentUser')
+      .leftJoinAndSelect('student.studentUser', 'studentUser')
+      .leftJoinAndSelect('student.academy', 'academy')
+      .where('parentUser.email = :email OR studentUser.email = :email', { email })
+      .getMany();
+    return students.map(s => this.childInfoOf(s));
+  }
+
+  /** 원아·보호자 정보 저장 (웹과 같은 raw 키에 쓴다) */
+  async updateChildInfo(email: string, data: any) {
+    const student = await this.findOwnStudent(email, Number(data?.studentId) || undefined);
+    const raw = ParentService.parseRawObj(student.raw);
+    const clean = (v: any) => (v === undefined || v === null ? undefined : String(v).trim());
+    const phoneOk = (v: string) => /^[0-9+\-\s()]{8,20}$/.test(v);
+
+    const gender = clean(data.gender);
+    const age = clean(data.age);
+    const parentName = clean(data.parentName);
+    const parentRelation = clean(data.parentRelation);
+    const parentPhone = clean(data.parentPhone);
+    const parent2Name = clean(data.parent2Name);
+    const parent2Relation = clean(data.parent2Relation);
+    const parent2Phone = clean(data.parent2Phone);
+    const allergies = clean(data.allergies);
+    const parentNote = clean(data.parentNote);
+    const address = clean(data.address);
+
+    if (parentPhone && !phoneOk(parentPhone)) throw new BadRequestException('주보호자 연락처 형식을 확인해 주세요.');
+    if (parent2Phone && !phoneOk(parent2Phone)) throw new BadRequestException('비상연락망 연락처 형식을 확인해 주세요.');
+    if (parentPhone && parent2Phone && parentPhone.replace(/\D/g, '') === parent2Phone.replace(/\D/g, '')) {
+      throw new BadRequestException('비상연락망은 주보호자와 다른 번호로 입력해 주세요.');
+    }
+
+    if (gender !== undefined) { student.gender = gender; raw['성별'] = gender; }
+    if (age !== undefined) raw['연령'] = age;
+    if (parentName !== undefined) {
+      raw['보호자 성함'] = parentName; raw['보호자성함'] = parentName;
+      raw['학부모성함'] = parentName; raw['보호자1 성함'] = parentName;
+    }
+    if (parentRelation !== undefined) { raw['보호자 관계'] = parentRelation; raw['보호자1 관계'] = parentRelation; }
+    if (parentPhone !== undefined) {
+      student.phone = parentPhone;
+      raw['부모연락처'] = parentPhone; raw['보호자연락처'] = parentPhone;
+      raw['학부모연락처'] = parentPhone; raw['연락처'] = parentPhone; raw['보호자1 연락처'] = parentPhone;
+    }
+    if (parent2Name !== undefined) { raw['보호자2 성함'] = parent2Name; raw['보호자2성함'] = parent2Name; }
+    if (parent2Relation !== undefined) { raw['보호자2 관계'] = parent2Relation; raw['보호자2관계'] = parent2Relation; }
+    if (parent2Phone !== undefined) {
+      raw['보호자2 연락처'] = parent2Phone; raw['보호자2연락처'] = parent2Phone;
+      raw['부모연락처2'] = parent2Phone; raw['비상연락처'] = parent2Phone;
+    }
+    if (allergies !== undefined) { student.allergies = allergies; raw['알레르기'] = allergies; }
+    if (parentNote !== undefined) raw['보호자 전달사항'] = parentNote;
+
+    // 집 주소는 아직 없을 때만 학부모가 입력한다. 이미 있는 주소를 바꾸는 것은 노선이 바뀌므로 '탑승지 변경 신청'으로 한다.
+    const hasAddress = !!student.address && !raw['주소입력필요'];
+    if (address && !hasAddress) {
+      student.address = address;
+      raw['주소'] = address;
+      try {
+        const coords = await this.routingService.geocodeAddress(address);
+        if (coords) {
+          student.latitude = coords.lat as any;
+          student.longitude = coords.lng as any;
+          delete raw['주소입력필요'];
+        }
+      } catch {
+        // 좌표를 못 찾아도 주소는 저장한다. 원장 웹에서 위치를 다시 잡을 수 있다.
+      }
+    }
+
+    student.raw = raw;
+    await this.studentRepository.save(student);
+
+    // 주보호자 연락처는 학부모 계정 전화번호와 맞춘다
+    if (parentPhone && student.parentUser && student.parentUser.email === email && student.parentUser.phone !== parentPhone) {
+      student.parentUser.phone = parentPhone;
+      await this.userRepository.save(student.parentUser);
+    }
+
+    return { success: true, message: '원아·보호자 정보가 저장되었습니다.', ...this.childInfoOf(student) };
   }
 
   async updatePhone(email: string, phone: string) {

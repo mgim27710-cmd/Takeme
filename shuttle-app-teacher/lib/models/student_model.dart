@@ -7,8 +7,18 @@ class StudentModel {
   final double? latitude;
   final double? longitude;
   final String allergies;
+  final String? gender;
+  /// 주보호자 성함·관계 (원아 정보의 보호자1)
+  final String parentName;
+  final String parentRelation;
+  /// 비상연락망 = 원아 정보의 보호자2. 주보호자가 연락이 안 될 때 연락할 사람
+  final String emergencyContactName;
+  final String emergencyContactRelation;
+  final String emergencyContactPhone;
   final bool boarded;
   final bool absent;
+  /// 이번 운행에서 하차함
+  final bool dropped;
   final String expectedTime;
   final String? actualBoardTime;
   final String? teacherMemo;
@@ -29,8 +39,15 @@ class StudentModel {
     this.latitude,
     this.longitude,
     this.allergies = '',
+    this.gender,
+    this.parentName = '',
+    this.parentRelation = '',
+    this.emergencyContactName = '',
+    this.emergencyContactRelation = '',
+    this.emergencyContactPhone = '',
     this.boarded = false,
     this.absent = false,
+    this.dropped = false,
     this.expectedTime = '15:30',
     this.actualBoardTime,
     this.teacherMemo,
@@ -59,8 +76,15 @@ class StudentModel {
       latitude: parseCoord(json['latitude'] ?? json['lat']),
       longitude: parseCoord(json['longitude'] ?? json['lng']),
       allergies: json['allergies'] ?? '',
+      parentName: json['parentName']?.toString() ?? '',
+      parentRelation: json['parentRelation']?.toString() ?? '',
+      emergencyContactName: json['emergencyContactName']?.toString() ?? '',
+      emergencyContactRelation: json['emergencyContactRelation']?.toString() ?? '',
+      emergencyContactPhone: json['emergencyContactPhone']?.toString() ?? '',
+      gender: (json['gender']?.toString().trim().isEmpty ?? true) ? null : json['gender'].toString().trim(),
       boarded: json['boarded'] == true || json['boardStatus'] == 'BOARDED',
       absent: json['absent'] == true || json['boardStatus'] == 'ABSENT',
+      dropped: json['dropped'] == true || json['boardStatus'] == 'DROPPED',
       expectedTime: json['expectedTime'] ?? '15:30',
       actualBoardTime: json['actualBoardTime']?.toString(),
       teacherMemo: json['teacherMemo'],

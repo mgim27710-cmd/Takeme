@@ -1,13 +1,22 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/route_model.dart';
+import 'naver_route_map.dart';
+import 'package:geolocator/geolocator.dart';
 import 'kakao_map_view_stub.dart' if (dart.library.html) 'kakao_map_view_web.dart';
 
 class KakaoMapView extends StatefulWidget {
   final List<RouteStop> stops;
   final List<Map<String, dynamic>> routePoints;
+  /// 기사 앱이 올린 실제 도로 경로 [{lat,lng}...] (없으면 routePoints 로 대신 그림)
+  final List<dynamic>? actualRoadPath;
+  /// 도로 경로에서 차량이 지나온 위치(인덱스)
+  final int progressIndex;
   final double? busLat;
   final double? busLng;
   final double? academyLat;
@@ -26,6 +35,8 @@ class KakaoMapView extends StatefulWidget {
     super.key,
     required this.stops,
     required this.routePoints,
+    this.actualRoadPath,
+    this.progressIndex = 0,
     this.busLat,
     this.busLng,
     this.academyLat,
@@ -81,8 +92,17 @@ class _KakaoMapViewState extends State<KakaoMapView> {
         oldWidget.academyLng != widget.academyLng ||
         oldWidget.isGohome != widget.isGohome) {
       _updateMapData();
+    } else if (oldWidget.actualRoadPath != widget.actualRoadPath ||
+        oldWidget.progressIndex != widget.progressIndex) {
+      _runJs('if (window.updateRoutePath) { window.updateRoutePath(${_roadPathJson()}, ${widget.progressIndex}); }');
     }
   }
+
+  String _roadPathJson() => jsonEncode((widget.actualRoadPath ?? [])
+      .whereType<Map>()
+      .map((p) => [p['lat'] ?? p['latitude'], p['lng'] ?? p['longitude']])
+      .where((p) => p[0] != null && p[1] != null)
+      .toList());
 
   void _runJs(String js) {
     if (kIsWeb) {
@@ -132,26 +152,129 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           ${widget.busLng ?? 'null'},
           ${widget.isGohome},
           ${widget.myChildLat ?? 'null'},
-          ${widget.myChildLng ?? 'null'}
+          ${widget.myChildLng ?? 'null'},
+          ${_roadPathJson()},
+          ${widget.progressIndex}
         );
       }
     ''';
     _controller?.runJavaScript(js);
   }
 
+
+  // ───── 네이버 지도 (인증되면 사용, 아니면 아래 기존 지도) ─────
+  final GlobalKey<NaverRouteMapState> _naverKey = GlobalKey<NaverRouteMapState>();
+  bool get _useNaver => !kIsWeb && naverMapAvailable.value;
+
+  static List<List<double>> _latLngList(List<dynamic>? list) {
+    final out = <List<double>>[];
+    for (final p in list ?? const []) {
+      if (p is Map) {
+        // 서버가 좌표를 숫자 또는 글자("37.78")로 보낼 수 있다
+        final la = double.tryParse((p['lat'] ?? p['latitude'])?.toString() ?? '');
+        final ln = double.tryParse((p['lng'] ?? p['longitude'])?.toString() ?? '');
+        if (la != null && ln != null) out.add([la, ln]);
+      }
+    }
+    return out;
+  }
+
+  Widget _naverMap() {
+    // 학부모에게는 내 아이 정류장만 보여준다
+    final mine = widget.stops.where((s) => s.isMyChild).toList();
+    final label = widget.isGohome ? '내리는 곳' : '타는 곳';
+    final stops = <NaverStopPoint>[
+      if (mine.isNotEmpty)
+        NaverStopPoint(lat: mine.first.latitude, lng: mine.first.longitude, label: label, isMine: true)
+      else if (widget.myChildLat != null && widget.myChildLng != null)
+        NaverStopPoint(lat: widget.myChildLat!, lng: widget.myChildLng!, label: label, isMine: true),
+    ];
+    return NaverRouteMap(
+      key: _naverKey,
+      stops: stops,
+      fallbackPoints: _latLngList(widget.routePoints),
+      roadPath: _latLngList(widget.actualRoadPath),
+      progressIndex: widget.progressIndex,
+      busLat: widget.busLat,
+      busLng: widget.busLng,
+      academyLat: widget.academyLat,
+      academyLng: widget.academyLng,
+      academyName: widget.academyName,
+    );
+  }
+
+  bool _locating = false;
+
+  /// [내 위치] 버튼: 위치 권한을 확인하고 현재 위치를 작은 빨간 점으로 표시
+  Future<void> _goToMyLocation() async {
+    if (_locating) return;
+    void tell(String msg) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+
+    _locating = true;
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        tell('휴대폰 위치(GPS)가 꺼져 있습니다. 설정에서 위치를 켜 주세요.');
+        return;
+      }
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
+      if (perm == LocationPermission.denied) {
+        tell('위치 권한을 허용해야 내 위치를 볼 수 있어요.');
+        return;
+      }
+      if (perm == LocationPermission.deniedForever) {
+        tell('위치 권한이 꺼져 있습니다. 휴대폰 설정 > 앱 > 위치에서 허용해 주세요.');
+        await Geolocator.openAppSettings();
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 10)),
+      );
+      if (!mounted) return;
+      if (_useNaver) {
+        await _naverKey.currentState?.showMyLocation(pos.latitude, pos.longitude);
+      } else {
+        _runJs('if (window.showMe) { window.showMe(${pos.latitude}, ${pos.longitude}); }');
+      }
+    } catch (e) {
+      tell('현재 위치를 가져오지 못했습니다. 잠시 후 다시 눌러 주세요.');
+    } finally {
+      _locating = false;
+    }
+  }
+
   void _zoomIn() {
+    if (_useNaver) {
+      _naverKey.currentState?.zoomIn();
+      return;
+    }
     _runJs('if (window.zoomIn) { window.zoomIn(); }');
   }
 
   void _zoomOut() {
+    if (_useNaver) {
+      _naverKey.currentState?.zoomOut();
+      return;
+    }
     _runJs('if (window.zoomOut) { window.zoomOut(); }');
   }
 
   void _fitAll() {
+    if (_useNaver) {
+      _naverKey.currentState?.fitAll();
+      return;
+    }
     _runJs('if (window.fitAll) { window.fitAll(); }');
   }
 
   void _focusMyChild() {
+    if (_useNaver) {
+      _naverKey.currentState?.focusMyChild();
+      return;
+    }
     _runJs('if (window.focusMyChild) { window.focusMyChild(); }');
   }
 
@@ -168,6 +291,8 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           isGohome: widget.isGohome,
           stops: widget.stops,
           routePoints: widget.routePoints,
+          actualRoadPath: widget.actualRoadPath,
+          progressIndex: widget.progressIndex,
           busLat: widget.busLat,
           busLng: widget.busLng,
           academyLat: widget.academyLat,
@@ -208,7 +333,7 @@ class _KakaoMapViewState extends State<KakaoMapView> {
       autoInitScript = '''
         setTimeout(function() {
           if (window.initData) {
-            window.initData($stopsJson, $pointsJson, $acLat, $acLng, $acName, $bLat, $bLng, ${widget.isGohome}, ${widget.myChildLat ?? 'null'}, ${widget.myChildLng ?? 'null'});
+            window.initData($stopsJson, $pointsJson, $acLat, $acLng, $acName, $bLat, $bLng, ${widget.isGohome}, ${widget.myChildLat ?? 'null'}, ${widget.myChildLng ?? 'null'}, ${_roadPathJson()}, ${widget.progressIndex});
           }
         }, 300);
       ''';
@@ -342,6 +467,19 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           }
         };
 
+        var meMarker = null;
+        window.showMe = function(lat, lng) {
+          if (!lat || !lng) return;
+          if (meMarker) {
+            meMarker.setLatLng([lat, lng]);
+          } else {
+            meMarker = L.circleMarker([lat, lng], {
+              radius: 7, color: '#ffffff', weight: 3, fillColor: '#ef4444', fillOpacity: 1
+            }).addTo(map);
+          }
+          map.setView([lat, lng], 16);
+        };
+
         window.updateBus = function(lat, lng) {
           if (!lat || !lng) return;
           if (busMarker) {
@@ -357,133 +495,94 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           }
         };
 
-        window.initData = function(stops, points, acLat, acLng, acName, bLat, bLng, isGohome, childLatArg, childLngArg) {
+        // 경로선과 마커를 담는 층. initData 가 다시 불려도 겹쳐 그려지지 않도록 매번 비운다.
+        var dataLayer = L.layerGroup().addTo(map);
+        var routeLayer = L.layerGroup().addTo(map);
+
+        function toLatLngs(list) {
+          var out = [];
+          (list || []).forEach(function(p) {
+            if (p && p.length >= 2 && p[0] && p[1]) out.push([p[0], p[1]]);
+          });
+          return out;
+        }
+
+        // 기사 앱처럼 전체 경로를 그린다: 지나온 구간은 회색, 남은 구간은 파란색
+        function drawRoute(roadPath, progIdx, fallbackPoints) {
+          routeLayer.clearLayers();
+          var road = toLatLngs(roadPath);
+          if (road.length > 1) {
+            var idx = Math.max(0, Math.min(progIdx || 0, road.length - 1));
+            if (idx > 0) {
+              L.polyline(road.slice(0, idx + 1), { color: '#94a3b8', weight: 6, opacity: 0.9, lineJoin: 'round', lineCap: 'round' }).addTo(routeLayer);
+            }
+            var remain = road.slice(idx);
+            if (remain.length > 1) {
+              L.polyline(remain, { color: '#1d4ed8', weight: 9, opacity: 0.85, lineJoin: 'round', lineCap: 'round' }).addTo(routeLayer);
+              L.polyline(remain, { color: '#3b82f6', weight: 5, opacity: 1.0, lineJoin: 'round', lineCap: 'round' }).addTo(routeLayer);
+            }
+            return road;
+          }
+          // 기사 앱이 아직 도로 경로를 올리지 않았으면 정류장끼리 이은 점선으로 대신 보여준다
+          var pts = toLatLngs(fallbackPoints);
+          if (pts.length > 1) {
+            L.polyline(pts, { color: '#3b82f6', weight: 4, opacity: 0.8, dashArray: '8 8' }).addTo(routeLayer);
+          }
+          return pts;
+        }
+
+        var lastFallbackPoints = [];
+        window.updateRoutePath = function(roadPath, progIdx) {
+          drawRoute(roadPath, progIdx, lastFallbackPoints);
+        };
+
+        window.initData = function(stops, points, acLat, acLng, acName, bLat, bLng, isGohome, childLatArg, childLngArg, roadPath, progIdx) {
+          dataLayer.clearLayers();
           var pts = [];
-          var targetAcLat = (acLat && acLat > 30) ? acLat : 37.558274;
-          var targetAcLng = (acLng && acLng > 120) ? acLng : 126.824116;
-          var targetAcName = acName || '경동 부속 유치원';
+          var hasAcademy = acLat && acLng;
+          var acTitle = acName || '유치원';
 
-          // 내 원아 정류장 또는 지정 좌표 찾기
+          // 내 아이 정류장 (학부모에게는 내 아이 정류장만 온다)
           var myStop = null;
-          if (stops && stops.length) {
-            for (var i = 0; i < stops.length; i++) {
-              if (stops[i].lat && stops[i].lng && stops[i].isMyChild) {
-                myStop = stops[i];
-                break;
-              }
-            }
-            if (!myStop && stops[0].lat && stops[0].lng) {
-              myStop = stops[0];
-            }
-          }
+          (stops || []).forEach(function(s) {
+            if (!myStop && s.lat && s.lng && s.isMyChild) myStop = s;
+          });
+          var childLat = childLatArg || (myStop ? myStop.lat : null);
+          var childLng = childLngArg || (myStop ? myStop.lng : null);
+          var childPlace = myStop ? (myStop.address || myStop.name) : '우리 아이 정류장';
 
-          // 탑승지 좌표 확정: 명시적 전달값 > 정류장 값 > 기본 탑승지(약 1km 떨어진 등촌삼거리)
-          var resolvedChildLat = childLatArg || (myStop ? myStop.lat : null);
-          var resolvedChildLng = childLngArg || (myStop ? myStop.lng : null);
-          if (!resolvedChildLat || !resolvedChildLng || resolvedChildLat < 30) {
-            resolvedChildLat = 37.566762;
-            resolvedChildLng = 126.826972;
-          }
-
-          // 만약 유치원 좌표와 탑승지 좌표가 거의 같다면 두 점이 겹치지 않게 분리(약 900m 분리)
-          if (Math.abs(resolvedChildLat - targetAcLat) < 0.0005 && Math.abs(resolvedChildLng - targetAcLng) < 0.0005) {
-            resolvedChildLat = 37.566762;
-            resolvedChildLng = 126.826972;
-          }
-
-          var childPlaceName = (myStop && (myStop.address || myStop.name)) ? (myStop.address || myStop.name) : '등촌 현대아이파크 정문 앞';
-
-          if (isGohome) {
-            // ================= 하원 모드: 출발지(유치원) -> 도착지(집/하차지) =================
-            // 1. 타는 곳 (출발지: 유치원) 점 마커
-            var pickupIcon = L.divIcon({
+          function pointMarker(lat, lng, cls, label, popup, z) {
+            var icon = L.divIcon({
               className: '',
-              html: '<div class="pickup-point-dot"><span class="point-label pickup-label">타는 곳</span></div>',
+              html: '<div class="' + cls + '-point-dot"><span class="point-label ' + cls + '-label">' + label + '</span></div>',
               iconSize: [26, 26],
               iconAnchor: [13, 13]
             });
-            L.marker([targetAcLat, targetAcLng], { icon: pickupIcon, zIndexOffset: 800 })
-              .bindPopup('<b>🏫 타는 곳 (출발지)</b><br/>' + targetAcName + '<br/>하원 차량 탑승 (16:00)')
-              .addTo(map);
-            pts.push([targetAcLat, targetAcLng]);
-
-            // 2. 도착지 (하차지: 원아 하차 장소) 점 마커
-            myChildLatLng = [resolvedChildLat, resolvedChildLng];
-            var destIcon = L.divIcon({
-              className: '',
-              html: '<div class="dest-point-dot"><span class="point-label dest-label">도착지</span></div>',
-              iconSize: [26, 26],
-              iconAnchor: [13, 13]
-            });
-            var destMarker = L.marker([resolvedChildLat, resolvedChildLng], { icon: destIcon, zIndexOffset: 1200 })
-              .bindPopup('<b>📍 도착지 (하원 하차 완료)</b><br/>' + childPlaceName + '<br/>예정 시각: 16:30 종료')
-              .addTo(map);
-            destMarker.openPopup();
-            pts.push([resolvedChildLat, resolvedChildLng]);
-          } else {
-            // ================= 등원 모드: 출발지(탑승지) -> 도착지(유치원) =================
-            // 1. 타는 곳 (출발지: 원아 탑승지) 점 마커
-            myChildLatLng = [resolvedChildLat, resolvedChildLng];
-            var pickupIcon = L.divIcon({
-              className: '',
-              html: '<div class="pickup-point-dot"><span class="point-label pickup-label">타는 곳</span></div>',
-              iconSize: [26, 26],
-              iconAnchor: [13, 13]
-            });
-            var pickupMarker = L.marker([resolvedChildLat, resolvedChildLng], { icon: pickupIcon, zIndexOffset: 1200 })
-              .bindPopup('<b>📍 타는 곳 (출발지)</b><br/>' + childPlaceName + '<br/>탑승 예정 시각: 08:40')
-              .addTo(map);
-            pickupMarker.openPopup();
-            pts.push([resolvedChildLat, resolvedChildLng]);
-
-            // 2. 도착지 (도착지: 유치원) 점 마커
-            var destIcon = L.divIcon({
-              className: '',
-              html: '<div class="dest-point-dot"><span class="point-label dest-label">도착지</span></div>',
-              iconSize: [26, 26],
-              iconAnchor: [13, 13]
-            });
-            L.marker([targetAcLat, targetAcLng], { icon: destIcon, zIndexOffset: 800 })
-              .bindPopup('<b>🏫 도착지: ' + targetAcName + '</b><br/>등원 완료 (09:00)')
-              .addTo(map);
-            pts.push([targetAcLat, targetAcLng]);
+            return L.marker([lat, lng], { icon: icon, zIndexOffset: z }).bindPopup(popup).addTo(dataLayer);
           }
 
-          // 3. 네비게이션 도로 경로선 (출발지에서 도착지까지 기사 앱 네비게이션 기반으로 연결)
-          var gotoRoadPoints = [[37.566762,126.826972],[37.566711,126.827658],[37.566691,126.827888],[37.56653,126.827866],[37.565986,126.827793],[37.564488,126.827594],[37.564377,126.827578],[37.56436,126.827766],[37.564349,126.827873],[37.564267,126.828741],[37.564246,126.82896],[37.56424,126.829017],[37.564128,126.830201],[37.56409,126.830599],[37.56407,126.83082],[37.564056,126.830968],[37.563992,126.831649],[37.563961,126.831977],[37.563868,126.832976],[37.56381,126.833452],[37.563727,126.833632],[37.563676,126.833721],[37.563625,126.833782],[37.563618,126.83379],[37.563541,126.83385],[37.563399,126.833934],[37.563156,126.833897],[37.562493,126.833798],[37.561417,126.833639],[37.561255,126.833616],[37.561268,126.833487],[37.561278,126.83338],[37.56135,126.832654],[37.561477,126.831351],[37.561537,126.830743],[37.561569,126.830411],[37.56157,126.830392],[37.561583,126.83026],[37.561594,126.830142],[37.561599,126.830092],[37.561647,126.829585],[37.561751,126.828481],[37.561789,126.828061],[37.561831,126.827654],[37.561849,126.827453],[37.561857,126.827385],[37.561875,126.827194],[37.561895,126.826978],[37.561904,126.826883],[37.562013,126.825652],[37.561049,126.825501],[37.560333,126.825389],[37.562013,126.825652],[37.561904,126.826883],[37.561895,126.826978],[37.561875,126.827194],[37.561725,126.82717],[37.561303,126.827104],[37.560882,126.827038],[37.560713,126.827011],[37.560271,126.826942],[37.560007,126.826905],[37.55991,126.826889],[37.55978,126.826863],[37.559612,126.826845],[37.559456,126.826825],[37.55939,126.82682],[37.559172,126.826798],[37.558931,126.826773],[37.558205,126.826686],[37.558048,126.826667],[37.558071,126.826439],[37.558124,126.825877],[37.558171,126.825768],[37.5582,126.825406],[37.558223,126.825267],[37.558238,126.825244],[37.558246,126.825216],[37.558245,126.825186],[37.558237,126.825159],[37.558245,126.824988],[37.558303,126.824447],[37.558368,126.823784],[37.55838,126.823692],[37.558393,126.82364],[37.558418,126.823625],[37.558437,126.8236],[37.55845,126.823569],[37.558454,126.823535],[37.558449,126.8235],[37.558434,126.823468],[37.558413,126.823445],[37.558387,126.823431],[37.558358,126.82343],[37.558331,126.823439],[37.558308,126.82346],[37.558291,126.823489],[37.558284,126.823518],[37.558283,126.823548],[37.558289,126.823577],[37.5583,126.823603],[37.558317,126.823624],[37.55832,126.823671],[37.558309,126.823772],[37.558274,126.824116]];
-          var gohomeRoadPoints = [[37.558274,126.824116],[37.558242,126.82443],[37.558181,126.824979],[37.558175,126.825029],[37.558156,126.825121],[37.558136,126.825135],[37.55812,126.825157],[37.558111,126.825185],[37.558111,126.825216],[37.55812,126.825245],[37.558136,126.825269],[37.558137,126.825393],[37.558109,126.825764],[37.558124,126.825877],[37.558071,126.826439],[37.558048,126.826667],[37.558205,126.826686],[37.558931,126.826773],[37.559172,126.826798],[37.55939,126.82682],[37.559456,126.826825],[37.559612,126.826845],[37.55978,126.826863],[37.55991,126.826889],[37.560007,126.826905],[37.560271,126.826942],[37.560713,126.827011],[37.560882,126.827038],[37.561303,126.827104],[37.561725,126.82717],[37.561875,126.827194],[37.561895,126.826978],[37.561904,126.826883],[37.562013,126.825652],[37.561049,126.825501],[37.560333,126.825389],[37.562013,126.825652],[37.561904,126.826883],[37.561895,126.826978],[37.561875,126.827194],[37.561857,126.827385],[37.561849,126.827453],[37.561831,126.827654],[37.561789,126.828061],[37.561751,126.828481],[37.561647,126.829585],[37.561599,126.830092],[37.561594,126.830142],[37.561583,126.83026],[37.56157,126.830392],[37.561569,126.830411],[37.561537,126.830743],[37.561477,126.831351],[37.56135,126.832654],[37.561278,126.83338],[37.561268,126.833487],[37.561255,126.833616],[37.561417,126.833639],[37.562493,126.833798],[37.563156,126.833897],[37.563399,126.833934],[37.563653,126.833994],[37.563775,126.83401],[37.563784,126.833865],[37.563788,126.833807],[37.56381,126.833452],[37.563868,126.832976],[37.563961,126.831977],[37.563992,126.831649],[37.564056,126.830968],[37.56407,126.83082],[37.56409,126.830599],[37.564128,126.830201],[37.56424,126.829017],[37.564246,126.82896],[37.564267,126.828741],[37.564349,126.827873],[37.56436,126.827766],[37.564377,126.827578],[37.564488,126.827594],[37.565986,126.827793],[37.56653,126.827866],[37.566691,126.827888],[37.566711,126.827658],[37.566762,126.826972]];
-
-          var navPoints = isGohome ? gohomeRoadPoints : ((points && points.length > 5) ? points : gotoRoadPoints);
-
-          if (navPoints && navPoints.length > 1) {
-            // 네비게이션 경로 테두리선 (기사 앱 네비게이션 기반 굵은 안내선)
-            L.polyline(navPoints, {
-              color: '#1d4ed8',
-              weight: 9,
-              opacity: 0.85,
-              lineJoin: 'round',
-              lineCap: 'round'
-            }).addTo(map);
-
-            // 네비게이션 경로 주행선 (기사 앱 로열 블루)
-            L.polyline(navPoints, {
-              color: '#3b82f6',
-              weight: 5,
-              opacity: 1.0,
-              lineJoin: 'round',
-              lineCap: 'round'
-            }).addTo(map);
-
-            navPoints.forEach(function(p) { pts.push(p); });
+          if (childLat && childLng) {
+            myChildLatLng = [childLat, childLng];
+            var label = isGohome ? '내리는 곳' : '타는 곳';
+            var m = pointMarker(childLat, childLng, isGohome ? 'dest' : 'pickup', label,
+              '<b>📍 우리 아이 ' + label + '</b><br/>' + childPlace, 1200);
+            m.openPopup();
+            pts.push([childLat, childLng]);
+          }
+          if (hasAcademy) {
+            pointMarker(acLat, acLng, isGohome ? 'pickup' : 'dest', isGohome ? '출발' : '도착',
+              '<b>🏫 ' + acTitle + '</b>', 800);
+            pts.push([acLat, acLng]);
           }
 
-          // 4. 버스 위치
+          lastFallbackPoints = points || [];
+          drawRoute(roadPath, progIdx, lastFallbackPoints).forEach(function(p) { pts.push(p); });
+
           if (bLat && bLng) {
             window.updateBus(bLat, bLng);
             pts.push([bLat, bLng]);
           }
 
-          // 5. 두 점(타는 곳, 도착지)에 맞추어 bounds 설정
           if (pts.length > 0) {
             allBounds = L.latLngBounds(pts);
             map.fitBounds(allBounds, { padding: [50, 50], maxZoom: 16 });
@@ -516,15 +615,20 @@ class _KakaoMapViewState extends State<KakaoMapView> {
                   htmlContent: _generateHtml(autoInit: true),
                   isInteractive: widget.isInteractive,
                 )
-              : (_controller == null
-                  ? _buildWebPlaceholder()
-                  : WebViewWidget(controller: _controller!)),
+              : ValueListenableBuilder<bool>(
+                  valueListenable: naverMapAvailable,
+                  builder: (context, naverOk, _) => naverOk
+                      ? _naverMap()
+                      : (_controller == null
+                          ? _buildWebPlaceholder()
+                          : WebViewWidget(controller: _controller!)),
+                ),
         ),
 
-        // Controls Overlay
+        // Controls Overlay (전체화면에서는 화면 가장자리·카메라 구멍을 피한다)
         Positioned(
-          top: 12,
-          right: 12,
+          top: 12 + (widget.isFullScreen ? MediaQuery.viewPaddingOf(context).top : 0),
+          right: 12 + (widget.isFullScreen ? MediaQuery.viewPaddingOf(context).right : 0),
           child: Column(
             children: [
               // Fullscreen Toggle
@@ -569,6 +673,15 @@ class _KakaoMapViewState extends State<KakaoMapView> {
                 icon: Icons.crop_free,
                 tooltip: '전체 노선 한눈에 보기',
                 onTap: _fitAll,
+              ),
+              const SizedBox(height: 8),
+
+              // 내 위치 (작은 빨간 점으로 표시)
+              _buildControlBtn(
+                icon: Icons.my_location,
+                tooltip: '내 위치 보기',
+                iconColor: const Color(0xFFEF4444),
+                onTap: _goToMyLocation,
               ),
             ],
           ),
@@ -685,10 +798,16 @@ class _KakaoMapViewState extends State<KakaoMapView> {
   }
 }
 
-class KakaoMapFullscreenPage extends StatelessWidget {
+/// 전체화면 지도 (차량선생님 앱과 같은 구성)
+/// - 안드로이드 하단 버튼 줄·상태 표시줄을 숨겨 지도를 가리지 않게 한다 (가장자리를 쓸어 올리면 잠깐 나타남)
+/// - 뒤로 가기는 위의 ← 버튼
+/// - 아래 '우리 아이 탑승/하차 장소' 카드는 X 로 오늘 하루 닫을 수 있다
+class KakaoMapFullscreenPage extends StatefulWidget {
   final bool isGohome;
   final List<RouteStop> stops;
   final List<Map<String, dynamic>> routePoints;
+  final List<dynamic>? actualRoadPath;
+  final int progressIndex;
   final double? busLat;
   final double? busLng;
   final double? academyLat;
@@ -702,6 +821,8 @@ class KakaoMapFullscreenPage extends StatelessWidget {
     this.isGohome = false,
     required this.stops,
     required this.routePoints,
+    this.actualRoadPath,
+    this.progressIndex = 0,
     this.busLat,
     this.busLng,
     this.academyLat,
@@ -712,8 +833,51 @@ class KakaoMapFullscreenPage extends StatelessWidget {
   });
 
   @override
+  State<KakaoMapFullscreenPage> createState() => _KakaoMapFullscreenPageState();
+}
+
+class _KakaoMapFullscreenPageState extends State<KakaoMapFullscreenPage> {
+  bool _isCardDismissed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkCardDismissed();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  @override
+  void dispose() {
+    // 지도에서 나가면 시스템 표시줄을 원래대로
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
+    super.dispose();
+  }
+
+  Future<void> _checkCardDismissed() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final dismissedDate = prefs.getString('hide_child_stop_card_date');
+      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      if (dismissedDate == today && mounted) {
+        setState(() => _isCardDismissed = true);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _dismissCardForToday() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      await prefs.setString('hide_child_stop_card_date', today);
+    } catch (_) {}
+    if (mounted) setState(() => _isCardDismissed = true);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final myStop = stops.cast<RouteStop?>().firstWhere((s) => s?.isMyChild == true, orElse: () => null);
+    final myStop = widget.stops.cast<RouteStop?>().firstWhere((s) => s?.isMyChild == true, orElse: () => null);
+    final viewPadding = MediaQuery.viewPaddingOf(context);
+    final placeLabel = widget.isGohome ? '우리 아이 하차 장소' : '우리 아이 탑승 장소';
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -722,12 +886,12 @@ class KakaoMapFullscreenPage extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              academyName ?? '유치원 통학차량 실시간 지도',
+              widget.academyName ?? '유치원 통학차량 실시간 지도',
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
             ),
-            if (myChildName != null)
+            if (widget.myChildName != null)
               Text(
-                '$myChildName 원아 탑승 노선',
+                '${widget.myChildName} 원아 ${widget.isGohome ? '하원' : '등원'} 노선',
                 style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
               ),
           ],
@@ -736,6 +900,7 @@ class KakaoMapFullscreenPage extends StatelessWidget {
         elevation: 1,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, size: 20, color: Color(0xFF0F172A)),
+          tooltip: '뒤로',
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
@@ -748,94 +913,94 @@ class KakaoMapFullscreenPage extends StatelessWidget {
       ),
       body: Stack(
         children: [
-          // Fullscreen Map View
           Positioned.fill(
             child: KakaoMapView(
-              stops: stops,
-              routePoints: routePoints,
-              busLat: busLat,
-              busLng: busLng,
-              academyLat: academyLat,
-              academyLng: academyLng,
-              academyName: academyName,
-              myChildName: myChildName,
-              myChildAddress: myChildAddress,
+              stops: widget.stops,
+              routePoints: widget.routePoints,
+              actualRoadPath: widget.actualRoadPath,
+              progressIndex: widget.progressIndex,
+              busLat: widget.busLat,
+              busLng: widget.busLng,
+              academyLat: widget.academyLat,
+              academyLng: widget.academyLng,
+              academyName: widget.academyName,
+              myChildName: widget.myChildName,
+              myChildAddress: widget.myChildAddress,
               isFullScreen: true,
-              isGohome: isGohome,
+              isGohome: widget.isGohome,
             ),
           ),
 
-          // Bottom Info Card
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: 24,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.12),
-                    blurRadius: 16,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF5F3FF),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFDDD6FE)),
+          // 아래 카드: 우리 아이 탑승/하차 장소 (X 로 오늘 하루 닫기)
+          if (!_isCardDismissed)
+            Positioned(
+              left: 16 + viewPadding.left,
+              right: 16 + viewPadding.right,
+              bottom: 24 + viewPadding.bottom,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.12),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
                     ),
-                    child: const Icon(Icons.stars_rounded, color: Color(0xFF7C3AED), size: 26),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          children: [
-                            const Text(
-                              '우리 아이 탑승 장소',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFF7C3AED)),
-                            ),
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFEFF6FF),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                '총 ${stops.length}개 정류장',
-                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          myStop?.address ?? myChildAddress ?? (myStop?.name ?? '탑승지 설정됨'),
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF1E293B)),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
+                  ],
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF5F3FF),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFDDD6FE)),
+                      ),
+                      child: const Icon(Icons.stars_rounded, color: Color(0xFF7C3AED), size: 26),
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            placeLabel,
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFF7C3AED)),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            myStop?.address ?? widget.myChildAddress ?? (myStop?.name ?? '정류장 정보 없음'),
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF1E293B)),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // X: 오늘 하루 닫기
+                    Tooltip(
+                      message: '오늘 하루 닫기',
+                      child: InkWell(
+                        onTap: _dismissCardForToday,
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: const BoxDecoration(color: Color(0xFFF1F5F9), shape: BoxShape.circle),
+                          child: const Icon(Icons.close, size: 16, color: Color(0xFF64748B)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
         ],
       ),
     );

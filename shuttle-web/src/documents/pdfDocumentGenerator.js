@@ -1616,7 +1616,6 @@ export function openPrintDocument(type, data = {}) {
           <div class="date-line">${autoDateKorean}</div>
           <div class="sign-names">
             안전관리책임자: __________________ (인) &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 총괄책임자(원장): __________________ (인)
->>>>>>> ea1a0d8 (feat: 서류 관리 시스템 고도화 및 법정 표준 서식 개선)
           </div>
         </div>
       </div>

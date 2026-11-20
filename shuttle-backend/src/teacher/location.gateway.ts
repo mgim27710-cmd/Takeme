@@ -18,6 +18,14 @@ import { Student } from '../entities/student.entity';
 import { User } from '../entities/user.entity';
 import { JwtPayload } from '../auth/auth-user.decorator';
 
+const SUPER_ADMIN_ROOM = 'super_admin';
+const ADMIN_ROLES = new Set(['ACADEMY_ADMIN', 'DESK_STAFF']);
+const STAFF_ROLES = new Set(['DRIVER', 'TEACHER', 'HOMEROOM_TEACHER', 'SHUTTLE_TEACHER']);
+/** 원장·데스크 방: 신청 접수, 결재 결과 같은 관리 알림 */
+const academyAdminRoom = (academyId: number) => `academy_admin_${academyId}`;
+/** 교직원 방(원장·데스크·기사·교사): 노선 변경, 운행 상태, 출석 제출 */
+const academyStaffRoom = (academyId: number) => `academy_staff_${academyId}`;
+
 @WebSocketGateway({ cors: { origin: '*' } })
 export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -41,12 +49,100 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     });
   }
 
-  afterInit(server: Server) {
-    this.routingService.registerRouteUpdateNotifier((academyId, msg) => {
-      if (this.server && academyId) {
-        this.server.to(`academy_${academyId}`).emit('notificationReceived', { message: msg });
+  afterInit(_server: Server) {
+    // 노선 변경 알림은 생성자에서 등록한 notifier(교직원 방에만 전송)를 그대로 쓴다.
+    // 예전에는 여기서 한 번 더 등록해(앞의 것을 덮어씀) 원아 이름이 담긴 메시지를 기관 전체(학부모 포함)로 보냈다.
+  }
+
+  /**
+   * 소켓 신원 확인. 운행 중 앱이 다시 연결될 때 로그인 토큰이 막 만료됐을 수 있으므로,
+   * 서명이 맞고 만료된 지 12시간 이내면 신원 확인에는 그대로 쓴다(HTTP API 는 기존대로 만료 토큰을 거부).
+   */
+  private async verifyTokenForSocket(token: string): Promise<JwtPayload> {
+    try {
+      return await this.jwtService.verifyAsync<JwtPayload>(token);
+    } catch (e: any) {
+      if (e?.name !== 'TokenExpiredError') throw e;
+      const payload = await this.jwtService.verifyAsync<JwtPayload & { exp?: number }>(token, { ignoreExpiration: true });
+      const expiredSec = payload.exp ? Date.now() / 1000 - payload.exp : Infinity;
+      if (expiredSec > 12 * 3600) throw e;
+      return payload;
+    }
+  }
+
+  /** 그 차량을 운행하는 사람인지: 차량 기사·차량선생님, 그 기관 원장·데스크, 통합 관리자 */
+  private async canControlVehicle(client: Socket, vehicleId: number): Promise<boolean> {
+    const user = client.data.user as JwtPayload | undefined;
+    if (!user?.sub || !vehicleId) return false;
+    const allowed: Set<number> = client.data.allowedSend || (client.data.allowedSend = new Set<number>());
+    if (allowed.has(vehicleId)) return true;
+    let ok = user.role === 'SUPER_ADMIN';
+    if (!ok) {
+      const v = await this.vehicleRepository.findOne({
+        where: { id: vehicleId },
+        relations: { driverUser: true, teacherUser: true, academy: true },
+      });
+      if (v) {
+        ok =
+          v.driverUser?.id === user.sub ||
+          v.teacherUser?.id === user.sub ||
+          (ADMIN_ROLES.has(String(user.role)) && !!user.academyId && v.academy?.id === Number(user.academyId));
       }
+    }
+    if (ok) allowed.add(vehicleId);
+    return ok;
+  }
+
+  /** 그 차량의 실시간 위치를 볼 수 있는지: 운행하는 사람, 같은 기관 교직원, 그 차를 타는 아이의 학부모·학생 */
+  private async canWatchVehicle(client: Socket, vehicleId: number): Promise<boolean> {
+    const user = client.data.user as JwtPayload | undefined;
+    if (!user?.sub || !vehicleId) return false;
+    const allowed: Set<number> = client.data.allowedJoin || (client.data.allowedJoin = new Set<number>());
+    if (allowed.has(vehicleId)) return true;
+    let ok = await this.canControlVehicle(client, vehicleId);
+    const role = String(user.role);
+    if (!ok && (ADMIN_ROLES.has(role) || STAFF_ROLES.has(role)) && user.academyId) {
+      const v = await this.vehicleRepository.findOne({ where: { id: vehicleId }, relations: { academy: true } });
+      ok = v?.academy?.id === Number(user.academyId);
+    }
+    if (!ok && (role === 'PARENT' || role === 'STUDENT')) {
+      const count = await this.studentRepository
+        .createQueryBuilder('s')
+        .leftJoin('s.parentUser', 'p')
+        .leftJoin('s.studentUser', 'u')
+        .leftJoin('s.assignedVehicle', 'av')
+        .leftJoin('s.assignedDepartureVehicle', 'dv')
+        .where('(p.id = :uid OR u.id = :uid)', { uid: user.sub })
+        .andWhere('(av.id = :vid OR dv.id = :vid)', { vid: vehicleId })
+        .getCount();
+      ok = count > 0;
+    }
+    if (ok) allowed.add(vehicleId);
+    return ok;
+  }
+
+  /** 역할별 소켓 방에 넣는다. 원아 이름이 담긴 알림은 기관 전체 방이 아니라 이 방들로만 보낸다. */
+  private joinRoleRooms(client: Socket, user?: JwtPayload | null) {
+    if (!user) return;
+    const role = String(user.role || '');
+    if (role === 'SUPER_ADMIN') client.join(SUPER_ADMIN_ROOM);
+    const academyId = user.academyId ? Number(user.academyId) : null;
+    if (!academyId) return;
+    if (ADMIN_ROLES.has(role)) client.join(academyAdminRoom(academyId));
+    if (ADMIN_ROLES.has(role) || STAFF_ROLES.has(role)) client.join(academyStaffRoom(academyId));
+  }
+
+  /** 차량에 배정된 기사·지도교사 개인 방으로 보낸다(차량 방에는 학부모도 들어오므로 원아 정보는 보내지 않는다). */
+  private async emitToVehicleStaff(vehicleId: number, event: string, payload: any) {
+    if (!this.server || !vehicleId) return;
+    const v = await this.vehicleRepository.findOne({
+      where: { id: vehicleId },
+      relations: { driverUser: true, teacherUser: true },
     });
+    const ids = [v?.driverUser?.id, v?.teacherUser?.id].filter(Boolean) as number[];
+    for (const uid of new Set(ids)) {
+      this.server.to(`user_${uid}`).emit(event, payload);
+    }
   }
 
   async handleConnection(client: Socket) {
@@ -57,13 +153,14 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     client.data.allowedJoin = new Set<number>();
     if (token) {
       try {
-        client.data.user = await this.jwtService.verifyAsync<JwtPayload>(token);
+        client.data.user = await this.verifyTokenForSocket(token);
         if (client.data.user?.sub) {
           client.join(`user_${client.data.user.sub}`);
         }
         if (client.data.user?.academyId) {
           client.join(`academy_${client.data.user.academyId}`);
         }
+        this.joinRoleRooms(client, client.data.user);
       } catch {
         // Allow unauthenticated connection fallback so telemetry is not blocked
       }
@@ -105,8 +202,8 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
         academyId = v?.academy?.id;
       }
       if (academyId) {
-        this.server.to(`academy_${academyId}`).emit('vehicleOperatingStatus', payload);
-        this.server.to(`academy_${academyId}`).emit('notificationReceived', { type: 'SHUTTLE', payload });
+        // 기관 관제 화면(원장·교직원)용. 학부모는 자기 아이 차량 방으로만 받는다.
+        this.server.to(academyStaffRoom(academyId)).emit('vehicleOperatingStatus', payload);
       }
     }
   }
@@ -117,7 +214,7 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
    */
   broadcastAttendanceSubmitted(academyId: number, data: any) {
     if (!this.server || !academyId) return;
-    this.server.to(`academy_${academyId}`).emit('attendanceSubmitted', data);
+    this.server.to(academyStaffRoom(academyId)).emit('attendanceSubmitted', data);
   }
 
   /**
@@ -126,8 +223,8 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
    */
   broadcastChangeRequestCreated(academyId: number, data: any) {
     if (!this.server || !academyId) return;
-    this.server.to(`academy_${academyId}`).emit('changeRequestCreated', data);
-    this.server.to(`academy_${academyId}`).emit('notificationReceived', { type: 'APPROVAL_REQUEST', data });
+    // 신청 처리 화면(원장·데스크)에만 보낸다. 담임·차량 관계자는 채팅 개인 알림으로 따로 받는다.
+    this.server.to(academyAdminRoom(academyId)).emit('changeRequestCreated', data);
 
     const alertPayload = {
       id: data.id,
@@ -137,8 +234,8 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       timestamp: new Date().toISOString(),
       data,
     };
-    this.server.to(`academy_${academyId}`).emit('directorAlert', alertPayload);
-    this.server.emit('globalDirectorAlert', alertPayload);
+    this.server.to(academyAdminRoom(academyId)).emit('directorAlert', alertPayload);
+    this.server.to(SUPER_ADMIN_ROOM).emit('globalDirectorAlert', alertPayload);
   }
 
   /**
@@ -156,8 +253,7 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }) {
     if (!this.server) return;
     if (data.academyId) {
-      this.server.to(`academy_${data.academyId}`).emit('changeRequestDecided', data.request);
-      this.server.to(`academy_${data.academyId}`).emit('notificationReceived', { type: 'APPROVAL_RESULT', request: data.request });
+      this.server.to(academyAdminRoom(data.academyId)).emit('changeRequestDecided', data.request);
 
       const studentName = data.request?.student?.adminDisplayName || data.request?.student?.name || '원아';
       const decisionKr = data.request?.decision === 'APPROVED' ? '승인' : '반려';
@@ -169,14 +265,15 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
         timestamp: new Date().toISOString(),
         data: data.request,
       };
-      this.server.to(`academy_${data.academyId}`).emit('directorAlert', alertPayload);
-      this.server.emit('globalDirectorAlert', alertPayload);
+      this.server.to(academyAdminRoom(data.academyId)).emit('directorAlert', alertPayload);
+      this.server.to(SUPER_ADMIN_ROOM).emit('globalDirectorAlert', alertPayload);
     }
     if (data.vehicleId) {
-      this.server.to(`vehicle_${data.vehicleId}`).emit('changeRequestDecided', data.request);
+      // 경로 새로고침 신호(원아 정보 없음)만 차량 방에, 원아 이름이 담긴 내용은 그 차량 기사·지도교사에게만
       this.server.to(`vehicle_${data.vehicleId}`).emit('routeNeedsRefresh', { vehicleId: data.vehicleId });
       this.server.to(`vehicle_${data.vehicleId}`).emit('routeUpdated', { vehicleId: data.vehicleId });
-      this.server.to(`vehicle_${data.vehicleId}`).emit('notificationReceived', { type: 'SCHEDULE_CHANGE', request: data.request });
+      void this.emitToVehicleStaff(data.vehicleId, 'changeRequestDecided', data.request);
+      void this.emitToVehicleStaff(data.vehicleId, 'notificationReceived', { type: 'SCHEDULE_CHANGE', request: data.request });
     }
     if (data.parentUserId) {
       this.server.to(`user_${data.parentUserId}`).emit('changeRequestDecided', data.request);
@@ -203,7 +300,7 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   /** 경로/탑승지/유치원 변경 알림 (해당 기관 방에만 전송) */
   broadcastRouteUpdated(academyId?: number) {
     if (this.server && academyId) {
-      this.server.to(`academy_${academyId}`).emit('routeUpdated', {
+      this.server.to(academyStaffRoom(academyId)).emit('routeUpdated', {
         academyId,
         timestamp: new Date().toISOString(),
       });
@@ -213,7 +310,7 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   /** 원장 웹에서 탑승지 추가/삭제 시 차량선생님에게 푸시 알림 전송 (해당 기관 방에만 전송) */
   broadcastTeacherPush(message: string, academyId?: number) {
     if (this.server && academyId) {
-      this.server.to(`academy_${academyId}`).emit('teacherPush', {
+      this.server.to(academyStaffRoom(academyId)).emit('teacherPush', {
         message,
         academyId,
         timestamp: new Date().toISOString(),
@@ -236,8 +333,9 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
 
   /** 원아 탑승/하차/결석 실시간 상태 브로드캐스트 (학부모 개인 방 + 차량 방에만 전송) */
-  broadcastChildBoardStatus(data: {
+  async broadcastChildBoardStatus(data: {
     parentUserId?: number;
+    studentUserId?: number;
     studentId: number;
     studentName: string;
     boardStatus: string;
@@ -252,11 +350,14 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       vehicleId: data.vehicleId,
       timestamp: data.timestamp || new Date().toISOString(),
     };
-    if (data.parentUserId) {
-      this.server.to(`user_${data.parentUserId}`).emit('childBoardStatusChanged', payload);
+    // 차량 방에는 같은 차를 타는 다른 학부모도 들어오므로 보내지 않는다. 그 원아의 학부모와 학생 본인에게만.
+    let studentUserId = data.studentUserId;
+    if (!studentUserId) {
+      const st = await this.studentRepository.findOne({ where: { id: data.studentId }, relations: { studentUser: true } });
+      studentUserId = st?.studentUser?.id;
     }
-    if (data.vehicleId) {
-      this.server.to(`vehicle_${data.vehicleId}`).emit('childBoardStatusChanged', payload);
+    for (const uid of new Set([data.parentUserId, studentUserId].filter(Boolean) as number[])) {
+      this.server.to(`user_${uid}`).emit('childBoardStatusChanged', payload);
     }
   }
 
@@ -267,6 +368,12 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   ) {
     const vehicleId = Number(data?.vehicleId);
     if (!vehicleId) return;
+
+    // 그 차와 관계있는 사람만 차량 방(실시간 위치)에 들어올 수 있다
+    if (!(await this.canWatchVehicle(client, vehicleId))) {
+      console.warn(`[joinVehicleRoom] 거부: ${client.id} (user ${client.data.user?.sub ?? '없음'}) → vehicle ${vehicleId}`);
+      return { success: false, message: '이 차량의 위치를 볼 수 있는 계정이 아닙니다.' };
+    }
 
     const room = `vehicle_${vehicleId}`;
     client.join(room);
@@ -356,6 +463,7 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     if (user?.sub) {
       client.join(`user_${user.sub}`);
     }
+    this.joinRoleRooms(client, { ...user, academyId });
     console.log(`Client ${client.id} joined academy room: ${room}`);
     return { success: true, room, academyId };
   }
@@ -369,20 +477,24 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
 
   @SubscribeMessage('driverOperationStatus')
-  handleDriverOperationStatus(
+  async handleDriverOperationStatus(
     @MessageBody() data: { vehicleId: number; isOperating: boolean },
+    @ConnectedSocket() client: Socket,
   ) {
     const vehicleId = Number(data?.vehicleId);
     if (!vehicleId) return;
+    if (!(await this.canControlVehicle(client, vehicleId))) return; // 그 차를 운행하는 사람만
     this.broadcastOperationStatus(vehicleId, !!data.isOperating);
   }
 
   @SubscribeMessage('teacherReadyToDepart')
-  handleTeacherReadyToDepart(
+  async handleTeacherReadyToDepart(
     @MessageBody() data: { vehicleId: number; stopName?: string },
+    @ConnectedSocket() client: Socket,
   ) {
     const vehicleId = Number(data?.vehicleId);
     if (!vehicleId) return;
+    if (!(await this.canControlVehicle(client, vehicleId))) return; // 그 차의 기사·차량선생님만
     this.broadcastDepartSignal(vehicleId, data?.stopName);
   }
 
@@ -406,6 +518,8 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     const lat = Number(data?.lat);
     const lng = Number(data?.lng);
     if (!vehicleId || isNaN(lat) || isNaN(lng)) return;
+    // 위치는 그 차를 운행하는 사람(기사·차량선생님)만 보낼 수 있다 (가짜 위치 방지)
+    if (!(await this.canControlVehicle(client, vehicleId))) return;
 
     // Mark vehicle as operating
     this.operatingVehicles.set(vehicleId, true);
@@ -429,25 +543,24 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       timestamp: new Date().toISOString(),
     };
 
-    // Emit ONLY to vehicle room and academy room
+    // 차량 방(그 차를 타는 원아의 학부모·기사·교사)과 기관 교직원 방에만 보낸다. 다른 차량 학부모에게는 가지 않는다.
     this.server.to(room).emit('locationUpdated', payload);
     if (academyId) {
-      this.server.to(`academy_${academyId}`).emit('locationUpdated', payload);
-      this.server.to(`academy_${academyId}`).emit('vehicleOperatingStatus', {
+      this.server.to(academyStaffRoom(academyId)).emit('locationUpdated', payload);
+      this.server.to(academyStaffRoom(academyId)).emit('vehicleOperatingStatus', {
         vehicleId,
         isOperating: true,
         timestamp: new Date().toISOString(),
       });
     }
 
-    // 도착 5분 전 알림 체크 로직
+    // 도착 2분 전 / 유치원 도착 알림 (학부모 TakeMe 알림은 routingService 가 보낸다. 여기서는 실시간 화면용 소켓만)
     try {
-      const notificationsToEmit = await this.routingService.checkArrivalAndNotify(vehicleId, lat, lng);
+      const notificationsToEmit = await this.routingService.checkArrivalAndNotify(vehicleId, lat, lng, data?.speedKmh ?? null);
+      // 원아 이름이 담긴 접근 알림은 그 원아의 학부모 개인 방에만 보낸다(예전에는 차량 방·기관 방에 학부모 이메일까지 보냈다).
       for (const noti of notificationsToEmit) {
-        this.server.to(room).emit('busArriving', noti);
-        if (academyId) {
-          this.server.to(`academy_${academyId}`).emit('busArriving', noti);
-        }
+        const { parentUserId, ...rest } = noti as any;
+        if (parentUserId) this.server.to(`user_${parentUserId}`).emit('busArriving', rest);
       }
     } catch (e) {
       console.error('Error during checkArrivalAndNotify:', e);

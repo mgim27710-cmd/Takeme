@@ -3,6 +3,7 @@ import '../services/api_service.dart';
 import '../models/student_model.dart';
 import '../models/user_model.dart';
 import 'login_screen.dart';
+import 'parent/child_info_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final bool isEmbeddedTab;
@@ -132,6 +133,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
         },
       ),
     );
+  }
+
+  /// 원아·보호자 정보(주보호자·비상연락망 등) 열기
+  Future<void> _openChildInfo() async {
+    try {
+      final list = await ApiService().getChildInfoList();
+      if (!mounted) return;
+      if (list.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('연결된 원아 정보가 없습니다.')));
+        return;
+      }
+      // 선택된 아이가 있으면 그 아이, 없으면 첫 번째 아이
+      final selectedId = _childInfo?.id;
+      final info = list.firstWhere((e) => e['studentId'] == selectedId, orElse: () => list.first);
+      await Navigator.push(context, MaterialPageRoute(builder: (_) => ChildInfoScreen(info: info)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('원아 정보를 불러오지 못했습니다. ${friendlyError(e)}')));
+    }
   }
 
   void _showPasswordChangeDialog() {
@@ -515,7 +535,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('연락처 (전화번호)', style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
+                                const Text('주보호자 연락처', style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
                                 const SizedBox(height: 2),
                                 Text(
                                   _userPhone.isNotEmpty ? _userPhone : '등록된 전화번호 없음',
@@ -539,6 +559,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               child: const Text('수정', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
                             ),
                           ],
+                        ),
+                        const Divider(height: 20, color: Color(0xFFF1F5F9)),
+                        // 원아·보호자 정보: 주보호자·비상연락망·알레르기 등 (웹 [원아 추가] 와 같은 정보)
+                        InkWell(
+                          onTap: _openChildInfo,
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 6),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('원아·보호자 정보', style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
+                                      SizedBox(height: 2),
+                                      Text('주보호자, 비상연락망, 알레르기 등', style: TextStyle(fontSize: 13, color: Color(0xFF1E293B), fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
+                                Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
+                              ],
+                            ),
+                          ),
                         ),
                         const Divider(height: 20, color: Color(0xFFF1F5F9)),
                         Row(

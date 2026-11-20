@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../config.dart';
 import '../../models/chat_model.dart';
 import '../../services/api_service.dart';
 import 'parent_chat_room_screen.dart';
@@ -755,7 +757,10 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
 
           const SizedBox(height: 10),
 
-          if (_directRooms.isEmpty)
+          if (_loadError != null && _rooms.isEmpty)
+            // 불러오기에 실패했을 때 "대화 없음"으로 보이지 않게 이유를 알려준다
+            _buildEmptyState('대화 목록을 불러오지 못했습니다.', '$_loadError\n화면을 아래로 당겨 다시 시도해 주세요.')
+          else if (_directRooms.isEmpty)
             _buildEmptyState('진행 중인 1:1 대화가 없습니다.', '상단 [1:1 대화 상대 선택하기]를 통해 대화를 시작하세요.')
           else
             ..._directRooms.map((room) => _buildRoomCard(room, isGroup: false)),
@@ -772,46 +777,18 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // 상단 배너
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF8B5CF6), Color(0xFF6D28D9)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.2),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
+          // 안내 문구: 버튼처럼 보이지 않게 회색 글자로만 보여준다
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), shape: BoxShape.circle),
-                  child: const Icon(Icons.groups_rounded, color: Colors.white, size: 26),
-                ),
-                const SizedBox(width: 14),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '학부모 · 교직원 그룹 단톡방',
-                        style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                      SizedBox(height: 3),
-                      Text(
-                        '반별 학부모 단톡방, 셔틀 호차 단톡방에서 빠르게 소통하세요.',
-                        style: TextStyle(color: Color(0xFFEDE9FE), fontSize: 12, height: 1.3),
-                      ),
-                    ],
+                Icon(Icons.info_outline, size: 18, color: Color(0xFF94A3B8)),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '반별 학부모 단톡방, 셔틀 호차 단톡방에서 함께 이야기할 수 있어요.',
+                    style: TextStyle(color: Color(0xFF64748B), fontSize: 14, height: 1.4),
                   ),
                 ),
               ],
@@ -955,6 +932,76 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
     );
   }
 
+  void _showRoomActions(ChatRoomModel room, String title) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+            ),
+            ListTile(
+              minTileHeight: 56,
+              leading: Icon(room.isPinned ? Icons.push_pin_outlined : Icons.push_pin),
+              title: Text(room.isPinned ? '고정 해제' : '맨 위에 고정', style: const TextStyle(fontSize: 16)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _roomAction('/chat/rooms/${room.id}/pin', {'pinned': !room.isPinned},
+                    failText: room.isPinned ? '고정을 해제하지 못했습니다.' : '고정하지 못했습니다.');
+              },
+            ),
+            ListTile(
+              minTileHeight: 56,
+              leading: const Icon(Icons.delete_outline, color: Color(0xFFDC2626)),
+              title: const Text('채팅방 삭제', style: TextStyle(fontSize: 16, color: Color(0xFFDC2626))),
+              onTap: () {
+                Navigator.pop(ctx);
+                showDialog(
+                  context: context,
+                  builder: (dctx) => AlertDialog(
+                    title: const Text('채팅방 삭제'),
+                    content: Text('"$title" 채팅방을 내 목록에서 삭제할까요?\n상대방에게는 그대로 남고, 새 메시지가 오면 다시 보입니다.'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(dctx), child: const Text('취소')),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pop(dctx);
+                          _roomAction('/chat/rooms/${room.id}/hide', {}, failText: '채팅방을 삭제하지 못했습니다.');
+                        },
+                        child: const Text('삭제', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _roomAction(String path, Map<String, dynamic> body, {required String failText}) async {
+    try {
+      final res = await ApiService().postWithAuth(Uri.parse('${AppConfig.apiHost}$path'), jsonEncode(body));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        _loadRooms();
+        return;
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$failText (${res.statusCode})')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$failText ${friendlyError(e)}')));
+    }
+  }
+
+
   Widget _buildRoomCard(ChatRoomModel room, {required bool isGroup}) {
     final title = isGroup ? room.name : room.getDisplayName(_myEmail);
     final opponent = isGroup ? null : room.getOtherMember(_myEmail);
@@ -990,20 +1037,45 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
             isGroup: isGroup,
             memberCount: memberCount,
           ),
+          // 길게 누르면 맨 위 고정/채팅방 삭제 (TakeMe 알림은 항상 맨 위라 해당 없음)
+          onLongPress: room.type == 'NOTIFICATION_SYSTEM' ? null : () => _showRoomActions(room, title),
           borderRadius: BorderRadius.circular(14),
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                CircleAvatar(
-                  radius: 22,
-                  backgroundColor: isGroup ? const Color(0xFFEDE9FE) : const Color(0xFFEFF6FF),
-                  child: Icon(
-                    isGroup ? Icons.groups_rounded : Icons.person_rounded,
-                    color: isGroup ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
-                    size: 24,
+                if (room.type == 'NOTIFICATION_SYSTEM' && room.name == 'TakeMe 알림')
+                  // TakeMe 알림: 차량선생님·기사 앱과 같은 어두운 종 아이콘
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F172A),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(Icons.notifications_active, color: Colors.white, size: 22),
+                  )
+                else if (room.type == 'NOTIFICATION_SYSTEM')
+                  // 공지사항: 기관 전체 공지
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Icon(Icons.campaign_rounded, color: Color(0xFF059669), size: 24),
+                  )
+                else
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundColor: isGroup ? const Color(0xFFEDE9FE) : const Color(0xFFEFF6FF),
+                    child: Icon(
+                      isGroup ? Icons.groups_rounded : Icons.person_rounded,
+                      color: isGroup ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
+                      size: 24,
+                    ),
                   ),
-                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -1011,6 +1083,10 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> wit
                     children: [
                       Row(
                         children: [
+                          if (room.isPinned) ...[
+                            const Icon(Icons.push_pin, size: 14, color: Color(0xFF64748B), semanticLabel: '고정됨'),
+                            const SizedBox(width: 4),
+                          ],
                           Flexible(
                             child: Text(
                               title,

@@ -76,6 +76,8 @@ abstract class NavMapController {
 
   void centerOn(GeoPoint p, {int zoom = 16});
   void markStopPassed(int index);
+  /// 정류장 표시를 다시 "남음"으로 (기사가 도착 처리를 되돌렸을 때)
+  void markStopPending(int index);
   void fitAll();
   void setHeadingUp(bool enabled);
   void resetZoom();
@@ -204,6 +206,15 @@ class NavMapControllerImpl implements NavMapController {
     passedStopIndices.add(index);
     if (index >= 0 && index < stops.length) {
       stops[index]['passed'] = true;
+    }
+    _notify();
+  }
+
+  @override
+  void markStopPending(int index) {
+    passedStopIndices.remove(index);
+    if (index >= 0 && index < stops.length) {
+      stops[index]['passed'] = false;
     }
     _notify();
   }

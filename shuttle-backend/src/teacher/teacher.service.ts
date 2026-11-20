@@ -21,6 +21,21 @@ import { AttendanceSubmission } from '../entities/attendance-submission.entity';
 import { ChatService } from '../chat/chat.service';
 import { formatTeacherName } from '../utils/teacher.util';
 
+/** 원아 정보(raw)에 저장된 주보호자·비상연락망(보호자2)·학부모 전달사항 — 웹 [원아 추가]·학부모 앱과 같은 키 */
+function guardianFields(s: Student) {
+  let raw: any = s.raw;
+  if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch { raw = {}; } }
+  raw = raw && typeof raw === 'object' ? raw : {};
+  return {
+    parentName: raw['보호자1 성함'] || raw['보호자 성함'] || s.parentUser?.name || '',
+    parentRelation: raw['보호자1 관계'] || raw['보호자 관계'] || '',
+    emergencyContactName: raw['보호자2 성함'] || raw['보호자2성함'] || '',
+    emergencyContactRelation: raw['보호자2 관계'] || raw['보호자2관계'] || '',
+    emergencyContactPhone: raw['보호자2 연락처'] || raw['보호자2연락처'] || raw['비상연락처'] || '',
+    parentMessage: raw['보호자 전달사항'] || '',
+  };
+}
+
 @Injectable()
 export class TeacherService {
   constructor(
@@ -242,9 +257,13 @@ export class TeacherService {
             longitude: s.longitude,
             boarded: s.boardStatus === 'BOARDED',
             absent: s.boardStatus === 'ABSENT',
+            dropped: s.boardStatus === 'DROPPED',
+            boardStatus: s.boardStatus || 'WAITING',
             expectedTime: s.raw ? s.raw['예상탑승시간'] || '15:30' : '15:30',
             allergies: s.allergies || (s.raw ? s.raw['알레르기'] : '') || '',
             parentPhone,
+            ...guardianFields(s),
+            gender: s.gender || null,
             className: user.assignedClass,
           };
         });
@@ -284,6 +303,8 @@ export class TeacherService {
           longitude: s.longitude,
           boarded: s.boardStatus === 'BOARDED',
           absent: s.boardStatus === 'ABSENT',
+          dropped: s.boardStatus === 'DROPPED',
+          boardStatus: s.boardStatus || 'WAITING',
           expectedTime: rawObj['예상탑승시간'] || '15:30',
           allergies: s.allergies || rawObj['알레르기'] || '',
           teacherMemo: s.teacherMemo,
@@ -311,6 +332,8 @@ export class TeacherService {
           longitude: s.longitude,
           boarded: s.boardStatus === 'BOARDED',
           absent: s.boardStatus === 'ABSENT',
+          dropped: s.boardStatus === 'DROPPED',
+          boardStatus: s.boardStatus || 'WAITING',
           expectedTime: s.raw ? s.raw['예상탑승시간'] || '15:30' : '15:30',
           allergies: s.allergies || (s.raw ? s.raw['알레르기'] : '') || '',
           teacherMemo: s.teacherMemo,
@@ -320,6 +343,9 @@ export class TeacherService {
           overrideType: (s as any).overrideType || null,
           overrideReason: (s as any).overrideReason || null,
           parentPhone,
+          // 주보호자·비상연락망(보호자2)·학부모 전달사항 (원아 정보에 저장된 값)
+          ...guardianFields(s),
+          gender: s.gender || null,
         };
       });
   }
@@ -616,7 +642,7 @@ export class TeacherService {
   private async notifyParentBoardStatus(
     student: Student,
     vehicle: Vehicle | null,
-    status: 'BOARDED' | 'WAITING' | 'ABSENT',
+    status: 'BOARDED' | 'WAITING' | 'ABSENT' | 'DROPPED',
     tagMethod: string = 'MANUAL'
   ) {
     const parent = student.parentUser;
@@ -625,6 +651,7 @@ export class TeacherService {
 
     let statusKr = '탑승 대기';
     if (status === 'BOARDED') statusKr = '탑승 완료';
+    else if (status === 'DROPPED') statusKr = '하차 완료';
     else if (status === 'ABSENT') statusKr = '미탑승/결석';
 
     const message = `[통학 라이브] ${studentName} 원아가 ${vehicle ? vehicle.busNumber + '호차에 ' : ''}${statusKr}되었습니다. (${timeStr})`;
@@ -648,6 +675,14 @@ export class TeacherService {
           parent.id,
           '셔틀 탑승 안내',
           `${studentName} 원아가 ${vehicle ? vehicle.busNumber + '호차에 ' : ''}탑승 완료했습니다.`,
+          { type: 'shuttle' },
+        ).catch(() => {});
+      }
+      if (status === 'DROPPED' && this.chatService) {
+        this.chatService.sendSystemNotificationToUser(
+          parent.id,
+          '셔틀 하차 안내',
+          `${studentName} 원아가 ${vehicle ? vehicle.busNumber + '호차에서 ' : ''}안전하게 내렸습니다.`,
           { type: 'shuttle' },
         ).catch(() => {});
       }
@@ -743,6 +778,47 @@ export class TeacherService {
     return { success: true, studentName: student.adminDisplayName || student.name };
   }
 
+  /** 하차 처리: 이번 운행에 탄(탑승) 원아만 하차로 바꾼다 */
+  async dropStudent(email: string, studentId: number) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('User not found');
+    const vehicle = await this.findAssignedVehicle(user.id);
+    if (!vehicle) throw new BadRequestException('배정된 차량이 없습니다.');
+
+    const todayStudents = await this.getTodayStudentsForVehicle(vehicle.id);
+    const student = todayStudents.find(s => s.id === studentId);
+    if (!student) throw new BadRequestException('해당 차량에 배정된 원아가 아닙니다.');
+    if (student.boardStatus !== 'BOARDED') {
+      throw new BadRequestException('탑승한 원아만 하차 처리할 수 있습니다.');
+    }
+
+    student.boardStatus = 'DROPPED';
+    await this.studentRepository.save(student);
+
+    const name = student.adminDisplayName || student.name;
+    await this.notificationRepository.save(this.notificationRepository.create({
+      vehicle,
+      message: `${vehicle.busNumber}호차 ${name} 원생 ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} 하차 완료`,
+    }));
+    await this.appendBoardingLog(vehicle.id, student.id, `${name} 하차`, 'MANUAL');
+    await this.notifyParentBoardStatus(student, vehicle, 'DROPPED', 'MANUAL');
+    return { success: true, studentName: name };
+  }
+
+  /** 아직 차에 타고 있는 원아 (탑승 처리 후 하차 처리가 안 된 원아) */
+  async getUndroppedStudents(email: string) {
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (!user) throw new BadRequestException('User not found');
+    const vehicle = await this.findAssignedVehicle(user.id);
+    if (!vehicle) return { students: [] };
+    const todayStudents = await this.getTodayStudentsForVehicle(vehicle.id);
+    return {
+      students: todayStudents
+        .filter(s => s.boardStatus === 'BOARDED')
+        .map(s => ({ id: s.id, name: s.adminDisplayName || s.name })),
+    };
+  }
+
   async unboardStudent(email: string, studentId: number) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
@@ -820,7 +896,7 @@ export class TeacherService {
       // 유치원 방에 escortStarted 전송 (관리자 웹 알림용)
       const academyId = vehicle.academy?.id || (vehicle as any).academyId;
       if (academyId) {
-        this.locationGateway.server.to(`academy_${academyId}`).emit('escortStarted', {
+        this.locationGateway.server.to(`academy_staff_${academyId}`).emit('escortStarted', {
           vehicleId: vehicle.id,
           vehicleName: vehicle.busNumber,
           escortName,
@@ -936,6 +1012,24 @@ export class TeacherService {
       });
       await this.notificationRepository.save(noti);
 
+      // 새 운행 시작: 지난 운행의 탑승/하차 표시를 '탑승 전'으로 되돌린다.
+      // 단, 끝나지 않은 운행이 있으면(앱 재시작 등) 아직 타고 있는 원아 정보가 지워지지 않게 그대로 둔다.
+      // (결석은 결석 신청·당일 처리에서 정하므로 여기서 바꾸지 않는다)
+      const lastLog = await this.operationLogRepository.findOne({
+        where: { vehicle: { id: vehicle.id } },
+        order: { id: 'DESC' },
+      });
+      if (!lastLog || lastLog.endTime) {
+        const todayStudents = await this.getTodayStudentsForVehicle(vehicle.id);
+        for (const st of todayStudents) {
+          if (st.boardStatus === 'BOARDED' || st.boardStatus === 'DROPPED') {
+            st.boardStatus = 'WAITING';
+            st.actualBoardTime = null as any;
+            await this.studentRepository.save(st);
+          }
+        }
+      }
+
       // Create new OperationLog
       const dateString = new Date().toISOString().split('T')[0];
       const log = this.operationLogRepository.create({
@@ -969,11 +1063,37 @@ export class TeacherService {
     return { success: true };
   }
 
-  async endOperation(email: string, interiorChecked?: boolean) {
+  async endOperation(email: string, interiorChecked?: boolean, ignoreUndropped?: boolean) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
     const vehicle = await this.findAssignedVehicle(user.id);
     if (vehicle) {
+      // 운행 종료 전 점검: 탑승 처리 후 하차 처리가 안 된 원아가 있으면 종료하지 않고 이름을 돌려준다.
+      // 기사가 경고를 보고도 종료하면(ignoreUndropped) 기록을 남기고 원장님께 알린다.
+      const undropped = (await this.getTodayStudentsForVehicle(vehicle.id)).filter(s => s.boardStatus === 'BOARDED');
+      if (undropped.length > 0 && !ignoreUndropped) {
+        throw new ConflictException({
+          code: 'UNDROPPED_STUDENTS',
+          message: '아직 하차 처리되지 않은 원아가 있습니다.',
+          students: undropped.map(s => ({ id: s.id, name: s.adminDisplayName || s.name })),
+        });
+      }
+      if (undropped.length > 0) {
+        const names = undropped.map(s => s.adminDisplayName || s.name).join(', ');
+        const text = `[미하차 경고 무시 종료] ${vehicle.busNumber}호차 운행이 하차 처리되지 않은 원아(${names})가 있는 상태로 종료되었습니다. (종료: ${user.name || email}, 차량 내부 확인: ${interiorChecked ? '예' : '아니오'})`;
+        await this.notificationRepository.save(this.notificationRepository.create({ vehicle, message: text, type: 'SHUTTLE' }));
+        await this.appendBoardingLog(vehicle.id, null, text, 'SYSTEM');
+        try {
+          const academyId = vehicle.academy?.id || (vehicle as any).academyId || user.academyId;
+          const adminIds = academyId && this.chatService ? await this.chatService.getAcademyAdminIds(academyId) : [];
+          if (adminIds.length > 0) {
+            await this.chatService!.sendSystemNotificationToUsers(adminIds, '미하차 원아 확인 필요', text, { type: 'shuttle' });
+          }
+        } catch (e) {
+          console.error('[endOperation] admin alert failed:', e);
+        }
+      }
+
       const rawBus = (vehicle.busNumber || '셔틀').trim();
       const busName = rawBus.endsWith('호차')
         ? rawBus
@@ -1372,7 +1492,8 @@ export class TeacherService {
     const driverName = vehicle.driverUser?.name || user.name || '기사님';
 
     if (this.locationGateway?.server) {
-      this.locationGateway.server.to(`academy_${academyId}`).emit('emergencyAlert', {
+      // 기관 교직원 방(원장·데스크·기사·교사)에만 보낸다
+      this.locationGateway.server.to(`academy_staff_${academyId}`).emit('emergencyAlert', {
         vehicleId: vehicle.id,
         vehicleName: vehicle.busNumber,
         driverName,

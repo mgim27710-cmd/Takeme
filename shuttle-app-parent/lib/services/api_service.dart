@@ -21,6 +21,8 @@ class ApiException implements Exception {
 
 /// 예외를 사용자가 이해할 수 있는 한 줄 안내로 바꾼다 (기술적인 오류 문구를 그대로 보여주지 않는다)
 String friendlyError(Object e) {
+  // 화면에는 쉬운 문구만 보여주므로, 원인 확인용으로 실제 오류를 개발 로그에 남긴다
+  debugPrint('[friendlyError] ${e.runtimeType}: $e');
   if (e is ApiException) return e.message;
   final t = e.toString();
   if (t.contains('SocketException') ||
@@ -335,6 +337,24 @@ class ApiService {
     return [];
   }
 
+  /// 메신저 전체 안 읽은 메시지 수 (TakeMe 알림 포함)
+  Future<int> getChatTotalUnreadCount() async {
+    try {
+      final email = currentUser?.email;
+      if (email == null) return 0;
+      final rooms = await getChatRooms(email);
+      var sum = 0;
+      for (final r in rooms) {
+        final type = r['type']?.toString();
+        if (type == 'PAYMENT_SYSTEM') continue;
+        sum += (r['unreadCount'] as num?)?.toInt() ?? 0;
+      }
+      return sum;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   Future<int> getUnreadNotificationCount(String email) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/parent/notifications/unread-count?email=${Uri.encodeComponent(email)}');
@@ -429,6 +449,22 @@ class ApiService {
     } catch (e) {
       if (throwOnError) rethrow;
       debugPrint('[ApiService] getParentRoute error: $e');
+    }
+    return null;
+  }
+
+  /// 내 아이 차량의 실제 도로 경로(기사 앱이 올린 길찾기 경로)와 진행 위치.
+  /// 기사 앱이 아직 경로를 만들지 않았으면 path 가 비어 있다.
+  Future<Map<String, dynamic>?> getParentRoutePath() async {
+    try {
+      final res = await getWithAuth(Uri.parse('${AppConfig.apiHost}/parent/route-path'))
+          .timeout(const Duration(seconds: 6));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+        if (decoded is Map<String, dynamic>) return decoded;
+      }
+    } catch (e) {
+      debugPrint('[ApiService] getParentRoutePath error: $e');
     }
     return null;
   }
@@ -541,6 +577,35 @@ class ApiService {
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message'] ?? '전화번호가 저장되었습니다.'};
   }
 
+  /// 내 아이들의 원아·보호자 정보와 빠진 필수 칸(missing). 실패하면 예외
+  Future<List<Map<String, dynamic>>> getChildInfoList() async {
+    final res = await getWithAuth(Uri.parse('${AppConfig.apiHost}/parent/child-info'))
+        .timeout(const Duration(seconds: 8));
+    throwIfServerError(res);
+    if (res.statusCode != 200) {
+      throw ApiException('원아 정보를 불러오지 못했습니다. (${res.statusCode})', res.statusCode);
+    }
+    if (res.bodyBytes.isEmpty) return [];
+    final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+    if (decoded is List) return decoded.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    if (decoded is Map) return [Map<String, dynamic>.from(decoded)];
+    return [];
+  }
+
+  /// 원아·보호자 정보 저장. 성공하면 저장된 정보(missing 포함), 실패하면 message
+  Future<Map<String, dynamic>> saveChildInfo(Map<String, dynamic> body) async {
+    try {
+      final res = await postWithAuth(Uri.parse('${AppConfig.apiHost}/parent/child-info'), jsonEncode(body));
+      final data = res.bodyBytes.isEmpty ? <String, dynamic>{} : jsonDecode(utf8.decode(res.bodyBytes));
+      final ok = res.statusCode == 200 || res.statusCode == 201;
+      final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      final msg = map['message'];
+      return {...map, 'success': ok, 'message': msg is List ? msg.join(', ') : msg};
+    } catch (e) {
+      return {'success': false, 'message': friendlyError(e)};
+    }
+  }
+
   Future<Map<String, dynamic>> changeParentPassword(String currentPassword, String newPassword) async {
     final email = currentUser?.email;
     if (email == null) return {'success': false, 'message': '로그인이 필요합니다.'};
@@ -591,6 +656,8 @@ class ApiService {
       final url = Uri.parse('${AppConfig.apiHost}/parent/today-schedule?email=${Uri.encodeComponent(email)}');
       final res = await getWithAuth(url).timeout(const Duration(seconds: 6));
       if (throwOnError) throwIfServerError(res);
+      // 오늘 일정이 없으면 서버가 빈 응답(null)을 보낸다. 오류가 아니라 "일정 없음"이다.
+      if (res.statusCode == 200 && res.bodyBytes.isEmpty) return null;
       if (res.statusCode == 200) {
         final decoded = jsonDecode(utf8.decode(res.bodyBytes));
         if (decoded is Map<String, dynamic>) {

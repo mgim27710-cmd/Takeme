@@ -510,8 +510,10 @@ export class ChatService {
       };
 
       if (academyId && this.chatGateway?.server) {
-        this.chatGateway.server.to(`academy_${academyId}`).emit('directorAlert', alertPayload);
-        this.chatGateway.server.to(`academy_${academyId}`).emit('notificationReceived', {
+        // 원장·데스크 방(academy_admin_{id}, LocationGateway에서 역할별로 입장)에만 보낸다.
+        // 기관 전체 방(academy_{id})에는 학부모·학생도 있으므로 보내지 않는다.
+        this.chatGateway.server.to(`academy_admin_${academyId}`).emit('directorAlert', alertPayload);
+        this.chatGateway.server.to(`academy_admin_${academyId}`).emit('notificationReceived', {
           type: 'DIRECTOR_ALERT',
           data: alertPayload,
         });
@@ -659,10 +661,26 @@ export class ChatService {
       (room as any).unreadCount = unreadMap.get(room.id) || 0;
     }
 
+    // 내 참여 정보(고정·삭제 여부)
+    const myMemberships = await this.memberRepo.find({
+      where: { user: { id: userId } },
+      relations: { room: true },
+    });
+    const myMemberByRoom = new Map<number, ChatRoomMember>();
+    for (const m of myMemberships) if (m.room?.id) myMemberByRoom.set(m.room.id, m);
+
     // 결재 전용 방 제외 및 알림 채널 단 1개 유지
     const seenSpecialTypes = new Set<string>();
     const deduplicatedRooms: ChatRoom[] = [];
     for (const room of rooms) {
+      const mine = myMemberByRoom.get(room.id);
+      // 내가 삭제한 방: 삭제한 뒤로 새 메시지가 없으면 목록에서 뺀다
+      if (mine?.hiddenAt) {
+        const latestAt = (room as any).latestMessage?.createdAt ? new Date((room as any).latestMessage.createdAt).getTime() : 0;
+        if (latestAt <= new Date(mine.hiddenAt).getTime()) continue;
+      }
+      (room as any).pinnedAt = mine?.pinnedAt || null;
+      (room as any).isPinned = !!mine?.pinnedAt;
       // 결재 전용 채널은 제거 (일반 1:1 및 그룹 대화방에서 결재 진행)
       if (room.type === ChatRoomType.PAYMENT_SYSTEM) {
         continue;
@@ -681,19 +699,53 @@ export class ChatService {
       deduplicatedRooms.push(room);
     }
 
-    // 공지사항 채널 최상단 고정, 나머지 최신 메시지 순 정렬
+    // 정렬: 1) TakeMe 알림 2) 공지사항 3) 내가 고정한 방(먼저 고정한 순서) 4) 나머지는 최신 메시지 순
     deduplicatedRooms.sort((a: any, b: any) => {
-      const aPin = a.type === ChatRoomType.NOTIFICATION_SYSTEM;
-      const bPin = b.type === ChatRoomType.NOTIFICATION_SYSTEM;
-      if (aPin && bPin) return a.name === PERSONAL_NOTI_ROOM_NAME ? -1 : 1; // 내 알림 -> 기관 공지
-      if (aPin) return -1;
-      if (bPin) return 1;
+      const aNoti = a.type === ChatRoomType.NOTIFICATION_SYSTEM;
+      const bNoti = b.type === ChatRoomType.NOTIFICATION_SYSTEM;
+      if (aNoti !== bNoti) return aNoti ? -1 : 1;
+      if (aNoti && bNoti) return a.name === PERSONAL_NOTI_ROOM_NAME ? -1 : 1; // TakeMe 알림 → 공지사항
+      const aPin = a.pinnedAt ? new Date(a.pinnedAt).getTime() : 0;
+      const bPin = b.pinnedAt ? new Date(b.pinnedAt).getTime() : 0;
+      if (!!aPin !== !!bPin) return aPin ? -1 : 1;
+      if (aPin && bPin && aPin !== bPin) return aPin - bPin;
       const timeA = a.latestMessage ? new Date(a.latestMessage.createdAt).getTime() : new Date(a.updatedAt || a.createdAt).getTime();
       const timeB = b.latestMessage ? new Date(b.latestMessage.createdAt).getTime() : new Date(b.updatedAt || b.createdAt).getTime();
       return timeB - timeA;
     });
 
     return deduplicatedRooms;
+  }
+
+  /** 내 목록에서 대화방 맨 위 고정/해제 (TakeMe 알림은 항상 맨 위라 고정 대상이 아님) */
+  async setRoomPinned(roomId: number, userId: number, pinned: boolean) {
+    const member = await this.memberRepo.findOne({
+      where: { room: { id: roomId }, user: { id: userId } },
+      relations: { room: true },
+    });
+    if (!member) throw new ForbiddenException('대화방 참여자만 고정할 수 있습니다.');
+    if (member.room?.type === ChatRoomType.NOTIFICATION_SYSTEM) {
+      throw new BadRequestException('TakeMe 알림은 항상 맨 위에 있어 따로 고정할 수 없습니다.');
+    }
+    member.pinnedAt = pinned ? new Date() : null;
+    await this.memberRepo.save(member);
+    return { success: true, roomId, isPinned: pinned };
+  }
+
+  /** 내 목록에서 대화방 삭제 (다른 참여자에게는 그대로 있고, 새 메시지가 오면 다시 보인다) */
+  async hideRoom(roomId: number, userId: number) {
+    const member = await this.memberRepo.findOne({
+      where: { room: { id: roomId }, user: { id: userId } },
+      relations: { room: true },
+    });
+    if (!member) throw new ForbiddenException('대화방 참여자만 삭제할 수 있습니다.');
+    if (member.room?.type === ChatRoomType.NOTIFICATION_SYSTEM) {
+      throw new BadRequestException('TakeMe 알림은 삭제할 수 없습니다.');
+    }
+    member.hiddenAt = new Date();
+    member.pinnedAt = null;
+    await this.memberRepo.save(member);
+    return { success: true, roomId };
   }
 
   async getMessages(roomId: number, currentUserId?: number) {
@@ -735,7 +787,8 @@ export class ChatService {
     if (currentUserId) {
       const toUpdate: ChatMessage[] = [];
       for (const m of messages) {
-        if (m.sender && m.sender.id !== currentUserId) {
+        // 보낸 사람이 없는 시스템 알림(TakeMe 알림)도 열어 보면 읽음 처리한다
+        if (!m.sender || m.sender.id !== currentUserId) {
           const readByList = (m.readBy || []).map(Number);
           if (!readByList.includes(currentUserId)) {
             readByList.push(currentUserId);

@@ -76,7 +76,7 @@ export class Student {
   approvalStatus: string; // 'UNREGISTERED' | 'PENDING' | 'APPROVED'
 
   @Column({ default: 'WAITING' })
-  boardStatus: string; // 'WAITING' | 'BOARDED' | 'ABSENT'
+  boardStatus: string; // 'WAITING'(탑승 전) | 'BOARDED'(탑승) | 'DROPPED'(하차) | 'ABSENT'(결석)
 
   @Column({ type: 'timestamp', nullable: true })
   actualBoardTime: Date;

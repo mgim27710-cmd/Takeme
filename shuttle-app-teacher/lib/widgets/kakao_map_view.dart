@@ -1,10 +1,13 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/route_model.dart';
+import 'naver_route_map.dart';
+import 'package:geolocator/geolocator.dart';
 
 class KakaoMapView extends StatefulWidget {
   final List<RouteStop> stops;
@@ -156,19 +159,121 @@ class _KakaoMapViewState extends State<KakaoMapView> {
     _controller?.runJavaScript(js);
   }
 
+
+  // ───── 네이버 지도 (인증되면 사용, 아니면 아래 기존 지도) ─────
+  final GlobalKey<NaverRouteMapState> _naverKey = GlobalKey<NaverRouteMapState>();
+  bool get _useNaver => !kIsWeb && naverMapAvailable.value;
+
+  static List<List<double>> _latLngList(List<dynamic>? list) {
+    final out = <List<double>>[];
+    for (final p in list ?? const []) {
+      if (p is Map) {
+        // 서버가 좌표를 숫자 또는 글자("37.78")로 보낼 수 있다
+        final la = double.tryParse((p['lat'] ?? p['latitude'])?.toString() ?? '');
+        final ln = double.tryParse((p['lng'] ?? p['longitude'])?.toString() ?? '');
+        if (la != null && ln != null) out.add([la, ln]);
+      }
+    }
+    return out;
+  }
+
+  Widget _naverMap() {
+    final stops = <NaverStopPoint>[
+      for (var i = 0; i < widget.stops.length; i++)
+        NaverStopPoint(
+          lat: widget.stops[i].latitude,
+          lng: widget.stops[i].longitude,
+          label: widget.stops[i].isMyChild ? '우리 아이' : '${i + 1}',
+          isMine: widget.stops[i].isMyChild,
+        ),
+    ];
+    return NaverRouteMap(
+      key: _naverKey,
+      stops: stops,
+      fallbackPoints: _latLngList(widget.routePoints),
+      roadPath: _latLngList(widget.actualRoadPath),
+      progressIndex: widget.progressIndex,
+      busLat: widget.busLat,
+      busLng: widget.busLng,
+      academyLat: widget.academyLat,
+      academyLng: widget.academyLng,
+      academyName: widget.academyName,
+      onStopTap: widget.onStopTap == null ? null : (i) => widget.onStopTap!(i, widget.stops[i].name),
+    );
+  }
+
+  bool _locating = false;
+
+  /// [내 위치] 버튼: 위치 권한을 확인하고 현재 위치를 작은 빨간 점으로 표시
+  Future<void> _goToMyLocation() async {
+    if (_locating) return;
+    void tell(String msg) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+
+    _locating = true;
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        tell('휴대폰 위치(GPS)가 꺼져 있습니다. 설정에서 위치를 켜 주세요.');
+        return;
+      }
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
+      if (perm == LocationPermission.denied) {
+        tell('위치 권한을 허용해야 내 위치를 볼 수 있어요.');
+        return;
+      }
+      if (perm == LocationPermission.deniedForever) {
+        tell('위치 권한이 꺼져 있습니다. 휴대폰 설정 > 앱 > 위치에서 허용해 주세요.');
+        await Geolocator.openAppSettings();
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 10)),
+      );
+      if (!mounted) return;
+      if (_useNaver) {
+        await _naverKey.currentState?.showMyLocation(pos.latitude, pos.longitude);
+      } else {
+        _controller?.runJavaScript('if (window.showMe) { window.showMe(${pos.latitude}, ${pos.longitude}); }');
+      }
+    } catch (e) {
+      tell('현재 위치를 가져오지 못했습니다. 잠시 후 다시 눌러 주세요.');
+    } finally {
+      _locating = false;
+    }
+  }
+
   void _zoomIn() {
+    if (_useNaver) {
+      _naverKey.currentState?.zoomIn();
+      return;
+    }
     _controller?.runJavaScript('if (window.zoomIn) { window.zoomIn(); }');
   }
 
   void _zoomOut() {
+    if (_useNaver) {
+      _naverKey.currentState?.zoomOut();
+      return;
+    }
     _controller?.runJavaScript('if (window.zoomOut) { window.zoomOut(); }');
   }
 
   void _fitAll() {
+    if (_useNaver) {
+      _naverKey.currentState?.fitAll();
+      return;
+    }
     _controller?.runJavaScript('if (window.fitAll) { window.fitAll(); }');
   }
 
   void _focusMyChild() {
+    if (_useNaver) {
+      _naverKey.currentState?.focusMyChild();
+      return;
+    }
     _controller?.runJavaScript('if (window.focusMyChild) { window.focusMyChild(); }');
   }
 
@@ -326,6 +431,19 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           }
         };
 
+        var meMarker = null;
+        window.showMe = function(lat, lng) {
+          if (!lat || !lng) return;
+          if (meMarker) {
+            meMarker.setLatLng([lat, lng]);
+          } else {
+            meMarker = L.circleMarker([lat, lng], {
+              radius: 7, color: '#ffffff', weight: 3, fillColor: '#ef4444', fillOpacity: 1
+            }).addTo(map);
+          }
+          map.setView([lat, lng], 16);
+        };
+
         window.updateBus = function(lat, lng) {
           if (!lat || !lng) return;
           if (busMarker) {
@@ -341,17 +459,34 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           }
         };
 
-        window.updateRoutePath = function(roadPath, progIdx) {
-          if (polyline) {
-            map.removeLayer(polyline);
-            polyline = null;
-          }
-          if (roadPath && roadPath.length) {
-            var active = roadPath.slice(progIdx || 0);
-            if (active.length) {
-              polyline = L.polyline(active, { color: '#2563eb', weight: 5, opacity: 0.85 }).addTo(map);
+        // 기사 앱처럼 전체 경로를 그린다: 지나온 구간은 회색, 남은 구간은 파란색
+        var routeLayer = L.layerGroup().addTo(map);
+        function drawRoute(roadPath, progIdx, fallbackPoints) {
+          routeLayer.clearLayers();
+          polyline = null;
+          if (roadPath && roadPath.length > 1) {
+            var idx = Math.max(0, Math.min(progIdx || 0, roadPath.length - 1));
+            if (idx > 0) {
+              L.polyline(roadPath.slice(0, idx + 1), { color: '#94a3b8', weight: 6, opacity: 0.9 }).addTo(routeLayer);
             }
+            var remain = roadPath.slice(idx);
+            if (remain.length > 1) {
+              L.polyline(remain, { color: '#1d4ed8', weight: 9, opacity: 0.85 }).addTo(routeLayer);
+              polyline = L.polyline(remain, { color: '#3b82f6', weight: 5, opacity: 1.0 }).addTo(routeLayer);
+            }
+            return roadPath;
           }
+          // 기사 앱이 아직 도로 경로를 올리지 않았으면 정류장끼리 이은 점선으로 대신 보여준다
+          if (fallbackPoints && fallbackPoints.length > 1) {
+            polyline = L.polyline(fallbackPoints, { color: '#3b82f6', weight: 4, opacity: 0.8, dashArray: '8 8' }).addTo(routeLayer);
+            return fallbackPoints;
+          }
+          return [];
+        }
+        var lastFallbackPoints = [];
+
+        window.updateRoutePath = function(roadPath, progIdx) {
+          drawRoute(roadPath, progIdx, lastFallbackPoints);
         };
 
         window.initData = function(stops, points, acLat, acLng, acName, bLat, bLng, roadPath, progIdx) {
@@ -408,12 +543,8 @@ class _KakaoMapViewState extends State<KakaoMapView> {
             });
           }
 
-          var activeRoute = (roadPath && roadPath.length) ? roadPath.slice(progIdx || 0) : (points || []);
-          if (activeRoute && activeRoute.length) {
-            if (polyline) map.removeLayer(polyline);
-            polyline = L.polyline(activeRoute, { color: '#2563eb', weight: 5, opacity: 0.85 }).addTo(map);
-            activeRoute.forEach(function(p) { pts.push(p); });
-          }
+          lastFallbackPoints = points || [];
+          drawRoute(roadPath, progIdx, lastFallbackPoints).forEach(function(p) { pts.push(p); });
 
           if (bLat && bLng) {
             window.updateBus(bLat, bLng);
@@ -440,9 +571,14 @@ class _KakaoMapViewState extends State<KakaoMapView> {
         // Map Container
         ClipRRect(
           borderRadius: BorderRadius.circular(widget.isFullScreen ? 0 : 20),
-          child: (kIsWeb || _controller == null)
-              ? _buildWebPlaceholder()
-              : WebViewWidget(controller: _controller!),
+          child: ValueListenableBuilder<bool>(
+            valueListenable: naverMapAvailable,
+            builder: (context, naverOk, _) => (naverOk && !kIsWeb)
+                ? _naverMap()
+                : ((kIsWeb || _controller == null)
+                    ? _buildWebPlaceholder()
+                    : WebViewWidget(controller: _controller!)),
+          ),
         ),
 
         // Controls Overlay
@@ -493,6 +629,15 @@ class _KakaoMapViewState extends State<KakaoMapView> {
                 icon: Icons.crop_free,
                 tooltip: '전체 노선 한눈에 보기',
                 onTap: _fitAll,
+              ),
+              const SizedBox(height: 8),
+
+              // 내 위치 (작은 빨간 점으로 표시)
+              _buildControlBtn(
+                icon: Icons.my_location,
+                tooltip: '내 위치 보기',
+                iconColor: const Color(0xFFEF4444),
+                onTap: _goToMyLocation,
               ),
             ],
           ),
@@ -634,6 +779,16 @@ class _KakaoMapFullscreenPageState extends State<KakaoMapFullscreenPage> {
   void initState() {
     super.initState();
     _checkCardDismissed();
+    // 전체화면 지도에서는 안드로이드 하단 버튼 줄(뒤로·홈·최근 앱)과 상태 표시줄을 숨긴다.
+    // 화면 가장자리를 쓸어 올리면 잠깐 나타나고, 뒤로 가기는 위의 ← 버튼으로 한다.
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  @override
+  void dispose() {
+    // 지도에서 나가면 시스템 표시줄을 원래대로
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
+    super.dispose();
   }
 
   Future<void> _checkCardDismissed() async {
