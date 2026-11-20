@@ -301,7 +301,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     try {
       final res = await ApiService().postWithAuth(
         Uri.parse('${AppConfig.apiHost}/teacher/drop-student'),
-        jsonEncode({'studentId': student.id, if (handover != null) 'handover': handover}),
+        jsonEncode({'studentId': student.id, 'handover': ?handover}),
       );
       if (res.statusCode == 200 || res.statusCode == 201) {
         if (reload) _loadAllData();
@@ -416,6 +416,84 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
       return null;
     }
     return {'type': 'OTHER', 'name': nameCtrl.text.trim(), 'relation': relCtrl.text.trim()};
+  }
+
+  bool _bulkBoarding = false;
+
+  /// 탑승 처리할 수 있는 원아인지 (아직 타지 않았고 결석·하차가 아닌 아이)
+  bool _canBoard(StudentModel s) => !s.boarded && !s.absent && !s.dropped;
+
+  /// 명단 전체 선택 / 전체 해제
+  void _toggleSelectAll(List<StudentModel> runList) {
+    final ids = runList.map((s) => s.id).toSet();
+    setState(() {
+      if (ids.isNotEmpty && ids.every(_selectedStudentIds.contains)) {
+        _selectedStudentIds.removeAll(ids);
+      } else {
+        _selectedStudentIds.addAll(ids);
+      }
+    });
+  }
+
+  /// 선택한 원아를 한 번에 탑승 처리 (이미 탔거나 결석·하차한 아이는 건너뜀, 실패한 아이는 알려줌)
+  Future<void> _boardSelected(List<StudentModel> runList) async {
+    if (_bulkBoarding) return;
+    final targets = runList.where((s) => _selectedStudentIds.contains(s.id) && _canBoard(s)).toList();
+    if (targets.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('선택한 원아는 이미 탑승했거나 결석·하차 처리되어 탑승할 아이가 없어요.')),
+      );
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('${targets.length}명 탑승 처리', style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: Text('선택한 원아를 탑승 처리할까요?\n\n${targets.map((s) => s.name).join(', ')}',
+            style: const TextStyle(fontSize: 15, height: 1.4)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981)),
+            child: const Text('탑승 처리', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final user = ApiService().currentUser;
+    if (user == null) return;
+
+    setState(() => _bulkBoarding = true);
+    final failed = <String>[];
+    for (final s in targets) {
+      try {
+        final res = await ApiService().manualBoardStudent(user.email, s.id, '');
+        if (res['success'] != true) failed.add(s.name);
+      } catch (_) {
+        failed.add(s.name);
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _bulkBoarding = false;
+      // 탑승에 성공한 아이는 선택을 푼다 (실패한 아이는 남겨 두어 다시 시도할 수 있게)
+      for (final s in targets) {
+        if (!failed.contains(s.name)) _selectedStudentIds.remove(s.id);
+      }
+    });
+    _loadAllData();
+    final done = targets.length - failed.length;
+    if (done > 0) _flutterTts.speak('$done명 탑승 완료');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(failed.isEmpty
+            ? '$done명 탑승 처리했습니다.'
+            : '$done명 탑승 처리했고, ${failed.length}명은 실패했어요: ${failed.join(', ')}. 다시 시도해 주세요.'),
+        backgroundColor: failed.isEmpty ? const Color(0xFF10B981) : Colors.red,
+      ),
+    );
   }
 
   void _confirmDropAll(List<StudentModel> boarded) {
@@ -852,12 +930,29 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                       ],
                     ),
                     const SizedBox(height: 2),
-                    Text(
-                      st.boardingLocation ?? st.address,
-                      style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    // 주보호자 연락처 (없으면 '없음' 표시). 누르면 상세 화면에서 바로 전화할 수 있다
+                    Builder(builder: (_) {
+                      final phone = (_parentPhones[st.id] ?? '').trim();
+                      return Row(
+                        children: [
+                          Icon(phone.isEmpty ? Icons.phone_disabled : Icons.phone,
+                              size: 14, color: phone.isEmpty ? const Color(0xFFCBD5E1) : const Color(0xFF64748B)),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              phone.isEmpty ? '주보호자 연락처 없음' : '주보호자 $phone',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: phone.isEmpty ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                                fontWeight: phone.isEmpty ? FontWeight.w400 : FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      );
+                    }),
                   ],
                 ),
               ),
@@ -1266,6 +1361,42 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                                 ),
                             ],
                           ),
+                          // 전체 선택 + 선택한 원아 탑승
+                          Builder(builder: (_) {
+                            final allSelected = runList.isNotEmpty && runList.every((s) => _selectedStudentIds.contains(s.id));
+                            final boardable = runList.where((s) => _selectedStudentIds.contains(s.id) && _canBoard(s)).length;
+                            return Row(
+                              children: [
+                                TextButton.icon(
+                                  onPressed: runList.isEmpty ? null : () => _toggleSelectAll(runList),
+                                  icon: Icon(allSelected ? Icons.check_box : Icons.check_box_outline_blank,
+                                      size: 22, color: const Color(0xFF2563EB)),
+                                  label: Text(allSelected ? '전체 해제' : '전체 선택',
+                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF2563EB))),
+                                  style: TextButton.styleFrom(minimumSize: const Size(48, 44), padding: const EdgeInsets.symmetric(horizontal: 8)),
+                                ),
+                                const Spacer(),
+                                if (_selectedStudentIds.isNotEmpty)
+                                  SizedBox(
+                                    height: 44,
+                                    child: ElevatedButton.icon(
+                                      onPressed: (_bulkBoarding || boardable == 0) ? null : () => _boardSelected(runList),
+                                      icon: _bulkBoarding
+                                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                          : const Icon(Icons.check_circle, size: 20),
+                                      label: Text(boardable == 0 ? '탑승할 아이 없음' : '선택한 $boardable명 탑승',
+                                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFF10B981),
+                                        foregroundColor: Colors.white,
+                                        disabledBackgroundColor: const Color(0xFFCBD5E1),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            );
+                          }),
                           if (availableRuns.length > 1) ...[
                             const SizedBox(height: 6),
                             SingleChildScrollView(
