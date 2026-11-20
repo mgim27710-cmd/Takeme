@@ -170,6 +170,17 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
           ),
         );
       } else {
+        // 선생님 방해금지 시간이면 언제 전달되는지 알려준다
+        final data = res['data'];
+        final deliverAt = DateTime.tryParse(data is Map ? (data['deliverAt']?.toString() ?? '') : '')?.toLocal();
+        if (deliverAt != null && deliverAt.isAfter(DateTime.now())) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('지금은 선생님 쉬는 시간이에요. ${_deliverText(deliverAt)}에 선생님께 전달돼요.'),
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
         // 성공 시 메시지 목록 재동기화
         _loadMessages();
       }
@@ -516,6 +527,16 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
     );
   }
 
+  /// 전달 예정 시각 문구: "내일 아침 8시", "월요일 아침 8시" 등
+  String _deliverText(DateTime t) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final day = DateTime(t.year, t.month, t.day);
+    final diff = day.difference(today).inDays;
+    final when = diff == 0 ? '오늘' : (diff == 1 ? '내일' : DateFormat('EEEE', 'ko').format(t));
+    return '$when 아침 ${t.hour}시';
+  }
+
   Widget _buildMessageBubble(ChatMessageModel msg, bool isMe) {
     final timeStr = DateFormat('a h:mm', 'ko').format(msg.createdAt);
 
@@ -527,9 +548,20 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
           mainAxisAlignment: MainAxisAlignment.end,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(
-              timeStr,
-              style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                // 선생님 방해금지 시간에 보낸 메시지: 전달 예정 표시
+                if (msg.isWaitingDelivery)
+                  Text(
+                    '${_deliverText(msg.deliverAt!)} 전달',
+                    style: const TextStyle(fontSize: 10, color: Color(0xFFB45309), fontWeight: FontWeight.w700),
+                  ),
+                Text(
+                  timeStr,
+                  style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+                ),
+              ],
             ),
             const SizedBox(width: 6),
             Flexible(

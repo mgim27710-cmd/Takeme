@@ -39,6 +39,8 @@ class ChatMessageModel {
   final String senderEmail;
   final String senderRole;
   final List<String> readBy;
+  /// 선생님 방해금지 시간에 보낸 메시지가 선생님께 전달될 시각 (null = 이미 전달됨)
+  final DateTime? deliverAt;
 
   ChatMessageModel({
     required this.id,
@@ -51,7 +53,11 @@ class ChatMessageModel {
     required this.senderEmail,
     required this.senderRole,
     required this.readBy,
+    this.deliverAt,
   });
+
+  /// 아직 선생님께 전달되지 않은 메시지인지
+  bool get isWaitingDelivery => deliverAt != null && deliverAt!.isAfter(DateTime.now());
 
   bool isMe(String? myEmail) {
     if (myEmail == null) return false;
@@ -82,6 +88,7 @@ class ChatMessageModel {
       senderEmail: sender['email'] as String? ?? '',
       senderRole: sender['role'] as String? ?? '',
       readBy: readByList,
+      deliverAt: DateTime.tryParse(json['deliverAt']?.toString() ?? '')?.toLocal(),
     );
   }
 }
