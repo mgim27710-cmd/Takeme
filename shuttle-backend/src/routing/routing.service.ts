@@ -3260,21 +3260,28 @@ export class RoutingService {
       }
       raw = raw || {};
 
+      let age = raw['연령'] || raw['학년'] || raw['나이'] || '';
+      if (!age && student.birthDate) {
+        const bYear = parseInt(String(student.birthDate).slice(0, 4), 10);
+        if (!isNaN(bYear)) age = `${new Date().getFullYear() - bYear + 1}세`;
+      }
+      if (!age) age = '연령 미입력';
+
       return {
-        className: raw['반명'] || '반 미지정',
-        name: student.name || raw['원아명'] || raw['학생이름/영문이름'] || raw['이름'] || '',
-        kindergartenName: raw['유치원명'] || raw['소속원명'] || raw['학교명'] || academy?.name || '',
-        age: raw['연령'] || raw['학년'] || '연령 미입력',
-        gender: raw['성별'] || '',
-        parentName: raw['보호자 성함'] || '',
-        parentPhone: raw['부모연락처'] || raw['보호자연락처'] || raw['보호자 연락처'] || '',
+        className: student.className || raw['반명'] || raw['학급'] || raw['반'] || '반 미지정',
+        name: student.adminDisplayName || student.name || raw['원아명'] || raw['학생이름/영문이름'] || raw['이름'] || '',
+        kindergartenName: academy?.name || raw['유치원명'] || raw['소속원명'] || raw['학교명'] || '',
+        age,
+        gender: student.gender || raw['성별'] || '',
+        parentName: student.parentUser?.name || raw['보호자 성함'] || raw['보호자1 성함'] || raw['학부모성함'] || '',
+        parentPhone: student.phone || student.parentUser?.phone || raw['부모연락처'] || raw['보호자연락처'] || raw['보호자 연락처'] || '',
         address: student.address || raw['주소'] || '',
         inLocation: sched?.address || raw['등원지'] || raw['탑승지'] || student.boardingLocation || student.address || '',
-        outLocation: raw['하원지'] || sched?.address || student.boardingLocation || student.address || '',
+        outLocation: raw['하원지'] || sched?.address || student.dropoffLocation || student.boardingLocation || student.address || '',
         teacherName: raw['담임명'] || '',
         departureType: getDepartureType(raw),
         inBus: sched?.assignedVehicle?.busNumber || raw['등원차량'] || student.assignedVehicle?.busNumber || '배정 대기',
-        outBus: raw['하원차량'] || sched?.assignedVehicle?.busNumber || student.assignedVehicle?.busNumber || '배정 대기',
+        outBus: raw['하원차량'] || sched?.assignedVehicle?.busNumber || student.assignedDepartureVehicle?.busNumber || student.assignedVehicle?.busNumber || '배정 대기',
         inTime: raw['등원시간'] || '',
         outTime: raw['하원시간'] || '',
         allergies: student.allergies || raw['알레르기'] || raw['알러지'] || '',
@@ -3329,7 +3336,7 @@ export class RoutingService {
       details: `원생 명단 엑셀 다운로드 (유치원: ${academy ? academy.name : (academyId || '전체')})`,
     });
 
-    return buffer as any as Buffer;
+    return Buffer.from(buffer as any);
   }
   async createAbsence(body: { studentId: number, startDate: string, endDate: string }) {
     const student = await this.studentRepository.findOne({ where: { id: body.studentId } });

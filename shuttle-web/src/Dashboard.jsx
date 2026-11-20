@@ -2299,50 +2299,91 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       ];
 
       if (exportTargets.students) {
+        const safeBuses = Array.isArray(buses) ? buses : [];
+        const safeTeachers = Array.isArray(currentTeachers) ? currentTeachers : [];
+
         students.forEach(st => {
           const raw = getStudentRaw(st);
-          const bus = buses.find(b => b.id === st.assignedBusId);
-          const busName = bus ? (bus.busNumber || bus.name || `${bus.id}호차`) : '';
+          const bus = safeBuses.find(b => b.id === st.assignedBusId);
+          const depBus = safeBuses.find(b => b.id === (st.assignedDepartureBusId || st.assignedBusId));
+          const busName = bus ? (bus.busNumber || bus.name || `${bus.id}호차`) : (raw['등원차량'] || '');
+          const depBusName = depBus ? (depBus.busNumber || depBus.name || `${depBus.id}호차`) : (raw['하원차량'] || busName);
 
-          const className = raw['반명'] || raw['반'] || raw['학급'] || '';
+          // 1. 반명 (st.className 우선 참조)
+          const className = st.className || raw['반명'] || raw['반'] || raw['학급'] || '';
+
+          // 2. 원아명
           const studentName = st.realName || st.name || raw['학생이름/영문이름'] || raw['원아명'] || raw['이름'] || '';
-          const academyName = academy?.name || raw['유치원명'] || '';
-          const age = (raw['연령'] !== undefined && raw['연령'] !== null && String(raw['연령']).trim()) 
-            ? raw['연령'] 
-            : (raw['학년'] || raw['나이'] || '');
-          const gender = raw['성별'] || '';
-          const parentName = raw['보호자 성함'] || raw['보호자성함'] || raw['보호자명'] || raw['학부모성함'] || raw['학부모 성함'] || '';
-          const parentPhone = raw['부모연락처'] || raw['보호자연락처'] || raw['보호자 연락처'] || raw['학부모연락처'] || raw['연락처'] || raw['전화번호'] || '';
-          const address = st.address || raw['주소'] || st.boardingLocation || raw['등원지'] || raw['탑승지'] || '';
-          const teacherName = formatTeacherName(raw['담임명'] || raw['담임'] || raw['담임교사'] || raw['선생님'] || raw['교사'] || '');
 
-          // 하원정보 구분 매핑
-          const depType = raw['하원구분'] || raw['하원정보'] || '';
+          // 3. 유치원명
+          const academyName = academy?.name || raw['유치원명'] || raw['소속원명'] || raw['학교명'] || '';
+
+          // 4. 연령 (생년월일 기반 자동 계산 fallback)
+          let age = (raw['연령'] !== undefined && raw['연령'] !== null && String(raw['연령']).trim()) 
+            ? String(raw['연령']).trim() 
+            : (raw['학년'] || raw['나이'] || '');
+          if (!age && st.birthDate) {
+            const birthYear = parseInt(String(st.birthDate).slice(0, 4), 10);
+            if (!isNaN(birthYear)) {
+              age = `${new Date().getFullYear() - birthYear + 1}세`;
+            }
+          }
+
+          // 5. 성별 (st.gender 우선 참조)
+          const gender = st.gender || raw['성별'] || '';
+
+          // 6. 보호자 성함 (st.parentName 우선 참조)
+          const parentName = st.parentName || raw['보호자 성함'] || raw['보호자1 성함'] || raw['보호자성함'] || raw['보호자명'] || raw['학부모성함'] || raw['학부모 성함'] || '';
+
+          // 7. 부모 연락처 (st.parentPhone, st.phone 우선 참조)
+          const parentPhone = st.parentPhone || st.phone || raw['부모연락처'] || raw['보호자연락처'] || raw['보호자 연락처'] || raw['보호자1 연락처'] || raw['학부모연락처'] || raw['연락처'] || raw['전화번호'] || '';
+
+          // 8. 주소 및 등하원 위치
+          const address = st.address || raw['주소'] || st.boardingLocation || raw['등원지'] || raw['탑승지'] || '';
+          const dropLoc = st.dropoffLocation || raw['하원지'] || raw['하차지'] || address;
+
+          // 9. 담임교사 (raw -> st.teacherName -> 반 매핑 담임교사 자동 탐색)
+          let rawTeacher = raw['담임명'] || raw['담임'] || raw['담임교사'] || raw['선생님'] || raw['교사'] || st.teacherName || '';
+          if (!rawTeacher && className && safeTeachers.length > 0) {
+            const assignedTeacher = safeTeachers.find(t => t.assignedClass && t.assignedClass.trim() === className.trim());
+            if (assignedTeacher) {
+              rawTeacher = assignedTeacher.name;
+            }
+          }
+          const teacherName = formatTeacherName(rawTeacher);
+
+          // 10. 하원정보 구분 매핑
+          const depType = raw['하원구분'] || raw['하원정보'] || st.departureType || '';
           let regularDrop = raw['정규하원'] || '';
           let afterSchoolDrop = raw['방과후하원'] || '';
           let fullDayDrop = raw['종일반하원'] || '';
 
           if (!regularDrop && !afterSchoolDrop && !fullDayDrop) {
             if (depType === '방과후하원') {
-              afterSchoolDrop = raw['하원지'] || 'O';
+              afterSchoolDrop = dropLoc || 'O';
             } else if (depType === '종일반하원') {
-              fullDayDrop = raw['하원지'] || 'O';
+              fullDayDrop = dropLoc || 'O';
             } else {
-              regularDrop = raw['하원지'] || (depType === '정규하원' ? 'O' : '');
+              regularDrop = dropLoc || (depType === '정규하원' ? 'O' : (dropLoc ? dropLoc : ''));
             }
           }
 
-          const pickupTime = raw['등원시간'] || '';
-          const dropoffTime = raw['하원시간'] || '';
+          // 11. 등하원 시간
+          const pickupTime = st.inTime || raw['등원시간'] || '';
+          const dropoffTime = st.outTime || raw['하원시간'] || '';
 
-          // 비고 구성 (배정차량 및 메모)
+          // 12. 비고 구성 (배정차량 및 메모)
           const noteParts = [];
-          if (busName) noteParts.push(`차량: ${busName}`);
+          if (busName) noteParts.push(`등원: ${busName}`);
+          if (depBusName && depBusName !== busName) noteParts.push(`하원: ${depBusName}`);
           if (st.teacherMemo) noteParts.push(st.teacherMemo);
           if (raw['비고']) noteParts.push(raw['비고']);
+          if (st.isNotRiding) noteParts.push('미탑승(자차/도보)');
           const note = noteParts.join(' / ');
 
+          // 13. 알레르기
           const allergies = st.allergies || raw['알레르기'] || raw['알러지'] || '';
+
           aoaData.push([
             className,
             studentName,
@@ -2367,11 +2408,13 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       // 2. 교사 데이터 추출 및 정제 (가입 교사 + 차량 동승 교사)
       const registeredTeacherNames = new Set();
       const teachersData = [];
+      const safeBusesForStaff = Array.isArray(buses) ? buses : [];
+      const safeStudentsForStaff = Array.isArray(students) ? students : [];
 
       if (exportTargets.teachers) {
         if (Array.isArray(currentTeachers)) {
           currentTeachers.forEach((t, idx) => {
-            const assignedBus = buses.find(b => b.teacherName === t.name || (t.phone && b.teacherPhone === t.phone));
+            const assignedBus = safeBusesForStaff.find(b => b.teacherName === t.name || (t.phone && b.teacherPhone === t.phone));
             registeredTeacherNames.add(t.name);
             teachersData.push({
               'No': idx + 1,
@@ -2385,7 +2428,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         }
 
         // 차량에 등록되어 있으나 교사 회원 목록에 없는 차량선생님 보완
-        buses.forEach(b => {
+        safeBusesForStaff.forEach(b => {
           if (b.teacherName && b.teacherName !== '미지정' && !registeredTeacherNames.has(b.teacherName)) {
             registeredTeacherNames.add(b.teacherName);
             teachersData.push({
@@ -2403,8 +2446,8 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       // 3. 기사 및 차량 데이터 추출 및 정제
       const driversData = [];
       if (exportTargets.drivers) {
-        sortedBuses.forEach((b, idx) => {
-          const assignedStudentCount = students.filter(st => st.assignedBusId === b.id).length;
+        (Array.isArray(sortedBuses) ? sortedBuses : safeBusesForStaff).forEach((b, idx) => {
+          const assignedStudentCount = safeStudentsForStaff.filter(st => st.assignedBusId === b.id).length;
           const driverStatus = b.driverApprovalStatus === 'APPROVED' 
             ? '승인완료' 
             : b.driverApprovalStatus === 'PENDING' 
@@ -2513,7 +2556,8 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       }
 
       const dateStr = new Date().toISOString().slice(0, 10);
-      const academyTitle = academy?.name ? `${academy.name.replace(/\s+/g, '_')}_` : '';
+      const safeName = (academy?.name || '').replace(/[\/\\:*?"<>|]/g, '_').trim();
+      const academyTitle = safeName ? `${safeName.replace(/\s+/g, '_')}_` : '';
       const selectedParts = [];
       if (exportTargets.students) selectedParts.push('원생');
       if (exportTargets.teachers) selectedParts.push('교사');
