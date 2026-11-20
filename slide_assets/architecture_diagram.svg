@@ -1,0 +1,173 @@
+
+<svg width="1600" height="850" viewBox="0 0 1600 850" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .arch-title { font-family: 'Malgun Gothic', sans-serif; font-weight: 800; font-size: 26px; fill: #0F172A; }
+      .arch-sub { font-family: 'Malgun Gothic', sans-serif; font-size: 15px; fill: #64748B; }
+      .tier-label { font-family: 'Malgun Gothic', sans-serif; font-weight: 800; font-size: 13px; fill: #FFFFFF; }
+      .box-title { font-family: 'Malgun Gothic', sans-serif; font-weight: 800; font-size: 16px; fill: #0F172A; }
+      .box-badge { font-family: 'Malgun Gothic', sans-serif; font-weight: 800; font-size: 11px; }
+      .box-text { font-family: 'Malgun Gothic', sans-serif; font-size: 12.5px; fill: #334155; line-height: 1.45; }
+      .proto-text { font-family: 'Malgun Gothic', sans-serif; font-weight: 800; font-size: 13px; fill: #1E293B; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="850" fill="#FFFFFF"/>
+  <rect x="2" y="2" width="1596" height="846" fill="none" stroke="#E2E8F0" stroke-width="2" rx="16"/>
+
+  <!-- Top Title -->
+  <rect x="40" y="30" width="6" height="34" fill="#2563EB" rx="3"/>
+  <text x="56" y="56" class="arch-title">TakeMe 시스템 전체 아키텍처 및 서비스 구상도</text>
+  <text x="56" y="84" class="arch-sub">클라이언트 멀티플랫폼 (Web &amp; Apps) ↔ 초저지연 통신 계층 ↔ 코어 백엔드 엔진 ↔ 데이터베이스 &amp; 클라우드 인프라</text>
+
+  <rect x="1330" y="38" width="220" height="36" rx="18" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.5"/>
+  <text x="1440" y="62" font-family="'Malgun Gothic', sans-serif" font-size="13" font-weight="800" fill="#2563EB" text-anchor="middle">Full-Stack Cloud Architecture</text>
+
+  <line x1="40" y1="105" x2="1560" y2="105" stroke="#CBD5E1" stroke-width="1.5"/>
+
+  <!-- ================= TIER 1: CLIENT LAYER ================= -->
+  <rect x="40" y="125" width="1520" height="155" rx="12" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.5"/>
+  <rect x="65" y="113" width="240" height="24" rx="12" fill="#2563EB"/>
+  <text x="185" y="129" class="tier-label" text-anchor="middle">CLIENT TIER (React 19 &amp; Flutter 3)</text>
+
+  <!-- Box 1-1: Admin Web -->
+  <rect x="65" y="150" width="350" height="110" rx="8" fill="#FFFFFF" stroke="#93C5FD" stroke-width="1.5"/>
+  <line x1="65" y1="150" x2="65" y2="260" stroke="#2563EB" stroke-width="5"/>
+  <rect x="80" y="162" width="40" height="18" rx="4" fill="#EFF6FF"/>
+  <text x="100" y="175" class="box-badge" fill="#2563EB" text-anchor="middle">Web</text>
+  <text x="130" y="177" class="box-title">원장 관리자 관제 웹</text>
+  <text x="80" y="202" class="box-text">React 19 / Vite / TailwindCSS</text>
+  <text x="80" y="222" class="box-text">• 네이버 지도 전 차량 실시간 관제 및 구역 편집</text>
+  <text x="80" y="242" class="box-text">• 대용량 엑셀 일괄 등록 &amp; Google OTP 보안</text>
+
+  <!-- Box 1-2: Driver App -->
+  <rect x="445" y="150" width="350" height="110" rx="8" fill="#FFFFFF" stroke="#86EFAC" stroke-width="1.5"/>
+  <line x1="445" y1="150" x2="445" y2="260" stroke="#059669" stroke-width="5"/>
+  <rect x="460" y="162" width="38" height="18" rx="4" fill="#ECFDF5"/>
+  <text x="479" y="175" class="box-badge" fill="#059669" text-anchor="middle">App</text>
+  <text x="508" y="177" class="box-title">통학차량 기사 앱</text>
+  <text x="460" y="202" class="box-text">Flutter 3 / Dart (Android &amp; iOS)</text>
+  <text x="460" y="222" class="box-text">• 1초 주기 실시간 GPS 좌표 백그라운드 송출</text>
+  <text x="460" y="242" class="box-text">• SK TMap 내비게이션 원터치 길안내 연동</text>
+
+  <!-- Box 1-3: Teacher App -->
+  <rect x="825" y="150" width="350" height="110" rx="8" fill="#FFFFFF" stroke="#6EE7B7" stroke-width="1.5"/>
+  <line x1="825" y1="150" x2="825" y2="260" stroke="#10B981" stroke-width="5"/>
+  <rect x="840" y="162" width="38" height="18" rx="4" fill="#ECFDF5"/>
+  <text x="859" y="175" class="box-badge" fill="#10B981" text-anchor="middle">App</text>
+  <text x="888" y="177" class="box-title">동승·담임교사 앱</text>
+  <text x="840" y="202" class="box-text">Flutter 3 / Dart</text>
+  <text x="840" y="222" class="box-text">• QR 코드 스캔 및 원터치 일괄 탑승 체크</text>
+  <text x="840" y="242" class="box-text">• 운행 종료 시 [차량 잔류 원아 최종 확인] 프로세스</text>
+
+  <!-- Box 1-4: Parent App -->
+  <rect x="1205" y="150" width="335" height="110" rx="8" fill="#FFFFFF" stroke="#67E8F9" stroke-width="1.5"/>
+  <line x1="1205" y1="150" x2="1205" y2="260" stroke="#0891B2" stroke-width="5"/>
+  <rect x="1220" y="162" width="38" height="18" rx="4" fill="#ECFEFF"/>
+  <text x="1239" y="175" class="box-badge" fill="#0891B2" text-anchor="middle">App</text>
+  <text x="1268" y="177" class="box-title">학부모 안심 앱</text>
+  <text x="1220" y="202" class="box-text">Flutter 3 / Dart</text>
+  <text x="1220" y="222" class="box-text">• 지도 위 셔틀 실시간 위치 &amp; 도착 3분 전 알림</text>
+  <text x="1220" y="242" class="box-text">• 당일 결석/직접 하원 모바일 원터치 신청</text>
+
+  <!-- ================= CONNECTOR 1 ================= -->
+  <line x1="80" y1="300" x2="600" y2="300" stroke="#94A3B8" stroke-width="2"/>
+  <rect x="610" y="288" width="380" height="24" rx="12" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5"/>
+  <text x="800" y="305" class="proto-text" fill="#2563EB" text-anchor="middle">HTTPS (REST API / JWT)  &amp;  WSS (Socket.IO Real-time Events)</text>
+  <line x1="1000" y1="300" x2="1520" y2="300" stroke="#94A3B8" stroke-width="2"/>
+
+  <!-- ================= TIER 2: CORE BACKEND LAYER ================= -->
+  <rect x="40" y="325" width="1520" height="235" rx="12" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.5"/>
+  <rect x="65" y="313" width="320" height="24" rx="12" fill="#059669"/>
+  <text x="225" y="329" class="tier-label" text-anchor="middle">CORE BACKEND ENGINE (NestJS 11 / Node.js 20 / TypeScript)</text>
+
+  <!-- Engine 1 -->
+  <rect x="65" y="350" width="280" height="185" rx="8" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+  <line x1="65" y1="350" x2="345" y2="350" stroke="#059669" stroke-width="4"/>
+  <text x="80" y="377" class="box-title">Routing &amp; GIS Module</text>
+  <text x="80" y="405" class="box-text">• 주소 자동 지오코딩 변환</text>
+  <text x="80" y="427" class="box-text">• 유치원 중심 6km 안전 반경 필터</text>
+  <text x="80" y="449" class="box-text">• K-Means 군집화 최적 호차 배정</text>
+  <text x="80" y="471" class="box-text">• Turf.js Convex Hull 폴리곤 연산</text>
+  <text x="80" y="493" class="box-text">• 신규 원아 등록 시 구역 동적 확장</text>
+  <text x="80" y="515" class="box-text" font-weight="700" fill="#059669">▶ 수기 14일 → 3초 배차 완성</text>
+
+  <!-- Engine 2 -->
+  <rect x="365" y="350" width="280" height="185" rx="8" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+  <line x1="365" y1="350" x2="645" y2="350" stroke="#059669" stroke-width="4"/>
+  <text x="380" y="377" class="box-title">LBS Location Gateway</text>
+  <text x="380" y="405" class="box-text">• Socket.IO 실시간 위치 스트림</text>
+  <text x="380" y="427" class="box-text">• 호차별 Room 채널 분리 트래픽 분산</text>
+  <text x="380" y="449" class="box-text">• Moving Average GPS 노이즈 필터</text>
+  <text x="380" y="471" class="box-text">• 500m 진입 시 ETA 도착시간 계산</text>
+  <text x="380" y="493" class="box-text">• 연결 끊김 시 자동 재접속 보간</text>
+  <text x="380" y="515" class="box-text" font-weight="700" fill="#059669">▶ 초저지연 GPS 위치 관제</text>
+
+  <!-- Engine 3 -->
+  <rect x="665" y="350" width="280" height="185" rx="8" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+  <line x1="665" y1="350" x2="945" y2="350" stroke="#059669" stroke-width="4"/>
+  <text x="680" y="377" class="box-title">Boarding &amp; Attendance</text>
+  <text x="680" y="405" class="box-text">• QR 코드 및 원터치 승하차 검증</text>
+  <text x="680" y="427" class="box-text">• 3단계 푸시 알림 디스패치</text>
+  <text x="680" y="449" class="box-text">  (출발, 도착 3분 전, 승·하차)</text>
+  <text x="680" y="471" class="box-text">• 당일 결석 신청 시 노선 자동 제외</text>
+  <text x="680" y="493" class="box-text">• 대체 기사 임시 계정 안전 전환</text>
+  <text x="680" y="515" class="box-text" font-weight="700" fill="#059669">▶ 미하차 사고 0% 원천 차단</text>
+
+  <!-- Engine 4 -->
+  <rect x="965" y="350" width="280" height="185" rx="8" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+  <line x1="965" y1="350" x2="1245" y2="350" stroke="#059669" stroke-width="4"/>
+  <text x="980" y="377" class="box-title">Excel Streaming Pipeline</text>
+  <text x="980" y="405" class="box-text">• 2행 헤더 공식 규격 엑셀 파싱</text>
+  <text x="980" y="427" class="box-text">• 비파괴적 원아·교사 데이터 병합</text>
+  <text x="980" y="449" class="box-text">• 3개 독립 시트 분리 고속 추출</text>
+  <text x="980" y="471" class="box-text">  ([유치원부], [교사], [기사])</text>
+  <text x="980" y="493" class="box-text">• DB Entity 우선 참조 Fallback 엔진</text>
+  <text x="980" y="515" class="box-text" font-weight="700" fill="#059669">▶ 빈칸 없는 온전한 엑셀 생성</text>
+
+  <!-- Engine 5 (Security) -->
+  <rect x="1265" y="350" width="275" height="185" rx="8" fill="#FFFFFF" stroke="#FCA5A5" stroke-width="1.5"/>
+  <line x1="1265" y1="350" x2="1540" y2="350" stroke="#DC2626" stroke-width="4"/>
+  <text x="1280" y="377" class="box-title" fill="#DC2626">Security &amp; Audit Log</text>
+  <text x="1280" y="405" class="box-text">• Google Authenticator OTP 2단계 인증</text>
+  <text x="1280" y="427" class="box-text">  (엑셀 다운로드 전 2차 승인 강제)</text>
+  <text x="1280" y="449" class="box-text">• bcrypt 비밀번호 단방향 해싱</text>
+  <text x="1280" y="471" class="box-text">• 타 반 연락처 마스킹(RBAC)</text>
+  <text x="1280" y="493" class="box-text">• 민감 작업 감사로그 영구 보관</text>
+  <text x="1280" y="515" class="box-text" font-weight="700" fill="#DC2626">▶ 개인정보 철통 보안 체계</text>
+
+  <!-- ================= CONNECTOR 2 ================= -->
+  <line x1="80" y1="580" x2="600" y2="580" stroke="#94A3B8" stroke-width="2"/>
+  <rect x="610" y="568" width="380" height="24" rx="12" fill="#F3E8FF" stroke="#7C3AED" stroke-width="1.5"/>
+  <text x="800" y="585" class="proto-text" fill="#7C3AED" text-anchor="middle">TypeORM Connection Pool  &amp;  External Cloud OpenAPIs</text>
+  <line x1="1000" y1="580" x2="1520" y2="580" stroke="#94A3B8" stroke-width="2"/>
+
+  <!-- ================= TIER 3: DATA & INFRASTRUCTURE LAYER ================= -->
+  <rect x="40" y="605" width="1520" height="210" rx="12" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.5"/>
+  <rect x="65" y="593" width="280" height="24" rx="12" fill="#7C3AED"/>
+  <text x="205" y="609" class="tier-label" text-anchor="middle">DATA &amp; CLOUD INFRASTRUCTURE TIER</text>
+
+  <!-- DB Box -->
+  <rect x="65" y="630" width="460" height="160" rx="8" fill="#FFFFFF" stroke="#DDD6FE" stroke-width="1.5"/>
+  <text x="85" y="658" class="box-title" fill="#7C3AED">PostgreSQL RDS (Managed Database)</text>
+  <text x="85" y="688" class="box-text">• TypeORM 복합 트랜잭션 및 외래키 CASCADE 제약 조건 무결성 보장</text>
+  <text x="85" y="712" class="box-text">• 원아(Student), 차량(Vehicle), 일정(Schedule), 사용자(User), 감사(AuditLog)</text>
+  <text x="85" y="736" class="box-text">• 전화번호/주소 등 민감 개인정보 TypeORM EncryptionTransformer 암호화</text>
+  <text x="85" y="760" class="box-text" font-weight="700" fill="#7C3AED">▶ 엔터프라이즈급 데이터 정합성 &amp; 암호화 저장</text>
+
+  <!-- Cloud Infra Box -->
+  <rect x="555" y="630" width="460" height="160" rx="8" fill="#FFFFFF" stroke="#FDE68A" stroke-width="1.5"/>
+  <text x="575" y="658" class="box-title" fill="#D97706">AWS Cloud Infrastructure &amp; Nginx</text>
+  <text x="575" y="688" class="box-text">• AWS EC2 클라우드 가상 서버 환경 배포 및 운영</text>
+  <text x="575" y="712" class="box-text">• Nginx 1.30 고성능 리버스 프록시 (정적 SPA 번들 + API 라우팅 분기)</text>
+  <text x="575" y="736" class="box-text">• Let's Encrypt SSL/TLS 1.3 암호화 인증서 적용 및 HTTP 301 자동 리다이렉트</text>
+  <text x="575" y="760" class="box-text" font-weight="700" fill="#D97706">▶ 무중단 24/7 고가용성 서비스 운영 인프라</text>
+
+  <!-- External APIs Box -->
+  <rect x="1045" y="630" width="495" height="160" rx="8" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1.5"/>
+  <text x="1065" y="658" class="box-title" fill="#2563EB">External OpenAPI Ecosystem</text>
+  <text x="1065" y="688" class="box-text">• Naver Maps SDK : 고정밀 벡터 지도 렌더링, 구역 폴리곤 시각화, 좌표 변환</text>
+  <text x="1065" y="712" class="box-text">• SK TMap &amp; Kakao Mobility : 최적 주행 경로 탐색, 실시간 내비 앱 연동 길안내</text>
+  <text x="1065" y="736" class="box-text">• speakeasy &amp; qrcode : Time-based One-Time Password (Google Authenticator)</text>
+  <text x="1065" y="760" class="box-text" font-weight="700" fill="#2563EB">▶ 국내 표준 맵 서비스 &amp; 보안 프로토콜 완벽 결합</text>
+</svg>

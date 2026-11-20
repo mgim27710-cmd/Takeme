@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 640" width="1500" height="640" style="background:#ffffff; font-family:'Pretendard', 'Malgun Gothic', sans-serif;">
+  <style>
+    .th { font-size: 19px; font-weight: 900; fill: #0F172A; text-anchor: middle; dominant-baseline: central; }
+    .th-sub { font-size: 15px; font-weight: 800; fill: #334155; text-anchor: middle; dominant-baseline: central; }
+    .td-cat1 { font-size: 19px; font-weight: 900; fill: #0F172A; text-anchor: middle; dominant-baseline: central; }
+    .td-task { font-size: 19px; font-weight: 800; fill: #1E293B; dominant-baseline: central; }
+    .table-border { stroke: #64748B; stroke-width: 2; }
+    .table-inner { stroke: #94A3B8; stroke-width: 1.2; }
+    .grid-line { stroke: #CBD5E1; stroke-width: 1; }
+    .grid-month { stroke: #64748B; stroke-width: 2; }
+    .bar { fill: #475569; rx: 6; }
+    .bar-milestone { fill: #1E3A8A; rx: 6; }
+  </style>
+
+  <!-- 상단 제목 및 [표] -->
+  <text x="35" y="32" font-size="28" font-weight="900" fill="#0F172A">추진 일정계획 ①</text>
+  <text x="1465" y="32" font-size="24" font-weight="900" fill="#0F172A" text-anchor="end">[표]</text>
+
+  <!-- 표 외곽선 -->
+  <g id="table">
+    <rect x="35" y="48" width="1430" height="480" fill="#FFFFFF" class="table-border" />
+    <rect x="35" y="48" width="620" height="64" fill="#F1F5F9" class="table-border" />
+    <text x="345" y="80" class="th" font-size="21">사업추진내용</text>
+    <rect x="655" y="48" width="180" height="34" fill="#E2E8F0" class="table-border" />
+    <text x="745" y="65" class="th">1M</text>
+    <rect x="835" y="48" width="180" height="34" fill="#E2E8F0" class="table-border" />
+    <text x="925" y="65" class="th">2M</text>
+    <rect x="1015" y="48" width="180" height="34" fill="#E2E8F0" class="table-border" />
+    <text x="1105" y="65" class="th">3M</text>
+    <rect x="1195" y="48" width="180" height="34" fill="#E2E8F0" class="table-border" />
+    <text x="1285" y="65" class="th">4M</text>
+    <rect x="1375" y="48" width="90" height="34" fill="#E2E8F0" class="table-border" />
+    <text x="1420" y="65" class="th">5M</text>
+    <rect x="655" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="677.5" y="97" class="th-sub">1W</text>
+    <rect x="700" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="722.5" y="97" class="th-sub">2W</text>
+    <rect x="745" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="767.5" y="97" class="th-sub">3W</text>
+    <rect x="790" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="812.5" y="97" class="th-sub">4W</text>
+    <rect x="835" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="857.5" y="97" class="th-sub">1W</text>
+    <rect x="880" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="902.5" y="97" class="th-sub">2W</text>
+    <rect x="925" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="947.5" y="97" class="th-sub">3W</text>
+    <rect x="970" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="992.5" y="97" class="th-sub">4W</text>
+    <rect x="1015" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="1037.5" y="97" class="th-sub">1W</text>
+    <rect x="1060" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="1082.5" y="97" class="th-sub">2W</text>
+    <rect x="1105" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="1127.5" y="97" class="th-sub">3W</text>
+    <rect x="1150" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="1172.5" y="97" class="th-sub">4W</text>
+    <rect x="1195" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="1217.5" y="97" class="th-sub">1W</text>
+    <rect x="1240" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="1262.5" y="97" class="th-sub">2W</text>
+    <rect x="1285" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="1307.5" y="97" class="th-sub">3W</text>
+    <rect x="1330" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="1352.5" y="97" class="th-sub">4W</text>
+    <rect x="1375" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="1397.5" y="97" class="th-sub">1W</text>
+    <rect x="1420" y="82" width="45" height="30" fill="#F8FAFC" class="grid-line" />
+    <text x="1442.5" y="97" class="th-sub">2W</text>
+    <line x1="655" y1="82" x2="655" y2="528" class="grid-month" />
+    <line x1="700" y1="82" x2="700" y2="528" class="grid-line" />
+    <line x1="745" y1="82" x2="745" y2="528" class="grid-line" />
+    <line x1="790" y1="82" x2="790" y2="528" class="grid-line" />
+    <line x1="835" y1="82" x2="835" y2="528" class="grid-month" />
+    <line x1="880" y1="82" x2="880" y2="528" class="grid-line" />
+    <line x1="925" y1="82" x2="925" y2="528" class="grid-line" />
+    <line x1="970" y1="82" x2="970" y2="528" class="grid-line" />
+    <line x1="1015" y1="82" x2="1015" y2="528" class="grid-month" />
+    <line x1="1060" y1="82" x2="1060" y2="528" class="grid-line" />
+    <line x1="1105" y1="82" x2="1105" y2="528" class="grid-line" />
+    <line x1="1150" y1="82" x2="1150" y2="528" class="grid-line" />
+    <line x1="1195" y1="82" x2="1195" y2="528" class="grid-month" />
+    <line x1="1240" y1="82" x2="1240" y2="528" class="grid-line" />
+    <line x1="1285" y1="82" x2="1285" y2="528" class="grid-line" />
+    <line x1="1330" y1="82" x2="1330" y2="528" class="grid-line" />
+    <line x1="1375" y1="82" x2="1375" y2="528" class="grid-month" />
+    <line x1="1420" y1="82" x2="1420" y2="528" class="grid-line" />
+    <line x1="1465" y1="82" x2="1465" y2="528" class="grid-month" />
+    <line x1="35" y1="164" x2="1465" y2="164" class="table-inner" />
+    <rect x="35" y="112" width="120" height="104" fill="#F8FAFC" class="table-border" />
+    <text x="95" y="150" class="td-cat1">기획 및</text>
+    <text x="95" y="178" class="td-cat1">분석</text>
+    <text x="173" y="138" class="td-task">내부 의견수렴 및 팀 R&amp;R 확정 / 법령 분석</text>
+    <rect x="659" y="120" width="127" height="36" class="bar" />
+    <line x1="35" y1="216" x2="1465" y2="216" class="table-inner" />
+    <text x="173" y="190" class="td-task">통학버스 사고 통계 분석 및 현장 요구도 조사</text>
+    <rect x="704" y="172" width="172" height="36" class="bar" />
+    <line x1="35" y1="268" x2="1465" y2="268" class="table-inner" />
+    <rect x="35" y="216" width="120" height="104" fill="#F8FAFC" class="table-border" />
+    <text x="95" y="254" class="td-cat1">시스템</text>
+    <text x="95" y="282" class="td-cat1">설계</text>
+    <text x="173" y="242" class="td-task">K-Means 공간 군집화 &amp; TSP 알고리즘 모델링</text>
+    <rect x="839" y="224" width="172" height="36" class="bar" />
+    <line x1="35" y1="320" x2="1465" y2="320" class="table-inner" />
+    <text x="173" y="294" class="td-task">NestJS 아키텍처 및 PostgreSQL DB 스키마 설계</text>
+    <rect x="884" y="276" width="172" height="36" class="bar" />
+    <line x1="35" y1="372" x2="1465" y2="372" class="table-inner" />
+    <rect x="35" y="320" width="120" height="104" fill="#F8FAFC" class="table-border" />
+    <text x="95" y="358" class="td-cat1">개발 및</text>
+    <text x="95" y="386" class="td-cat1">구현</text>
+    <text x="173" y="346" class="td-task">코어 백엔드 API &amp; SK TMap 실시간 교통량 연동</text>
+    <rect x="974" y="328" width="262" height="36" class="bar" />
+    <line x1="35" y1="424" x2="1465" y2="424" class="table-inner" />
+    <text x="173" y="398" class="td-task">React 관리자 대시보드 (엑셀 연동) &amp; Flutter 모바일 앱</text>
+    <rect x="1019" y="380" width="307" height="36" class="bar" />
+    <line x1="35" y1="476" x2="1465" y2="476" class="table-inner" />
+    <rect x="35" y="424" width="120" height="52" fill="#F8FAFC" class="table-border" />
+    <text x="95" y="436" class="td-cat1">검증 및</text>
+    <text x="95" y="464" class="td-cat1">배포</text>
+    <text x="173" y="450" class="td-task">실차 모의 주행 현장 LBS 실증 &amp; AWS 클라우드 배포</text>
+    <rect x="1244" y="432" width="217" height="36" class="bar" />
+    <line x1="35" y1="528" x2="1465" y2="528" class="table-border" />
+    <rect x="35" y="476" width="120" height="52" fill="#F8FAFC" class="table-border" />
+    <text x="95" y="488" class="td-cat1">추진</text>
+    <text x="95" y="516" class="td-cat1">보고</text>
+    <text x="173" y="502" class="td-task">프로젝트 착수보고 / 중간점검 / 최종 심사보고</text>
+    <rect x="661" y="484" width="33" height="36" class="bar-milestone" />
+    <rect x="1021" y="484" width="33" height="36" class="bar-milestone" />
+    <rect x="1426" y="484" width="33" height="36" class="bar-milestone" />
+    <line x1="155" y1="112" x2="155" y2="528" class="table-border" />
+    <line x1="655" y1="48" x2="655" y2="528" class="table-border" />
+  </g>
+</svg>

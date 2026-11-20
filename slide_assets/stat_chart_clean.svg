@@ -1,0 +1,88 @@
+<svg width="1500" height="680" viewBox="0 0 1500 680" xmlns="http://www.w3.org/2000/svg" style="background:#ffffff; font-family:'Pretendard', 'Malgun Gothic', sans-serif;">
+  <defs>
+    <filter id="shadow" x="-3%" y="-3%" width="106%" height="108%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0F172A" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <!-- 테두리 -->
+  <rect x="10" y="10" width="1480" height="660" rx="16" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2" />
+
+  <!-- ================= 1. 좌측 카드: 수기 배차의 한계 및 비효율 ================= -->
+  <g transform="translate(35, 35)" filter="url(#shadow)">
+    <rect x="0" y="0" width="455" height="610" rx="14" fill="#EFF6FF" stroke="#93C5FD" stroke-width="2.5" />
+    <rect x="25" y="30" width="180" height="38" rx="19" fill="#2563EB" />
+    <text x="115" y="55" font-size="18" font-weight="900" fill="#FFFFFF" text-anchor="middle">배차 비효율 문제</text>
+
+    <!-- 핵심 수치 -->
+    <text x="227" y="165" font-size="76" font-weight="900" fill="#2563EB" text-anchor="middle">2.5시간</text>
+    <text x="227" y="210" font-size="22" font-weight="900" fill="#1E3A8A" text-anchor="middle">원생 50명 기준 수동 배차 시간</text>
+    <text x="227" y="240" font-size="17" font-weight="700" fill="#1D4ED8" text-anchor="middle">(한국교통연구원 실태 조사)</text>
+
+    <line x1="30" y1="265" x2="425" y2="265" stroke="#BFDBFE" stroke-width="2" />
+
+    <!-- 문제점 2가지 -->
+    <rect x="25" y="290" width="405" height="135" rx="10" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1.5" />
+    <text x="45" y="328" font-size="19" font-weight="900" fill="#1E3A8A">⚠️ 주관적 수기 배차의 비효율</text>
+    <text x="45" y="360" font-size="16.5" font-weight="700" fill="#4B5563">• 관리자마다 다른 비표준 경로 생성</text>
+    <text x="45" y="390" font-size="16.5" font-weight="700" fill="#4B5563">• 불필요한 우회로 유류비 28% 과다 지출</text>
+
+    <rect x="25" y="445" width="405" height="145" rx="10" fill="#FFFFFF" stroke="#BFDBFE" stroke-width="1.5" />
+    <text x="45" y="483" font-size="19" font-weight="900" fill="#1D4ED8">🚀 TakeMe AI 솔루션 적용</text>
+    <text x="45" y="515" font-size="16.5" font-weight="800" fill="#0F172A">• K-Means 클러스터링으로 5초 만에 생성</text>
+    <text x="45" y="545" font-size="16.5" font-weight="800" fill="#0F172A">• Convex Hull TSP로 이동 경로 28% 단축</text>
+    <text x="45" y="575" font-size="15" font-weight="700" fill="#2563EB">➔ 배차 시간 99% 단축 &amp; 유류비 대폭 절감</text>
+  </g>
+
+  <!-- ================= 2. 중앙 카드: 승하차 안전 및 사각지대 ================= -->
+  <g transform="translate(520, 35)" filter="url(#shadow)">
+    <rect x="0" y="0" width="455" height="610" rx="14" fill="#FEF2F2" stroke="#FCA5A5" stroke-width="2.5" />
+    <rect x="25" y="30" width="180" height="38" rx="19" fill="#DC2626" />
+    <text x="115" y="55" font-size="18" font-weight="900" fill="#FFFFFF" text-anchor="middle">승하차 안전 실태</text>
+
+    <!-- 핵심 수치 -->
+    <text x="227" y="165" font-size="76" font-weight="900" fill="#DC2626" text-anchor="middle">64.2%</text>
+    <text x="227" y="210" font-size="22" font-weight="900" fill="#991B1B" text-anchor="middle">승·하차 및 차량 방치 사고</text>
+    <text x="227" y="240" font-size="17" font-weight="700" fill="#7F1D1D" text-anchor="middle">(도로교통공단 TAAS 통계 분석)</text>
+
+    <line x1="30" y1="265" x2="425" y2="265" stroke="#FECACA" stroke-width="2" />
+
+    <!-- 문제점 및 대안 -->
+    <rect x="25" y="290" width="405" height="135" rx="10" fill="#FFFFFF" stroke="#FCA5A5" stroke-width="1.5" />
+    <text x="45" y="328" font-size="19" font-weight="900" fill="#B91C1C">⚠️ 도로변 대기 &amp; 사각지대 위험</text>
+    <text x="45" y="360" font-size="16.5" font-weight="700" fill="#4B5563">• 셔틀 도착 미인지로 길거리 대기 시간 증가</text>
+    <text x="45" y="390" font-size="16.5" font-weight="700" fill="#4B5563">• 학부모 87.4% "실시간 위치 필요" 응답</text>
+
+    <rect x="25" y="445" width="405" height="145" rx="10" fill="#FFFFFF" stroke="#FCA5A5" stroke-width="1.5" />
+    <text x="45" y="483" font-size="19" font-weight="900" fill="#DC2626">🛡️ TakeMe 안심 관제 적용</text>
+    <text x="45" y="515" font-size="16.5" font-weight="800" fill="#0F172A">• 지오펜스 3단계 푸시 알림 (10분/3분/도착)</text>
+    <text x="45" y="545" font-size="16.5" font-weight="800" fill="#0F172A">• 운행 종료 후 원생 잔류 검증 강제화</text>
+    <text x="45" y="575" font-size="15" font-weight="700" fill="#DC2626">➔ 길거리 대기 80% 감소 &amp; 잔류사고 Zero</text>
+  </g>
+
+  <!-- ================= 3. 우측 카드: 학술 논문 연구 검증 ================= -->
+  <g transform="translate(1005, 35)" filter="url(#shadow)">
+    <rect x="0" y="0" width="460" height="610" rx="14" fill="#F0FDF4" stroke="#86EFAC" stroke-width="2.5" />
+    <rect x="25" y="30" width="180" height="38" rx="19" fill="#059669" />
+    <text x="115" y="55" font-size="18" font-weight="900" fill="#FFFFFF" text-anchor="middle">학술 논문 연구 검증</text>
+
+    <text x="25" y="115" font-size="20" font-weight="900" fill="#065F46">SBRP 및 LBS 관제 연구 분석</text>
+    <text x="25" y="142" font-size="15" font-weight="700" fill="#047857">대한교통학회지 &amp; 한국ITS학회논문지</text>
+
+    <!-- 연구 1: SBRP 노선 최적화 -->
+    <rect x="25" y="165" width="410" height="200" rx="12" fill="#FFFFFF" stroke="#86EFAC" stroke-width="2" />
+    <text x="45" y="202" font-size="18.5" font-weight="900" fill="#065F46">① 통학버스 최적 노선(SBRP) 연구</text>
+    <text x="45" y="232" font-size="15" font-weight="700" fill="#64748B">"클러스터링 기반 통학버스 노선 최적화 모델"</text>
+    <text x="395" y="295" font-size="48" font-weight="900" fill="#059669" text-anchor="end">28.4% ↓</text>
+    <text x="45" y="335" font-size="17" font-weight="800" fill="#1E293B">K-Means + TSP 알고리즘 적용 시</text>
+    <text x="45" y="358" font-size="16" font-weight="700" fill="#059669">총 주행거리 28.4% 단축 검증 (대한교통학회)</text>
+
+    <!-- 연구 2: LBS 안전 관제 -->
+    <rect x="25" y="380" width="410" height="210" rx="12" fill="#FFFFFF" stroke="#86EFAC" stroke-width="2" />
+    <text x="45" y="418" font-size="18.5" font-weight="900" fill="#065F46">② 실시간 승하차 모니터링 연구</text>
+    <text x="45" y="448" font-size="15" font-weight="700" fill="#64748B">"IoT/GIS 기반 통학버스 승하차 안전성 연구"</text>
+    <text x="395" y="510" font-size="48" font-weight="900" fill="#059669" text-anchor="end">78.5% ↓</text>
+    <text x="45" y="550" font-size="17" font-weight="800" fill="#1E293B">지오펜스 사전 알림 도입 시</text>
+    <text x="45" y="573" font-size="16" font-weight="700" fill="#059669">노상 대기시간 78.5% 감소 입증 (한국ITS학회)</text>
+  </g>
+</svg>

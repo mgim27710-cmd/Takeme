@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Malgun Gothic', -apple-system, sans-serif; }
+  body { width: 1400px; height: 750px; background: #ffffff; padding: 25px; display: flex; flex-direction: column; gap: 16px; }
+
+  .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #E2E8F0; padding-bottom: 12px; }
+  .title-box h2 { font-size: 24px; color: #0F172A; font-weight: 800; }
+  .title-box p { font-size: 13px; color: #64748B; margin-top: 4px; }
+  .badge { background: #EFF6FF; color: #2563EB; border: 1px solid #93C5FD; padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+
+  .diagram-container { display: flex; flex-direction: column; gap: 12px; flex: 1; justify-content: space-between; }
+
+  /* Layers */
+  .layer { background: #F8FAFC; border: 1.5px solid #CBD5E1; border-radius: 12px; padding: 14px 20px; position: relative; }
+  .layer-label { position: absolute; top: -10px; left: 24px; background: #0F172A; color: #fff; font-size: 11px; font-weight: 800; padding: 3px 12px; border-radius: 10px; }
+  .layer-label.green { background: #059669; }
+  .layer-label.blue { background: #2563EB; }
+  .layer-label.purple { background: #7C3AED; }
+
+  .row-grid { display: grid; gap: 14px; }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .grid-5 { grid-template-columns: repeat(5, 1fr); }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+
+  .node-box { background: #FFFFFF; border: 1.5px solid #E2E8F0; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+  .node-title { font-size: 13px; font-weight: 800; color: #0F172A; display: flex; align-items: center; gap: 6px; }
+  .node-tag { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+  .tag-web { background: #EFF6FF; color: #2563EB; }
+  .tag-app { background: #ECFDF5; color: #059669; }
+  .tag-engine { background: #FAF5FF; color: #7C3AED; }
+  .tag-db { background: #FEF3C7; color: #D97706; }
+  .node-desc { font-size: 10.5px; color: #64748B; line-height: 1.4; margin-top: 2px; }
+
+  /* Arrow Divider */
+  .connector { display: flex; justify-content: center; align-items: center; gap: 20px; font-size: 11px; font-weight: 800; color: #475569; }
+  .connector-line { flex: 1; height: 1.5px; background: #CBD5E1; }
+  .connector-badge { background: #F1F5F9; border: 1px solid #CBD5E1; padding: 3px 14px; border-radius: 12px; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div class="title-box">
+      <h2>TakeMe 시스템 전체 아키텍처 및 서비스 구상도</h2>
+      <p>클라이언트(Web·App) ↔ 실시간 통신 계층 ↔ 코어 백엔드 엔진 ↔ 데이터베이스 & 클라우드 인프라</p>
+    </div>
+    <div class="badge">Full-Stack Cloud Architecture</div>
+  </div>
+
+  <div class="diagram-container">
+    <!-- Layer 1: Client -->
+    <div class="layer">
+      <div class="layer-label blue">CLIENT TIER (React 19 & Flutter 3)</div>
+      <div class="row-grid grid-4" style="margin-top: 4px;">
+        <div class="node-box" style="border-left: 4px solid #2563EB;">
+          <div class="node-title"><span class="node-tag tag-web">Web</span> 원장 관리자 웹</div>
+          <div class="node-desc">React 19 / Vite / Tailwind<br>• 네이버 지도 실시간 관제<br>• 엑셀 일괄 등록 & OTP 보안</div>
+        </div>
+        <div class="node-box" style="border-left: 4px solid #059669;">
+          <div class="node-title"><span class="node-tag tag-app">App</span> 통학차량 기사 앱</div>
+          <div class="node-desc">Flutter 3 / Dart<br>• 1초 주기 실시간 GPS 송출<br>• SK TMap 내비 자동 길안내</div>
+        </div>
+        <div class="node-box" style="border-left: 4px solid #10B981;">
+          <div class="node-title"><span class="node-tag tag-app">App</span> 동승·담임교사 앱</div>
+          <div class="node-desc">Flutter 3 / Dart<br>• QR/원터치 승하차 체크<br>• 잔류 원아 방지 최종 확인</div>
+        </div>
+        <div class="node-box" style="border-left: 4px solid #06B6D4;">
+          <div class="node-title"><span class="node-tag tag-app">App</span> 학부모 안심 앱</div>
+          <div class="node-desc">Flutter 3 / Dart<br>• 지도 위 셔틀 실시간 위치<br>• 3단 푸시 알림 & 당일 변경</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Connector 1 -->
+    <div class="connector">
+      <div class="connector-line"></div>
+      <div class="connector-badge">HTTPS (REST API / JWT Bearer) &nbsp;|&nbsp; WSS (Socket.IO Real-time Events)</div>
+      <div class="connector-line"></div>
+    </div>
+
+    <!-- Layer 2: Core Backend -->
+    <div class="layer">
+      <div class="layer-label green">CORE BACKEND ENGINE (NestJS 11 / Node.js 20)</div>
+      <div class="row-grid grid-5" style="margin-top: 4px;">
+        <div class="node-box" style="border-left: 4px solid #059669;">
+          <div class="node-title"><span class="node-tag tag-engine">Engine</span> Routing & GIS</div>
+          <div class="node-desc">• 6km 반경 안전 필터링<br>• K-Means 군집 배차<br>• Convex Hull 폴리곤 생성</div>
+        </div>
+        <div class="node-box" style="border-left: 4px solid #059669;">
+          <div class="node-title"><span class="node-tag tag-engine">Gateway</span> LBS 관제 소켓</div>
+          <div class="node-desc">• 룸(Room) 기반 위치 분산<br>• Moving Average 좌표 보정<br>• 반경 500m ETA 계산</div>
+        </div>
+        <div class="node-box" style="border-left: 4px solid #059669;">
+          <div class="node-title"><span class="node-tag tag-engine">Service</span> 승하차 & 알림</div>
+          <div class="node-desc">• QR 검증 & 일괄 탑승<br>• 출발/도착 3분전/하차 알림<br>• 당일 결석 노선 자동 갱신</div>
+        </div>
+        <div class="node-box" style="border-left: 4px solid #059669;">
+          <div class="node-title"><span class="node-tag tag-engine">Excel</span> 엑셀 스트리밍</div>
+          <div class="node-desc">• 2행 헤더 공식 양식 파싱<br>• 원생/교사/기사 분리 시트<br>• DB Fallback 온전 복원</div>
+        </div>
+        <div class="node-box" style="border-left: 4px solid #DC2626;">
+          <div class="node-title"><span class="node-tag tag-engine" style="background:#FEF2F2; color:#DC2626;">Security</span> 인증 & 감사</div>
+          <div class="node-desc">• Google OTP 2차 검증<br>• bcrypt & RBAC 권한 분리<br>• 모든 작업 감사로그 추적</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Connector 2 -->
+    <div class="connector">
+      <div class="connector-line"></div>
+      <div class="connector-badge">TypeORM Connection Pool &nbsp;|&nbsp; External Cloud OpenAPIs</div>
+      <div class="connector-line"></div>
+    </div>
+
+    <!-- Layer 3: Database & Cloud Infrastructure -->
+    <div class="layer">
+      <div class="layer-label purple">DATA & CLOUD INFRASTRUCTURE TIER</div>
+      <div class="row-grid grid-3" style="margin-top: 4px;">
+        <div class="node-box" style="border-left: 4px solid #7C3AED;">
+          <div class="node-title"><span class="node-tag tag-db">Database</span> PostgreSQL RDS</div>
+          <div class="node-desc">TypeORM 트랜잭션 보장, 원아/차량/일정/계정/감사로그 엔티티, AES-256 개인정보 암호화 필드</div>
+        </div>
+        <div class="node-box" style="border-left: 4px solid #D97706;">
+          <div class="node-title"><span class="node-tag tag-db">Cloud</span> AWS EC2 & Nginx</div>
+          <div class="node-desc">Nginx 1.30 리버스 프록시, Let's Encrypt TLS 1.3 SSL 암호화 통신, Docker 컨테이너 지원</div>
+        </div>
+        <div class="node-box" style="border-left: 4px solid #2563EB;">
+          <div class="node-title"><span class="node-tag tag-db">External</span> 외부 API 연동</div>
+          <div class="node-desc">Naver Maps SDK (GIS 지도), Kakao Mobility & SK TMap (내비 길안내), speakeasy (Google OTP)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

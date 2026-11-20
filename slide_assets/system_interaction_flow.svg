@@ -1,0 +1,274 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 860" width="1440" height="860" style="background:#ffffff; font-family:'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;">
+  <defs>
+    <marker id="arr-blue" markerWidth="10" markerHeight="10" refX="7" refY="3.5" orient="auto">
+      <polygon points="0 0, 8 3.5, 0 7" fill="#2563EB" />
+    </marker>
+    <marker id="arr-green" markerWidth="10" markerHeight="10" refX="7" refY="3.5" orient="auto">
+      <polygon points="0 0, 8 3.5, 0 7" fill="#059669" />
+    </marker>
+    <marker id="arr-amber" markerWidth="10" markerHeight="10" refX="7" refY="3.5" orient="auto">
+      <polygon points="0 0, 8 3.5, 0 7" fill="#D97706" />
+    </marker>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="112%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0F172A" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <!-- 캔버스 외곽 -->
+  <rect x="15" y="15" width="1410" height="830" rx="16" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.5" />
+
+  <!-- 상단 타이틀 배너 -->
+  <rect x="35" y="30" width="1370" height="52" rx="10" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1.5" />
+  <text x="55" y="64" font-size="20" font-weight="900" fill="#1E3A8A">시스템 주요 기능 구성 및 실시간 상호작용 데이터 흐름도</text>
+  <text x="1385" y="63" font-size="15" font-weight="800" fill="#2563EB" text-anchor="end">TakeMe Real-Time Architecture</text>
+
+  <!-- ============================================================== -->
+  <!-- 1. 좌측 상단: 학원 관리자 웹 대시보드 (Admin Web) -->
+  <!-- ============================================================== -->
+  <g transform="translate(45, 105)" filter="url(#shadow)">
+    <rect x="0" y="0" width="375" height="320" rx="14" fill="#FFFFFF" stroke="#3B82F6" stroke-width="2.5" />
+    <!-- Header -->
+    <rect x="0" y="0" width="375" height="52" rx="14" fill="#EFF6FF" />
+    <rect x="0" y="38" width="375" height="14" fill="#EFF6FF" />
+    <circle cx="28" cy="26" r="14" fill="#3B82F6" />
+    <text x="28" y="32" font-size="14" fill="#FFFFFF" text-anchor="middle" font-weight="900">ADM</text>
+    <text x="52" y="33" font-size="18" font-weight="900" fill="#1E3A8A">학원 관리자 (Web 대시보드)</text>
+    <text x="360" y="33" font-size="13" font-weight="800" fill="#2563EB" text-anchor="end">React 19</text>
+
+    <!-- 기능 박스 4개 (글씨 크기 15~18px 대폭 확대) -->
+    <g transform="translate(15, 66)">
+      <!-- 1 -->
+      <rect x="0" y="0" width="345" height="54" rx="8" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="10" y="10" width="70" height="34" rx="5" fill="#DBEAFE" />
+      <text x="45" y="32" font-size="13.5" font-weight="800" fill="#1D4ED8" text-anchor="middle">엑셀 연동</text>
+      <text x="92" y="26" font-size="15.5" font-weight="800" fill="#0F172A">원생 명단 일괄 등록 &amp; 다운로드</text>
+      <text x="92" y="44" font-size="13" font-weight="600" fill="#64748B">2행 복합헤더 자동 파싱 &amp; 노선별 출력</text>
+
+      <!-- 2 -->
+      <rect x="0" y="62" width="345" height="54" rx="8" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="10" y="72" width="70" height="34" rx="5" fill="#E0E7FF" />
+      <text x="45" y="94" font-size="13.5" font-weight="800" fill="#4338CA" text-anchor="middle">배차 생성</text>
+      <text x="92" y="88" font-size="15.5" font-weight="800" fill="#0F172A">원클릭 AI 배차 노선 승인</text>
+      <text x="92" y="106" font-size="13" font-weight="600" fill="#64748B">K-Means 공간 군집화 &amp; 5초 자동 배차</text>
+
+      <!-- 3 -->
+      <rect x="0" y="124" width="345" height="54" rx="8" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="10" y="134" width="70" height="34" rx="5" fill="#DCFCE7" />
+      <text x="45" y="156" font-size="13.5" font-weight="800" fill="#15803D" text-anchor="middle">통합 관제</text>
+      <text x="92" y="150" font-size="15.5" font-weight="800" fill="#0F172A">전 차량 실시간 위치 모니터링</text>
+      <text x="92" y="168" font-size="13" font-weight="600" fill="#64748B">0.2초 초저지연 동기화 &amp; 미하차 경보</text>
+
+      <!-- 4 -->
+      <rect x="0" y="186" width="345" height="54" rx="8" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="10" y="196" width="70" height="34" rx="5" fill="#FEE2E2" />
+      <text x="45" y="218" font-size="13.5" font-weight="800" fill="#B91C1C" text-anchor="middle">2단계 보안</text>
+      <text x="92" y="212" font-size="15.5" font-weight="800" fill="#0F172A">Google OTP 2FA 보안 로그인</text>
+      <text x="92" y="230" font-size="13" font-weight="600" fill="#64748B">원생 개인정보 보호용 6자리 일회용 번호</text>
+    </g>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- 2. 중앙: 코어 백엔드 & AI 배차 엔진 (NestJS 11) -->
+  <!-- ============================================================== -->
+  <g transform="translate(515, 95)" filter="url(#shadow)">
+    <rect x="0" y="0" width="410" height="610" rx="14" fill="#FFFFFF" stroke="#4F46E5" stroke-width="2.5" />
+    <rect x="0" y="0" width="410" height="56" rx="14" fill="#EEF2FF" />
+    <rect x="0" y="42" width="410" height="14" fill="#EEF2FF" />
+    <circle cx="30" cy="28" r="15" fill="#4F46E5" />
+    <text x="30" y="34" font-size="16" fill="#FFFFFF" text-anchor="middle" font-weight="900">⚙️</text>
+    <text x="56" y="35" font-size="19" font-weight="900" fill="#312E81">TakeMe 코어 엔진 (NestJS 11)</text>
+    <text x="395" y="35" font-size="13" font-weight="800" fill="#6366F1" text-anchor="end">Core Engine</text>
+
+    <!-- 내부 핵심 모듈 리스트 (큰 글씨) -->
+    <g transform="translate(18, 70)">
+      <!-- 모듈 1: GIS AI 배차 -->
+      <rect x="0" y="0" width="374" height="110" rx="10" fill="#F8FAFC" stroke="#C7D2FE" stroke-width="1.5" />
+      <rect x="12" y="10" width="160" height="26" rx="5" fill="#E0E7FF" />
+      <text x="92" y="28" font-size="13.5" font-weight="800" fill="#3730A3" text-anchor="middle">GIS &amp; AI 노선 최적화</text>
+      <text x="14" y="56" font-size="14.5" font-weight="800" fill="#0F172A">• K-Means 군집화 : 탑승 정원 기준 균등 분할</text>
+      <text x="14" y="78" font-size="14.5" font-weight="800" fill="#0F172A">• Convex Hull &amp; TSP : U턴 방지 최단 순회</text>
+      <text x="14" y="98" font-size="13.5" font-weight="600" fill="#475569">• SK TMap 실시간 교통량 연계 정밀 ETA 산출</text>
+
+      <!-- 모듈 2: WebSocket 관제 -->
+      <rect x="0" y="122" width="374" height="110" rx="10" fill="#F8FAFC" stroke="#A7F3D0" stroke-width="1.5" />
+      <rect x="12" y="132" width="185" height="26" rx="5" fill="#D1FAE5" />
+      <text x="104" y="150" font-size="13.5" font-weight="800" fill="#065F46" text-anchor="middle">WebSocket / Socket.IO</text>
+      <text x="14" y="178" font-size="14.5" font-weight="800" fill="#0F172A">• 0.2초 초저지연 양방향 위치 브로드캐스팅</text>
+      <text x="14" y="200" font-size="14.5" font-weight="800" fill="#0F172A">• 노선별 소켓 룸(Room) 격리로 부하 85% 절감</text>
+      <text x="14" y="220" font-size="13.5" font-weight="600" fill="#475569">• 네트워크 일시 단절 시 자동 재연결 및 보정</text>
+
+      <!-- 모듈 3: 지오펜스 안전 알림 -->
+      <rect x="0" y="244" width="374" height="110" rx="10" fill="#F8FAFC" stroke="#FDE68A" stroke-width="1.5" />
+      <rect x="12" y="254" width="185" height="26" rx="5" fill="#FEF3C7" />
+      <text x="104" y="272" font-size="13.5" font-weight="800" fill="#92400E" text-anchor="middle">Geo-fence &amp; Safety 알림</text>
+      <text x="14" y="300" font-size="14.5" font-weight="800" fill="#0F172A">• 3단계 지오펜스(2km/500m/도착) 자동 판정</text>
+      <text x="14" y="322" font-size="14.5" font-weight="800" fill="#0F172A">• FCM 푸시 알림으로 길거리 대기 80% 단축</text>
+      <text x="14" y="342" font-size="13.5" font-weight="600" fill="#475569">• 운행 종료 후 미하차 아동 잔류 여부 자동 검증</text>
+
+      <!-- 모듈 4: 데이터 & 보안 -->
+      <rect x="0" y="366" width="374" height="90" rx="10" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.5" />
+      <text x="14" y="394" font-size="14.5" font-weight="800" fill="#1E3A8A">💾 PostgreSQL 16 RDS : 원생/노선/승하차 트랜잭션</text>
+      <text x="14" y="418" font-size="14.5" font-weight="800" fill="#1E3A8A">🗺️ Naver Maps Geocoding : 주소 ➔ 좌표 정밀 변환</text>
+      <text x="14" y="442" font-size="14.5" font-weight="800" fill="#1E3A8A">🔐 Google TOTP 2FA &amp; ExcelJS 2행 복합헤더 파서</text>
+
+      <!-- 모듈 5: 인프라 -->
+      <rect x="0" y="468" width="374" height="52" rx="8" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1" />
+      <text x="187" y="500" font-size="14" font-weight="800" fill="#334155" text-anchor="middle">AWS EC2 Cloud · Nginx Reverse Proxy · WSS/HTTPS</text>
+    </g>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- 3. 우측 상단: 통학버스 운전 기사 앱 (Driver App) -->
+  <!-- ============================================================== -->
+  <g transform="translate(1015, 105)" filter="url(#shadow)">
+    <rect x="0" y="0" width="375" height="290" rx="14" fill="#FFFFFF" stroke="#059669" stroke-width="2.5" />
+    <rect x="0" y="0" width="375" height="52" rx="14" fill="#ECFDF5" />
+    <rect x="0" y="38" width="375" height="14" fill="#ECFDF5" />
+    <circle cx="28" cy="26" r="14" fill="#059669" />
+    <text x="28" y="32" font-size="14" fill="#FFFFFF" text-anchor="middle" font-weight="900">DRV</text>
+    <text x="52" y="33" font-size="18" font-weight="900" fill="#065F46">통학버스 기사 (모바일 앱)</text>
+    <text x="360" y="33" font-size="13" font-weight="800" fill="#059669" text-anchor="end">Flutter 3</text>
+
+    <g transform="translate(15, 66)">
+      <!-- 1 -->
+      <rect x="0" y="0" width="345" height="48" rx="7" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="8" y="8" width="70" height="32" rx="5" fill="#D1FAE5" />
+      <text x="43" y="29" font-size="13" font-weight="800" fill="#065F46" text-anchor="middle">GPS 스트림</text>
+      <text x="88" y="24" font-size="15" font-weight="800" fill="#0F172A">1초 주기 실시간 위치 전송</text>
+      <text x="88" y="40" font-size="12.5" font-weight="600" fill="#64748B">백그라운드 GPS 고정밀 스트리밍</text>
+
+      <!-- 2 -->
+      <rect x="0" y="54" width="345" height="48" rx="7" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="8" y="62" width="70" height="32" rx="5" fill="#FEF3C7" />
+      <text x="43" y="83" font-size="13" font-weight="800" fill="#92400E" text-anchor="middle">경로 안내</text>
+      <text x="88" y="78" font-size="15" font-weight="800" fill="#0F172A">SK TMap 턴바이턴 네비 연동</text>
+      <text x="88" y="94" font-size="12.5" font-weight="600" fill="#64748B">최적 정류장 순회 순서 자동 안내</text>
+
+      <!-- 3 -->
+      <rect x="0" y="108" width="345" height="48" rx="7" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="8" y="116" width="70" height="32" rx="5" fill="#DBEAFE" />
+      <text x="43" y="137" font-size="13" font-weight="800" fill="#1D4ED8" text-anchor="middle">승하차 체크</text>
+      <text x="88" y="132" font-size="15" font-weight="800" fill="#0F172A">원터치 탑승/하차 현장 태깅</text>
+      <text x="88" y="148" font-size="12.5" font-weight="600" fill="#64748B">당일 결석/미탑승 원생 실시간 표시</text>
+
+      <!-- 4 -->
+      <rect x="0" y="162" width="345" height="48" rx="7" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="8" y="170" width="70" height="32" rx="5" fill="#FEE2E2" />
+      <text x="43" y="191" font-size="13" font-weight="800" fill="#B91C1C" text-anchor="middle">잔류 방지</text>
+      <text x="88" y="186" font-size="15" font-weight="800" fill="#0F172A">운행 종료 후 차량 잔류 검증</text>
+      <text x="88" y="202" font-size="12.5" font-weight="600" fill="#64748B">미하차 원생 확인 전 종료 불가 경고</text>
+    </g>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- 4. 우측 하단: 학부모용 모바일 앱 (Parent App) -->
+  <!-- ============================================================== -->
+  <g transform="translate(1015, 425)" filter="url(#shadow)">
+    <rect x="0" y="0" width="375" height="280" rx="14" fill="#FFFFFF" stroke="#D97706" stroke-width="2.5" />
+    <rect x="0" y="0" width="375" height="52" rx="14" fill="#FEF3C7" />
+    <rect x="0" y="38" width="375" height="14" fill="#FEF3C7" />
+    <circle cx="28" cy="26" r="14" fill="#D97706" />
+    <text x="28" y="32" font-size="14" fill="#FFFFFF" text-anchor="middle" font-weight="900">PAR</text>
+    <text x="52" y="33" font-size="18" font-weight="900" fill="#92400E">학부모 (모바일 앱)</text>
+    <text x="360" y="33" font-size="13" font-weight="800" fill="#D97706" text-anchor="end">Flutter 3</text>
+
+    <g transform="translate(15, 66)">
+      <!-- 1 -->
+      <rect x="0" y="0" width="345" height="58" rx="7" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="8" y="10" width="70" height="38" rx="5" fill="#FEF3C7" />
+      <text x="43" y="34" font-size="13" font-weight="800" fill="#92400E" text-anchor="middle">위치 확인</text>
+      <text x="88" y="27" font-size="15" font-weight="800" fill="#0F172A">통학 셔틀 실시간 지도 뷰</text>
+      <text x="88" y="47" font-size="12.5" font-weight="600" fill="#64748B">내 자녀 탑승 버스 현재 위치 및 노선 확인</text>
+
+      <!-- 2 -->
+      <rect x="0" y="66" width="345" height="58" rx="7" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="8" y="76" width="70" height="38" rx="5" fill="#DBEAFE" />
+      <text x="43" y="100" font-size="13" font-weight="800" fill="#1D4ED8" text-anchor="middle">3단계 알림</text>
+      <text x="88" y="93" font-size="15" font-weight="800" fill="#0F172A">10분 전 / 3분 전 / 탑승 완료 푸시</text>
+      <text x="88" y="113" font-size="12.5" font-weight="600" fill="#64748B">도로변 위험 대기 시간 80% 감소</text>
+
+      <!-- 3 -->
+      <rect x="0" y="132" width="345" height="58" rx="7" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="8" y="142" width="70" height="38" rx="5" fill="#DCFCE7" />
+      <text x="43" y="166" font-size="13" font-weight="800" fill="#15803D" text-anchor="middle">결석 접수</text>
+      <text x="88" y="159" font-size="15" font-weight="800" fill="#0F172A">당일 결석/미탑승 1초 접수</text>
+      <text x="88" y="179" font-size="12.5" font-weight="600" fill="#64748B">기사 및 관리자에게 실시간 자동 전파</text>
+    </g>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- 5. 상호작용 화살표 (큰 글씨 뱃지) -->
+  <!-- ============================================================== -->
+
+  <!-- ① 관리자 ➔ 코어 엔진 -->
+  <path d="M 420, 205 L 505, 205" fill="none" stroke="#2563EB" stroke-width="3.5" marker-end="url(#arr-blue)" />
+  <g transform="translate(422, 168)">
+    <rect x="0" y="0" width="88" height="32" rx="16" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.8" />
+    <text x="44" y="21" font-size="13" font-weight="900" fill="#1D4ED8" text-anchor="middle">① 배차 요청</text>
+  </g>
+
+  <!-- ② 코어 엔진 ➔ 관리자 -->
+  <path d="M 515, 280 L 430, 280" fill="none" stroke="#2563EB" stroke-width="3.5" stroke-dasharray="6,4" marker-end="url(#arr-blue)" />
+  <g transform="translate(422, 290)">
+    <rect x="0" y="0" width="88" height="32" rx="16" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.8" />
+    <text x="44" y="21" font-size="13" font-weight="900" fill="#1D4ED8" text-anchor="middle">② 관제 동기화</text>
+  </g>
+
+  <!-- ③ 코어 엔진 ➔ 기사 앱 -->
+  <path d="M 925, 195 L 1005, 195" fill="none" stroke="#059669" stroke-width="3.5" marker-end="url(#arr-green)" />
+  <g transform="translate(928, 158)">
+    <rect x="0" y="0" width="88" height="32" rx="16" fill="#ECFDF5" stroke="#10B981" stroke-width="1.8" />
+    <text x="44" y="21" font-size="13" font-weight="900" fill="#047857" text-anchor="middle">③ 노선 하달</text>
+  </g>
+
+  <!-- ④ 기사 앱 ➔ 코어 엔진 -->
+  <path d="M 1015, 270 L 935, 270" fill="none" stroke="#059669" stroke-width="3.5" marker-end="url(#arr-green)" />
+  <g transform="translate(928, 280)">
+    <rect x="0" y="0" width="88" height="32" rx="16" fill="#ECFDF5" stroke="#10B981" stroke-width="1.8" />
+    <text x="44" y="21" font-size="13" font-weight="900" fill="#047857" text-anchor="middle">④ GPS 스트림</text>
+  </g>
+
+  <!-- ⑤ 코어 엔진 ➔ 학부모 앱 -->
+  <path d="M 925, 510 L 1005, 510" fill="none" stroke="#D97706" stroke-width="3.5" marker-end="url(#arr-amber)" />
+  <g transform="translate(928, 473)">
+    <rect x="0" y="0" width="88" height="32" rx="16" fill="#FEF3C7" stroke="#F59E0B" stroke-width="1.8" />
+    <text x="44" y="21" font-size="13" font-weight="900" fill="#B45309" text-anchor="middle">⑤ 3단계 푸시</text>
+  </g>
+
+  <!-- ⑥ 학부모 앱 ➔ 코어 엔진 -->
+  <path d="M 1015, 580 L 935, 580" fill="none" stroke="#D97706" stroke-width="3.5" stroke-dasharray="6,4" marker-end="url(#arr-amber)" />
+  <g transform="translate(928, 590)">
+    <rect x="0" y="0" width="88" height="32" rx="16" fill="#FEF3C7" stroke="#F59E0B" stroke-width="1.8" />
+    <text x="44" y="21" font-size="13" font-weight="900" fill="#B45309" text-anchor="middle">⑥ 결석 접수</text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- 6. 하단 요약 바 (큰 글씨) -->
+  <!-- ============================================================== -->
+  <g transform="translate(45, 725)">
+    <rect x="0" y="0" width="1345" height="100" rx="12" fill="#FFFFFF" stroke="#94A3B8" stroke-width="1.5" />
+    <text x="25" y="32" font-size="16" font-weight="900" fill="#0F172A">상호작용 데이터 흐름 핵심 요약</text>
+
+    <g transform="translate(25, 45)">
+      <circle cx="10" cy="18" r="9" fill="#3B82F6" />
+      <text x="10" y="23" font-size="12" fill="#FFF" text-anchor="middle" font-weight="900">1</text>
+      <text x="26" y="23" font-size="15" font-weight="800" fill="#1E3A8A">노선 생성 :</text>
+      <text x="105" y="23" font-size="14.5" font-weight="600" fill="#334155">관리자 엑셀 업로드 ➔ Naver 지오코딩 ➔ K-Means/TSP 노선 생성 (5초 완료)</text>
+
+      <circle cx="700" cy="18" r="9" fill="#059669" />
+      <text x="700" y="23" font-size="12" fill="#FFF" text-anchor="middle" font-weight="900">2</text>
+      <text x="716" y="23" font-size="15" font-weight="800" fill="#065F46">운행 관제 :</text>
+      <text x="795" y="23" font-size="14.5" font-weight="600" fill="#334155">기사 GPS 스트리밍 ➔ 0.2초 WSS 브로드캐스팅 ➔ 전 참여자 실시간 동기화</text>
+
+      <circle cx="10" cy="42" r="9" fill="#D97706" />
+      <text x="10" y="47" font-size="12" fill="#FFF" text-anchor="middle" font-weight="900">3</text>
+      <text x="26" y="47" font-size="15" font-weight="800" fill="#92400E">안심 알림 :</text>
+      <text x="105" y="47" font-size="14.5" font-weight="600" fill="#334155">2km(10분전) ➔ 500m(3분전) ➔ 탑승 완료 즉시 학부모 스마트 안심 푸시</text>
+
+      <circle cx="700" cy="42" r="9" fill="#DC2626" />
+      <text x="700" y="47" font-size="12" fill="#FFF" text-anchor="middle" font-weight="900">4</text>
+      <text x="716" y="47" font-size="15" font-weight="800" fill="#991B1B">안전 하차 :</text>
+      <text x="795" y="47" font-size="14.5" font-weight="600" fill="#334155">운행 종료 시 탑승 원생 하차 여부 전산 매칭 ➔ 잔류 아동 비상 경보 발령</text>
+    </g>
+  </g>
+</svg>
