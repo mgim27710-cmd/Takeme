@@ -267,10 +267,32 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
     }
   }
 
+  // 마지막으로 지도에 적용한 카메라 값 (거의 같으면 다시 적용하지 않는다)
+  double? _appliedLat;
+  double? _appliedLng;
+  double? _appliedZoom;
+  double? _appliedBearing;
+  double? _appliedYRatio;
+
   /// 카메라 이동 (애니메이션 없음, 이전 호출이 끝나기 전에는 건너뜀)
+  ///
+  /// 매 프레임 확대·방향이 아주 조금씩 바뀐 값을 그대로 넣으면 네이버 지도가 지명·도로명 글자 배치를
+  /// 매번 다시 계산해서 운행 중 글자가 깜빡인다. 그래서 확대는 0.05 단위, 방향은 1도 단위로 맞추고,
+  /// 눈에 띄게 바뀌었을 때만 카메라를 움직인다.
   Future<void> _moveCamera(LatLng? target, double? zoom, double? bearing, double yRatio) async {
     final map = _map;
     if (!_canUseMap || map == null || _cameraBusy) return;
+    if (zoom != null) zoom = (zoom * 20).roundToDouble() / 20;
+    if (bearing != null) bearing = bearing.roundToDouble() % 360;
+    final ry = (yRatio * 100).roundToDouble() / 100;
+    final same = target != null &&
+        _appliedLat != null &&
+        (target.latitude - _appliedLat!).abs() < 0.000002 && // 약 20cm
+        (target.longitude - _appliedLng!).abs() < 0.000002 &&
+        (zoom == null || zoom == _appliedZoom) &&
+        (bearing == null || bearing == _appliedBearing) &&
+        ry == _appliedYRatio;
+    if (same) return;
     _cameraBusy = true;
     try {
       final update = NCameraUpdate.withParams(
@@ -279,9 +301,16 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
         bearing: bearing,
         tilt: 0,
       )
-        ..setPivot(NPoint(0.5, yRatio))
+        ..setPivot(NPoint(0.5, ry))
         ..setAnimation(animation: NCameraAnimation.none, duration: Duration.zero);
       await map.updateCamera(update);
+      if (target != null) {
+        _appliedLat = target.latitude;
+        _appliedLng = target.longitude;
+      }
+      if (zoom != null) _appliedZoom = zoom;
+      if (bearing != null) _appliedBearing = bearing;
+      _appliedYRatio = ry;
     } catch (e) {
       debugPrint('[nav_map_naver] moveCamera error: $e');
     } finally {
@@ -311,19 +340,22 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
     if (pts.isEmpty) return;
 
     try {
+      _appliedLat = null;
       await map.updateCamera(
         NCameraUpdate.withParams(bearing: 0, tilt: 0)
           ..setPivot(NPoint.relativeCenter)
           ..setAnimation(animation: NCameraAnimation.none, duration: Duration.zero),
       );
       final bounds = NLatLngBounds.from(pts);
+      _appliedLat = null;
       await map.updateCamera(
         NCameraUpdate.fitBounds(bounds, padding: const EdgeInsets.all(50))
           ..setAnimation(animation: NCameraAnimation.none, duration: Duration.zero),
       );
       final cam = await map.getCameraPosition();
       if (cam.zoom > 16.0) {
-        await map.updateCamera(
+        _appliedLat = null;
+      await map.updateCamera(
           NCameraUpdate.withParams(zoom: 16.0)
             ..setAnimation(animation: NCameraAnimation.none, duration: Duration.zero),
         );
@@ -734,7 +766,8 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
           _overlays[spec.id] = ov;
           _overlayKeys[spec.id] = key;
           await map.addOverlay(ov);
-        } else if (_overlayKeys[spec.id] != key || _isNavigating) {
+        } else if (_overlayKeys[spec.id] != key) {
+          // 경로선은 실제로 바뀌었을 때만 다시 넣는다 (같은 선을 0.25초마다 다시 넣으면 지도 글자가 깜빡임)
           if (existing is NPathOverlay) {
             existing.setCoords(coords);
             existing.setColor(spec.color);
@@ -928,6 +961,7 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
           _isFollowing = false;
           _targetYRatio = 0.5;
           _impl.onUserDrag?.call();
+          _appliedLat = null; // 다시 따라가기 할 때 카메라를 반드시 움직이도록
         }
       },
       onCustomStyleLoadFailed: (e) => debugPrint('[nav_map_naver] custom style load failed: $e'),
