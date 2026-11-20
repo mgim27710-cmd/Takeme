@@ -297,11 +297,11 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   }
 
   /// 하차 처리 (탑승한 원아만)
-  Future<bool> _dropStudent(StudentModel student, {bool reload = true}) async {
+  Future<bool> _dropStudent(StudentModel student, {bool reload = true, Map<String, String>? handover}) async {
     try {
       final res = await ApiService().postWithAuth(
         Uri.parse('${AppConfig.apiHost}/teacher/drop-student'),
-        jsonEncode({'studentId': student.id}),
+        jsonEncode({'studentId': student.id, if (handover != null) 'handover': handover}),
       );
       if (res.statusCode == 200 || res.statusCode == 201) {
         if (reload) _loadAllData();
@@ -325,10 +325,97 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     return false;
   }
 
+  /// 하차 + 보호자 인수 확인: 누가 아이를 받았는지 고른 뒤 하차 처리
   Future<void> _handleDropStudent(StudentModel student) async {
-    if (await _dropStudent(student)) {
+    final handover = await _askHandover(student);
+    if (handover == null) return; // 취소
+    if (await _dropStudent(student, handover: handover)) {
       _flutterTts.speak('${student.name} 원아 하차 완료');
     }
+  }
+
+  /// "누가 아이를 받았나요?" 주보호자 / 비상연락망 / 다른 분(이름·관계 입력) / 유치원 선생님께 인계
+  Future<Map<String, String>?> _askHandover(StudentModel st) async {
+    String join(List<String> parts) => parts.where((e) => e.trim().isNotEmpty).join(' ');
+    final primary = join([st.parentRelation, st.parentName]);
+    final emergency = join([st.emergencyContactRelation, st.emergencyContactName]);
+
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        Widget option(String value, IconData icon, String title, String? sub) => ListTile(
+              minTileHeight: 60,
+              leading: Icon(icon, size: 26, color: const Color(0xFF7C3AED)),
+              title: Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              subtitle: sub == null || sub.isEmpty ? null : Text(sub, style: const TextStyle(fontSize: 14)),
+              onTap: () => Navigator.pop(ctx, value),
+            );
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 4),
+                child: Text('${st.name} 원아를 누가 받았나요?',
+                    style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900)),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text('인수한 분을 기록하고 학부모님께 함께 알려드려요.',
+                    style: TextStyle(fontSize: 14, color: Color(0xFF64748B))),
+              ),
+              option('PRIMARY', Icons.person, '주보호자', primary.isEmpty ? null : primary),
+              if (st.emergencyContactPhone.isNotEmpty || emergency.isNotEmpty)
+                option('EMERGENCY', Icons.contact_phone, '비상연락망 보호자', emergency.isEmpty ? null : emergency),
+              option('OTHER', Icons.person_add_alt_1, '다른 분', '이름과 관계를 입력해요'),
+              option('ACADEMY', Icons.school, '유치원 선생님께 인계', '등원해서 유치원에 도착했을 때'),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+    if (choice == null || !mounted) return null;
+    if (choice != 'OTHER') return {'type': choice};
+
+    final nameCtrl = TextEditingController();
+    final relCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('아이를 받은 분'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              autofocus: true,
+              style: const TextStyle(fontSize: 17),
+              decoration: const InputDecoration(labelText: '이름 (필수)', hintText: '예: 김철수'),
+            ),
+            TextField(
+              controller: relCtrl,
+              style: const TextStyle(fontSize: 17),
+              decoration: const InputDecoration(labelText: '관계', hintText: '예: 이모, 학원 선생님'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('하차 처리')),
+        ],
+      ),
+    );
+    if (ok != true) return null;
+    if (nameCtrl.text.trim().isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('아이를 받은 분의 이름을 입력해 주세요.')));
+      }
+      return null;
+    }
+    return {'type': 'OTHER', 'name': nameCtrl.text.trim(), 'relation': relCtrl.text.trim()};
   }
 
   void _confirmDropAll(List<StudentModel> boarded) {
@@ -336,7 +423,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('${boarded.length}명 모두 하차', style: const TextStyle(fontWeight: FontWeight.bold)),
-        content: Text('타고 있는 원아를 모두 하차 처리할까요?\n\n${boarded.map((s) => s.name).join(', ')}',
+        content: Text('유치원에 도착해 선생님께 인계한 것으로 모두 하차 처리할까요?\n(하원 중에는 아이마다 [하차]를 눌러 받은 분을 기록해 주세요)\n\n${boarded.map((s) => s.name).join(', ')}',
             style: const TextStyle(fontSize: 15, height: 1.4)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
@@ -345,7 +432,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
               Navigator.pop(ctx);
               var ok = 0;
               for (final s in boarded) {
-                if (await _dropStudent(s, reload: false)) ok++;
+                if (await _dropStudent(s, reload: false, handover: const {'type': 'ACADEMY'})) ok++;
               }
               _loadAllData();
               if (ok > 0) _flutterTts.speak('$ok명 하차 완료');

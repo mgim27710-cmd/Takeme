@@ -134,9 +134,12 @@ export class TeacherController {
 
   /** 하차 처리 */
   @Post('drop-student')
-  async dropStudent(@AuthEmail() email: string, @Body() body: { studentId: number }) {
+  async dropStudent(
+    @AuthEmail() email: string,
+    @Body() body: { studentId: number; handover?: { type?: string; name?: string; relation?: string } },
+  ) {
     if (!email) throw new BadRequestException('이메일이 필요합니다.');
-    return this.teacherService.dropStudent(email, Number(body?.studentId));
+    return this.teacherService.dropStudent(email, Number(body?.studentId), body?.handover);
   }
 
   /** 아직 하차 처리 안 된(타고 있는) 원아 */
