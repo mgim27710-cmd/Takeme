@@ -7,7 +7,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/route_model.dart';
 import 'naver_route_map.dart';
-import 'package:geolocator/geolocator.dart';
 import 'kakao_map_view_stub.dart' if (dart.library.html) 'kakao_map_view_web.dart';
 
 class KakaoMapView extends StatefulWidget {
@@ -59,7 +58,6 @@ class KakaoMapView extends StatefulWidget {
 class _KakaoMapViewState extends State<KakaoMapView> {
   WebViewController? _controller;
   final GlobalKey _webMapKey = GlobalKey();
-  bool _isMapLoaded = false;
 
   @override
   void initState() {
@@ -70,9 +68,6 @@ class _KakaoMapViewState extends State<KakaoMapView> {
         ..setNavigationDelegate(
           NavigationDelegate(
             onPageFinished: (_) {
-              setState(() {
-                _isMapLoaded = true;
-              });
               _updateMapData();
             },
           ),
@@ -203,46 +198,18 @@ class _KakaoMapViewState extends State<KakaoMapView> {
     );
   }
 
-  bool _locating = false;
-
-  /// [내 위치] 버튼: 위치 권한을 확인하고 현재 위치를 작은 빨간 점으로 표시
-  Future<void> _goToMyLocation() async {
-    if (_locating) return;
-    void tell(String msg) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-    }
-
-    _locating = true;
-    try {
-      if (!await Geolocator.isLocationServiceEnabled()) {
-        tell('휴대폰 위치(GPS)가 꺼져 있습니다. 설정에서 위치를 켜 주세요.');
-        return;
-      }
-      var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
-      if (perm == LocationPermission.denied) {
-        tell('위치 권한을 허용해야 내 위치를 볼 수 있어요.');
-        return;
-      }
-      if (perm == LocationPermission.deniedForever) {
-        tell('위치 권한이 꺼져 있습니다. 휴대폰 설정 > 앱 > 위치에서 허용해 주세요.');
-        await Geolocator.openAppSettings();
-        return;
-      }
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 10)),
+  /// [버스 위치] 버튼: 버스가 운행 중이면 지금 버스 위치로 이동, 아니면 안내
+  void _goToBus() {
+    if (widget.busLat == null || widget.busLng == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('지금 운행 중인 버스가 없어요. 운행이 시작되면 버스 위치를 볼 수 있어요.')),
       );
-      if (!mounted) return;
-      if (_useNaver) {
-        await _naverKey.currentState?.showMyLocation(pos.latitude, pos.longitude);
-      } else {
-        _runJs('if (window.showMe) { window.showMe(${pos.latitude}, ${pos.longitude}); }');
-      }
-    } catch (e) {
-      tell('현재 위치를 가져오지 못했습니다. 잠시 후 다시 눌러 주세요.');
-    } finally {
-      _locating = false;
+      return;
+    }
+    if (_useNaver) {
+      _naverKey.currentState?.focusBus();
+    } else {
+      _runJs('if (window.focusBus) { window.focusBus(); }');
     }
   }
 
@@ -676,12 +643,12 @@ class _KakaoMapViewState extends State<KakaoMapView> {
               ),
               const SizedBox(height: 8),
 
-              // 내 위치 (작은 빨간 점으로 표시)
+              // 버스 위치 (운행 중일 때 지금 버스가 있는 곳으로)
               _buildControlBtn(
-                icon: Icons.my_location,
-                tooltip: '내 위치 보기',
-                iconColor: const Color(0xFFEF4444),
-                onTap: _goToMyLocation,
+                icon: Icons.directions_bus_filled,
+                tooltip: '버스 위치 보기',
+                iconColor: const Color(0xFFF59E0B),
+                onTap: _goToBus,
               ),
             ],
           ),

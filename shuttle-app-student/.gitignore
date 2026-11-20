@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# 지도 인증키 등 (flutter run --dart-define-from-file=secrets.json)
+secrets.json

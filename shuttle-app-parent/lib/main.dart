@@ -5,6 +5,7 @@ import 'services/api_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/parent/parent_home_screen.dart';
 import 'utils/network_helper.dart';
+import 'services/local_push.dart';
 import 'widgets/naver_route_map.dart';
 
 void main() async {
@@ -14,6 +15,8 @@ void main() async {
   await ApiService().init();
   // 네이버 지도 (실행 시 --dart-define=NAVER_MAP_CLIENT_ID=... 이 있고 인증되면 사용, 아니면 기존 지도)
   await initNaverMap();
+  // 휴대폰 알림창 알림 (운행 시작·도착 N분 전·하차)
+  await LocalPush.instance.init();
   runApp(const TakeMeParentApp());
 }
 

@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
-import 'package:socket_io_client/socket_io_client.dart' as io_client;
 
 import '../../config.dart';
 import '../../driver/driver_navigator.dart';
@@ -63,7 +62,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
   String? _escortConfirmedAt;
   DateTime? _drivingStartTime;
   bool _escort5MinWarned = false;
-  io_client.Socket? _escortSocket;
+  /// 공용 소켓(SocketService)에 붙인 이 화면 리스너들 (dispose 때 해제)
+  final List<VoidCallback> _socketUnsubs = [];
   String? _changeBannerText;
   Timer? _changeBannerTimer;
   int _unreadMessengerCount = 0; // 메신저 안 읽은 수 (TakeMe 알림 포함)
@@ -94,9 +94,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     _flutterTts.setSpeechRate(0.5);
     _map = NavMapController();
     _nav = DriverNavigator(_map)..init();
-    _initEscortSocket();
     _loadUnreadCount();
     SocketService().connect(ApiService().token); // 이미 연결돼 있으면 그대로 둔다 (리스너를 등록하려면 소켓이 먼저 필요)
+    _initEscortSocket();
     SocketService().onRoomUpdated((_) {
       if (mounted) _loadUnreadCount();
     });
@@ -126,26 +126,24 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     });
   }
 
+  /// 동승 확인·통학 변경 승인·알림 이벤트.
+  /// 예전에는 이 화면이 서버에 소켓을 하나 더 열었다(기사 앱이 같은 서버에 연결 2개). 이제 공용 소켓 하나만 쓴다.
   void _initEscortSocket() {
-    final token = ApiService().token;
-    _escortSocket = io_client.io(
-      AppConfig.apiHost,
-      io_client.OptionBuilder()
-          .setTransports(['websocket'])
-          .enableReconnection()
-          .setReconnectionDelay(2000)
-          .setAuth({'token': token})
-          .build(),
-    );
-
-    _escortSocket!.onConnect((_) {
-      if (_nav.vehicleId != null) {
-        _escortSocket!.emit('joinVehicleRoom', {'vehicleId': _nav.vehicleId});
+    final sock = SocketService();
+    // 차량 번호를 알게 되면 차량 방에 들어간다 (동승 확인 알림은 차량 방으로 온다). 재연결 때는 SocketService 가 다시 들어간다.
+    void joinIfReady() {
+      final vid = _nav.vehicleId;
+      if (vid != null && sock.joinedVehicleId != vid) {
+        sock.joinVehicleRoom(vid);
+        _fetchEscortStatus();
       }
-      _fetchEscortStatus();
-    });
+    }
+    _nav.addListener(joinIfReady);
+    _socketUnsubs.add(() => _nav.removeListener(joinIfReady));
+    joinIfReady();
+    _fetchEscortStatus();
 
-    _escortSocket!.on('escortConfirmed', (data) {
+    _socketUnsubs.add(sock.listen('escortConfirmed', (data) {
       if (!mounted) return;
       _loadUnreadCount();
       setState(() {
@@ -155,9 +153,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
         }
       });
       _flutterTts.speak('동승 확인되었습니다: ${_escortName ?? "차량선생님"}');
-    });
+    }));
 
-    _escortSocket!.on('changeRequestDecided', (data) {
+    _socketUnsubs.add(sock.listen('changeRequestDecided', (data) {
       if (!mounted) return;
       _loadUnreadCount();
       if (data is Map) {
@@ -187,11 +185,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
           );
         }
       }
-    });
+    }));
 
-    _escortSocket!.on('notificationReceived', (_) {
+    _socketUnsubs.add(sock.listen('notificationReceived', (_) {
       if (mounted) _loadUnreadCount();
-    });
+    }));
   }
 
   Future<void> _fetchEscortStatus() async {
@@ -227,8 +225,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     _notificationPollTimer?.cancel();
     _changeBannerTimer?.cancel();
     _flutterTts.stop();
-    _escortSocket?.disconnect();
-    _escortSocket = null;
+    for (final off in _socketUnsubs) {
+      off();
+    }
+    _socketUnsubs.clear();
     _nav.dispose();
     super.dispose();
   }
@@ -923,14 +923,20 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
             color: const Color(0xD9FFFFFF),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Text(
-            '${_nav.speedKmh}',
-            style: TextStyle(
-              fontSize: 32,
-              fontWeight: FontWeight.w900,
-              color: over ? _C.red : _C.slate800,
-              height: 1.05,
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '${_nav.speedKmh}',
+                style: TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.w900,
+                  color: over ? _C.red : _C.slate800,
+                  height: 1.05,
+                ),
+              ),
+              const Text('km/h', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: _C.slate500, height: 1.0)),
+            ],
           ),
         ),
       ],
@@ -1512,7 +1518,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                          if ((kDebugMode || _nav.testMode) && _nav.currentProvider != null) ...[
+                          if (_nav.testMode && _nav.currentProvider != null) ...[
                             const SizedBox(height: 2),
                             Text(
                               '[길찾기: ${_nav.currentProvider == 'kakao' ? '카카오' : _nav.currentProvider == 'naver' ? '네이버' : '폴백'}]',

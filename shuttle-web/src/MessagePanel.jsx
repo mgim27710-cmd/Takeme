@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from './map/MapKit';
 import L from 'leaflet';
 import { API_BASE_URL } from './config';
 import { formatTeacherName } from './utils/teacherUtil';
@@ -795,6 +795,53 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       setIsCreatingRoom(false);
     }
   };
+
+  // ───── 공지사항 읽음 확인 (원장·데스크) ─────
+  const [noticeStatus, setNoticeStatus] = useState(null); // null = 닫힘, [] = 목록
+  const [noticeStatusLoading, setNoticeStatusLoading] = useState(false);
+  const [noticeStatusError, setNoticeStatusError] = useState('');
+  const [openNoticeId, setOpenNoticeId] = useState(null);
+  const [remindingId, setRemindingId] = useState(null);
+
+  const loadNoticeReadStatus = async () => {
+    if (!activeRoom) return;
+    setNoticeStatusLoading(true);
+    setNoticeStatusError('');
+    if (noticeStatus === null) setNoticeStatus([]);
+    try {
+      const res = await fetch(`${API_BASE_URL}/chat/rooms/${activeRoom.id}/notice-read-status`, { headers: getAuthHeaders() });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setNoticeStatusError((data && data.message) || `읽음 현황을 불러오지 못했습니다. (${res.status})`);
+        return;
+      }
+      setNoticeStatus(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setNoticeStatusError('네트워크 오류로 읽음 현황을 불러오지 못했습니다.');
+    } finally {
+      setNoticeStatusLoading(false);
+    }
+  };
+
+  const handleRemindUnread = async (messageId, count) => {
+    if (!window.confirm(`이 공지를 아직 읽지 않은 ${count}명에게 TakeMe 알림으로 다시 알릴까요?`)) return;
+    setRemindingId(messageId);
+    try {
+      const res = await fetch(`${API_BASE_URL}/chat/messages/${messageId}/remind-unread`, { method: 'POST', headers: getAuthHeaders() });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data?.message || `다시 알리지 못했습니다. (${res.status})`);
+        return;
+      }
+      alert(`${data?.sentCount ?? 0}명에게 다시 알렸습니다. (알림 설정에서 공지를 끈 사람은 받지 않습니다)`);
+    } catch (e) {
+      alert('네트워크 오류로 다시 알리지 못했습니다.');
+    } finally {
+      setRemindingId(null);
+    }
+  };
+
+  const roleKr = (r) => ({ PARENT: '학부모', STUDENT: '학생', DRIVER: '기사', TEACHER: '교사', HOMEROOM_TEACHER: '담임', SHUTTLE_TEACHER: '차량선생님' }[r] || '');
 
   const handleSendMessage = async () => {
     const text = inputText.trim();
@@ -1681,6 +1728,68 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
         isClosing ? 'animate-slide-out-right' : 'animate-slide-in-right'
       }`}
     >
+      {noticeStatus !== null && (
+        <div className="fixed inset-0 z-[3000] bg-black/40 flex items-center justify-center p-4" onClick={() => setNoticeStatus(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-800">공지 읽음 확인</h3>
+                <p className="text-xs text-slate-500 mt-0.5">학부모·학생·교사·기사 중 누가 읽었는지 보여줍니다 (최근 20개).</p>
+              </div>
+              <button type="button" onClick={() => setNoticeStatus(null)} className="text-slate-400 hover:text-slate-600 text-sm font-bold">닫기</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {noticeStatusLoading && <p className="text-sm text-slate-500">불러오는 중...</p>}
+              {noticeStatusError && <p className="text-sm font-bold text-red-600">{noticeStatusError}</p>}
+              {!noticeStatusLoading && !noticeStatusError && noticeStatus.length === 0 && (
+                <p className="text-sm text-slate-500">아직 올린 공지가 없습니다.</p>
+              )}
+              {noticeStatus.map((n) => (
+                <div key={n.messageId} className="border border-slate-200 rounded-xl p-3">
+                  <p className="text-sm text-slate-800 line-clamp-2 whitespace-pre-wrap">{n.text}</p>
+                  <div className="flex items-center justify-between mt-2 gap-2">
+                    <span className="text-xs text-slate-500">
+                      {formatMessageTime(n.createdAt)} ·{' '}
+                      <b className={n.readCount === n.total ? 'text-emerald-600' : 'text-amber-600'}>읽음 {n.readCount}/{n.total}</b>
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {n.unread.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setOpenNoticeId(openNoticeId === n.messageId ? null : n.messageId)}
+                          className="text-xs font-bold text-slate-600 hover:text-slate-800 px-2 py-1 rounded-lg border border-slate-200"
+                        >
+                          안 읽은 사람 {n.unread.length}명
+                        </button>
+                      )}
+                      {n.unread.length > 0 && (
+                        <button
+                          type="button"
+                          disabled={remindingId === n.messageId}
+                          onClick={() => handleRemindUnread(n.messageId, n.unread.length)}
+                          className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 px-2 py-1 rounded-lg"
+                        >
+                          {remindingId === n.messageId ? '보내는 중...' : '다시 알림'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {openNoticeId === n.messageId && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {n.unread.map((u) => (
+                        <span key={u.id} className="text-[11px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md">
+                          {u.name}{roleKr(u.role) && ` · ${roleKr(u.role)}`}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ============================================================ */}
       {/* LEFT COLUMN: 채팅방 목록 (Kakao Style Room List) */}
       {/* ============================================================ */}
@@ -1909,6 +2018,19 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
               </div>
 
               <div className="flex items-center gap-2">
+                {/* 공지 읽음 확인: 공지사항 방에서 원장·데스크만 */}
+                {isCurrentRoomNotificationSystem && !isPersonalNotificationRoom &&
+                  ['ACADEMY_ADMIN', 'SUPER_ADMIN', 'DESK_STAFF'].includes(myUser.role) && (
+                  <button
+                    type="button"
+                    onClick={loadNoticeReadStatus}
+                    className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2 px-3 rounded-xl shadow-sm transition-all"
+                    title="공지별로 누가 읽었는지 보고, 안 읽은 사람에게만 다시 알립니다"
+                  >
+                    공지 읽음 확인
+                  </button>
+                )}
+
                 {/* 결재 신청 버튼 (선생-관리자 사이의 내부 절차이므로 학부모 계정 및 학부모와의 대화방에서는 숨김) */}
                 {!isCurrentRoomNotificationSystem && !isParent && !isChatWithParent && (
                   <button

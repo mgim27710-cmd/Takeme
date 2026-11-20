@@ -267,10 +267,32 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
     }
   }
 
+  // 마지막으로 지도에 적용한 카메라 값 (거의 같으면 다시 적용하지 않는다)
+  double? _appliedLat;
+  double? _appliedLng;
+  double? _appliedZoom;
+  double? _appliedBearing;
+  double? _appliedYRatio;
+
   /// 카메라 이동 (애니메이션 없음, 이전 호출이 끝나기 전에는 건너뜀)
+  ///
+  /// 매 프레임 확대·방향이 아주 조금씩 바뀐 값을 그대로 넣으면 네이버 지도가 지명·도로명 글자 배치를
+  /// 매번 다시 계산해서 운행 중 글자가 깜빡인다. 그래서 확대는 0.05 단위, 방향은 1도 단위로 맞추고,
+  /// 눈에 띄게 바뀌었을 때만 카메라를 움직인다.
   Future<void> _moveCamera(LatLng? target, double? zoom, double? bearing, double yRatio) async {
     final map = _map;
     if (!_canUseMap || map == null || _cameraBusy) return;
+    if (zoom != null) zoom = (zoom * 20).roundToDouble() / 20;
+    if (bearing != null) bearing = bearing.roundToDouble() % 360;
+    final ry = (yRatio * 100).roundToDouble() / 100;
+    final same = target != null &&
+        _appliedLat != null &&
+        (target.latitude - _appliedLat!).abs() < 0.000002 && // 약 20cm
+        (target.longitude - _appliedLng!).abs() < 0.000002 &&
+        (zoom == null || zoom == _appliedZoom) &&
+        (bearing == null || bearing == _appliedBearing) &&
+        ry == _appliedYRatio;
+    if (same) return;
     _cameraBusy = true;
     try {
       final update = NCameraUpdate.withParams(
@@ -279,9 +301,16 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
         bearing: bearing,
         tilt: 0,
       )
-        ..setPivot(NPoint(0.5, yRatio))
+        ..setPivot(NPoint(0.5, ry))
         ..setAnimation(animation: NCameraAnimation.none, duration: Duration.zero);
       await map.updateCamera(update);
+      if (target != null) {
+        _appliedLat = target.latitude;
+        _appliedLng = target.longitude;
+      }
+      if (zoom != null) _appliedZoom = zoom;
+      if (bearing != null) _appliedBearing = bearing;
+      _appliedYRatio = ry;
     } catch (e) {
       debugPrint('[nav_map_naver] moveCamera error: $e');
     } finally {
@@ -311,19 +340,22 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
     if (pts.isEmpty) return;
 
     try {
+      _appliedLat = null;
       await map.updateCamera(
         NCameraUpdate.withParams(bearing: 0, tilt: 0)
           ..setPivot(NPoint.relativeCenter)
           ..setAnimation(animation: NCameraAnimation.none, duration: Duration.zero),
       );
       final bounds = NLatLngBounds.from(pts);
+      _appliedLat = null;
       await map.updateCamera(
         NCameraUpdate.fitBounds(bounds, padding: const EdgeInsets.all(50))
           ..setAnimation(animation: NCameraAnimation.none, duration: Duration.zero),
       );
       final cam = await map.getCameraPosition();
       if (cam.zoom > 16.0) {
-        await map.updateCamera(
+        _appliedLat = null;
+      await map.updateCamera(
           NCameraUpdate.withParams(zoom: 16.0)
             ..setAnimation(animation: NCameraAnimation.none, duration: Duration.zero),
         );
@@ -333,10 +365,56 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
     }
   }
 
+  Object? _priSrc;
+  int _priSrcLen = -1;
+  List<LatLng>? _priCache;
+
+  /// 기본 경로 좌표 (경로가 바뀔 때만 새로 변환한다. 예전에는 매 프레임 전체 경로를 다시 변환했다)
   List<LatLng>? _getPrimaryRouteLatLngs() {
-    if (_impl.primaryRoute == null) return null;
-    return _impl.primaryRoute!.map((e) => LatLng(e.lat, e.lng)).toList();
+    final src = _impl.primaryRoute;
+    if (src == null) return null;
+    if (!identical(src, _priSrc) || src.length != _priSrcLen) {
+      _priSrc = src;
+      _priSrcLen = src.length;
+      _priCache = src.map((e) => LatLng(e.lat, e.lng)).toList(growable: false);
+      _overlapLastI = null;
+      _uturnNearest.clear();
+    }
+    return _priCache;
   }
+
+  /// 경로의 j번째 구간이 같은 도로를 반대로 되돌아오는 구간이면, 그 짝이 되는 앞쪽 구간 번호 중 가장 큰 값 (없으면 -1).
+  /// 경로가 바뀔 때 한 번만 계산한다 (예전에는 0.25초마다 경로 전체를 이중 반복으로 계산해서 운행 중 버벅였다).
+  List<int>? _overlapLastI;
+
+  List<int> _overlapTable(List<LatLng> pri) {
+    final cached = _overlapLastI;
+    if (cached != null && cached.length == pri.length) return cached;
+    final n = pri.length;
+    final res = List<int>.filled(n, -1);
+    if (n >= 4) {
+      final bearings = List<double>.generate(n - 1, (i) => _bearingBetween(pri[i], pri[i + 1]));
+      for (int j = 2; j < n - 1; j++) {
+        final midJ = LatLng((pri[j].latitude + pri[j + 1].latitude) / 2, (pri[j].longitude + pri[j + 1].longitude) / 2);
+        for (int i = j - 2; i >= 0; i--) {
+          // 대략 40m 보다 먼 구간은 계산하지 않는다
+          final a = pri[i], b = pri[i + 1];
+          final minLat = math.min(a.latitude, b.latitude) - 0.0004, maxLat = math.max(a.latitude, b.latitude) + 0.0004;
+          final minLng = math.min(a.longitude, b.longitude) - 0.0005, maxLng = math.max(a.longitude, b.longitude) + 0.0005;
+          if (midJ.latitude < minLat || midJ.latitude > maxLat || midJ.longitude < minLng || midJ.longitude > maxLng) continue;
+          if (_angleDiff(bearings[i], bearings[j]) >= 135.0 && _pointToSegDist(midJ, a, b) <= 18.0) {
+            res[j] = i;
+            break;
+          }
+        }
+      }
+    }
+    _overlapLastI = res;
+    return res;
+  }
+
+  /// 유턴 지점별 가장 가까운 경로 점 번호 (경로가 바뀔 때만 다시 계산)
+  final Map<int, int> _uturnNearest = {};
 
   List<LatLng>? _getAlternateRouteLatLngs() {
     if (_impl.alternateRoute == null) return null;
@@ -550,26 +628,17 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
     final pri = _getPrimaryRouteLatLngs();
     if (pri == null || pri.length < 2) return specs;
 
-    final activePoints = _getActiveRoutePoints();
     final int currentSegIdx = _isNavigating ? _impl.routeProgressIndex.clamp(0, pri.length - 1) : 0;
+    final activePoints = _getActiveRoutePoints();
 
     // 같은 도로를 반대 방향으로 다시 지나는 구간(유턴/복귀) 검출
+    // activePoints[k] (k>=1) 는 경로의 (offset + k) 번째 점. 짝 구간이 아직 지나지 않은 쪽에 있을 때만 겹침으로 본다.
     final isOverlap = List<bool>.filled(math.max(0, activePoints.length - 1), false);
-    if (activePoints.length >= 4) {
-      for (int j = 2; j < activePoints.length - 1; j++) {
-        final bj = _bearingBetween(activePoints[j], activePoints[j + 1]);
-        final midJ = LatLng(
-          (activePoints[j].latitude + activePoints[j + 1].latitude) / 2,
-          (activePoints[j].longitude + activePoints[j + 1].longitude) / 2,
-        );
-        for (int i = 0; i < j - 1; i++) {
-          final bi = _bearingBetween(activePoints[i], activePoints[i + 1]);
-          if (_angleDiff(bi, bj) >= 135.0 && _pointToSegDist(midJ, activePoints[i], activePoints[i + 1]) <= 18.0) {
-            isOverlap[j] = true;
-            break;
-          }
-        }
-      }
+    final table = _overlapTable(pri);
+    final offset = _isNavigating ? currentSegIdx : 0;
+    for (int k = 2; k < activePoints.length - 1; k++) {
+      final j = offset + k;
+      if (j < table.length && table[j] >= offset) isOverlap[k] = true;
     }
 
     final returnRuns = <List<LatLng>>[];
@@ -682,6 +751,7 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
   }
 
   final Map<String, String> _overlayKeys = {};
+  final Map<String, DateTime> _overlayUpdatedAt = {};
 
   Future<void> _syncOverlays() async {
     final map = _map;
@@ -734,7 +804,11 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
           _overlays[spec.id] = ov;
           _overlayKeys[spec.id] = key;
           await map.addOverlay(ov);
-        } else if (_overlayKeys[spec.id] != key || _isNavigating) {
+        } else if (_overlayKeys[spec.id] != key &&
+            (!_isNavigating || DateTime.now().difference(_overlayUpdatedAt[spec.id] ?? DateTime(2000)).inMilliseconds >= 1000)) {
+          // 차가 움직이면 선의 시작점이 계속 바뀌므로 1초에 한 번까지만 좌표를 다시 보낸다 (전체 좌표 전송이 무겁다)
+          _overlayUpdatedAt[spec.id] = DateTime.now();
+          // 경로선은 실제로 바뀌었을 때만 다시 넣는다 (같은 선을 0.25초마다 다시 넣으면 지도 글자가 깜빡임)
           if (existing is NPathOverlay) {
             existing.setCoords(coords);
             existing.setColor(spec.color);
@@ -811,15 +885,18 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
           final u = uturns[k];
           final uLatLng = LatLng(u.lat, u.lng);
           if (_isNavigating && pri != null && pri.isNotEmpty) {
-            int nearestIdx = 0;
-            double minDist = double.infinity;
-            for (int j = 0; j < pri.length; j++) {
-              final d = _distanceMeters(uLatLng, pri[j]);
-              if (d < minDist) {
-                minDist = d;
-                nearestIdx = j;
+            final nearestIdx = _uturnNearest.putIfAbsent(k, () {
+              int best = 0;
+              double minDist = double.infinity;
+              for (int j = 0; j < pri.length; j++) {
+                final d = _distanceMeters(uLatLng, pri[j]);
+                if (d < minDist) {
+                  minDist = d;
+                  best = j;
+                }
               }
-            }
+              return best;
+            });
             if (nearestIdx < curProgress - 1) continue;
           }
           final id = 'uturn_$k';
@@ -840,7 +917,7 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
 
       // 내 위치 차량 마커
       if (_hasInitialLocation && _meMarker == null) {
-        final icon = await _image('car', const _CarMarkerWidget(screenAngleDeg: 0), const Size(48, 48));
+        final icon = await _image('car2', const _CarMarkerWidget(screenAngleDeg: 0), const Size(60, 60));
         if (!_canUseMap) return;
         final m = NMarker(
           id: 'me',
@@ -884,8 +961,18 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
 
   // ───────────────────────── 빌드 ─────────────────────────
 
+  /// 지도 위젯은 한 번만 만든다.
+  /// 예전에는 화면이 다시 그려질 때마다(기사 화면은 GPS 가 올 때마다) 새 옵션을 만들었는데, 시작 위치에
+  /// 매 순간 바뀌는 현재 위치가 들어 있어서 매번 '옵션이 바뀌었다'고 판단되어 네이버 지도에 설정 전체를
+  /// 다시 보냈다. 이것이 운행 중 버벅임과 지도 글자 깜빡임의 주원인이었다.
+  Widget? _mapWidget;
+
   @override
   Widget build(BuildContext context) {
+    return _mapWidget ??= RepaintBoundary(child: _buildMap());
+  }
+
+  Widget _buildMap() {
     return NaverMap(
       options: NaverMapViewOptions(
         initialCameraPosition: NCameraPosition(
@@ -906,7 +993,7 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
         locationButtonEnable: false,
         indoorLevelPickerEnable: false,
         logoAlign: NLogoAlign.leftBottom,
-        logoMargin: const EdgeInsets.only(left: 12, bottom: 12),
+        logoMargin: const EdgeInsets.only(left: 16, bottom: 92), // 왼쪽 아래 원형 버튼 위
         minZoom: 6,
         maxZoom: 19,
         customStyleId: naverMapStyleId.isEmpty ? null : naverMapStyleId,
@@ -928,6 +1015,7 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
           _isFollowing = false;
           _targetYRatio = 0.5;
           _impl.onUserDrag?.call();
+          _appliedLat = null; // 다시 따라가기 할 때 카메라를 반드시 움직이도록
         }
       },
       onCustomStyleLoadFailed: (e) => debugPrint('[nav_map_naver] custom style load failed: $e'),
@@ -943,17 +1031,18 @@ class _CarMarkerWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 48,
-      height: 48,
+    // 그림자가 그림 크기(60) 안에 다 들어가도록 원은 46 으로 (예전에는 그림자가 잘려서 회색 네모가 보였다)
+    return Center(child: Container(
+      width: 46,
+      height: 46,
       decoration: const BoxDecoration(
         shape: BoxShape.circle,
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Color(0x52000000),
-            blurRadius: 10,
-            offset: Offset(0, 3),
+            color: Color(0x40000000),
+            blurRadius: 5,
+            offset: Offset(0, 2),
           ),
         ],
       ),
@@ -966,7 +1055,7 @@ class _CarMarkerWidget extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 

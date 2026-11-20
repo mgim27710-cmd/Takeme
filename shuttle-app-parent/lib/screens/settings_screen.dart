@@ -20,6 +20,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isDeletingAccount = false;
   String _userPhone = '';
   bool _notifyShuttleOperation = true;
+  int _arrivalNoticeMinutes = 2; // 도착 알림 시점: 2분 전 / 5분 전 / 0 끄기
   bool _notifyBoardPost = true;
 
   @override
@@ -40,6 +41,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final child = await ApiService().getMyChild(user.email);
       final profile = await ApiService().getParentProfile();
       final notiSettings = await ApiService().getNotificationSettings();
+      final arrivalMin = await ApiService().getArrivalNoticeMinutes();
       if (mounted) {
         setState(() {
           _childInfo = child;
@@ -50,6 +52,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _userPhone = profile['phone'].toString();
           }
           _notifyShuttleOperation = notiSettings['notifyShuttleOperation'] ?? true;
+          _arrivalNoticeMinutes = arrivalMin;
           _notifyBoardPost = notiSettings['notifyBoardPost'] ?? true;
         });
       }
@@ -500,6 +503,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               setState(() => _notifyBoardPost = val);
                               await ApiService().updateNotificationSettings(notifyBoardPost: val);
                             },
+                          ),
+                          const Divider(height: 1, color: Color(0xFFF1F5F9)),
+                          // 버스 도착 알림을 언제 받을지 (서버가 이 시점에 TakeMe 알림을 한 번 보낸다)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('버스 도착 알림 시점', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF0F172A))),
+                                const SizedBox(height: 2),
+                                const Text('버스가 우리 아이 정류장에 도착하기 몇 분 전에 알려드릴까요?', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 8,
+                                  children: [
+                                    for (final opt in const [(5, '5분 전'), (2, '2분 전'), (0, '받지 않기')])
+                                      ChoiceChip(
+                                        label: Text(opt.$2, style: const TextStyle(fontSize: 14)),
+                                        selected: _arrivalNoticeMinutes == opt.$1,
+                                        onSelected: (_) async {
+                                          final before = _arrivalNoticeMinutes;
+                                          setState(() => _arrivalNoticeMinutes = opt.$1);
+                                          final ok = await ApiService().setArrivalNoticeMinutes(opt.$1);
+                                          if (!ok && mounted) {
+                                            setState(() => _arrivalNoticeMinutes = before);
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(content: Text('저장하지 못했습니다. 잠시 후 다시 시도해 주세요.')),
+                                            );
+                                          }
+                                        },
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),

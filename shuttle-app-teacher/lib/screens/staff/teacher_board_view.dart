@@ -1653,7 +1653,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                   child: Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
-                                      Row(
+                                      Expanded(child: Row(
                                         children: [
                                           CircleAvatar(
                                             radius: 18,
@@ -1664,16 +1664,21 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                             ),
                                           ),
                                           const SizedBox(width: 10),
-                                          Column(
+                                          Expanded(child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              Row(
+                                              // 이름과 배지: 폭이 모자라면 다음 줄로
+                                              Wrap(
+                                                spacing: 4,
+                                                runSpacing: 2,
+                                                crossAxisAlignment: WrapCrossAlignment.center,
                                                 children: [
                                                   Text(
                                                     post['authorName'] ?? '기관 관리자',
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
                                                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E293B)),
                                                   ),
-                                                  const SizedBox(width: 6),
                                                   Container(
                                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                     decoration: BoxDecoration(
@@ -1693,7 +1698,6 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                                       ),
                                                     ),
                                                   ),
-                                                  const SizedBox(width: 4),
                                                   Container(
                                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                     decoration: BoxDecoration(
@@ -1723,9 +1727,10 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                                 style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
                                               ),
                                             ],
-                                          ),
+                                          )),
                                         ],
-                                      ),
+                                      )),
+                                      const SizedBox(width: 6),
 
                                       // Class badge & 3-dots Menu
                                       Row(

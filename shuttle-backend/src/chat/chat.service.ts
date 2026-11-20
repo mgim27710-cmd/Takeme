@@ -1,6 +1,6 @@
-import { Injectable, BadRequestException, ForbiddenException, forwardRef, Inject } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, forwardRef, Inject, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, LessThanOrEqual } from 'typeorm';
 import { ChatRoom, ChatRoomType } from '../entities/chat-room.entity';
 import { ChatRoomMember } from '../entities/chat-room-member.entity';
 import { ChatMessage } from '../entities/chat-message.entity';
@@ -27,7 +27,7 @@ export const LEGACY_ACADEMY_NOTI_ROOM_NAME = '실시간 알림 채널';
 const ACADEMY_NOTI_ROOM_NAMES = [ACADEMY_NOTI_ROOM_NAME, LEGACY_ACADEMY_NOTI_ROOM_NAME];
 
 @Injectable()
-export class ChatService {
+export class ChatService implements OnModuleInit {
   constructor(
     @InjectRepository(ChatRoom) private roomRepo: Repository<ChatRoom>,
     @InjectRepository(ChatRoomMember) private memberRepo: Repository<ChatRoomMember>,
@@ -197,6 +197,56 @@ export class ChatService {
   }
 
   /** 대화방 참여자 목록을 조회해서 해당 방 참여자에게만 메시지 전송 */
+  // ============================================================
+  // 교사 방해금지 시간: 평일 08:00~18:00(한국 시간) 밖에 학부모·학생이 교사에게 보낸 메시지는
+  // 다음 평일 아침 8시에 교사에게 전달한다 (교권 보호)
+  // ============================================================
+  static readonly TEACHER_HOURS = { start: 8, end: 18 };
+  private static readonly TEACHER_ROLES = new Set<string>(['TEACHER', 'HOMEROOM_TEACHER', 'SHUTTLE_TEACHER']);
+
+  /** 방해금지 시간이면 전달할 시각(다음 평일 08:00 KST), 아니면 null */
+  private teacherDndDeliverAt(sender: User, room: ChatRoom): Date | null {
+    if (sender.role !== UserRole.PARENT && sender.role !== UserRole.STUDENT) return null;
+    const hasTeacher = (room.members || []).some(m => m.user && ChatService.TEACHER_ROLES.has(String(m.user.role)));
+    if (!hasTeacher) return null;
+    const { start, end } = ChatService.TEACHER_HOURS;
+    const kstNow = new Date(Date.now() + 9 * 3600 * 1000);
+    const isWeekday = (d: Date) => d.getUTCDay() >= 1 && d.getUTCDay() <= 5;
+    const h = kstNow.getUTCHours();
+    if (isWeekday(kstNow) && h >= start && h < end) return null;
+    // 오늘(평일, 아침 8시 전)이면 오늘 8시, 아니면 다음 평일 8시
+    const day = new Date(Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate()));
+    if (!(isWeekday(kstNow) && h < start)) day.setUTCDate(day.getUTCDate() + 1);
+    while (!isWeekday(day)) day.setUTCDate(day.getUTCDate() + 1);
+    // KST 08:00 = UTC 전날 23:00
+    return new Date(day.getTime() + (start - 9) * 3600 * 1000);
+  }
+
+  onModuleInit() {
+    // 1분마다 전달 시각이 된 메시지를 교사에게 보낸다 (스크립트 실행을 막지 않도록 unref)
+    const timer = setInterval(() => {
+      this.releaseDeferredMessages().catch(err => console.error('[ChatService] deferred release error:', err));
+    }, 60 * 1000);
+    (timer as any).unref?.();
+  }
+
+  async releaseDeferredMessages() {
+    const due = await this.messageRepo.find({
+      where: { deliverAt: LessThanOrEqual(new Date()) },
+      relations: { sender: true, room: true },
+      take: 200,
+    });
+    for (const m of due) {
+      m.deliverAt = null;
+      await this.messageRepo.save(m);
+      if (m.room?.id) {
+        await this.roomRepo.update(m.room.id, { updatedAt: new Date() });
+        await this.broadcastToRoom(m.room.id, m);
+      }
+    }
+    return due.length;
+  }
+
   private async broadcastToRoom(roomId: number, message: any) {
     const room = await this.roomRepo.findOne({ where: { id: roomId }, relations: { members: { user: true } } });
     const ids = (room?.members || []).map(m => m.user?.id).filter(Boolean) as number[];
@@ -640,6 +690,7 @@ export class ChatService {
           .leftJoin('msg.sender', 'sender')
           .where('room.id IN (:...roomIds)', { roomIds })
           .andWhere('(sender.id IS NULL OR sender.id != :userId)', { userId })
+          .andWhere('(msg.deliverAt IS NULL OR msg.deliverAt <= :nowDeliver)', { nowDeliver: new Date() })
           .getMany();
 
         for (const m of candidateMsgs) {
@@ -657,7 +708,16 @@ export class ChatService {
     }
 
     for (const room of rooms) {
-      (room as any).latestMessage = latestMap.get(room.id) || null;
+      let latest: any = latestMap.get(room.id) || null;
+      if (latest?.deliverAt && new Date(latest.deliverAt) > new Date() && latest.sender?.id !== userId) {
+        latest = await this.messageRepo.createQueryBuilder('m')
+          .leftJoinAndSelect('m.sender', 'sender')
+          .where('m.roomId = :rid', { rid: room.id })
+          .andWhere('(m.deliverAt IS NULL OR m.deliverAt <= :now OR sender.id = :uid)', { now: new Date(), uid: userId })
+          .orderBy('m.id', 'DESC')
+          .getOne();
+      }
+      (room as any).latestMessage = latest || null;
       (room as any).unreadCount = unreadMap.get(room.id) || 0;
     }
 
@@ -715,6 +775,79 @@ export class ChatService {
     });
 
     return deduplicatedRooms;
+  }
+
+  // ============================================================
+  // 공지사항 읽음 확인 (원장·데스크·통합 관리자)
+  // ============================================================
+
+  /** 공지를 받아야 하는 사람: 그 기관의 학부모·학생·교사·기사 (원장·데스크 제외) */
+  private async getNoticeAudience(academyId: number) {
+    const users = await this.userRepo.find({ where: { academyId }, select: { id: true, name: true, email: true, role: true } });
+    const audienceRoles = new Set<string>([
+      UserRole.PARENT, UserRole.STUDENT, UserRole.DRIVER,
+      UserRole.TEACHER, UserRole.HOMEROOM_TEACHER, UserRole.SHUTTLE_TEACHER,
+    ]);
+    return users.filter(u => audienceRoles.has(u.role));
+  }
+
+  /** 공지사항 방이고, 요청한 사람이 그 기관 원장·데스크(또는 통합 관리자)인지 확인 */
+  private async assertNoticeManager(roomId: number, requester: { sub: number; role: string; academyId: number | null }) {
+    const room = await this.roomRepo.findOne({ where: { id: roomId } });
+    if (!room || room.type !== ChatRoomType.NOTIFICATION_SYSTEM || room.name === PERSONAL_NOTI_ROOM_NAME) {
+      throw new BadRequestException('공지사항 방이 아닙니다.');
+    }
+    const isSuper = requester.role === UserRole.SUPER_ADMIN;
+    const isManager = requester.role === UserRole.ACADEMY_ADMIN || requester.role === UserRole.DESK_STAFF;
+    if (!isSuper && !(isManager && requester.academyId && room.academyId === Number(requester.academyId))) {
+      throw new ForbiddenException('공지 읽음 확인은 원장님(데스크)만 볼 수 있습니다.');
+    }
+    if (!room.academyId) throw new BadRequestException('기관 정보가 없는 공지사항 방입니다.');
+    return room;
+  }
+
+  /** 최근 공지별 읽음 현황: 읽은 수/대상 수, 안 읽은 사람 */
+  async getNoticeReadStatus(roomId: number, requester: { sub: number; role: string; academyId: number | null }) {
+    const room = await this.assertNoticeManager(roomId, requester);
+    const audience = await this.getNoticeAudience(room.academyId!);
+    const messages = await this.messageRepo.find({
+      where: { room: { id: roomId } },
+      order: { createdAt: 'DESC' },
+      take: 20,
+      relations: { sender: true },
+    });
+    return messages.map(m => {
+      const reads = new Set((m.readBy || []).map(Number));
+      const unread = audience.filter(u => u.id !== m.sender?.id && !reads.has(u.id));
+      const total = audience.filter(u => u.id !== m.sender?.id).length;
+      return {
+        messageId: m.id,
+        text: m.text,
+        createdAt: m.createdAt,
+        total,
+        readCount: total - unread.length,
+        unread: unread.map(u => ({ id: u.id, name: u.name || u.email, role: u.role })),
+      };
+    });
+  }
+
+  /** 안 읽은 사람에게만 TakeMe 알림으로 다시 알림 */
+  async remindUnreadNotice(messageId: number, requester: { sub: number; role: string; academyId: number | null }) {
+    const msg = await this.messageRepo.findOne({ where: { id: messageId }, relations: { room: true, sender: true } });
+    if (!msg?.room) throw new BadRequestException('공지를 찾을 수 없습니다.');
+    const room = await this.assertNoticeManager(msg.room.id, requester);
+    const audience = await this.getNoticeAudience(room.academyId!);
+    const reads = new Set((msg.readBy || []).map(Number));
+    const targets = audience.filter(u => u.id !== msg.sender?.id && !reads.has(u.id)).map(u => u.id);
+    if (targets.length === 0) return { success: true, sentCount: 0 };
+    const preview = (msg.text || '').replace(/\s+/g, ' ').slice(0, 60);
+    const sent = await this.sendSystemNotificationToUsers(
+      targets,
+      '공지 확인 부탁드려요',
+      `아직 확인하지 않은 공지가 있어요: "${preview}${(msg.text || '').length > 60 ? '…' : ''}" 메신저의 공지사항에서 확인해 주세요.`,
+      { type: 'notice' },
+    );
+    return { success: true, sentCount: sent.length };
   }
 
   /** 내 목록에서 대화방 맨 위 고정/해제 (TakeMe 알림은 항상 맨 위라 고정 대상이 아님) */
@@ -777,11 +910,12 @@ export class ChatService {
 
     const memberCount = room?.members?.length && room.members.length > 0 ? room.members.length : 2;
 
-    const messages = await this.messageRepo.find({
+    const nowForDeliver = new Date();
+    const messages = (await this.messageRepo.find({
       where: { room: { id: roomId } },
       order: { createdAt: 'ASC' },
       relations: { sender: true },
-    });
+    })).filter(m => !m.deliverAt || m.deliverAt <= nowForDeliver || (currentUserId && m.sender?.id === currentUserId));
 
     const updatedIds: number[] = [];
     if (currentUserId) {
@@ -968,6 +1102,7 @@ export class ChatService {
     const memberCount = room?.members?.length && room.members.length > 0 ? room.members.length : 2;
     const initialUnreadCount = Math.max(0, memberCount - 1);
 
+    const deliverAt = this.teacherDndDeliverAt(user, room);
     const message = this.messageRepo.create({
       room: { id: roomId },
       sender: user,
@@ -975,6 +1110,7 @@ export class ChatService {
       type: type || 'TEXT',
       payload: payload || null,
       readBy: [user.id],
+      deliverAt,
     });
     const saved = await this.messageRepo.save(message);
 
@@ -991,9 +1127,13 @@ export class ChatService {
         memberCount,
         unreadCount: initialUnreadCount,
       };
-      const memberIds = (room?.members || []).map(m => m.user?.id).filter(Boolean) as number[];
+      // 방해금지 시간이면 지금은 보낸 사람에게만 (교사에게는 전달 시각에 releaseDeferredMessages 가 보냄)
+      const memberIds = deliverAt
+        ? [user.id]
+        : ((room?.members || []).map(m => m.user?.id).filter(Boolean) as number[]);
       this.chatGateway.broadcastMessageToRoom(roomId, payloadMessage, memberIds);
     }
+    if (deliverAt) return fullMessage;
 
     // [교사/기사 앱 수신함 즉시 동기화]
     // 관리자(원장님) 또는 다른 사용자가 메시지를 보냈을 때,

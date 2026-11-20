@@ -245,8 +245,12 @@ export class ParentService {
         take: 30,
       });
 
+      const myChildNames = [student.adminDisplayName, student.name].filter(Boolean) as string[];
       for (const n of vNotis) {
         const msg = n.message || '';
+        // 차량 운행 기록(다른 원아의 탑승·하차·결석 기록)은 학부모에게 보여주지 않는다. 우리 아이 기록만
+        if (n.type === 'VEHICLE_LOG' && !myChildNames.some(nm => msg.includes(nm))) continue;
+        if (msg.includes('원생') && !myChildNames.some(nm => msg.includes(nm))) continue;
         let type = 'NOTICE';
         let title = '공지 알림';
         if (msg.includes('운행이 시작')) {

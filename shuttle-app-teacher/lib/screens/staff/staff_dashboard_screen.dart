@@ -297,11 +297,11 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   }
 
   /// 하차 처리 (탑승한 원아만)
-  Future<bool> _dropStudent(StudentModel student, {bool reload = true}) async {
+  Future<bool> _dropStudent(StudentModel student, {bool reload = true, Map<String, String>? handover}) async {
     try {
       final res = await ApiService().postWithAuth(
         Uri.parse('${AppConfig.apiHost}/teacher/drop-student'),
-        jsonEncode({'studentId': student.id}),
+        jsonEncode({'studentId': student.id, 'handover': ?handover}),
       );
       if (res.statusCode == 200 || res.statusCode == 201) {
         if (reload) _loadAllData();
@@ -325,10 +325,175 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     return false;
   }
 
+  /// 하차 + 보호자 인수 확인: 누가 아이를 받았는지 고른 뒤 하차 처리
   Future<void> _handleDropStudent(StudentModel student) async {
-    if (await _dropStudent(student)) {
+    final handover = await _askHandover(student);
+    if (handover == null) return; // 취소
+    if (await _dropStudent(student, handover: handover)) {
       _flutterTts.speak('${student.name} 원아 하차 완료');
     }
+  }
+
+  /// "누가 아이를 받았나요?" 주보호자 / 비상연락망 / 다른 분(이름·관계 입력) / 유치원 선생님께 인계
+  Future<Map<String, String>?> _askHandover(StudentModel st) async {
+    String join(List<String> parts) => parts.where((e) => e.trim().isNotEmpty).join(' ');
+    final primary = join([st.parentRelation, st.parentName]);
+    final emergency = join([st.emergencyContactRelation, st.emergencyContactName]);
+
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        Widget option(String value, IconData icon, String title, String? sub) => ListTile(
+              minTileHeight: 60,
+              leading: Icon(icon, size: 26, color: const Color(0xFF7C3AED)),
+              title: Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              subtitle: sub == null || sub.isEmpty ? null : Text(sub, style: const TextStyle(fontSize: 14)),
+              onTap: () => Navigator.pop(ctx, value),
+            );
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 4),
+                child: Text('${st.name} 원아를 누가 받았나요?',
+                    style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900)),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text('인수한 분을 기록하고 학부모님께 함께 알려드려요.',
+                    style: TextStyle(fontSize: 14, color: Color(0xFF64748B))),
+              ),
+              option('PRIMARY', Icons.person, '주보호자', primary.isEmpty ? null : primary),
+              if (st.emergencyContactPhone.isNotEmpty || emergency.isNotEmpty)
+                option('EMERGENCY', Icons.contact_phone, '비상연락망 보호자', emergency.isEmpty ? null : emergency),
+              option('OTHER', Icons.person_add_alt_1, '다른 분', '이름과 관계를 입력해요'),
+              option('ACADEMY', Icons.school, '유치원 선생님께 인계', '등원해서 유치원에 도착했을 때'),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+    if (choice == null || !mounted) return null;
+    if (choice != 'OTHER') return {'type': choice};
+
+    final nameCtrl = TextEditingController();
+    final relCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('아이를 받은 분'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              autofocus: true,
+              style: const TextStyle(fontSize: 17),
+              decoration: const InputDecoration(labelText: '이름 (필수)', hintText: '예: 김철수'),
+            ),
+            TextField(
+              controller: relCtrl,
+              style: const TextStyle(fontSize: 17),
+              decoration: const InputDecoration(labelText: '관계', hintText: '예: 이모, 학원 선생님'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('하차 처리')),
+        ],
+      ),
+    );
+    if (ok != true) return null;
+    if (nameCtrl.text.trim().isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('아이를 받은 분의 이름을 입력해 주세요.')));
+      }
+      return null;
+    }
+    return {'type': 'OTHER', 'name': nameCtrl.text.trim(), 'relation': relCtrl.text.trim()};
+  }
+
+  bool _bulkBoarding = false;
+
+  /// 탑승 처리할 수 있는 원아인지 (아직 타지 않았고 결석·하차가 아닌 아이)
+  bool _canBoard(StudentModel s) => !s.boarded && !s.absent && !s.dropped;
+
+  /// 명단 전체 선택 / 전체 해제
+  void _toggleSelectAll(List<StudentModel> runList) {
+    final ids = runList.map((s) => s.id).toSet();
+    setState(() {
+      if (ids.isNotEmpty && ids.every(_selectedStudentIds.contains)) {
+        _selectedStudentIds.removeAll(ids);
+      } else {
+        _selectedStudentIds.addAll(ids);
+      }
+    });
+  }
+
+  /// 선택한 원아를 한 번에 탑승 처리 (이미 탔거나 결석·하차한 아이는 건너뜀, 실패한 아이는 알려줌)
+  Future<void> _boardSelected(List<StudentModel> runList) async {
+    if (_bulkBoarding) return;
+    final targets = runList.where((s) => _selectedStudentIds.contains(s.id) && _canBoard(s)).toList();
+    if (targets.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('선택한 원아는 이미 탑승했거나 결석·하차 처리되어 탑승할 아이가 없어요.')),
+      );
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('${targets.length}명 탑승 처리', style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: Text('선택한 원아를 탑승 처리할까요?\n\n${targets.map((s) => s.name).join(', ')}',
+            style: const TextStyle(fontSize: 15, height: 1.4)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981)),
+            child: const Text('탑승 처리', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final user = ApiService().currentUser;
+    if (user == null) return;
+
+    setState(() => _bulkBoarding = true);
+    final failed = <String>[];
+    for (final s in targets) {
+      try {
+        final res = await ApiService().manualBoardStudent(user.email, s.id, '');
+        if (res['success'] != true) failed.add(s.name);
+      } catch (_) {
+        failed.add(s.name);
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _bulkBoarding = false;
+      // 탑승에 성공한 아이는 선택을 푼다 (실패한 아이는 남겨 두어 다시 시도할 수 있게)
+      for (final s in targets) {
+        if (!failed.contains(s.name)) _selectedStudentIds.remove(s.id);
+      }
+    });
+    _loadAllData();
+    final done = targets.length - failed.length;
+    if (done > 0) _flutterTts.speak('$done명 탑승 완료');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(failed.isEmpty
+            ? '$done명 탑승 처리했습니다.'
+            : '$done명 탑승 처리했고, ${failed.length}명은 실패했어요: ${failed.join(', ')}. 다시 시도해 주세요.'),
+        backgroundColor: failed.isEmpty ? const Color(0xFF10B981) : Colors.red,
+      ),
+    );
   }
 
   void _confirmDropAll(List<StudentModel> boarded) {
@@ -336,7 +501,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('${boarded.length}명 모두 하차', style: const TextStyle(fontWeight: FontWeight.bold)),
-        content: Text('타고 있는 원아를 모두 하차 처리할까요?\n\n${boarded.map((s) => s.name).join(', ')}',
+        content: Text('유치원에 도착해 선생님께 인계한 것으로 모두 하차 처리할까요?\n(하원 중에는 아이마다 [하차]를 눌러 받은 분을 기록해 주세요)\n\n${boarded.map((s) => s.name).join(', ')}',
             style: const TextStyle(fontSize: 15, height: 1.4)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
@@ -345,7 +510,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
               Navigator.pop(ctx);
               var ok = 0;
               for (final s in boarded) {
-                if (await _dropStudent(s, reload: false)) ok++;
+                if (await _dropStudent(s, reload: false, handover: const {'type': 'ACADEMY'})) ok++;
               }
               _loadAllData();
               if (ok > 0) _flutterTts.speak('$ok명 하차 완료');
@@ -664,6 +829,14 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     }
   }
 
+  /// 성별 표시: 서버 값이 MALE/FEMALE/M/F/남/여 어느 것이어도 '남'/'여'로
+  String _genderKr(String g) {
+    final v = g.trim().toUpperCase();
+    if (v == 'FEMALE' || v == 'F' || v == '여' || v == '여자') return '여';
+    if (v == 'MALE' || v == 'M' || v == '남' || v == '남자') return '남';
+    return g;
+  }
+
   /// 원아 상태(색 + 문구 + 아이콘): 탑승 전 / 탑승 / 하차 / 결석
   ({String label, IconData icon, Color fg, Color bg, Color border}) _statusOf(StudentModel st) {
     if (st.absent) {
@@ -765,12 +938,29 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                       ],
                     ),
                     const SizedBox(height: 2),
-                    Text(
-                      st.boardingLocation ?? st.address,
-                      style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    // 주보호자 연락처 (없으면 '없음' 표시). 누르면 상세 화면에서 바로 전화할 수 있다
+                    Builder(builder: (_) {
+                      final phone = (_parentPhones[st.id] ?? '').trim();
+                      return Row(
+                        children: [
+                          Icon(phone.isEmpty ? Icons.phone_disabled : Icons.phone,
+                              size: 14, color: phone.isEmpty ? const Color(0xFFCBD5E1) : const Color(0xFF64748B)),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              phone.isEmpty ? '주보호자 연락처 없음' : '주보호자 $phone',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: phone.isEmpty ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                                fontWeight: phone.isEmpty ? FontWeight.w400 : FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      );
+                    }),
                   ],
                 ),
               ),
@@ -800,13 +990,17 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
           required VoidCallback onPressed,
           bool outlined = false,
         }) {
-          final child = Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 22, color: outlined ? color : Colors.white),
-              const SizedBox(width: 6),
-              Text(label, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: outlined ? color : Colors.white)),
-            ],
+          // 버튼 폭이 좁으면 글자·아이콘을 함께 줄여서 넘치지 않게 한다
+          final child = FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 22, color: outlined ? color : Colors.white),
+                const SizedBox(width: 6),
+                Text(label, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: outlined ? color : Colors.white)),
+              ],
+            ),
           );
           final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(12));
           return SizedBox(
@@ -887,7 +1081,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                   ),
                   if (st.gender != null) ...[
                     const SizedBox(height: 4),
-                    Text('성별: ${st.gender}', style: const TextStyle(fontSize: 16, color: Color(0xFF475569))),
+                    Text('성별: ${_genderKr(st.gender!)}', style: const TextStyle(fontSize: 16, color: Color(0xFF475569))),
                   ],
                   const SizedBox(height: 4),
                   Text(
@@ -1179,6 +1373,42 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                                 ),
                             ],
                           ),
+                          // 전체 선택 + 선택한 원아 탑승
+                          Builder(builder: (_) {
+                            final allSelected = runList.isNotEmpty && runList.every((s) => _selectedStudentIds.contains(s.id));
+                            final boardable = runList.where((s) => _selectedStudentIds.contains(s.id) && _canBoard(s)).length;
+                            return Row(
+                              children: [
+                                TextButton.icon(
+                                  onPressed: runList.isEmpty ? null : () => _toggleSelectAll(runList),
+                                  icon: Icon(allSelected ? Icons.check_box : Icons.check_box_outline_blank,
+                                      size: 22, color: const Color(0xFF2563EB)),
+                                  label: Text(allSelected ? '전체 해제' : '전체 선택',
+                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF2563EB))),
+                                  style: TextButton.styleFrom(minimumSize: const Size(48, 44), padding: const EdgeInsets.symmetric(horizontal: 8)),
+                                ),
+                                const Spacer(),
+                                if (_selectedStudentIds.isNotEmpty)
+                                  SizedBox(
+                                    height: 44,
+                                    child: ElevatedButton.icon(
+                                      onPressed: (_bulkBoarding || boardable == 0) ? null : () => _boardSelected(runList),
+                                      icon: _bulkBoarding
+                                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                          : const Icon(Icons.check_circle, size: 20),
+                                      label: Text(boardable == 0 ? '탑승할 아이 없음' : '선택한 $boardable명 탑승',
+                                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFF10B981),
+                                        foregroundColor: Colors.white,
+                                        disabledBackgroundColor: const Color(0xFFCBD5E1),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            );
+                          }),
                           if (availableRuns.length > 1) ...[
                             const SizedBox(height: 6),
                             SingleChildScrollView(

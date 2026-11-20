@@ -630,6 +630,7 @@ export class TeacherService {
       }
 
       const noti = this.notificationRepository.create({
+        type: 'VEHICLE_LOG', // 원장 화면 운행 기록용 (차량선생님·기사 알림 숫자에 넣지 않음)
         vehicle: vehicle,
         message: adminLogMessage
       });
@@ -643,7 +644,8 @@ export class TeacherService {
     student: Student,
     vehicle: Vehicle | null,
     status: 'BOARDED' | 'WAITING' | 'ABSENT' | 'DROPPED',
-    tagMethod: string = 'MANUAL'
+    tagMethod: string = 'MANUAL',
+    handoverTo?: string,
   ) {
     const parent = student.parentUser;
     const studentName = student.adminDisplayName || student.name;
@@ -682,7 +684,7 @@ export class TeacherService {
         this.chatService.sendSystemNotificationToUser(
           parent.id,
           '셔틀 하차 안내',
-          `${studentName} 원아가 ${vehicle ? vehicle.busNumber + '호차에서 ' : ''}안전하게 내렸습니다.`,
+          `${studentName} 원아가 ${vehicle ? vehicle.busNumber + '호차에서 ' : ''}안전하게 내렸습니다.${handoverTo ? ` (인수: ${handoverTo})` : ''}`,
           { type: 'shuttle' },
         ).catch(() => {});
       }
@@ -723,6 +725,7 @@ export class TeacherService {
     }
     if (vehicle) {
       const adminNoti = this.notificationRepository.create({
+        type: 'VEHICLE_LOG', // 원장 화면 운행 기록용 (차량선생님·기사 알림 숫자에 넣지 않음)
         vehicle: vehicle,
         message: msg
       });
@@ -756,6 +759,7 @@ export class TeacherService {
     const vehicle = await this.findAssignedVehicle(user.id);
     if (vehicle) {
       const adminNoti = this.notificationRepository.create({
+        type: 'VEHICLE_LOG', // 원장 화면 운행 기록용 (차량선생님·기사 알림 숫자에 넣지 않음)
         vehicle: vehicle,
         message: `${vehicle.busNumber}호차 ${student.adminDisplayName || student.name} 원생 ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 결석/건너뛰기`
       });
@@ -779,7 +783,16 @@ export class TeacherService {
   }
 
   /** 하차 처리: 이번 운행에 탄(탑승) 원아만 하차로 바꾼다 */
-  async dropStudent(email: string, studentId: number) {
+  /**
+   * 하차 처리 + 보호자 인수 확인
+   * handover: 누가 아이를 받았는지
+   *   PRIMARY(주보호자) / EMERGENCY(비상연락망=보호자2) / OTHER(다른 사람, 이름 필수) / ACADEMY(유치원 선생님께 인계)
+   */
+  async dropStudent(
+    email: string,
+    studentId: number,
+    handover?: { type?: string; name?: string; relation?: string },
+  ) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
     const vehicle = await this.findAssignedVehicle(user.id);
@@ -792,17 +805,42 @@ export class TeacherService {
       throw new BadRequestException('탑승한 원아만 하차 처리할 수 있습니다.');
     }
 
+    // 인수자 정리: 주보호자·비상연락망은 원아 정보(보호자1·보호자2)에서 이름·관계를 채운다
+    let raw: any = student.raw;
+    if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch { raw = {}; } }
+    raw = raw && typeof raw === 'object' ? { ...raw } : {};
+    const type = String(handover?.type || '').toUpperCase();
+    let who = '';
+    if (type === 'PRIMARY') {
+      who = [raw['보호자1 관계'] || raw['보호자 관계'], raw['보호자1 성함'] || raw['보호자 성함'] || student.parentUser?.name]
+        .filter(Boolean).join(' ') || '주보호자';
+    } else if (type === 'EMERGENCY') {
+      who = [raw['보호자2 관계'] || raw['보호자2관계'], raw['보호자2 성함'] || raw['보호자2성함']].filter(Boolean).join(' ') || '비상연락망 보호자';
+    } else if (type === 'OTHER') {
+      const n = String(handover?.name || '').trim();
+      if (!n) throw new BadRequestException('아이를 받은 분의 이름을 입력해 주세요.');
+      who = [String(handover?.relation || '').trim(), n].filter(Boolean).join(' ');
+    } else if (type === 'ACADEMY') {
+      who = '유치원 선생님께 인계';
+    }
+
     student.boardStatus = 'DROPPED';
+    if (who) {
+      raw['최근 인수'] = { type, who, at: new Date().toISOString(), by: user.name || email, vehicle: vehicle.busNumber };
+      student.raw = raw;
+    }
     await this.studentRepository.save(student);
 
     const name = student.adminDisplayName || student.name;
+    const whoText = who ? ` · 인수: ${who}` : '';
     await this.notificationRepository.save(this.notificationRepository.create({
+      type: 'VEHICLE_LOG', // 원장 화면 운행 기록용 (차량선생님·기사 알림 숫자에 넣지 않음)
       vehicle,
-      message: `${vehicle.busNumber}호차 ${name} 원생 ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} 하차 완료`,
+      message: `${vehicle.busNumber}호차 ${name} 원생 ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} 하차 완료${whoText}`,
     }));
-    await this.appendBoardingLog(vehicle.id, student.id, `${name} 하차`, 'MANUAL');
-    await this.notifyParentBoardStatus(student, vehicle, 'DROPPED', 'MANUAL');
-    return { success: true, studentName: name };
+    await this.appendBoardingLog(vehicle.id, student.id, `${name} 하차${whoText}`, 'MANUAL');
+    await this.notifyParentBoardStatus(student, vehicle, 'DROPPED', 'MANUAL', who);
+    return { success: true, studentName: name, handover: who || null };
   }
 
   /** 아직 차에 타고 있는 원아 (탑승 처리 후 하차 처리가 안 된 원아) */
@@ -1136,6 +1174,7 @@ export class TeacherService {
         await this.studentRepository.save(st);
 
         const absentNoti = this.notificationRepository.create({
+          type: 'VEHICLE_LOG', // 원장 화면 운행 기록용 (차량선생님·기사 알림 숫자에 넣지 않음)
           vehicle: vehicle,
           message: `${vehicle.busNumber}호차 ${st.adminDisplayName || st.name} 원생 미탑승(자동 결석 처리)`
         });
@@ -1184,6 +1223,7 @@ export class TeacherService {
 
     // 1. Create a Notification for the academy admin
     this.notificationRepository.save(this.notificationRepository.create({
+      type: 'VEHICLE_LOG', // 원장 화면 운행 기록용 (차량선생님·기사 알림 숫자에 넣지 않음)
       vehicle: vehicle,
       message: `${student.adminDisplayName || student.name} 학생이 셔틀버스에 탑승했습니다. ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 탑승 완료 (QR)`
     }));

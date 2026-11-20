@@ -95,7 +95,11 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
 
   void _enterRoom(Map<String, dynamic> room) async {
     final roomId = room['id'] as int;
-    final title = room['displayName'] ?? _normalizeRoomName(room['name']) ?? '대화방';
+    final isAlertRoom = room['type'] == 'NOTIFICATION_SYSTEM';
+    // 알림 방은 방 이름(TakeMe 알림/공지사항)으로 보여준다
+    final title = isAlertRoom
+        ? (_normalizeRoomName(room['name']) ?? '알림')
+        : (room['displayName'] ?? _normalizeRoomName(room['name']) ?? '대화방');
     final targetUser = room['targetUser'] as Map<String, dynamic>?;
 
     await Navigator.push(
@@ -104,7 +108,9 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
         builder: (_) => ChatConversationScreen(
           roomId: roomId,
           title: title,
-          targetUser: targetUser,
+          targetUser: isAlertRoom ? null : targetUser,
+          isSystem: isAlertRoom,
+          room: room,
         ),
       ),
     );
@@ -208,7 +214,11 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
   Widget _buildRoomItem(Map<String, dynamic> room) {
     final displayName = room['displayName'] ?? _normalizeRoomName(room['name']) ?? '대화방';
     final latestMsg = room['latestMessage'] as Map<String, dynamic>?;
-    final latestText = latestMsg?['text']?.toString() ?? '대화 내용이 없습니다.';
+    // 알림 방에 아직 메시지가 없으면 무슨 방인지 설명을 보여준다
+    final latestText = latestMsg?['text']?.toString() ??
+        (room['type'] == 'NOTIFICATION_SYSTEM'
+            ? (room['name'] == 'TakeMe 알림' ? '나와 우리 아이 관련 알림이 오는 방이에요' : '유치원 전체 공지가 오는 방이에요')
+            : '대화 내용이 없습니다.');
     final timeStr = _formatRoomTime(latestMsg?['createdAt'] ?? room['updatedAt'] ?? room['createdAt']);
     final unreadCount = room['unreadCount'] as int? ?? 0;
     final targetUser = room['targetUser'] as Map<String, dynamic>?;

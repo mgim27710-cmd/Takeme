@@ -469,9 +469,25 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
     );
   }
 
+  /// 알림 전용 방(TakeMe 알림·공지사항)인지: 메시지 입력을 막는다
+  bool get _isAlertOnlyRoom =>
+      widget.isSystem ||
+      widget.title == 'TakeMe 알림' ||
+      widget.title == '공지사항' ||
+      widget.room?['type'] == 'SYSTEM' ||
+      widget.room?['type'] == 'NOTIFICATION_SYSTEM' ||
+      widget.room?['name'] == 'TakeMe 알림' ||
+      widget.room?['isSystem'] == true;
+
   @override
   Widget build(BuildContext context) {
-    final subText = widget.targetUser?['subText'] ?? '';
+    // 알림 전용 방: TakeMe 알림(나에게 온 알림) / 공지사항(기관 전체 공지)
+    final isNoticeRoom = widget.title == '공지사항' ||
+        (widget.room?['type'] == 'NOTIFICATION_SYSTEM' && widget.room?['name'] != 'TakeMe 알림');
+    final isAlertRoom = _isAlertOnlyRoom;
+    final subText = isAlertRoom
+        ? (isNoticeRoom ? '유치원 전체 공지가 오는 방이에요' : '나와 우리 아이 관련 알림이 오는 방이에요')
+        : (widget.targetUser?['subText'] ?? '');
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -483,7 +499,25 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         titleSpacing: 0,
-        title: Column(
+        title: Row(
+          children: [
+            if (isAlertRoom) ...[
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: isNoticeRoom ? const Color(0xFFECFDF5) : const Color(0xFF0F172A),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  isNoticeRoom ? Icons.campaign_rounded : Icons.notifications_active,
+                  color: isNoticeRoom ? const Color(0xFF059669) : Colors.white,
+                  size: 19,
+                ),
+              ),
+              const SizedBox(width: 10),
+            ],
+            Expanded(child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
@@ -503,6 +537,8 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                   color: Color(0xFF64748B),
                 ),
               ),
+          ],
+        )),
           ],
         ),
         actions: [
@@ -569,7 +605,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                         ),
             ),
             // Bottom Input Bar or System Room Notice
-            if (widget.isSystem || widget.title == 'TakeMe 알림' || widget.room?['type'] == 'SYSTEM' || widget.room?['name'] == 'TakeMe 알림' || widget.room?['isSystem'] == true)
+            if (isAlertRoom)
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -583,7 +619,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                     Icon(Icons.lock_outline, size: 16, color: Color(0xFF64748B)),
                     SizedBox(width: 8),
                     Text(
-                      '시스템 알림 전용 대화방입니다. 답장을 보낼 수 없습니다.',
+                      '알림 전용 방이라 메시지를 보낼 수 없어요.',
                       style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B), fontWeight: FontWeight.w600),
                     ),
                   ],
