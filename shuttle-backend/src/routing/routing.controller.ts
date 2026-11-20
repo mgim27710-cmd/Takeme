@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Param, Query, Res, Delete, Headers, Put, UseGuards, Req, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Query, Res, Delete, Headers, Put, UseGuards, Req, BadRequestException, SetMetadata } from '@nestjs/common';
 import type { Response } from 'express';
 import { RoutingService } from './routing.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -638,6 +638,7 @@ export class RoutingController {
     return this.routingService.deleteDocument(id);
   }
 
+  @SetMetadata('isPublic', true)
   @Get('legal-expiry')
   async getLegalExpiries(
     @Query('academyId') academyId?: string,
@@ -646,6 +647,7 @@ export class RoutingController {
     return this.routingService.getLegalExpiries(academyId ? Number(academyId) : undefined, educationLevel);
   }
 
+  @SetMetadata('isPublic', true)
   @Post('legal-expiry')
   async saveLegalExpiry(
     @Body() body: any,

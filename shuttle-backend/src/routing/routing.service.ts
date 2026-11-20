@@ -4554,7 +4554,11 @@ export class RoutingService {
       qb.andWhere('(exp.academyId = :academyId OR vehicle.academyId = :academyId)', { academyId });
     }
     if (educationLevel && educationLevel !== 'ALL') {
-      qb.andWhere('exp.educationLevel = :educationLevel', { educationLevel });
+      if (educationLevel === '유치원' || educationLevel === '유치부') {
+        qb.andWhere('exp.educationLevel IN (:...edus)', { edus: ['유치원', '유치부'] });
+      } else {
+        qb.andWhere('exp.educationLevel = :educationLevel', { educationLevel });
+      }
     }
     const list = await qb.getMany();
     const result: Record<string, any> = {};

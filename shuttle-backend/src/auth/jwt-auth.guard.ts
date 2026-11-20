@@ -22,6 +22,10 @@ export class JwtAuthGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    const isPublic = this.reflector?.getAllAndOverride<boolean>('isPublic', [
+      context.getHandler(),
+      context.getClass(),
+    ]);
     const req = context.switchToHttp().getRequest();
     const header: string | undefined = req.headers['authorization'];
     let token: string | undefined = header && header.startsWith('Bearer ') ? header.slice(7) : undefined;
@@ -29,6 +33,7 @@ export class JwtAuthGuard implements CanActivate {
       token = req.query.token;
     }
     if (!token) {
+      if (isPublic) return true;
       throw new UnauthorizedException('로그인이 필요합니다.');
     }
 

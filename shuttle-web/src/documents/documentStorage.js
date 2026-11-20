@@ -264,6 +264,11 @@ export function formatFileSize(bytes) {
 // 교육 · 보험 · 신고증명서 만료일 알림 관리 시스템 (서버 동기화 지원)
 // --------------------------------------------------------------------------
 
+function getAuthHeaders() {
+  const token = localStorage.getItem('takeme_token') || localStorage.getItem('token') || '';
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
 export function getExpiryStorageKey(educationLevel) {
   const currentEdu = educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
   return `takeme_legal_expiry_records_${currentEdu}`;
@@ -274,11 +279,18 @@ export function getExpiryRecords(educationLevel) {
   const currentEdu = educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
   
   // Background sync with server
-  fetch(`${API_BASE_URL}/routing/legal-expiry?educationLevel=${encodeURIComponent(currentEdu)}`)
+  fetch(`${API_BASE_URL}/routing/legal-expiry?educationLevel=${encodeURIComponent(currentEdu)}`, {
+    headers: { ...getAuthHeaders() }
+  })
     .then(r => r.json())
     .then(serverRecords => {
       if (serverRecords && typeof serverRecords === 'object' && Object.keys(serverRecords).length > 0) {
-        localStorage.setItem(key, JSON.stringify(serverRecords));
+        const prev = localStorage.getItem(key);
+        const next = JSON.stringify(serverRecords);
+        if (prev !== next) {
+          localStorage.setItem(key, next);
+          window.dispatchEvent(new CustomEvent('takeme_expiry_changed'));
+        }
       }
     })
     .catch(() => {});
@@ -293,6 +305,24 @@ export function getExpiryRecords(educationLevel) {
     console.error('만료일 정보 로드 실패:', err);
     return {};
   }
+}
+
+export async function loadExpiryRecordsAsync(educationLevel) {
+  const key = getExpiryStorageKey(educationLevel);
+  const currentEdu = educationLevel || localStorage.getItem('takeme_selected_education_level') || '유치원';
+  try {
+    const res = await fetch(`${API_BASE_URL}/routing/legal-expiry?educationLevel=${encodeURIComponent(currentEdu)}`, {
+      headers: { ...getAuthHeaders() }
+    });
+    if (res.ok) {
+      const serverRecords = await res.json();
+      if (serverRecords && typeof serverRecords === 'object' && Object.keys(serverRecords).length > 0) {
+        localStorage.setItem(key, JSON.stringify(serverRecords));
+        return serverRecords;
+      }
+    }
+  } catch (_) {}
+  return getExpiryRecords(educationLevel);
 }
 
 export function saveExpiryRecord(busId, record, educationLevel) {
@@ -312,7 +342,10 @@ export function saveExpiryRecord(busId, record, educationLevel) {
     // Save to server DB
     fetch(`${API_BASE_URL}/routing/legal-expiry`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
       body: JSON.stringify({
         vehicleId: Number(busId),
         educationLevel: currentEdu,

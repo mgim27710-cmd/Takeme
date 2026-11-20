@@ -7,6 +7,7 @@ import {
   previewDocumentInNewTab,
   formatFileSize,
   getExpiryRecords,
+  loadExpiryRecordsAsync,
   saveExpiryRecord,
   calculateDday,
   getOverallExpirySummary,
@@ -86,9 +87,12 @@ export default function DocumentManager({
   const fileInputRef = useRef(null);
 
   // Load expiry records & calculate summary & sync staff app notifications (학제별 격리)
-  const loadExpiry = () => {
-    const recs = getExpiryRecords(currentEducationLevel);
-    setExpiryRecords(recs);
+  const loadExpiry = async () => {
+    let recs = getExpiryRecords(currentEducationLevel);
+    if (!recs || Object.keys(recs).length === 0) {
+      recs = await loadExpiryRecordsAsync(currentEducationLevel);
+    }
+    setExpiryRecords(recs || {});
     const sum = getOverallExpirySummary(buses, currentEducationLevel);
     setExpirySummary(sum);
     const staffSync = syncStaffExpiryNotifications(buses, currentEducationLevel);
