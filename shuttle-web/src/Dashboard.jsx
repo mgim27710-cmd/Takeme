@@ -8028,7 +8028,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                   </div>
                 </div>
               ` : isPureNotRiding ? `
-                <div style="background-color: ${NOT_RIDING_COLOR}; width: 14px; height: 14px; border-radius: 50%; border: ${isHomonym ? '2.5px solid #f59e0b' : '2px solid white'}; box-shadow: ${isHomonym ? '0 0 0 2px #fde68a, 0 2px 4px rgba(0,0,0,0.35)' : '0 2px 4px rgba(0,0,0,0.35)'};" title="${isOutside6kmNotRiding ? '구역 외 미탑승 원아' : '미탑승 원아'}"></div>
+                <div style="background-color: ${NOT_RIDING_COLOR}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.35);" title="${isOutside6kmNotRiding ? '구역 외 미탑승 원아' : '미탑승 원아'}"></div>
               ` : isOneTimeStudent ? `
                 <div style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">
                   <span style="position: absolute; inset: -2px; border-radius: 50%; background: #f43f5e; opacity: 0.45; animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
@@ -8037,7 +8037,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                   </div>
                 </div>
               ` : `
-                <div style="background-color: ${stColor}; width: 14px; height: 14px; border-radius: 50%; border: ${isHomonym ? '2.5px solid #f59e0b' : '2px solid white'}; box-shadow: ${isHomonym ? '0 0 0 2px #fde68a, 0 0 8px rgba(245,158,11,0.8)' : '0 2px 4px rgba(0,0,0,0.4)'};" title="${isHomonym ? `[동명이인: ${homonym.label}] ${st.name}` : st.name}"></div>
+                <div style="background-color: ${stColor}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.4);" title="${isHomonym ? `[동명이인: ${homonym.label}] ${st.name}` : st.name}"></div>
               `,
               iconSize: (isApprovalPending || isHighlighted) ? [44, 44] : needsExtraBus ? [26, 26] : isOneTimeStudent ? [24, 24] : [14, 14],
               iconAnchor: (isApprovalPending || isHighlighted) ? [22, 22] : needsExtraBus ? [13, 13] : isOneTimeStudent ? [12, 12] : [7, 7]
