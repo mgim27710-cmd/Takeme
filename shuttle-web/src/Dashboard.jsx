@@ -857,7 +857,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       imageUrl: '',
       symbol: '🏫',
       bgColor: '#2563eb',
-      showLabel: true,
+      showLabel: false,
       customEmoji: ''
     };
   });
@@ -2724,7 +2724,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     const isImage = academyIconSettings.type === 'image' && !!academyIconSettings.imageUrl;
     const symbol = academyIconSettings.symbol || '🏫';
     const bg = academyIconSettings.bgColor || '#2563eb';
-    const showLabel = academyIconSettings.showLabel !== false;
+    const showLabel = false; // 유치원 아이콘 상단 설명/말풍선 라벨 제거
     const academyName = academy?.name || '우리 학원';
 
     const innerHtml = isImage ? `
@@ -2737,11 +2737,6 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     return L.divIcon({
       html: `
         <div style="position: relative; display: flex; flex-direction: column; align-items: center; cursor: pointer; transform: translateZ(0);">
-          ${showLabel ? `
-            <div style="background: rgba(255, 255, 255, 0.96); color: ${bg}; border: 1.5px solid ${bg}; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 800; white-space: nowrap; box-shadow: 0 4px 10px rgba(0,0,0,0.18); margin-bottom: 3px; backdrop-filter: blur(2px);">
-              ${academyName}
-            </div>
-          ` : ''}
           <div style="position: relative; width: 44px; height: 44px; border-radius: 50%; background: ${isImage ? '#ffffff' : bg}; border: 3px solid ${isImage ? bg : '#ffffff'}; box-shadow: 0 6px 16px rgba(0,0,0,0.35); display: flex; align-items: center; justify-content: center; overflow: hidden; transition: transform 0.2s ease;">
             ${innerHtml}
           </div>
@@ -2749,9 +2744,9 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         </div>
       `,
       className: 'custom-academy-marker-wrapper',
-      iconSize: [44, showLabel ? 72 : 54],
-      iconAnchor: [22, showLabel ? 72 : 54],
-      popupAnchor: [0, -(showLabel ? 72 : 54)]
+      iconSize: [44, 54],
+      iconAnchor: [22, 54],
+      popupAnchor: [0, -56]
     });
   }, [academyIconSettings, academy?.name]);
 
