@@ -118,17 +118,67 @@ const calcDistToBusKm = (stLat, stLng, bus) => {
   return minDist;
 };
 
-// 학원 기준 운행 반경 및 버스 구역 예외 검사 헬퍼
+// 동명이인 식별 헬퍼 (노란색 테두리 및 다른반이면 반명 -> 반같으면 부모성함 -> 성함도같으면 전화번호 표기)
+export const getHomonymInfo = (st, allStudents = []) => {
+  if (!st || !st.name) return null;
+  const name = st.name.trim();
+  const sameNameStudents = allStudents.filter(s => s && s.name && s.name.trim() === name);
+  if (sameNameStudents.length <= 1) return null;
+
+  const getStClass = (s) => (s.className || s.raw?.['반명'] || s.raw?.['반'] || s.raw?.['학급'] || '').trim();
+  const getStParent = (s) => (s.parentName || s.raw?.['보호자 성함'] || s.raw?.['학부모 성함'] || s.raw?.['학부모명'] || s.raw?.['보호자1 성함'] || s.raw?.['보호자성함'] || '').trim();
+  const getStPhone = (s) => (s.parentPhone || s.phone || s.raw?.['부모연락처'] || s.raw?.['보호자연락처'] || s.raw?.['보호자 연락처'] || s.raw?.['전화번호'] || s.raw?.['연락처'] || '').trim();
+
+  const myClass = getStClass(st);
+  const myParent = getStParent(st);
+  const myPhone = getStPhone(st);
+
+  // 1. 다른 반이면 -> 반명 (새싹반 등) 표기
+  const hasDiffClass = sameNameStudents.some(s => s.id !== st.id && getStClass(s) !== myClass);
+  if (hasDiffClass) {
+    return {
+      isHomonym: true,
+      level: 'CLASS',
+      label: myClass || '반 미지정',
+      subLabel: null,
+      parentName: myParent,
+      phone: myPhone,
+      className: myClass
+    };
+  }
+
+  // 2. 반이 같다면 -> 부모님 성함 표기
+  const hasDiffParent = sameNameStudents.some(s => s.id !== st.id && getStParent(s) !== myParent);
+  if (hasDiffParent) {
+    return {
+      isHomonym: true,
+      level: 'PARENT',
+      label: myParent ? `부모: ${myParent}` : (myClass ? `${myClass}` : '보호자 미지정'),
+      subLabel: null,
+      parentName: myParent,
+      phone: myPhone,
+      className: myClass
+    };
+  }
+
+  // 3. 성함도 같다면 -> 전화번호를 아래에 표기
+  return {
+    isHomonym: true,
+    level: 'PHONE',
+    label: myParent ? `부모: ${myParent}` : (myClass || '동명이인'),
+    subLabel: myPhone ? `전화번호: ${myPhone}` : '전화번호 미등록',
+    parentName: myParent,
+    phone: myPhone,
+    className: myClass
+  };
+};
+
+// 학원 기준 운행 반경 및 버스 구역 예외 검사 헬퍼 (차량 운행 구역 내 학생은 무조건 정상 탑승/할당)
 const checkSixKmRule = (st, buses = [], academy = null, maxRadiusKm = 6.0) => {
-  if (!academy || isNaN(academy.lat) || isNaN(academy.lng) || !st.lat || !st.lng) {
+  if (!st || !st.lat || !st.lng) {
     return { isOutside6km: false, distKm: 0 };
   }
-  const distKm = calcDistKm(academy.lat, academy.lng, st.lat, st.lng);
-  const limitKm = Number(maxRadiusKm || 6.0);
-  if (distKm <= limitKm) {
-    return { isOutside6km: false, distKm };
-  }
-  // 운행 반경 밖이지만, 반경 밖에 버스 구역(폴리곤)이 있어서 그 안에 위치하면 정상 탑승 예외 인정
+  // 6KM는 경계선이며, 6KM 반경 밖이라도 차량 운행 구역(버스 폴리곤) 내에 위치하면 예외 없이 무조건 정상 탑승/할당
   const isInsideBusZone = buses.some(b => {
     if (!b.turfPolygon) return false;
     try {
@@ -138,7 +188,17 @@ const checkSixKmRule = (st, buses = [], academy = null, maxRadiusKm = 6.0) => {
     }
   });
   if (isInsideBusZone) {
-    return { isOutside6km: false, distKm, isCoveredByBusZone: true };
+    return { isOutside6km: false, distKm: 0, isCoveredByBusZone: true };
+  }
+
+  // 버스 구역 외부에 위치할 때만 학원 중심 반경(기본 6KM) 경계 초과 여부 체크
+  if (!academy || isNaN(academy.lat) || isNaN(academy.lng)) {
+    return { isOutside6km: false, distKm: 0 };
+  }
+  const distKm = calcDistKm(academy.lat, academy.lng, st.lat, st.lng);
+  const limitKm = Number(maxRadiusKm || 6.0);
+  if (distKm <= limitKm) {
+    return { isOutside6km: false, distKm };
   }
   return { isOutside6km: true, distKm };
 };
@@ -3207,12 +3267,18 @@ const parseKindergartenExcelSheet = (sheet) => {
           const name = row['학생이름/영문이름'] || row['이름'] || row['원아명'] || row['원생명'] || row['학생명'] || row['원생이름'] || `원생${idx + 1}`;
           const roadAddress = (row['도로명주소'] || row['주소'] || '').toString().trim();
           const stopLocation = (row['탑승차량_승차지'] || row['승차지'] || row['등원지'] || row['탑승지'] || row['승차지(주소)'] || '').toString().trim();
-          const address = roadAddress || stopLocation;
+          const dropLocation = (row['하차차량_하차지'] || row['하차지'] || row['하원지'] || row['하차지(주소)'] || '').toString().trim();
           const boardingLocation = stopLocation || roadAddress;
+          const dropoffLocation = dropLocation || roadAddress;
+          const address = roadAddress || stopLocation;
+          // 승하차지(탑승지 우선) 기준으로 지오코딩 타겟 설정
+          const targetGeocode = stopLocation || dropLocation || roadAddress;
           return {
             name: name.toString().trim(),
             address: address,
             boardingLocation: boardingLocation,
+            dropoffLocation: dropoffLocation,
+            targetGeocode: targetGeocode,
             raw: row
           };
         }).filter(item => item.name);
@@ -3223,7 +3289,10 @@ const parseKindergartenExcelSheet = (sheet) => {
           return;
         }
 
-        const validAddressesToGeocode = Array.from(new Set(addressMap.map(a => a.address).filter(Boolean)));
+        const validAddressesToGeocode = Array.from(new Set([
+          ...addressMap.map(a => a.targetGeocode).filter(Boolean),
+          ...addressMap.map(a => a.address).filter(Boolean)
+        ]));
         let geocodeLookup = new Map();
         if (validAddressesToGeocode.length > 0) {
           const res = await fetch(`${API_BASE_URL}/routing/geocode-bulk`, {
@@ -3250,14 +3319,17 @@ const parseKindergartenExcelSheet = (sheet) => {
         });
 
         addressMap.forEach((item, idx) => {
-          const trimmedAddr = (item.address || '').trim();
-          const coords = trimmedAddr ? (geocodeLookup.get(item.address) || geocodeLookup.get(trimmedAddr)) : null;
+          const targetAddr = (item.targetGeocode || '').trim();
+          const homeAddr = (item.address || '').trim();
+          const coords = (targetAddr ? (geocodeLookup.get(targetAddr) || geocodeLookup.get(item.targetGeocode)) : null) ||
+                         (homeAddr ? (geocodeLookup.get(homeAddr) || geocodeLookup.get(item.address)) : null);
           const isGeocoded = Boolean(coords && coords.lat && coords.lng);
 
           let lat = null;
           let lng = null;
-          let address = trimmedAddr;
-          let boardingLocation = item.boardingLocation || trimmedAddr;
+          let address = homeAddr || targetAddr;
+          let boardingLocation = item.boardingLocation || address;
+          let dropoffLocation = item.dropoffLocation || address;
           let assignedBus = null;
 
           if (isGeocoded) {
@@ -3985,18 +4057,26 @@ const parseKindergartenExcelSheet = (sheet) => {
     try {
       const targetAcademyId = selectedAcademyId || currentUser.academyId;
 
-      // 1. Geocode address via backend geocode-bulk endpoint if address is provided
+      // 1. Geocode boarding / dropoff location first (fallback to road address)
       let coords = null;
-      if (!studentForm.isNotRiding && studentForm.address.trim()) {
+      const inLocInput = (studentForm.inLocation || studentForm.boardingLocation || '').trim();
+      const outLocInput = (studentForm.outLocation || studentForm.dropoffLocation || '').trim();
+      const homeAddrInput = studentForm.address.trim();
+      const primaryTarget = inLocInput || outLocInput || homeAddrInput;
+      const addrsToTry = Array.from(new Set([primaryTarget, homeAddrInput].filter(Boolean)));
+
+      if (!studentForm.isNotRiding && addrsToTry.length > 0) {
         try {
           const geoRes = await fetch(`${API_BASE_URL}/routing/geocode-bulk`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ addresses: [studentForm.address.trim()] })
+            body: JSON.stringify({ addresses: addrsToTry })
           });
           if (geoRes.ok) {
             const geocoded = await geoRes.json();
-            coords = geocoded[0]?.coords || null;
+            const primaryMatch = geocoded.find(g => g.address === primaryTarget && g.coords);
+            const fallbackMatch = geocoded.find(g => g.coords);
+            coords = primaryMatch?.coords || fallbackMatch?.coords || null;
           }
         } catch (geoErr) {
           console.warn('Geocoding error:', geoErr);
@@ -4010,33 +4090,51 @@ const parseKindergartenExcelSheet = (sheet) => {
 
       let assignedBusId = (isNone || isAfternoonOnly) ? null : (studentForm.assignedBusId ? Number(studentForm.assignedBusId) : null);
       let assignedDepartureBusId = (isNone || isMorningOnly) ? null : (studentForm.assignedDepartureBusId ? Number(studentForm.assignedDepartureBusId) : null);
-      let assignedBus = buses.find(b => b.id === assignedBusId);
-      let assignedDepartureBus = buses.find(b => b.id === assignedDepartureBusId);
 
-      // 2. Auto-assign vehicle by zone polygon if not manually selected
-      if (!isNone && !isAfternoonOnly && !assignedBusId && coords) {
-        const pt = turf.point([coords.lng, coords.lat]);
-        let minDistance = Infinity;
+      // 2. 점(승하차지) 변경 시 해당 좌표가 위치한 호차(차량 폴리곤)로 자동 매핑 및 저장
+      if (!isNone && coords && coords.lat && coords.lng) {
+        const pt = turf.point([Number(coords.lng), Number(coords.lat)]);
+        let matchedBus = null;
 
         for (const bus of buses) {
-          if (bus.turfPolygon && turf.booleanPointInPolygon(pt, bus.turfPolygon)) {
-            assignedBus = bus;
-            assignedBusId = bus.id;
-            break;
+          if (bus.turfPolygon) {
+            try {
+              if (turf.booleanPointInPolygon(pt, bus.turfPolygon)) {
+                matchedBus = bus;
+                break;
+              }
+            } catch (_) {}
           }
-          if (bus.points && bus.points.length > 0) {
-            for (const bPt of bus.points) {
-              const busNode = turf.point([bPt[1], bPt[0]]);
-              const dist = turf.distance(pt, busNode);
-              if (dist < minDistance) {
-                minDistance = dist;
-                assignedBus = bus;
-                assignedBusId = bus.id;
+        }
+
+        // 구역 내에 포함된 경우 해당 호차로 자동 변경
+        if (matchedBus) {
+          if (!isAfternoonOnly) {
+            assignedBusId = matchedBus.id;
+          }
+          if (!isMorningOnly) {
+            assignedDepartureBusId = matchedBus.id;
+          }
+        } else if (!assignedBusId) {
+          // 구역 외인 경우 기존 최소 거리 폴백
+          let minDistance = Infinity;
+          for (const bus of buses) {
+            if (bus.points && bus.points.length > 0) {
+              for (const bPt of bus.points) {
+                const busNode = turf.point([bPt[1], bPt[0]]);
+                const dist = turf.distance(pt, busNode);
+                if (dist < minDistance) {
+                  minDistance = dist;
+                  assignedBusId = bus.id;
+                }
               }
             }
           }
         }
       }
+
+      let assignedBus = buses.find(b => b.id === assignedBusId);
+      let assignedDepartureBus = buses.find(b => b.id === assignedDepartureBusId);
 
       // 만석 차량(25인승 기준) 검사 (정원 도달 시 미배차/증차 필요 상태로 등록)
       let rebalanceNotice = '';
@@ -4068,7 +4166,11 @@ const parseKindergartenExcelSheet = (sheet) => {
         lat: coords ? coords.lat : undefined,
         lng: coords ? coords.lng : undefined,
         assignedBusId: assignedBusId,
+        assignedVehicleId: assignedBusId,
+        inBusId: assignedBusId,
         assignedDepartureBusId: assignedDepartureBusId,
+        assignedDepartureVehicleId: assignedDepartureBusId,
+        outBusId: assignedDepartureBusId,
         boardingType: bType,
         isNotRiding: isNone,
         className: studentForm.className.trim(),
@@ -5169,17 +5271,30 @@ const parseKindergartenExcelSheet = (sheet) => {
                                 <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
                                 <span>당일 1회 탑승자 ({oneTimeStudents.length}명)</span>
                               </div>
-                              {oneTimeStudents.map(st => (
-                                <div key={st.id} className="text-xs flex justify-between items-center bg-rose-50 border border-rose-200 p-2 rounded-xl shadow-2xs">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className="px-1.5 py-0.2 bg-rose-500 text-white rounded text-[11px] font-black">1회</span>
-                                    <span className="font-extrabold text-rose-950 truncate">{st.name}</span>
+                              {oneTimeStudents.map(st => {
+                                const homonym = getHomonymInfo(st, students);
+                                const isHomonym = Boolean(homonym?.isHomonym);
+                                return (
+                                <div key={st.id} className={`text-xs flex justify-between items-center p-2 rounded-xl shadow-2xs ${isHomonym ? 'bg-amber-50/70 border-2 border-amber-400 ring-1 ring-amber-300' : 'bg-rose-50 border border-rose-200'}`}>
+                                  <div className="flex flex-col min-w-0 pr-1">
+                                    <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                                      <span className="px-1.5 py-0.2 bg-rose-500 text-white rounded text-[11px] font-black">1회</span>
+                                      <span className="font-extrabold text-rose-950 truncate">{st.name}</span>
+                                      {isHomonym && (
+                                        <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-400 font-black text-[10px] shrink-0" title={homonym.subLabel}>
+                                          {homonym.label}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {isHomonym && homonym.subLabel && (
+                                      <span className="text-[10px] text-amber-800 font-bold mt-0.5">{homonym.subLabel}</span>
+                                    )}
                                   </div>
-                                  <span className="text-rose-700 font-medium text-xs truncate max-w-[130px]" title={st.address || st.boardingLocation}>
+                                  <span className="text-rose-700 font-medium text-xs truncate max-w-[130px] shrink-0" title={st.address || st.boardingLocation}>
                                     {st.boardingLocation || st.address || '위치 미등록'}
                                   </span>
                                 </div>
-                              ))}
+                              );})}
                             </div>
                           )}
 
@@ -5193,6 +5308,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                             )}
                             <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
                               {regularStudents.map(st => {
+                                const homonym = getHomonymInfo(st, students);
+                                const isHomonym = Boolean(homonym?.isHomonym);
                                 const bType = getStudentBoardingType(st);
                                 const dayKey = selectedDay !== 'ALL' ? selectedDay : null;
                                 const weekly = st.raw?.['요일별일정'] || st.raw?.weeklySchedules || st.weeklySchedules;
@@ -5205,20 +5322,30 @@ const parseKindergartenExcelSheet = (sheet) => {
                                   : (operationMode === 'AFTERNOON' ? st.dropoffTime : st.boardingTime);
                                 const stopName = dayStop || (operationMode === 'AFTERNOON' ? (st.dropoffLocation || st.address) : (st.boardingLocation || st.address)) || '위치 미등록';
                                 return (
-                                  <div key={st.id} className="text-xs flex justify-between items-center bg-slate-50 p-2 rounded-xl border border-slate-200">
-                                    <div className="flex items-center gap-1.5 min-w-0">
-                                      <span className={`px-1.5 py-0.2 rounded text-[10px] font-extrabold ${
-                                        bType === 'MORNING_ONLY'
-                                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                          : bType === 'AFTERNOON_ONLY'
-                                          ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
-                                          : 'bg-slate-200 text-slate-800'
-                                      }`}>
-                                        {bType === 'MORNING_ONLY' ? '등원만' : bType === 'AFTERNOON_ONLY' ? '하원만' : '등·하원'}
-                                      </span>
-                                      <span className="font-extrabold text-slate-900 truncate">{st.name}</span>
+                                  <div key={st.id} className={`text-xs flex justify-between items-center p-2 rounded-xl border ${isHomonym ? 'bg-amber-50/70 border-2 border-amber-400 ring-1 ring-amber-300' : 'bg-slate-50 border-slate-200'}`}>
+                                    <div className="flex flex-col min-w-0 pr-1">
+                                      <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                                        <span className={`px-1.5 py-0.2 rounded text-[10px] font-extrabold ${
+                                          bType === 'MORNING_ONLY'
+                                            ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                            : bType === 'AFTERNOON_ONLY'
+                                            ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                                            : 'bg-slate-200 text-slate-800'
+                                        }`}>
+                                          {bType === 'MORNING_ONLY' ? '등원만' : bType === 'AFTERNOON_ONLY' ? '하원만' : '등·하원'}
+                                        </span>
+                                        <span className="font-extrabold text-slate-900 truncate">{st.name}</span>
+                                        {isHomonym && (
+                                          <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-400 font-black text-[10px] shrink-0" title={homonym.subLabel}>
+                                            {homonym.label}
+                                          </span>
+                                        )}
+                                      </div>
+                                      {isHomonym && homonym.subLabel && (
+                                        <span className="text-[10px] text-amber-800 font-bold mt-0.5">{homonym.subLabel}</span>
+                                      )}
                                     </div>
-                                    <span className="text-slate-600 font-medium text-xs truncate max-w-[140px]" title={`${stopName}${dayTime ? ` (${dayTime})` : ''}`}>
+                                    <span className="text-slate-600 font-medium text-xs truncate max-w-[140px] shrink-0" title={`${stopName}${dayTime ? ` (${dayTime})` : ''}`}>
                                       {stopName}
                                       {dayTime ? <span className="text-blue-600 font-bold ml-1 text-[11px]">({dayTime})</span> : null}
                                     </span>
@@ -5387,16 +5514,29 @@ const parseKindergartenExcelSheet = (sheet) => {
                           <p className="text-[11px] text-amber-800/80 font-medium py-1">현재 모든 {terms.student}이 통학 차량에 배정되어 있습니다.</p>
                         ) : (
                           <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
-                            {unassignedList.map(st => (
-                              <div key={st.id} className="flex items-center justify-between bg-white p-2 rounded-xl border border-amber-200 text-xs shadow-2xs">
+                            {unassignedList.map(st => {
+                              const homonym = getHomonymInfo(st, students);
+                              const isHomonym = Boolean(homonym?.isHomonym);
+                              return (
+                              <div key={st.id} className={`flex items-center justify-between p-2 rounded-xl text-xs shadow-2xs ${isHomonym ? 'bg-amber-50/70 border-2 border-amber-400 ring-1 ring-amber-300' : 'bg-white border border-amber-200'}`}>
                                 <div className="min-w-0 pr-2">
-                                  <span 
-                                    onClick={() => handleStudentMapClick(st)}
-                                    className="font-extrabold text-slate-800 hover:text-blue-600 underline cursor-pointer block truncate"
-                                    title="지도에서 위치 보기"
-                                  >
-                                    {st.name}
-                                  </span>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span 
+                                      onClick={() => handleStudentMapClick(st)}
+                                      className="font-extrabold text-slate-800 hover:text-blue-600 underline cursor-pointer truncate"
+                                      title="지도에서 위치 보기"
+                                    >
+                                      {st.name}
+                                    </span>
+                                    {isHomonym && (
+                                      <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-400 font-black text-[10px] shrink-0" title={homonym.subLabel}>
+                                        {homonym.label}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {isHomonym && homonym.subLabel && (
+                                    <div className="text-[10px] text-amber-800 font-bold mt-0.5">{homonym.subLabel}</div>
+                                  )}
                                   <span className="text-[10px] text-slate-500 block truncate font-medium">{st.address || '주소 미등록'}</span>
                                 </div>
                                 <select
@@ -5420,7 +5560,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                                   ))}
                                 </select>
                               </div>
-                            ))}
+                            );})}
                           </div>
                         )}
                       </div>
@@ -5481,10 +5621,16 @@ const parseKindergartenExcelSheet = (sheet) => {
                             <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
                               {extraBusList.map(st => {
                                 const isChecked = selectedExtraBusStudentIds.size === 0 || selectedExtraBusStudentIds.has(st.id);
+                                const homonym = getHomonymInfo(st, students);
+                                const isHomonym = Boolean(homonym?.isHomonym);
                                 return (
                                   <div 
                                     key={st.id} 
-                                    className="flex items-center justify-between bg-white p-2 rounded-xl border border-orange-200 text-xs shadow-2xs hover:border-orange-400 transition-colors"
+                                    className={`flex items-center justify-between p-2 rounded-xl text-xs shadow-2xs transition-colors ${
+                                      isHomonym 
+                                        ? 'bg-amber-50/70 border-2 border-amber-400 ring-1 ring-amber-300' 
+                                        : 'bg-white border border-orange-200 hover:border-orange-400'
+                                    }`}
                                   >
                                     <label className="flex items-center gap-2 min-w-0 pr-2 cursor-pointer flex-1">
                                       <input 
@@ -5494,7 +5640,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                                         className="w-3.5 h-3.5 rounded text-orange-600 cursor-pointer shrink-0"
                                       />
                                       <div className="min-w-0">
-                                        <div className="flex items-center gap-1.5">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
                                           <span 
                                             onClick={(e) => { e.preventDefault(); handleStudentMapClick(st); }}
                                             className="font-black text-slate-900 hover:text-blue-600 underline cursor-pointer truncate"
@@ -5502,10 +5648,19 @@ const parseKindergartenExcelSheet = (sheet) => {
                                           >
                                             {st.name}
                                           </span>
-                                          <span className="text-[10px] font-bold text-orange-700 bg-orange-100 px-1.5 py-0.2 rounded shrink-0">
-                                            증차 필요
-                                          </span>
+                                          {isHomonym ? (
+                                            <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-400 font-black text-[10px] shrink-0" title={homonym.subLabel}>
+                                              {homonym.label}
+                                            </span>
+                                          ) : (
+                                            <span className="text-[10px] font-bold text-orange-700 bg-orange-100 px-1.5 py-0.2 rounded shrink-0">
+                                              증차 필요
+                                            </span>
+                                          )}
                                         </div>
+                                        {isHomonym && homonym.subLabel && (
+                                          <div className="text-[10px] text-amber-800 font-bold mt-0.5">{homonym.subLabel}</div>
+                                        )}
                                         <span className="text-[10px] text-slate-500 block truncate font-medium">
                                           {st.address || st.boardingLocation || '주소 미등록'}
                                         </span>
@@ -5546,6 +5701,8 @@ const parseKindergartenExcelSheet = (sheet) => {
             const rawClass = st.raw?.['반명'];
             const rawAge = st.raw?.['연령'] !== undefined && st.raw?.['연령'] !== null ? st.raw['연령'] : st.raw?.['학년'];
             const hasAllergy = Boolean(st.allergies || st.raw?.['알레르기']);
+            const homonym = getHomonymInfo(st, students);
+            const isHomonym = Boolean(homonym?.isHomonym);
 
             return (
               <div
@@ -5555,12 +5712,14 @@ const parseKindergartenExcelSheet = (sheet) => {
                 className={`p-2.5 rounded-xl transition-all group cursor-pointer ${
                   highlightedStudentId === st.id
                     ? 'relative ring-2 ring-indigo-500 border-indigo-500 bg-indigo-50/40 z-1 shadow-xs'
+                    : isHomonym
+                    ? 'border-2 border-amber-400 bg-amber-50/20 ring-2 ring-amber-300 shadow-xs'
                     : needsAddress
                     ? 'bg-rose-50/40 border border-rose-300 ring-1 ring-rose-100 shadow-2xs'
                     : 'bg-white border border-slate-200 hover:border-blue-400 hover:shadow-xs shadow-2xs'
                 }`}
               >
-                {/* Compact Row 1: Dot + Name + Class + Badges / Bus Badge + Toggle */}
+                {/* Compact Row 1: Dot + Name + Class/Homonym + Badges / Bus Badge + Toggle */}
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0 flex-1">
                     <div 
@@ -5570,11 +5729,19 @@ const parseKindergartenExcelSheet = (sheet) => {
                     <span className="font-black text-slate-900 text-[16px] shrink-0 tracking-tight">
                       {st.name}
                     </span>
-                    {rawClass && (
+                    {isHomonym ? (
+                      <span 
+                        className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-400 font-black text-[11px] shadow-2xs shrink-0 flex items-center gap-1"
+                        title={homonym.subLabel ? `${homonym.label} (${homonym.subLabel})` : homonym.label}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                        <span>{homonym.label}</span>
+                      </span>
+                    ) : rawClass ? (
                       <span className="text-[13px] text-slate-600 font-bold truncate shrink-0">
                         {rawClass}
                       </span>
-                    )}
+                    ) : null}
 
                     {/* Urgent Status Badges Only */}
                     {st.boardStatus === 'ABSENT' && (
@@ -5626,6 +5793,14 @@ const parseKindergartenExcelSheet = (sheet) => {
                     </button>
                   </div>
                 </div>
+
+                {/* 동명이인 식별: 성함도 같은 경우 전화번호를 아래에 표기 */}
+                {isHomonym && homonym.subLabel && (
+                  <div className="mt-1 px-2.5 py-1 bg-amber-100/90 border border-amber-300 rounded-lg text-amber-950 font-bold text-[11px] flex items-center justify-between shadow-2xs">
+                    <span className="text-amber-800 font-medium">동명이인 식별:</span>
+                    <span className="font-black text-amber-900">{homonym.subLabel}</span>
+                  </div>
+                )}
 
                 {/* Compact Row 2: Address (간결한 1줄) */}
                 {needsAddress ? (
@@ -7810,6 +7985,8 @@ const parseKindergartenExcelSheet = (sheet) => {
               ? '#64748b'
               : EXTRA_BUS_COLOR;
 
+            const homonym = getHomonymInfo(st, students);
+            const isHomonym = Boolean(homonym?.isHomonym);
             const isHighlighted = highlightedStudentId === st.id;
             const studentIcon = L.divIcon({
               className: isApprovalPending
@@ -7851,7 +8028,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                   </div>
                 </div>
               ` : isPureNotRiding ? `
-                <div style="background-color: ${NOT_RIDING_COLOR}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.35);" title="${isOutside6kmNotRiding ? '구역 외 미탑승 원아' : '미탑승 원아'}"></div>
+                <div style="background-color: ${NOT_RIDING_COLOR}; width: 14px; height: 14px; border-radius: 50%; border: ${isHomonym ? '2.5px solid #f59e0b' : '2px solid white'}; box-shadow: ${isHomonym ? '0 0 0 2px #fde68a, 0 2px 4px rgba(0,0,0,0.35)' : '0 2px 4px rgba(0,0,0,0.35)'};" title="${isOutside6kmNotRiding ? '구역 외 미탑승 원아' : '미탑승 원아'}"></div>
               ` : isOneTimeStudent ? `
                 <div style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">
                   <span style="position: absolute; inset: -2px; border-radius: 50%; background: #f43f5e; opacity: 0.45; animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
@@ -7860,7 +8037,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                   </div>
                 </div>
               ` : `
-                <div style="background-color: ${stColor}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>
+                <div style="background-color: ${stColor}; width: 14px; height: 14px; border-radius: 50%; border: ${isHomonym ? '2.5px solid #f59e0b' : '2px solid white'}; box-shadow: ${isHomonym ? '0 0 0 2px #fde68a, 0 0 8px rgba(245,158,11,0.8)' : '0 2px 4px rgba(0,0,0,0.4)'};" title="${isHomonym ? `[동명이인: ${homonym.label}] ${st.name}` : st.name}"></div>
               `,
               iconSize: (isApprovalPending || isHighlighted) ? [44, 44] : needsExtraBus ? [26, 26] : isOneTimeStudent ? [24, 24] : [14, 14],
               iconAnchor: (isApprovalPending || isHighlighted) ? [22, 22] : needsExtraBus ? [13, 13] : isOneTimeStudent ? [12, 12] : [7, 7]
@@ -7868,6 +8045,19 @@ const parseKindergartenExcelSheet = (sheet) => {
             return (
               <Marker key={st.id} position={[displayLat, displayLng]} icon={studentIcon}>
                 <Popup className="student-popup">
+                {isHomonym && (
+                  <div className="bg-amber-50 border-2 border-amber-400 p-2.5 rounded-xl mb-2 text-amber-950 shadow-2xs">
+                    <div className="flex items-center gap-1.5 font-black text-xs text-amber-900">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                      <span>[동명이인 식별] {homonym.label}</span>
+                    </div>
+                    {homonym.subLabel && (
+                      <div className="text-[11px] font-bold text-amber-800 mt-1 pl-3.5">
+                        {homonym.subLabel}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="font-bold text-lg mb-1 flex items-center justify-between">
                   <span>{st.name} <span className="text-sm font-normal text-slate-500">{st.raw?.['성별']} / {st.raw?.['연령'] || st.raw?.['학년'] || ''}</span></span>
                   {isApprovalPending ? (

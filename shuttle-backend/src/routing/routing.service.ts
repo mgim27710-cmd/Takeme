@@ -2539,8 +2539,9 @@ export class RoutingService {
     let lat = studentData.lat !== undefined && studentData.lat !== null && !isNaN(parseFloat(studentData.lat)) ? parseFloat(studentData.lat) : undefined;
     let lng = studentData.lng !== undefined && studentData.lng !== null && !isNaN(parseFloat(studentData.lng)) ? parseFloat(studentData.lng) : undefined;
 
-    if ((lat === undefined || lng === undefined) && studentData.address) {
-      const coords = await this.geocodeAddress(studentData.address);
+    if ((lat === undefined || lng === undefined) && (studentData.boardingLocation || studentData.inLocation || studentData.address)) {
+      const targetLoc = (studentData.boardingLocation || studentData.inLocation || studentData.address);
+      const coords = await this.geocodeAddress(targetLoc) || (studentData.address && studentData.address !== targetLoc ? await this.geocodeAddress(studentData.address) : null);
       if (coords) {
         lat = coords.lat;
         lng = coords.lng;
