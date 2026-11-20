@@ -255,6 +255,49 @@ export function Polygon(props) {
   return isNaverMapEnabled() ? <NaverPolygon {...props} /> : <RL.Polygon {...props} />;
 }
 
+// ─────────────────────────── 원 (Circle) ───────────────────────────
+
+function NaverCircle({ center, radius, pathOptions, children }) {
+  const { map } = useContext(NaverMapCtx);
+  const [circ, setCirc] = useState(null);
+
+  useEffect(() => {
+    if (!valid(center)) return undefined;
+    const c = new (nm().Circle)({
+      map,
+      center: toLatLng(center),
+      radius: Number(radius) || 1000,
+      clickable: Boolean(children),
+      ...polygonOptions(pathOptions || {}),
+    });
+    setCirc(c);
+    return () => {
+      c.setMap(null);
+      setCirc(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map]);
+
+  useEffect(() => {
+    if (circ && valid(center)) circ.setCenter(toLatLng(center));
+  }, [circ, center]);
+
+  useEffect(() => {
+    if (circ && radius) circ.setRadius(Number(radius));
+  }, [circ, radius]);
+
+  useEffect(() => {
+    if (circ && pathOptions) circ.setOptions(polygonOptions(pathOptions));
+  }, [circ, pathOptions]);
+
+  const ov = useMemo(() => (circ ? { overlay: circ, kind: 'shape' } : null), [circ]);
+  return ov ? <OverlayCtx.Provider value={ov}>{children}</OverlayCtx.Provider> : null;
+}
+
+export function Circle(props) {
+  return isNaverMapEnabled() ? <NaverCircle {...props} /> : <RL.Circle {...props} />;
+}
+
 // ─────────────────────────── 말풍선(팝업) ───────────────────────────
 
 function NaverPopup({ children }) {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, Polygon, Marker, Popup, useMap, useMapEvents } from './map/MapKit';
+import { MapContainer, TileLayer, Polygon, Circle, Marker, Popup, useMap, useMapEvents } from './map/MapKit';
 import L from 'leaflet';
 import * as turf from '@turf/turf';
 import * as XLSX from 'xlsx';
@@ -630,6 +630,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     notRiding: true,  // 셔틀 미탑승 (회색)
     unassigned: true, // 정규 미배정 (구역 밖)
   });
+  const [isLegendCollapsed, setIsLegendCollapsed] = useState(false);
 
   const toggleLegendItem = (key) => {
     setLegendVisibility(prev => ({
@@ -7091,17 +7092,31 @@ const parseKindergartenExcelSheet = (sheet) => {
 
         {/* Zone Editing Overlay */}
         {isZoneEditingMode && (
-          <div className="absolute top-4 left-16 z-[1000] bg-white/95 backdrop-blur-sm p-4 rounded-2xl shadow-xl border border-blue-100 flex flex-col gap-3 min-w-[200px]">
-            <h3 className="font-bold text-slate-800 text-sm">구역 수정할 호차 선택</h3>
-            <div className="flex flex-col gap-1">
+          <div className="absolute top-4 left-16 z-[1000] bg-white/95 backdrop-blur-sm p-4 rounded-2xl shadow-xl border border-blue-100 flex flex-col gap-3 min-w-[210px]">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-2">
+              <h3 className="font-black text-slate-800 text-sm">구역 꼭짓점 수정</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsZoneEditingMode(false);
+                  setEditingZoneBusId(null);
+                }}
+                className="text-xs text-slate-400 hover:text-slate-700 font-bold px-2 py-0.5 rounded hover:bg-slate-100 transition cursor-pointer"
+                title="수정 종료"
+              >
+                ✕ 종료
+              </button>
+            </div>
+            <div className="text-[11px] font-bold text-slate-500">수정할 호차 선택:</div>
+            <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
               {sortedBuses.map(bus => (
                 <button
                   key={bus.id}
                   onClick={() => handleSelectEditBus(bus.id)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-bold transition-all ${editingZoneBusId === bus.id ? 'bg-blue-50 border-blue-200 shadow-inner text-blue-800' : 'hover:bg-slate-50 border-transparent text-slate-600'} border`}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-bold transition-all ${editingZoneBusId === bus.id ? 'bg-blue-50 border-blue-200 shadow-inner text-blue-800' : 'hover:bg-slate-50 border-transparent text-slate-600'} border cursor-pointer`}
                 >
-                  <span className="w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: bus.color }}></span>
-                  {bus.name}
+                  <span className="w-3 h-3 rounded-full shadow-sm shrink-0" style={{ backgroundColor: bus.color }}></span>
+                  <span className="truncate">{bus.name}</span>
                 </button>
               ))}
             </div>
@@ -7109,14 +7124,14 @@ const parseKindergartenExcelSheet = (sheet) => {
               <div className="mt-1 pt-3 border-t border-slate-200 flex flex-col gap-2">
                 <button 
                   onClick={() => setIsAddingPoint(!isAddingPoint)}
-                  className={`w-full py-2.5 rounded-lg text-xs font-bold transition-colors ${isAddingPoint ? 'bg-blue-600 text-white shadow-inner' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                  className={`w-full py-2.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${isAddingPoint ? 'bg-blue-600 text-white shadow-inner font-black' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
                 >
                   {isAddingPoint ? '지도 빈곳 클릭 시 점 추가' : '+ 새 꼭짓점 추가'}
                 </button>
                 <button 
                   onClick={handleSavePolygon}
                   disabled={isProcessing}
-                  className="w-full py-2.5 bg-green-600 text-white rounded-lg text-xs font-bold shadow-md hover:bg-green-700 transition-colors disabled:opacity-50"
+                  className="w-full py-2.5 bg-green-600 text-white rounded-lg text-xs font-black shadow-md hover:bg-green-700 transition-colors disabled:opacity-50 cursor-pointer"
                 >
                   {isProcessing ? '저장 중...' : '수정 내역 저장'}
                 </button>
@@ -7344,6 +7359,31 @@ const parseKindergartenExcelSheet = (sheet) => {
                 <div className="text-xs text-slate-500 mt-1">{academy.address}</div>
               </Popup>
             </Marker>
+          )}
+
+          {/* Draw Academy 6KM Radius Circle (옅은 실선) */}
+          {academy && !isNaN(academy.lat) && !isNaN(academy.lng) && (
+            <Circle
+              center={[Number(academy.lat), Number(academy.lng)]}
+              radius={6000}
+              pathOptions={{
+                color: '#6366f1',
+                weight: 1.5,
+                opacity: 0.35,
+                fillColor: '#818cf8',
+                fillOpacity: 0.03,
+                dashArray: null,
+              }}
+            >
+              <Popup>
+                <div className="text-center p-1.5 text-xs min-w-[200px]">
+                  <span className="font-extrabold text-indigo-700 block mb-1">{academy.name} 기준 6KM 운행 권역</span>
+                  <div className="text-[11px] text-slate-600 leading-snug">
+                    학원 반경 6km 초과 시 구역 외 미탑승으로 자동 분류됩니다. (버스 구역 내 위치 시 탑승 예외 인정)
+                  </div>
+                </div>
+              </Popup>
+            </Circle>
           )}
           
           <ZoneEditEvents isAddingPoint={isAddingPoint} onAddPoint={handleAddPoint} />
@@ -7942,239 +7982,279 @@ const parseKindergartenExcelSheet = (sheet) => {
           })}
         </MapContainer>
 
-        {/* Floating Map Legend (지도 고대비 범례 안내 - 클릭 시 해당 구역/위치로 이동) */}
+        {/* Floating Map Legend (지도 고대비 범례 안내 - 우측 하단 배치로 구역 수정 툴과의 겹침 완벽 방지) */}
         {(activeTab === 'status' || activeTab === 'buses') && (
-        <div className="absolute bottom-6 left-6 z-[1000] bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200 p-2.5 max-w-[240px] transition-all pointer-events-auto">
-          <div className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-2 flex items-center justify-between px-1">
-            <span className="flex items-center gap-1.5">
-              <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="absolute bottom-6 right-6 z-[1000] bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200 transition-all pointer-events-auto">
+          {isLegendCollapsed ? (
+            <button
+              type="button"
+              onClick={() => setIsLegendCollapsed(false)}
+              className="flex items-center gap-2 px-3 py-2 text-xs font-black text-slate-700 hover:text-blue-600 cursor-pointer"
+              title="지도 범례 펼치기"
+            >
+              <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
               </svg>
               <span>지도 범례</span>
-            </span>
-            <span className="text-[10px] text-blue-600 font-extrabold">ON/OFF</span>
-          </div>
-          <div className="space-y-1 text-xs font-bold text-slate-700">
-            {/* Needs Extra Bus indicator (!) */}
-            <button
-              type="button"
-              onClick={() => toggleLegendItem('extraBus')}
-              title={legendVisibility.extraBus ? "클릭 시 증차 필요(!) 아이콘 숨김" : "클릭 시 증차 필요(!) 아이콘 표시"}
-              className={`w-full text-left flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border transition-all cursor-pointer select-none active:scale-[0.98] ${
-                legendVisibility.extraBus
-                  ? 'bg-orange-50/90 border-orange-200 text-orange-950 hover:bg-orange-100/80 shadow-2xs'
-                  : 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-50'
-              }`}
-            >
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className={`w-4 h-4 rounded-full text-[10px] font-black flex items-center justify-center border border-white shadow-2xs shrink-0 ${
-                  legendVisibility.extraBus ? 'bg-orange-600 text-white' : 'bg-slate-400 text-slate-100'
-                }`}>!</span>
-                <span className={`text-[11px] font-black truncate ${!legendVisibility.extraBus ? 'line-through text-slate-400' : ''}`}>
-                  증차 필요
-                </span>
-              </div>
-              <span className={`shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
-                legendVisibility.extraBus ? 'bg-orange-100 text-orange-800 border-orange-300' : 'bg-slate-200 text-slate-500 border-slate-300'
-              }`}>
-                {legendVisibility.extraBus ? '표시' : '숨김'}
-              </span>
+              <span className="text-[10px] text-blue-600 font-extrabold bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">▲ 펼치기</span>
             </button>
-
-            {/* Full vehicle hatched pattern indicator (빗금) */}
-            <div 
-              onClick={() => toggleLegendItem('fullBus')}
-              role="button"
-              title={legendVisibility.fullBus ? "클릭 시 만석(빗금) 패턴 숨김" : "클릭 시 만석(빗금) 패턴 표시"}
-              className={`w-full flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border transition-all cursor-pointer select-none active:scale-[0.98] ${
-                legendVisibility.fullBus
-                  ? 'bg-slate-50/90 hover:bg-slate-100 border-slate-200 text-slate-800 shadow-2xs'
-                  : 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-50'
-              }`}
-            >
-              <div className="flex items-center gap-1.5 min-w-0">
-                <div 
-                  className={`w-4 h-4 rounded border shrink-0 shadow-2xs ${legendVisibility.fullBus ? 'border-slate-500' : 'border-slate-300 opacity-40'}`}
-                  style={{
-                    background: legendVisibility.fullBus
-                      ? 'repeating-linear-gradient(45deg, #059669 0, #059669 2px, #ecfdf5 2px, #ecfdf5 5px)'
-                      : '#e2e8f0'
-                  }}
-                ></div>
-                <span className={`text-[11px] font-black truncate ${!legendVisibility.fullBus ? 'line-through text-slate-400' : ''}`}>
-                  정원 만석 (빗금)
+          ) : (
+            <div className="p-2.5 max-w-[240px]">
+              <div className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-2 flex items-center justify-between px-1">
+                <span className="flex items-center gap-1.5">
+                  <svg className="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                  </svg>
+                  <span>지도 범례</span>
                 </span>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleFocusFullBusZone();
-                  }}
-                  title="만석 구역으로 이동"
-                  className="text-[9px] font-bold text-slate-600 hover:text-blue-600 px-1 py-0.5 rounded hover:bg-slate-200 transition-colors"
-                >
-                  이동
-                </button>
-                <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
-                  legendVisibility.fullBus ? 'bg-slate-200 text-slate-800 border-slate-300' : 'bg-slate-200 text-slate-500 border-slate-300'
-                }`}>
-                  {legendVisibility.fullBus ? '표시' : '숨김'}
-                </span>
-              </div>
-            </div>
-
-            {/* One-time rider indicator (1) */}
-            <div 
-              onClick={() => toggleLegendItem('oneTime')}
-              role="button"
-              title={legendVisibility.oneTime ? "클릭 시 1회 탑승(1) 마커 숨김" : "클릭 시 1회 탑승(1) 마커 표시"}
-              className={`w-full flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border transition-all cursor-pointer select-none active:scale-[0.98] ${
-                legendVisibility.oneTime
-                  ? 'bg-rose-50/85 hover:bg-rose-100/90 border-rose-200 text-rose-950 shadow-2xs'
-                  : 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-50'
-              }`}
-            >
-              <div className="flex items-center gap-1.5 min-w-0">
-                <div className="relative w-4 h-4 flex items-center justify-center shrink-0">
-                  {legendVisibility.oneTime && (
-                    <span className="absolute inset-0 rounded-full bg-rose-400 opacity-60 animate-ping"></span>
-                  )}
-                  <span className={`relative w-3.5 h-3.5 rounded-full text-white text-[8.5px] font-black flex items-center justify-center border border-white ${
-                    legendVisibility.oneTime ? 'bg-rose-500' : 'bg-slate-400'
-                  }`}>1</span>
-                </div>
-                <span className={`text-[11px] font-black truncate ${!legendVisibility.oneTime ? 'line-through text-slate-400' : ''}`}>
-                  당일 1회 탑승
-                </span>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleFocusOneTimeRiders();
-                  }}
-                  title="1회 탑승자 위치로 이동"
-                  className="text-[9px] font-bold text-rose-700 hover:text-blue-600 px-1 py-0.5 rounded hover:bg-rose-100 transition-colors"
-                >
-                  이동
-                </button>
-                <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
-                  legendVisibility.oneTime ? 'bg-rose-100 text-rose-800 border-rose-300' : 'bg-slate-200 text-slate-500 border-slate-300'
-                }`}>
-                  {legendVisibility.oneTime ? '표시' : '숨김'}
-                </span>
-              </div>
-            </div>
-
-            {/* Pure not riding (Walk / Self-pickup) indicator */}
-            <button
-              type="button"
-              onClick={() => toggleLegendItem('notRiding')}
-              title={legendVisibility.notRiding ? "클릭 시 미탑승(회색) 마커 숨김" : "클릭 시 미탑승(회색) 마커 표시"}
-              className={`w-full text-left flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border transition-all cursor-pointer select-none active:scale-[0.98] ${
-                legendVisibility.notRiding
-                  ? 'bg-slate-50/80 hover:bg-slate-100/90 border-slate-200 text-slate-700'
-                  : 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-50'
-              }`}
-            >
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className={`w-3 h-3 rounded-full border border-white shadow-xs shrink-0 ${
-                  legendVisibility.notRiding ? 'bg-slate-400' : 'bg-slate-300'
-                }`}></span>
-                <span className={`text-[11px] font-black truncate ${!legendVisibility.notRiding ? 'line-through text-slate-400' : ''}`}>
-                  미탑승 (도보/자차)
-                </span>
-              </div>
-              <span className={`shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
-                legendVisibility.notRiding ? 'bg-slate-200 text-slate-700 border-slate-300' : 'bg-slate-200 text-slate-500 border-slate-300'
-              }`}>
-                {legendVisibility.notRiding ? '표시' : '숨김'}
-              </span>
-            </button>
-
-            {/* Unassigned regular indicator */}
-            <div 
-              onClick={() => toggleLegendItem('unassigned')}
-              role="button"
-              title={legendVisibility.unassigned ? "클릭 시 미배정 마커 숨김" : "클릭 시 미배정 마커 표시"}
-              className={`w-full flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border transition-all cursor-pointer select-none active:scale-[0.98] ${
-                legendVisibility.unassigned
-                  ? 'bg-slate-50/80 hover:bg-slate-100/90 border-slate-200 text-slate-700 shadow-2xs'
-                  : 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-50'
-              }`}
-            >
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className={`w-3 h-3 rounded-full border border-white shadow-xs shrink-0 ${
-                  legendVisibility.unassigned ? 'bg-slate-600' : 'bg-slate-300'
-                }`}></span>
-                <span className={`text-[11px] font-black truncate ${!legendVisibility.unassigned ? 'line-through text-slate-400' : ''}`}>
-                  구역 외 미배정
-                </span>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleFocusUnassignedRiders();
-                  }}
-                  title="미배정자 위치로 이동"
-                  className="text-[9px] font-bold text-slate-600 hover:text-blue-600 px-1 py-0.5 rounded hover:bg-slate-200 transition-colors"
-                >
-                  이동
-                </button>
-                <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
-                  legendVisibility.unassigned ? 'bg-slate-200 text-slate-700 border-slate-300' : 'bg-slate-200 text-slate-500 border-slate-300'
-                }`}>
-                  {legendVisibility.unassigned ? '표시' : '숨김'}
-                </span>
-              </div>
-            </div>
-
-            {/* Bus list with colors: 클릭 시 해당 호차 구역으로 뷰 이동 */}
-            {buses.length > 0 && (
-              <div className="pt-2 border-t border-slate-100">
-                <div className="text-[10px] font-bold text-slate-400 mb-1.5 flex items-center justify-between">
-                  <span>호차별 운행 구역</span>
-                  <span className="text-blue-600 font-bold">호차 클릭 시 이동</span>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {/* 전체 구역 한눈에 보기 버튼 */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-blue-600 font-extrabold">ON/OFF</span>
                   <button
                     type="button"
-                    onClick={handleFocusAllZones}
-                    title="모든 호차 구역과 기관 위치를 한눈에 봅니다"
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-black text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-300 shadow-2xs hover:shadow-xs hover:scale-105 active:scale-95 transition-all cursor-pointer ring-offset-1 hover:ring-2 hover:ring-slate-400 select-none"
+                    onClick={() => setIsLegendCollapsed(true)}
+                    className="text-[10px] font-bold text-slate-400 hover:text-slate-600 px-1.5 py-0.5 rounded hover:bg-slate-100 cursor-pointer"
+                    title="범례 접기"
                   >
-                    <svg className="w-3.5 h-3.5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                    </svg>
-                    <span>전체</span>
+                    ▼ 접기
                   </button>
-
-                  {buses.map(b => (
-                    <button
-                      key={b.id}
-                      type="button"
-                      onClick={() => handleFocusBusZone(b)}
-                      title={`[${b.name}] 구역으로 지도 뷰를 이동합니다`}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-black text-white shadow-xs hover:shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer ring-offset-1 hover:ring-2 hover:ring-blue-400 select-none"
-                      style={{ backgroundColor: b.color || '#1d4ed8' }}
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
-                      <span>{b.name}</span>
-                      <svg className="w-2.5 h-2.5 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </button>
-                  ))}
                 </div>
               </div>
-            )}
-          </div>
+              <div className="space-y-1 text-xs font-bold text-slate-700">
+                {/* 6KM circle indicator (학원 반경 6km 권역 옅은 실선) */}
+                <div className="w-full flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border border-indigo-100 bg-indigo-50/70 text-indigo-950">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="w-3.5 h-3.5 rounded-full border border-indigo-400 bg-indigo-100/90 shrink-0"></span>
+                    <span className="text-[11px] font-black truncate">
+                      학원 반경 6KM
+                    </span>
+                  </div>
+                  <span className="shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 border border-indigo-200">
+                    실선 원
+                  </span>
+                </div>
+
+                {/* Needs Extra Bus indicator (!) */}
+                <button
+                  type="button"
+                  onClick={() => toggleLegendItem('extraBus')}
+                  title={legendVisibility.extraBus ? "클릭 시 증차 필요(!) 아이콘 숨김" : "클릭 시 증차 필요(!) 아이콘 표시"}
+                  className={`w-full text-left flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border transition-all cursor-pointer select-none active:scale-[0.98] ${
+                    legendVisibility.extraBus
+                      ? 'bg-orange-50/90 border-orange-200 text-orange-950 hover:bg-orange-100/80 shadow-2xs'
+                      : 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className={`w-4 h-4 rounded-full text-[10px] font-black flex items-center justify-center border border-white shadow-2xs shrink-0 ${
+                      legendVisibility.extraBus ? 'bg-orange-600 text-white' : 'bg-slate-400 text-slate-100'
+                    }`}>!</span>
+                    <span className={`text-[11px] font-black truncate ${!legendVisibility.extraBus ? 'line-through text-slate-400' : ''}`}>
+                      증차 필요
+                    </span>
+                  </div>
+                  <span className={`shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
+                    legendVisibility.extraBus ? 'bg-orange-100 text-orange-800 border-orange-300' : 'bg-slate-200 text-slate-500 border-slate-300'
+                  }`}>
+                    {legendVisibility.extraBus ? '표시' : '숨김'}
+                  </span>
+                </button>
+
+                {/* Full vehicle hatched pattern indicator (빗금) */}
+                <div 
+                  onClick={() => toggleLegendItem('fullBus')}
+                  role="button"
+                  title={legendVisibility.fullBus ? "클릭 시 만석(빗금) 패턴 숨김" : "클릭 시 만석(빗금) 패턴 표시"}
+                  className={`w-full flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border transition-all cursor-pointer select-none active:scale-[0.98] ${
+                    legendVisibility.fullBus
+                      ? 'bg-slate-50/90 hover:bg-slate-100 border-slate-200 text-slate-800 shadow-2xs'
+                      : 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <div 
+                      className={`w-4 h-4 rounded border shrink-0 shadow-2xs ${legendVisibility.fullBus ? 'border-slate-500' : 'border-slate-300 opacity-40'}`}
+                      style={{
+                        background: legendVisibility.fullBus
+                          ? 'repeating-linear-gradient(45deg, #059669 0, #059669 2px, #ecfdf5 2px, #ecfdf5 5px)'
+                          : '#e2e8f0'
+                      }}
+                    ></div>
+                    <span className={`text-[11px] font-black truncate ${!legendVisibility.fullBus ? 'line-through text-slate-400' : ''}`}>
+                      정원 만석 (빗금)
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleFocusFullBusZone();
+                      }}
+                      title="만석 구역으로 이동"
+                      className="text-[9px] font-bold text-slate-600 hover:text-blue-600 px-1 py-0.5 rounded hover:bg-slate-200 transition-colors"
+                    >
+                      이동
+                    </button>
+                    <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
+                      legendVisibility.fullBus ? 'bg-slate-200 text-slate-800 border-slate-300' : 'bg-slate-200 text-slate-500 border-slate-300'
+                    }`}>
+                      {legendVisibility.fullBus ? '표시' : '숨김'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* One-time rider indicator (1) */}
+                <div 
+                  onClick={() => toggleLegendItem('oneTime')}
+                  role="button"
+                  title={legendVisibility.oneTime ? "클릭 시 1회 탑승(1) 마커 숨김" : "클릭 시 1회 탑승(1) 마커 표시"}
+                  className={`w-full flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border transition-all cursor-pointer select-none active:scale-[0.98] ${
+                    legendVisibility.oneTime
+                      ? 'bg-rose-50/85 hover:bg-rose-100/90 border-rose-200 text-rose-950 shadow-2xs'
+                      : 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <div className="relative w-4 h-4 flex items-center justify-center shrink-0">
+                      {legendVisibility.oneTime && (
+                        <span className="absolute inset-0 rounded-full bg-rose-400 opacity-60 animate-ping"></span>
+                      )}
+                      <span className={`relative w-3.5 h-3.5 rounded-full text-white text-[8.5px] font-black flex items-center justify-center border border-white ${
+                        legendVisibility.oneTime ? 'bg-rose-500' : 'bg-slate-400'
+                      }`}>1</span>
+                    </div>
+                    <span className={`text-[11px] font-black truncate ${!legendVisibility.oneTime ? 'line-through text-slate-400' : ''}`}>
+                      당일 1회 탑승
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleFocusOneTimeRiders();
+                      }}
+                      title="1회 탑승자 위치로 이동"
+                      className="text-[9px] font-bold text-rose-700 hover:text-blue-600 px-1 py-0.5 rounded hover:bg-rose-100 transition-colors"
+                    >
+                      이동
+                    </button>
+                    <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
+                      legendVisibility.oneTime ? 'bg-rose-100 text-rose-800 border-rose-300' : 'bg-slate-200 text-slate-500 border-slate-300'
+                    }`}>
+                      {legendVisibility.oneTime ? '표시' : '숨김'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Pure not riding (Walk / Self-pickup) indicator */}
+                <button
+                  type="button"
+                  onClick={() => toggleLegendItem('notRiding')}
+                  title={legendVisibility.notRiding ? "클릭 시 미탑승(회색) 마커 숨김" : "클릭 시 미탑승(회색) 마커 표시"}
+                  className={`w-full text-left flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border transition-all cursor-pointer select-none active:scale-[0.98] ${
+                    legendVisibility.notRiding
+                      ? 'bg-slate-50/80 hover:bg-slate-100/90 border-slate-200 text-slate-700'
+                      : 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className={`w-3 h-3 rounded-full border border-white shadow-xs shrink-0 ${
+                      legendVisibility.notRiding ? 'bg-slate-400' : 'bg-slate-300'
+                    }`}></span>
+                    <span className={`text-[11px] font-black truncate ${!legendVisibility.notRiding ? 'line-through text-slate-400' : ''}`}>
+                      미탑승 (도보/자차)
+                    </span>
+                  </div>
+                  <span className={`shrink-0 text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
+                    legendVisibility.notRiding ? 'bg-slate-200 text-slate-700 border-slate-300' : 'bg-slate-200 text-slate-500 border-slate-300'
+                  }`}>
+                    {legendVisibility.notRiding ? '표시' : '숨김'}
+                  </span>
+                </button>
+
+                {/* Unassigned regular indicator */}
+                <div 
+                  onClick={() => toggleLegendItem('unassigned')}
+                  role="button"
+                  title={legendVisibility.unassigned ? "클릭 시 미배정 마커 숨김" : "클릭 시 미배정 마커 표시"}
+                  className={`w-full flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border transition-all cursor-pointer select-none active:scale-[0.98] ${
+                    legendVisibility.unassigned
+                      ? 'bg-slate-50/80 hover:bg-slate-100/90 border-slate-200 text-slate-700 shadow-2xs'
+                      : 'bg-slate-100/70 border-slate-200 text-slate-400 opacity-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className={`w-3 h-3 rounded-full border border-white shadow-xs shrink-0 ${
+                      legendVisibility.unassigned ? 'bg-slate-600' : 'bg-slate-300'
+                    }`}></span>
+                    <span className={`text-[11px] font-black truncate ${!legendVisibility.unassigned ? 'line-through text-slate-400' : ''}`}>
+                      구역 외 미배정
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleFocusUnassignedRiders();
+                      }}
+                      title="미배정자 위치로 이동"
+                      className="text-[9px] font-bold text-slate-600 hover:text-blue-600 px-1 py-0.5 rounded hover:bg-slate-200 transition-colors"
+                    >
+                      이동
+                    </button>
+                    <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded border ${
+                      legendVisibility.unassigned ? 'bg-slate-200 text-slate-700 border-slate-300' : 'bg-slate-200 text-slate-500 border-slate-300'
+                    }`}>
+                      {legendVisibility.unassigned ? '표시' : '숨김'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Bus list with colors: 클릭 시 해당 호차 구역으로 뷰 이동 */}
+                {buses.length > 0 && (
+                  <div className="pt-2 border-t border-slate-100">
+                    <div className="text-[10px] font-bold text-slate-400 mb-1.5 flex items-center justify-between">
+                      <span>호차별 운행 구역</span>
+                      <span className="text-blue-600 font-bold">호차 클릭 시 이동</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {/* 전체 구역 한눈에 보기 버튼 */}
+                      <button
+                        type="button"
+                        onClick={handleFocusAllZones}
+                        title="모든 호차 구역과 기관 위치를 한눈에 봅니다"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-black text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-300 shadow-2xs hover:shadow-xs hover:scale-105 active:scale-95 transition-all cursor-pointer ring-offset-1 hover:ring-2 hover:ring-slate-400 select-none"
+                      >
+                        <svg className="w-3.5 h-3.5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                        </svg>
+                        <span>전체</span>
+                      </button>
+
+                      {buses.map(b => (
+                        <button
+                          key={b.id}
+                          type="button"
+                          onClick={() => handleFocusBusZone(b)}
+                          title={`[${b.name}] 구역으로 지도 뷰를 이동합니다`}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-black text-white shadow-xs hover:shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer ring-offset-1 hover:ring-2 hover:ring-blue-400 select-none"
+                          style={{ backgroundColor: b.color || '#1d4ed8' }}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                          <span>{b.name}</span>
+                          <svg className="w-2.5 h-2.5 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                          </svg>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
         )}
       </div>
