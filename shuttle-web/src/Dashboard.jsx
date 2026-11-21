@@ -7171,15 +7171,9 @@ const parseKindergartenExcelSheet = (sheet) => {
               {/* Main Page Header */}
               <div className="p-6 pb-4 border-b border-slate-100 bg-white shrink-0">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
-                      소통·공지
-                    </h2>
-                    <span className={`text-xs px-2.5 py-1 rounded-lg font-black shadow-xs flex items-center gap-1 border ${terms.themeBadge}`}>
-                      <span>{terms.icon}</span>
-                      <span>{activeEducationLevel}</span>
-                    </span>
-                  </div>
+                  <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
+                    소통·공지
+                  </h2>
                 </div>
               </div>
 
