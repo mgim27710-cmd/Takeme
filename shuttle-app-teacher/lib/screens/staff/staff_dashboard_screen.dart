@@ -131,15 +131,34 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
 
     final students = studentsJson.map((item) => StudentModel.fromJson(item)).toList()
       ..sort((a, b) {
+        // 0. 탑승 상태 우선순위:
+        //    탑승 대기(WAITING) -> 0 (상단 유지)
+        //    탑승 완료(BOARDED) -> 1 (탑승 처리 시 아래로 내려감)
+        //    하차/결석(DROPPED/ABSENT) -> 2 (맨 아래로 이동)
+        int statusPriority(StudentModel s) {
+          if (s.boarded) return 1;
+          if (s.dropped || s.absent) return 2;
+          return 0;
+        }
+
+        final pA = statusPriority(a);
+        final pB = statusPriority(b);
+        if (pA != pB) {
+          return pA.compareTo(pB);
+        }
+
+        // 1. 노선 정류장 도착 순서
         final orderA = stopOrderMap[a.id] ?? stopOrderMap[a.name] ?? stopOrderMap[a.realName] ?? 9999;
         final orderB = stopOrderMap[b.id] ?? stopOrderMap[b.name] ?? stopOrderMap[b.realName] ?? 9999;
         if (orderA != orderB) {
           return orderA.compareTo(orderB);
         }
+        // 2. 탑승 예정 시간
         final timeComp = a.expectedTime.compareTo(b.expectedTime);
         if (timeComp != 0) {
           return timeComp;
         }
+        // 3. 이름 가나다순
         return a.name.compareTo(b.name);
       });
     for (final item in studentsJson) {
