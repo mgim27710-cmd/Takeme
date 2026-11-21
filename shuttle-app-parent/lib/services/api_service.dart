@@ -985,25 +985,27 @@ class ApiService {
     }
   }
 
-  Future<Map<String, List<Map<String, dynamic>>>> getChatUsers(String email, {bool throwOnError = false}) async {
+  Future<Map<String, dynamic>> getChatUsers([String? email, bool throwOnError = false]) async {
     try {
-      final url = Uri.parse('${AppConfig.apiHost}/chat/users?email=${Uri.encodeComponent(email)}');
+      final userEmail = email ?? _currentUser?.email ?? 'parent@takeme.com';
+      final url = Uri.parse('${AppConfig.apiHost}/chat/users?email=${Uri.encodeComponent(userEmail)}');
       final res = await getWithAuth(url).timeout(const Duration(seconds: 6));
       if (throwOnError) throwIfServerError(res);
       if (res.statusCode == 200) {
         final Map<String, dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
         return {
+          'success': true,
           'drivers': (data['drivers'] as List<dynamic>? ?? []).whereType<Map<String, dynamic>>().toList(),
           'teachers': (data['teachers'] as List<dynamic>? ?? []).whereType<Map<String, dynamic>>().toList(),
           'admins': (data['admins'] as List<dynamic>? ?? []).whereType<Map<String, dynamic>>().toList(),
           'parents': (data['parents'] as List<dynamic>? ?? []).whereType<Map<String, dynamic>>().toList(),
         };
       }
-      return {'drivers': [], 'teachers': [], 'admins': [], 'parents': []};
+      return {'success': false, 'drivers': [], 'teachers': [], 'admins': [], 'parents': []};
     } catch (e) {
       debugPrint('[ApiService] getChatUsers error: $e');
       if (throwOnError) rethrow;
-      return {'drivers': [], 'teachers': [], 'admins': [], 'parents': []};
+      return {'success': false, 'drivers': [], 'teachers': [], 'admins': [], 'parents': []};
     }
   }
 
@@ -1081,28 +1083,27 @@ class ApiService {
     }
   }
 
-  Future<Map<String, dynamic>> createChatRoom({
-    required String name,
-    String type = 'DIRECT',
-    required List<int> userIds,
-    required String creatorEmail,
+  Future<Map<String, dynamic>?> createChatRoom(
+    List<int> userIds, {
+    String? name,
+    String? type,
+    String? creatorEmail,
   }) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/chat/rooms');
-      final res = await postWithAuth(url, jsonEncode({
-        'name': name,
-        'type': type,
+      final payload = {
         'userIds': userIds,
-        'creatorEmail': creatorEmail,
-      })).timeout(const Duration(seconds: 6));
-      final data = jsonDecode(utf8.decode(res.bodyBytes));
-      return {
-        'success': res.statusCode == 200 || res.statusCode == 201,
-        'data': data,
+        if (name != null && name.isNotEmpty) 'name': name,
+        if (type != null && type.isNotEmpty) 'type': type,
+        'creatorEmail': creatorEmail ?? _currentUser?.email ?? 'parent@takeme.com',
       };
+      final res = await postWithAuth(url, jsonEncode(payload)).timeout(const Duration(seconds: 6));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
     } catch (e) {
       debugPrint('[ApiService] createChatRoom error: $e');
-      return {'success': false, 'message': '채팅방 생성 실패: $e'};
     }
+    return null;
   }
 }
