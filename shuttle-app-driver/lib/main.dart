@@ -8,10 +8,13 @@ import 'screens/login_screen.dart';
 import 'screens/driver/driver_home_screen.dart';
 import 'widgets/nav_map_view.dart';
 import 'utils/network_helper.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'services/push_notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 앱이 꺼져 있을 때 오는 푸시를 받으려면 runApp 전에 백그라운드 핸들러를 등록해야 한다
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   setupNetworkSecurity();
   await initializeDateFormatting('ko_KR', null);
   await ApiService().init();

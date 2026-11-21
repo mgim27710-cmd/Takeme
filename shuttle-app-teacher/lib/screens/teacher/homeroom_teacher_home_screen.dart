@@ -21,7 +21,6 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
   int _selectedTabIndex = 0;
   late final PageController _pageController;
   bool _isRefreshing = false;
-  int _unreadNotificationCount = 0;
   int _unreadChatCount = 0;
   Timer? _notificationPollTimer;
 
@@ -37,7 +36,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
     });
     SocketService().onRoomUpdated((_) {
       if (mounted) _loadUnreadCount();
-    });
+    }, key: 'home');
   }
 
   @override
@@ -49,11 +48,10 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
 
   Future<void> _loadUnreadCount() async {
     try {
-      final count = await ApiService().getTeacherUnreadCount();
+      // 알림은 모두 TakeMe 알림 방으로 오므로 대화방 안 읽은 수(TakeMe 알림 포함)만 센다
       final chatCount = await ApiService().getChatTotalUnreadCount();
       if (mounted) {
         setState(() {
-          _unreadNotificationCount = count;
           _unreadChatCount = chatCount;
         });
       }
@@ -61,7 +59,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
   }
 
   Widget _buildNotificationButton() {
-    final totalUnread = _unreadNotificationCount + _unreadChatCount;
+    final totalUnread = _unreadChatCount;
     return Stack(
       clipBehavior: Clip.none,
       alignment: Alignment.center,
@@ -435,7 +433,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
                   index: 4,
                   icon: Icons.forum_outlined,
                   label: '메신저',
-                  badgeCount: _unreadChatCount + _unreadNotificationCount,
+                  badgeCount: _unreadChatCount,
                 ),
               ],
             ),

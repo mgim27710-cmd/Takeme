@@ -30,7 +30,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   String? _escortName;
   String? _escortConfirmedAt;
   bool _isCheckingIn = false;
-  int _unreadNotificationCount = 0;
   int _unreadChatCount = 0;
   Timer? _notificationPollTimer;
 
@@ -60,7 +59,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     });
     SocketService().onRoomUpdated((_) {
       if (mounted) _loadUnreadCount();
-    });
+    }, key: 'home');
   }
 
   @override
@@ -75,11 +74,10 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
 
   Future<void> _loadUnreadCount() async {
     try {
-      final count = await ApiService().getTeacherUnreadCount();
+      // 알림은 모두 TakeMe 알림 방으로 오므로 대화방 안 읽은 수(TakeMe 알림 포함)만 센다
       final chatCount = await ApiService().getChatTotalUnreadCount();
       if (mounted) {
         setState(() {
-          _unreadNotificationCount = count;
           _unreadChatCount = chatCount;
         });
       }
@@ -1250,7 +1248,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                   ).then((_) => _loadUnreadCount());
                 },
               ),
-              if ((_unreadNotificationCount + _unreadChatCount) > 0)
+              if (_unreadChatCount > 0)
                 Positioned(
                   right: 4,
                   bottom: 4,
@@ -1265,9 +1263,9 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                       constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
                       alignment: Alignment.center,
                       child: Text(
-                        (_unreadNotificationCount + _unreadChatCount) > 9
+                        _unreadChatCount > 9
                             ? '9+'
-                            : '${_unreadNotificationCount + _unreadChatCount}',
+                            : '$_unreadChatCount',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 10,

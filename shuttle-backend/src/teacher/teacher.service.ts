@@ -1096,6 +1096,22 @@ export class TeacherService {
             ).catch(() => {});
           }
         }).catch(() => {});
+
+        // 그 차량의 지도교사·기사에게도 운행 시작 알림(TakeMe 알림 + 휴대폰 푸시)
+        this.vehicleRepository
+          .findOne({ where: { id: vehicle.id }, relations: { driverUser: true, teacherUser: true } })
+          .then((v) => {
+            const staffIds = [v?.driverUser?.id, v?.teacherUser?.id, user.id]
+              .filter((id): id is number => typeof id === 'number');
+            if (staffIds.length === 0) return;
+            return this.chatService?.sendSystemNotificationToUsers(
+              staffIds,
+              '운행 시작',
+              `${busName} 운행을 시작했습니다.`,
+              { type: 'shuttle' },
+            );
+          })
+          .catch(() => {});
       }
     }
     return { success: true };

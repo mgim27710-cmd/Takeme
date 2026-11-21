@@ -416,6 +416,54 @@ export class RoutingService {
     this.studentNotificationHandler = fn;
   }
 
+  private pushHandler?: (userIds: number[], title: string, body: string, data?: Record<string, any>, settingType?: any) => Promise<any>;
+
+  /** ChatService 가 휴대폰 푸시(SNS) 보내는 함수를 등록한다 (모듈 순환 참조를 피하려고 함수로 받는다) */
+  public registerPushHandler(fn: (userIds: number[], title: string, body: string, data?: Record<string, any>, settingType?: any) => Promise<any>) {
+    this.pushHandler = fn;
+  }
+
+  /**
+   * 새 알림장·게시물 휴대폰 푸시.
+   * 전체 공개면 기관의 학부모·교사·기사, 반 공개면 그 반 원아의 학부모와 그 반 담임에게. 글쓴이는 뺀다.
+   */
+  private async pushNewBoardPost(post: BoardPost, academyId: number, authorUserId?: number) {
+    if (!this.pushHandler) return;
+    try {
+      const ids = new Set<number>();
+      const isClass = post.visibility === 'CLASS' && !!post.targetClass;
+      const students = await this.studentRepository.find({
+        where: { academy: { id: academyId } },
+        relations: { parentUser: true },
+      });
+      for (const st of students) {
+        if (isClass && !isSameClass(getStudentClassName(st), post.targetClass)) continue;
+        if (st.parentUser?.id) ids.add(st.parentUser.id);
+      }
+      const staff = await this.userRepository.find({
+        where: {
+          academyId,
+          role: In(isClass ? [UserRole.HOMEROOM_TEACHER] : [UserRole.HOMEROOM_TEACHER, UserRole.SHUTTLE_TEACHER, UserRole.DRIVER]),
+        },
+      });
+      for (const u of staff) {
+        if (isClass && !isSameClass(u.assignedClass, post.targetClass)) continue;
+        ids.add(u.id);
+      }
+      if (authorUserId) ids.delete(authorUserId);
+      const isNotice = post.postType === 'NOTICE';
+      await this.pushHandler(
+        Array.from(ids),
+        isNotice ? '새 알림장' : '새 게시물',
+        post.title || (isNotice ? '새 알림장이 등록되었습니다.' : '새 게시물이 등록되었습니다.'),
+        { type: isNotice ? 'notice' : 'board', postId: post.id },
+        isNotice ? 'notice' : 'post',
+      );
+    } catch (err) {
+      console.warn('[RoutingService] pushNewBoardPost error:', err);
+    }
+  }
+
   /** 원아와 연결된 사람(학부모·담임·차량 지도교사/기사·관리자)에게만 개인 알림 */
   public notifyStudentRelated(studentId: number, title: string, content: string, roles: Array<'PARENT' | 'HOMEROOM' | 'VEHICLE' | 'ADMIN'>, options?: any) {
     try {
@@ -3704,6 +3752,7 @@ export class RoutingService {
     if (academy?.id) {
       const alertMsg = saved.postType === 'NOTICE' ? '새 알림장이 등록되었습니다.' : '새 게시물이 등록되었습니다.';
       this.notifyRouteUpdated(academy.id, alertMsg);
+      void this.pushNewBoardPost(saved, academy.id, userId);
     }
     return this.hydratePostMedia(saved);
   }

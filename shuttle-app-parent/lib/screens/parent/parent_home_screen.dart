@@ -72,6 +72,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     LocalPush.instance.requestPermission();
     _loadAllData();
     _loadUnreadCount();
+    SocketService().onRoomUpdated((_) {
+      if (mounted) _loadUnreadCount();
+    }, key: 'home');
     WidgetsBinding.instance.addPostFrameCallback((_) => _ensureChildInfo());
     _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;

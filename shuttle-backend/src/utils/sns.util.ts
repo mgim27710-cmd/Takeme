@@ -10,6 +10,9 @@ export const SNS_PLATFORM_APPLICATION_ARN =
   process.env.AWS_SNS_PLATFORM_APPLICATION_ARN ||
   'arn:aws:sns:ap-southeast-2:485185308729:app/GCM/TakeMe-Push-FCM';
 
+/** 앱(PushNotificationService)이 만드는 안드로이드 알림 채널 ID 와 같아야 한다 */
+export const ANDROID_PUSH_CHANNEL_ID = 'takeme_push_channel';
+
 let cachedSnsClient: SNSClient | null = null;
 
 export function getSnsClient(): SNSClient {
@@ -87,19 +90,32 @@ export async function sendSnsPushNotification(
     }
   }
 
-  const gcmPayload = {
-    notification: {
-      title,
-      body,
-      sound: 'default',
-      click_action: 'FLUTTER_NOTIFICATION_CLICK',
+  // SNS 플랫폼 앱이 FCM HTTP v1 방식이므로 fcmV1Message 형식으로 보낸다.
+  // (예전 GCM 형식 {notification, data} 를 보내면 휴대폰에 제목·내용이 빈 알림이 뜬다)
+  // notification 이 있어야 앱이 꺼져 있거나 백그라운드일 때도 안드로이드가 알림창에 바로 띄운다.
+  const fcmV1Payload = {
+    fcmV1Message: {
+      message: {
+        notification: { title, body },
+        data: stringifiedData,
+        android: {
+          priority: 'high',
+          notification: {
+            channel_id: ANDROID_PUSH_CHANNEL_ID,
+            sound: 'default',
+            click_action: 'FLUTTER_NOTIFICATION_CLICK',
+          },
+        },
+        apns: {
+          payload: { aps: { alert: { title, body }, sound: 'default' } },
+        },
+      },
     },
-    data: stringifiedData,
   };
 
   const message = JSON.stringify({
     default: body,
-    GCM: JSON.stringify(gcmPayload),
+    GCM: JSON.stringify(fcmV1Payload),
   });
 
   try {

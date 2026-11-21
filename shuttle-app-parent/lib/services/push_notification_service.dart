@@ -7,11 +7,17 @@ import 'package:http/http.dart' as http;
 import '../config.dart';
 import 'api_service.dart';
 
+/// 앱이 꺼져 있거나 백그라운드일 때 받은 푸시. 반드시 최상위 함수여야 한다.
+/// 서버가 notification(제목·내용)을 함께 보내므로 알림창 표시는 안드로이드가 직접 한다
+/// (여기서 또 띄우면 두 번 뜬다).
 @pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   debugPrint('[PushNotificationService] Background message: ${message.messageId}');
 }
+
+/// 서버(sns.util.ts ANDROID_PUSH_CHANNEL_ID)와 AndroidManifest 의 기본 채널과 같은 ID
+const String kPushChannelId = 'takeme_push_channel';
 
 class PushNotificationService {
   static final PushNotificationService _instance = PushNotificationService._internal();
@@ -28,7 +34,7 @@ class PushNotificationService {
 
     try {
       await Firebase.initializeApp();
-      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
       // Setup Local Notifications
       const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -44,7 +50,7 @@ class PushNotificationService {
 
       // Create Android Notification Channel
       const androidChannel = AndroidNotificationChannel(
-        'takeme_push_channel',
+        kPushChannelId,
         'TakeMe 알림',
         description: 'TakeMe 통학차량 및 알림장 실시간 푸시 채널',
         importance: Importance.max,
@@ -55,7 +61,10 @@ class PushNotificationService {
           .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
           ?.createNotificationChannel(androidChannel);
 
-      // Request permission
+      // Request permission (안드로이드 13+ POST_NOTIFICATIONS 포함)
+      await _localNotifications
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
       final settings = await FirebaseMessaging.instance.requestPermission(
         alert: true,
         badge: true,
@@ -65,12 +74,12 @@ class PushNotificationService {
 
       // Foreground message listener
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        debugPrint('[PushNotificationService] Foreground message: ${message.notification?.title}');
-        showNotification(
-          title: message.notification?.title ?? message.data['title']?.toString() ?? 'TakeMe 알림',
-          body: message.notification?.body ?? message.data['body']?.toString() ?? message.data['message']?.toString() ?? '',
-          payload: jsonEncode(message.data),
-        );
+        final title = _firstText([message.notification?.title, message.data['title']]) ?? 'TakeMe 알림';
+        final body = _firstText([message.notification?.body, message.data['body'], message.data['message']]) ?? '';
+        debugPrint('[PushNotificationService] Foreground message: $title / $body');
+        // 운행 시작·하차는 앱이 켜져 있으면 LocalPush 가 소켓 이벤트로 이미 띄운다 (두 번 뜨지 않게)
+        if (message.data['type'] == 'shuttle' && (title == '운행 시작 안내' || title == '셔틀 하차 안내')) return;
+        showNotification(title: title, body: body, payload: jsonEncode(message.data));
       });
 
       // Token refresh listener
@@ -92,6 +101,15 @@ class PushNotificationService {
     }
   }
 
+  /// 비어 있지 않은 첫 글자열 (서버가 빈 문자열을 보내도 data 쪽 값을 쓰게)
+  static String? _firstText(List<Object?> values) {
+    for (final v in values) {
+      final t = v?.toString().trim();
+      if (t != null && t.isNotEmpty) return t;
+    }
+    return null;
+  }
+
   /// Show notification banner via FlutterLocalNotifications
   Future<void> showNotification({
     required String title,
@@ -100,7 +118,7 @@ class PushNotificationService {
   }) async {
     try {
       const androidDetails = AndroidNotificationDetails(
-        'takeme_push_channel',
+        kPushChannelId,
         'TakeMe 알림',
         channelDescription: 'TakeMe 통학차량 및 알림장 실시간 푸시 채널',
         importance: Importance.max,
@@ -134,7 +152,7 @@ class PushNotificationService {
     }
 
     try {
-      final url = Uri.parse('${AppConfig.apiHost}/api/me/device-token');
+      final url = Uri.parse('${AppConfig.apiHost}/me/device-token');
       final res = await http.post(
         url,
         headers: {
