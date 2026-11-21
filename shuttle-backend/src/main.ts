@@ -3,7 +3,7 @@ import { AppModule } from './app.module';
 import * as express from 'express';
 import helmet from 'helmet';
 import { join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
@@ -68,12 +68,45 @@ async function bootstrap() {
     .build();
   SwaggerModule.setup('api-docs', app, SwaggerModule.createDocument(app, swaggerConfig));
 
-  // 정적 클라우드 미디어 업로드 서빙 (/uploads/*)
+  // 정적 클라우드 미디어 업로드 서빙 (/uploads/*) 및 온디맨드 썸네일 생성
   const uploadsPath = join(process.cwd(), 'uploads');
   if (!existsSync(uploadsPath)) {
     mkdirSync(uploadsPath, { recursive: true });
   }
-  app.use('/uploads', express.static(uploadsPath));
+
+  // 온디맨드 썸네일 자동 생성 미들웨어
+  app.use('/uploads', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (req.method === 'GET' && req.path.includes('/thumb_')) {
+      const fullPath = join(uploadsPath, req.path);
+      if (!existsSync(fullPath)) {
+        // 원본 파일 경로 추출 (예: /board/thumb_abc.jpg -> /board/abc.jpg)
+        const originalPath = join(uploadsPath, req.path.replace('/thumb_', '/'));
+        if (existsSync(originalPath)) {
+          try {
+            const sharp = require('sharp');
+            const thumbBuffer = await sharp(originalPath)
+              .rotate()
+              .resize({ width: 360, withoutEnlargement: true })
+              .jpeg({ quality: 78, progressive: true })
+              .toBuffer();
+            writeFileSync(fullPath, thumbBuffer);
+            res.setHeader('Content-Type', 'image/jpeg');
+            res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+            return res.send(thumbBuffer);
+          } catch (thumbErr) {
+            console.warn('[Thumbnail Error] Fallback to original:', thumbErr);
+            return res.sendFile(originalPath);
+          }
+        }
+      }
+    }
+    next();
+  });
+
+  app.use('/uploads', express.static(uploadsPath, {
+    maxAge: '30d',
+    immutable: true,
+  }));
 
   const webDistPath = join(process.cwd(), '..', 'shuttle-web', 'dist');
   if (existsSync(webDistPath)) {

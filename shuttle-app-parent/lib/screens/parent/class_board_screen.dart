@@ -51,17 +51,19 @@ class _ClassBoardScreenState extends State<ClassBoardScreen> {
     }
   }
 
-  String _resolveImageUrl(String? url) {
+  String _resolveImageUrl(String? url, {bool thumbnail = false}) {
     if (url == null || url.trim().isEmpty) return '';
-    final trimmed = url.trim();
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
-    final host = AppConfig.apiHost.endsWith('/')
-        ? AppConfig.apiHost.substring(0, AppConfig.apiHost.length - 1)
-        : AppConfig.apiHost;
-    if (trimmed.startsWith('/')) {
-      return '$host$trimmed';
+    String resolved = url.trim();
+    if (!resolved.startsWith('http://') && !resolved.startsWith('https://')) {
+      final host = AppConfig.apiHost.endsWith('/')
+          ? AppConfig.apiHost.substring(0, AppConfig.apiHost.length - 1)
+          : AppConfig.apiHost;
+      resolved = resolved.startsWith('/') ? '$host$resolved' : '$host/$resolved';
     }
-    return '$host/$trimmed';
+    if (thumbnail && resolved.contains('/uploads/board/') && !resolved.contains('/uploads/board/thumb_')) {
+      resolved = resolved.replaceFirst('/uploads/board/', '/uploads/board/thumb_');
+    }
+    return resolved;
   }
 
   String _formatDate(dynamic dateVal) {
@@ -256,10 +258,13 @@ class _ClassBoardScreenState extends State<ClassBoardScreen> {
                                     ClipRRect(
                                       borderRadius: BorderRadius.circular(10),
                                       child: Image.network(
-                                        _resolveImageUrl(thumbUrl),
+                                        _resolveImageUrl(thumbUrl, thumbnail: true),
                                         width: 72,
                                         height: 72,
                                         fit: BoxFit.cover,
+                                        cacheWidth: 200,
+                                        cacheHeight: 200,
+                                        filterQuality: FilterQuality.low,
                                         errorBuilder: (ctx, err, stack) => Container(
                                           width: 72,
                                           height: 72,
@@ -286,17 +291,19 @@ class ClassBoardDetailScreen extends StatelessWidget {
 
   const ClassBoardDetailScreen({super.key, required this.post});
 
-  String _resolveImageUrl(String? url) {
+  String _resolveImageUrl(String? url, {bool thumbnail = false}) {
     if (url == null || url.trim().isEmpty) return '';
-    final trimmed = url.trim();
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
-    final host = AppConfig.apiHost.endsWith('/')
-        ? AppConfig.apiHost.substring(0, AppConfig.apiHost.length - 1)
-        : AppConfig.apiHost;
-    if (trimmed.startsWith('/')) {
-      return '$host$trimmed';
+    String resolved = url.trim();
+    if (!resolved.startsWith('http://') && !resolved.startsWith('https://')) {
+      final host = AppConfig.apiHost.endsWith('/')
+          ? AppConfig.apiHost.substring(0, AppConfig.apiHost.length - 1)
+          : AppConfig.apiHost;
+      resolved = resolved.startsWith('/') ? '$host$resolved' : '$host/$resolved';
     }
-    return '$host/$trimmed';
+    if (thumbnail && resolved.contains('/uploads/board/') && !resolved.contains('/uploads/board/thumb_')) {
+      resolved = resolved.replaceFirst('/uploads/board/', '/uploads/board/thumb_');
+    }
+    return resolved;
   }
 
   String _formatDate(dynamic dateVal) {
@@ -460,9 +467,11 @@ class ClassBoardDetailScreen extends StatelessWidget {
                         alignment: Alignment.bottomRight,
                         children: [
                           Image.network(
-                            _resolveImageUrl(imgUrl),
+                            _resolveImageUrl(imgUrl, thumbnail: true),
                             width: double.infinity,
                             fit: BoxFit.cover,
+                            cacheWidth: 800,
+                            filterQuality: FilterQuality.low,
                             errorBuilder: (c, e, s) => Container(
                               height: 180,
                               color: const Color(0xFFF1F5F9),

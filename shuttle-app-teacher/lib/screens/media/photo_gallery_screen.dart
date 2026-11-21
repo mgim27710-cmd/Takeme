@@ -83,14 +83,16 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
       if (source == ImageSource.camera) {
         final photo = await _picker.pickImage(
           source: ImageSource.camera,
-          imageQuality: 85,
-          maxWidth: 1920,
+          imageQuality: 80,
+          maxWidth: 1600,
+          maxHeight: 1600,
         );
         if (photo != null) picked.add(photo);
       } else {
         picked = await _picker.pickMultiImage(
-          imageQuality: 85,
-          maxWidth: 1920,
+          imageQuality: 80,
+          maxWidth: 1600,
+          maxHeight: 1600,
         );
       }
 
@@ -685,10 +687,31 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
                                                 child: Stack(
                                                   fit: StackFit.expand,
                                                   children: [
-                                                    photo['url'] != null && photo['url'].toString().isNotEmpty
+                                                    (photo['thumbnailUrl'] != null && photo['thumbnailUrl'].toString().isNotEmpty) || (photo['url'] != null && photo['url'].toString().isNotEmpty)
                                                         ? Image.network(
-                                                            photo['url'],
+                                                            (photo['thumbnailUrl'] != null && photo['thumbnailUrl'].toString().isNotEmpty)
+                                                                ? photo['thumbnailUrl']
+                                                                : photo['url'],
                                                             fit: BoxFit.cover,
+                                                            cacheWidth: 350,
+                                                            cacheHeight: 350,
+                                                            filterQuality: FilterQuality.low,
+                                                            loadingBuilder: (ctx, child, progress) {
+                                                              if (progress == null) return child;
+                                                              return Container(
+                                                                color: const Color(0xFFF1F5F9),
+                                                                child: const Center(
+                                                                  child: SizedBox(
+                                                                    width: 20,
+                                                                    height: 20,
+                                                                    child: CircularProgressIndicator(
+                                                                      strokeWidth: 2,
+                                                                      color: Color(0xFF94A3B8),
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                              );
+                                                            },
                                                             errorBuilder: (ctx, err, stack) => Container(
                                                               color: const Color(0xFFE2E8F0),
                                                               child: const Icon(Icons.broken_image, color: Color(0xFF94A3B8)),

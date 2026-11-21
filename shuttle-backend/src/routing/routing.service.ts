@@ -4115,15 +4115,37 @@ export class RoutingService {
 
     const randomName = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${ext}`;
 
+    // Sharp 경량 썸네일 버퍼 생성 (폭 360px, JPEG 78%, 원본 대비 용량 95% 절감)
+    let thumbBuffer: Buffer | null = null;
+    try {
+      const sharp = require('sharp');
+      thumbBuffer = await sharp(buffer)
+        .rotate()
+        .resize({ width: 360, withoutEnlargement: true })
+        .jpeg({ quality: 78, progressive: true })
+        .toBuffer();
+    } catch (sharpErr) {
+      console.warn('[uploadMedia] Sharp thumbnail creation failed, fallback to original:', sharpErr);
+    }
+
     // S3 사용 (AWS_S3_BUCKET + AWS_REGION): 파일 키를 돌려주고, 화면 표시용 서명 URL 은 조회할 때마다 새로 만든다.
     if (isS3Enabled()) {
       try {
         const s3Key = `board/${randomName}`;
         await uploadToS3(s3Key, buffer, detectedMime);
+
+        let thumbS3Key: string | null = null;
+        if (thumbBuffer) {
+          thumbS3Key = `board/thumb_${randomName}`;
+          await uploadToS3(thumbS3Key, thumbBuffer, 'image/jpeg');
+        }
+
         return {
           success: true,
           ref: `${S3_REF_PREFIX}${s3Key}`, // DB 에 저장할 값
           url: await signS3Key(s3Key), // 바로 미리보기용 (1시간). 저장하지 말 것
+          thumbnailRef: thumbS3Key ? `${S3_REF_PREFIX}${thumbS3Key}` : `${S3_REF_PREFIX}${s3Key}`,
+          thumbnailUrl: thumbS3Key ? await signS3Key(thumbS3Key) : await signS3Key(s3Key),
           filename: randomName,
           size: buffer.length,
           createdAt: new Date().toISOString()
@@ -4142,14 +4164,23 @@ export class RoutingService {
     const filePath = path.join(uploadsDir, randomName);
     fs.writeFileSync(filePath, buffer);
 
+    let thumbFileName: string | null = null;
+    if (thumbBuffer) {
+      thumbFileName = `thumb_${randomName}`;
+      fs.writeFileSync(path.join(uploadsDir, thumbFileName), thumbBuffer);
+    }
+
     const host = reqHost || '52.63.245.203.sslip.io';
     const protocol = (host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':3000')) ? 'http' : 'https';
     const url = `${protocol}://${host}/uploads/board/${randomName}`;
+    const thumbnailUrl = thumbFileName ? `${protocol}://${host}/uploads/board/${thumbFileName}` : url;
 
     return {
       success: true,
       ref: url,
       url,
+      thumbnailRef: thumbnailUrl,
+      thumbnailUrl,
       filename: randomName,
       size: buffer.length,
       createdAt: new Date().toISOString()

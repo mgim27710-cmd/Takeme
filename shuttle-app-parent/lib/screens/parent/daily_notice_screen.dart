@@ -482,6 +482,9 @@ class _DailyNoticeScreenState extends State<DailyNoticeScreen> {
                           width: 64,
                           height: 64,
                           fit: BoxFit.cover,
+                          cacheWidth: 180,
+                          cacheHeight: 180,
+                          filterQuality: FilterQuality.low,
                           errorBuilder: (_, __, ___) => Container(
                             width: 64,
                             height: 64,
@@ -738,6 +741,8 @@ class _DailyNoticeDetailScreenState extends State<DailyNoticeDetailScreen> {
                             imgUrl,
                             width: double.infinity,
                             fit: BoxFit.cover,
+                            cacheWidth: 800,
+                            filterQuality: FilterQuality.low,
                             errorBuilder: (_, __, ___) => Container(
                               height: 180,
                               color: const Color(0xFFF1F5F9),

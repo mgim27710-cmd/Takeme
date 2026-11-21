@@ -413,12 +413,13 @@ export default function PhotoGalleryManager({
                 className="group relative bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-2xs hover:shadow-md hover:border-indigo-300 transition-all cursor-pointer flex flex-col"
               >
                 <div className="aspect-square w-full bg-slate-100 overflow-hidden relative">
-                  {photo.url ? (
+                  {(photo.thumbnailUrl || photo.url) ? (
                     <img
-                      src={photo.url}
+                      src={photo.thumbnailUrl || photo.url}
                       alt={photo.filename || '사진'}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       loading="lazy"
+                      decoding="async"
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-slate-400 text-xs">

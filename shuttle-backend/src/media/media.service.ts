@@ -82,6 +82,7 @@ export class MediaService {
         vehicleId,
         className,
         storageKey: uploadResult.ref || uploadResult.url || uploadResult.filename || 'unknown',
+        thumbnailKey: uploadResult.thumbnailRef || uploadResult.thumbnailUrl || null,
         filename: uploadResult.filename,
         mimeType: item.mimeType || null,
         size: uploadResult.size || 0,
@@ -90,8 +91,13 @@ export class MediaService {
 
       const saved = await this.mediaRepo.save(asset);
       const signedUrl = await resolveMediaRef(saved.storageKey);
+      const signedThumbUrl = saved.thumbnailKey
+        ? await resolveMediaRef(saved.thumbnailKey)
+        : (signedUrl && signedUrl.includes('/uploads/board/')
+            ? signedUrl.replace('/uploads/board/', '/uploads/board/thumb_')
+            : signedUrl);
 
-      const assetWithUrl = { ...saved, url: signedUrl };
+      const assetWithUrl = { ...saved, url: signedUrl, thumbnailUrl: signedThumbUrl };
       createdAssets.push(assetWithUrl);
 
       // Realtime notification to academy room
@@ -155,9 +161,20 @@ export class MediaService {
     const results = await Promise.all(
       assets.map(async (asset) => {
         const url = await resolveMediaRef(asset.storageKey);
+        let thumbnailUrl = asset.thumbnailKey
+          ? await resolveMediaRef(asset.thumbnailKey)
+          : null;
+        if (!thumbnailUrl && url) {
+          if (url.includes('/uploads/board/')) {
+            thumbnailUrl = url.replace('/uploads/board/', '/uploads/board/thumb_');
+          } else {
+            thumbnailUrl = url;
+          }
+        }
         return {
           ...asset,
           url,
+          thumbnailUrl: thumbnailUrl || url,
         };
       }),
     );

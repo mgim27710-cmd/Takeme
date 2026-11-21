@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { API_BASE_URL } from '../config';
+import { compressImage } from '../utils/imageCompressor';
 
 const PRESET_PHOTOS = [
   {
@@ -509,12 +510,10 @@ export default function BoardViewer({
       }
 
       try {
-        const base64Data = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
+        const compressed = await compressImage(file);
+        const base64Data = compressed.base64Data;
+        const uploadFilename = compressed.filename;
+        const uploadMime = compressed.mimeType;
 
         let finalUrl = base64Data;
         try {
@@ -523,8 +522,8 @@ export default function BoardViewer({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               base64Data,
-              filename: file.name,
-              mimeType: file.type
+              filename: uploadFilename,
+              mimeType: uploadMime
             })
           });
           const data = await res.json();

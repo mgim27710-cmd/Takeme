@@ -220,9 +220,12 @@ class _BoardCommunityScreenState extends State<BoardCommunityScreen> {
     final List<dynamic> images = post['images'] is List ? post['images'] : [];
     final singleImage = post['imageUrl']?.toString();
     final hasImage = (singleImage != null && singleImage.isNotEmpty) || images.isNotEmpty;
-    final thumbUrl = (singleImage != null && singleImage.isNotEmpty)
+    final String? rawThumb = (singleImage != null && singleImage.isNotEmpty)
         ? singleImage
         : (images.isNotEmpty ? images.first.toString() : null);
+    final thumbUrl = (rawThumb != null && rawThumb.contains('/uploads/board/') && !rawThumb.contains('/uploads/board/thumb_'))
+        ? rawThumb.replaceFirst('/uploads/board/', '/uploads/board/thumb_')
+        : rawThumb;
 
     final isNotice = role == 'ADMIN' || role == 'ACADEMY_ADMIN' || title.contains('공지');
 
@@ -318,6 +321,9 @@ class _BoardCommunityScreenState extends State<BoardCommunityScreen> {
                           width: 68,
                           height: 68,
                           fit: BoxFit.cover,
+                          cacheWidth: 200,
+                          cacheHeight: 200,
+                          filterQuality: FilterQuality.low,
                           errorBuilder: (_, __, ___) => Container(
                             width: 68,
                             height: 68,
@@ -496,7 +502,13 @@ class _BoardDetailScreenState extends State<BoardDetailScreen> {
                           padding: const EdgeInsets.only(bottom: 12),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(12),
-                            child: Image.network(img, width: double.infinity, fit: BoxFit.cover),
+                            child: Image.network(
+                              img,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                              cacheWidth: 800,
+                              filterQuality: FilterQuality.low,
+                            ),
                           ),
                         )),
                   ],

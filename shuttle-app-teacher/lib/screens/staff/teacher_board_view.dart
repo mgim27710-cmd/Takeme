@@ -47,17 +47,19 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
     super.dispose();
   }
 
-  String _resolveImageUrl(String? url) {
+  String _resolveImageUrl(String? url, {bool thumbnail = false}) {
     if (url == null || url.trim().isEmpty) return '';
-    final trimmed = url.trim();
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
-    final host = AppConfig.apiHost.endsWith('/')
-        ? AppConfig.apiHost.substring(0, AppConfig.apiHost.length - 1)
-        : AppConfig.apiHost;
-    if (trimmed.startsWith('/')) {
-      return '$host$trimmed';
+    String resolved = url.trim();
+    if (!resolved.startsWith('http://') && !resolved.startsWith('https://')) {
+      final host = AppConfig.apiHost.endsWith('/')
+          ? AppConfig.apiHost.substring(0, AppConfig.apiHost.length - 1)
+          : AppConfig.apiHost;
+      resolved = resolved.startsWith('/') ? '$host$resolved' : '$host/$resolved';
     }
-    return '$host/$trimmed';
+    if (thumbnail && resolved.contains('/uploads/board/') && !resolved.contains('/uploads/board/thumb_')) {
+      resolved = resolved.replaceFirst('/uploads/board/', '/uploads/board/thumb_');
+    }
+    return resolved;
   }
 
   void _openImageViewer(BuildContext context, String imageUrl, String title) {
@@ -154,6 +156,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             final item = mediaList[i];
                             final rawUrl = item['url']?.toString() ?? '';
                             final fullUrl = _resolveImageUrl(rawUrl);
+                            final thumbUrl = _resolveImageUrl(item['thumbnailUrl']?.toString() ?? rawUrl, thumbnail: true);
                             final isSelected = selectedUrls.contains(fullUrl);
 
                             return GestureDetector(
@@ -172,8 +175,11 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(8),
                                     child: Image.network(
-                                      fullUrl,
+                                      thumbUrl,
                                       fit: BoxFit.cover,
+                                      cacheWidth: 250,
+                                      cacheHeight: 250,
+                                      filterQuality: FilterQuality.low,
                                       errorBuilder: (c, e, s) => Container(
                                         color: const Color(0xFFF1F5F9),
                                         child: const Icon(Icons.broken_image_outlined, color: Color(0xFF94A3B8)),
@@ -656,8 +662,11 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                               ),
                               clipBehavior: Clip.antiAlias,
                               child: Image.network(
-                                _resolveImageUrl(url),
+                                _resolveImageUrl(url, thumbnail: true),
                                 fit: BoxFit.cover,
+                                cacheWidth: 200,
+                                cacheHeight: 200,
+                                filterQuality: FilterQuality.low,
                                 errorBuilder: (ctx, err, stack) => const Icon(Icons.broken_image, color: Color(0xFF94A3B8)),
                               ),
                             ),
@@ -1211,7 +1220,14 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                 border: Border.all(color: const Color(0xFFE2E8F0)),
                               ),
                               clipBehavior: Clip.antiAlias,
-                              child: Image.network(_resolveImageUrl(url), fit: BoxFit.cover, errorBuilder: (ctx, err, stack) => const Icon(Icons.broken_image)),
+                              child: Image.network(
+                                _resolveImageUrl(url, thumbnail: true),
+                                fit: BoxFit.cover,
+                                cacheWidth: 200,
+                                cacheHeight: 200,
+                                filterQuality: FilterQuality.low,
+                                errorBuilder: (ctx, err, stack) => const Icon(Icons.broken_image),
+                              ),
                             ),
                             Positioned(
                               top: -6,
@@ -1969,8 +1985,11 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                             ),
                                             clipBehavior: Clip.antiAlias,
                                             child: Image.network(
-                                              _resolveImageUrl(imgUrl),
+                                              _resolveImageUrl(imgUrl, thumbnail: true),
                                               fit: BoxFit.cover,
+                                              cacheWidth: 480,
+                                              cacheHeight: 360,
+                                              filterQuality: FilterQuality.low,
                                               errorBuilder: (ctx, err, stack) => Container(
                                                 color: const Color(0xFFF1F5F9),
                                                 child: const Center(

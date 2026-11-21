@@ -6,6 +6,7 @@ import MessagePanel from './MessagePanel';
 import LogViewer from './LogViewer';
 import { API_BASE_URL } from './config';
 import { formatTeacherName } from './utils/teacherUtil';
+import { compressImage } from './utils/imageCompressor';
 
 // Haversine Distance Helper
 function getDistanceKm(lat1, lon1, lat2, lon2) {
@@ -311,12 +312,11 @@ export default function TeacherDashboard({
       }
 
       try {
-        const base64Data = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
+        // 업로드 전 브라우저에서 이미지 압축 최적화 (1600px, 80% JPEG)
+        const compressed = await compressImage(file);
+        const base64Data = compressed.base64Data;
+        const uploadFilename = compressed.filename;
+        const uploadMime = compressed.mimeType;
 
         let finalUrl = base64Data;
         let createdId = `${Date.now()}-${i}-${Math.random().toString(36).substring(2, 7)}`;
@@ -332,8 +332,8 @@ export default function TeacherDashboard({
               body: JSON.stringify({
                 photos: [{
                   base64Data,
-                  filename: file.name,
-                  mimeType: file.type,
+                  filename: uploadFilename,
+                  mimeType: uploadMime,
                   className: teacherClass || undefined
                 }]
               })
@@ -341,7 +341,7 @@ export default function TeacherDashboard({
             if (res.ok) {
               const resData = await res.json();
               const item = Array.isArray(resData) ? resData[0] : resData;
-              if (item?.url) finalUrl = item.url;
+              if (item?.thumbnailUrl || item?.url) finalUrl = item.thumbnailUrl || item.url;
               if (item?.id) createdId = item.id;
             }
           } else {
@@ -350,13 +350,13 @@ export default function TeacherDashboard({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 base64Data,
-                filename: file.name,
-                mimeType: file.type
+                filename: uploadFilename,
+                mimeType: uploadMime
               })
             });
             const data = await res.json();
-            if (res.ok && data.url) {
-              finalUrl = data.url;
+            if (res.ok && (data.thumbnailUrl || data.url)) {
+              finalUrl = data.thumbnailUrl || data.url;
             }
           }
         } catch (netErr) {
