@@ -682,25 +682,25 @@ export default function LogViewer({
 
   // Render Calendar Date Cells
   const getDayClasses = (dateStr) => {
-    let classes = 'w-10 h-10 mx-auto rounded-full flex items-center justify-center text-sm font-bold transition-all relative ';
+    let classes = 'w-11 h-11 mx-auto rounded-2xl flex items-center justify-center text-sm font-black transition-all relative cursor-pointer ';
     const isSelected = dateStr === selectedDateStr;
     const isToday = dateStr === todayStr;
     const info = dateIndicatorMap.get(dateStr);
 
     if (isSelected) {
-      return classes + 'bg-blue-600 text-white shadow-md scale-110 ring-2 ring-blue-300';
+      return classes + 'bg-blue-600 text-white shadow-md scale-105 ring-2 ring-blue-400';
     }
 
     if (info?.hasHoliday) {
-      return classes + 'bg-orange-100 text-orange-700 font-black border border-orange-300 hover:bg-orange-200';
+      return classes + 'bg-orange-100/90 text-orange-800 font-black border border-orange-300 hover:bg-orange-200 shadow-2xs';
     }
 
     if (info?.hasVacation) {
-      return classes + 'bg-purple-100 text-purple-700 font-bold border border-purple-200 hover:bg-purple-200';
+      return classes + 'bg-purple-100/90 text-purple-800 font-black border border-purple-300 hover:bg-purple-200 shadow-2xs';
     }
 
     if (isToday) {
-      return classes + 'bg-blue-50 text-blue-700 border border-blue-300 font-black';
+      return classes + 'bg-blue-50 text-blue-700 border-2 border-blue-400 font-black';
     }
 
     return classes + 'hover:bg-slate-100 text-slate-700';
@@ -711,24 +711,24 @@ export default function LogViewer({
     if (!info) return null;
 
     return (
-      <div className="absolute bottom-1 flex justify-center items-center gap-0.5 w-full pointer-events-none">
+      <div className="absolute bottom-1 flex justify-center items-center gap-1 w-full pointer-events-none">
         {info.hasHoliday && (calendarFilter === 'SELECTED_DATE' || calendarFilter === 'HOLIDAY') && (
-          <span className="w-1.5 h-1.5 rounded-full bg-orange-500" title="휴업일" />
+          <span className="w-2 h-2 rounded-full bg-orange-500 shadow-2xs ring-1 ring-white" title="휴업일" />
         )}
         {info.hasEvent && (calendarFilter === 'SELECTED_DATE' || calendarFilter === 'EVENT') && (
-          <span className="w-1.5 h-1.5 rounded-full bg-blue-500" title="학원/반 행사" />
+          <span className="w-2 h-2 rounded-full bg-blue-500 shadow-2xs ring-1 ring-white" title="학원/반 행사" />
         )}
         {info.absences > 0 && (calendarFilter === 'SELECTED_DATE' || calendarFilter === 'ABSENCE') && (
-          <span className="w-1.5 h-1.5 rounded-full bg-rose-500" title={`결석 ${info.absences}명`} />
+          <span className="w-2 h-2 rounded-full bg-rose-500 shadow-2xs ring-1 ring-white" title={`결석 ${info.absences}명`} />
         )}
         {info.changes > 0 && (calendarFilter === 'SELECTED_DATE' || calendarFilter === 'CHANGE') && (
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" title={`통학 변동 ${info.changes}건`} />
+          <span className="w-2 h-2 rounded-full bg-amber-500 shadow-2xs ring-1 ring-white" title={`통학 변동 ${info.changes}건`} />
         )}
         {info.approvedCount > 0 && (calendarFilter === 'SELECTED_DATE' || calendarFilter === 'APPROVAL') && (
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title={`결재 승인 ${info.approvedCount}건`} />
+          <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-2xs ring-1 ring-white" title={`결재 승인 ${info.approvedCount}건`} />
         )}
         {info.hasStaffLeave && (calendarFilter === 'SELECTED_DATE' || calendarFilter === 'STAFF_LEAVE') && (
-          <span className="w-1.5 h-1.5 rounded-full bg-purple-600 shadow-2xs" title="직원 휴가" />
+          <span className="w-2 h-2 rounded-full bg-purple-600 shadow-2xs ring-1 ring-white" title="직원 휴가" />
         )}
       </div>
     );
@@ -790,97 +790,97 @@ export default function LogViewer({
             </button>
           </div>
 
-          {/* Color Legend / Interactive Filter Buttons */}
-          <div className="flex flex-wrap items-center gap-1 text-[11px] font-bold pt-1.5 border-t border-slate-200/60">
+          {/* Color Legend / Interactive Filter Buttons (High Visibility) */}
+          <div className="flex flex-wrap items-center gap-1.5 text-xs font-black pt-2 border-t border-slate-200/70">
             <button
               type="button"
               onClick={() => setCalendarFilter(prev => prev === 'HOLIDAY' ? 'SELECTED_DATE' : 'HOLIDAY')}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
                 calendarFilter === 'HOLIDAY'
-                  ? 'bg-orange-500 text-white border-orange-600 shadow-2xs font-extrabold'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-orange-50 hover:text-orange-600 hover:border-orange-200'
+                  ? 'bg-orange-500 text-white border-orange-600 shadow-xs font-black scale-105'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-orange-50 hover:text-orange-700 hover:border-orange-300'
               }`}
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${calendarFilter === 'HOLIDAY' ? 'bg-white' : 'bg-orange-500'}`} />
+              <span className={`w-2 h-2 rounded-full ${calendarFilter === 'HOLIDAY' ? 'bg-white' : 'bg-orange-500'}`} />
               <span>휴업일</span>
             </button>
 
             <button
               type="button"
               onClick={() => setCalendarFilter(prev => prev === 'EVENT' ? 'SELECTED_DATE' : 'EVENT')}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
                 calendarFilter === 'EVENT'
-                  ? 'bg-blue-500 text-white border-blue-600 shadow-2xs font-extrabold'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200'
+                  ? 'bg-blue-600 text-white border-blue-700 shadow-xs font-black scale-105'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300'
               }`}
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${calendarFilter === 'EVENT' ? 'bg-white' : 'bg-blue-500'}`} />
+              <span className={`w-2 h-2 rounded-full ${calendarFilter === 'EVENT' ? 'bg-white' : 'bg-blue-600'}`} />
               <span>행사</span>
             </button>
 
             <button
               type="button"
               onClick={() => setCalendarFilter(prev => prev === 'ABSENCE' ? 'SELECTED_DATE' : 'ABSENCE')}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
                 calendarFilter === 'ABSENCE'
-                  ? 'bg-rose-500 text-white border-rose-600 shadow-2xs font-extrabold'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200'
+                  ? 'bg-rose-600 text-white border-rose-700 shadow-xs font-black scale-105'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300'
               }`}
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${calendarFilter === 'ABSENCE' ? 'bg-white' : 'bg-rose-500'}`} />
+              <span className={`w-2 h-2 rounded-full ${calendarFilter === 'ABSENCE' ? 'bg-white' : 'bg-rose-600'}`} />
               <span>결석</span>
             </button>
 
             <button
               type="button"
               onClick={() => setCalendarFilter(prev => prev === 'CHANGE' ? 'SELECTED_DATE' : 'CHANGE')}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
                 calendarFilter === 'CHANGE'
-                  ? 'bg-amber-500 text-white border-amber-600 shadow-2xs font-extrabold'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200'
+                  ? 'bg-amber-500 text-white border-amber-600 shadow-xs font-black scale-105'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-amber-50 hover:text-amber-700 hover:border-amber-300'
               }`}
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${calendarFilter === 'CHANGE' ? 'bg-white' : 'bg-amber-500'}`} />
+              <span className={`w-2 h-2 rounded-full ${calendarFilter === 'CHANGE' ? 'bg-white' : 'bg-amber-500'}`} />
               <span>통학 변동</span>
             </button>
 
             <button
               type="button"
               onClick={() => setCalendarFilter(prev => prev === 'APPROVAL' ? 'SELECTED_DATE' : 'APPROVAL')}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
                 calendarFilter === 'APPROVAL'
-                  ? 'bg-emerald-500 text-white border-emerald-600 shadow-2xs font-extrabold'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200'
+                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs font-black scale-105'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300'
               }`}
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${calendarFilter === 'APPROVAL' ? 'bg-white' : 'bg-emerald-500'}`} />
+              <span className={`w-2 h-2 rounded-full ${calendarFilter === 'APPROVAL' ? 'bg-white' : 'bg-emerald-600'}`} />
               <span>결재 승인</span>
             </button>
 
             <button
               type="button"
               onClick={() => setCalendarFilter(prev => prev === 'STAFF_LEAVE' ? 'SELECTED_DATE' : 'STAFF_LEAVE')}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
                 calendarFilter === 'STAFF_LEAVE'
-                  ? 'bg-purple-600 text-white border-purple-700 shadow-2xs font-extrabold'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-purple-50 hover:text-purple-600 hover:border-purple-200'
+                  ? 'bg-purple-600 text-white border-purple-700 shadow-xs font-black scale-105'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-purple-50 hover:text-purple-700 hover:border-purple-300'
               }`}
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${calendarFilter === 'STAFF_LEAVE' ? 'bg-white' : 'bg-purple-600'}`} />
+              <span className={`w-2 h-2 rounded-full ${calendarFilter === 'STAFF_LEAVE' ? 'bg-white' : 'bg-purple-600'}`} />
               <span>직원 휴가</span>
             </button>
 
             <button
               type="button"
               onClick={() => setCalendarFilter('SELECTED_DATE')}
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
                 calendarFilter === 'SELECTED_DATE'
-                  ? 'bg-blue-600 text-white border-blue-700 shadow-2xs font-extrabold'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200'
+                  ? 'bg-slate-800 text-white border-slate-900 shadow-xs font-black scale-105'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100 hover:text-slate-900'
               }`}
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${calendarFilter === 'SELECTED_DATE' ? 'bg-white' : 'bg-blue-600'}`} />
-              <span>선택일</span>
+              <span className={`w-2 h-2 rounded-full ${calendarFilter === 'SELECTED_DATE' ? 'bg-white' : 'bg-slate-800'}`} />
+              <span>선택일 전체보기</span>
             </button>
           </div>
         </div>
@@ -888,24 +888,24 @@ export default function LogViewer({
         {/* 13 Months Scrollable List */}
         <div className="flex-1 overflow-y-auto p-6 space-y-12" ref={calendarRef}>
           {monthsData.map((mData, index) => (
-            <div key={index} data-is-current={mData.isCurrentMonth} className="max-w-md mx-auto">
-              <h3 className="text-lg font-black text-slate-800 mb-3 flex items-center justify-between">
+            <div key={index} data-is-current={mData.isCurrentMonth} className="max-w-lg mx-auto">
+              <h3 className="text-xl font-black text-slate-800 mb-3.5 flex items-center justify-between">
                 <span>{mData.year}년 {monthNames[mData.month]}</span>
                 {mData.isCurrentMonth && (
-                  <span className="text-[11px] font-bold bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded-full">
+                  <span className="text-xs font-black bg-blue-100 text-blue-700 border border-blue-300 px-2.5 py-0.5 rounded-full shadow-2xs">
                     이번 달
                   </span>
                 )}
               </h3>
-              <div className="grid grid-cols-7 gap-1 text-center mb-1.5">
+              <div className="grid grid-cols-7 gap-1.5 text-center mb-2">
                 {['일', '월', '화', '수', '목', '금', '토'].map(d => (
-                  <div key={d} className={`text-xs font-bold py-1 ${d === '일' ? 'text-red-500' : d === '토' ? 'text-blue-500' : 'text-slate-400'}`}>
+                  <div key={d} className={`text-xs font-black py-1.5 ${d === '일' ? 'text-red-500' : d === '토' ? 'text-blue-500' : 'text-slate-500'}`}>
                     {d}
                   </div>
                 ))}
               </div>
-              <div className="grid grid-cols-7 gap-1">
-                {mData.blanks.map(b => <div key={`blank-${b}`} className="h-10" />)}
+              <div className="grid grid-cols-7 gap-1.5">
+                {mData.blanks.map(b => <div key={`blank-${b}`} className="h-11" />)}
                 {mData.daysArray.map(({ day, dateStr }) => (
                   <div key={day} className="relative">
                     <button
@@ -1305,75 +1305,75 @@ export default function LogViewer({
             </div>
           )}
 
-          {/* Section 1: Events & Holidays on this date */}
+          {/* Section 1: Events & Holidays on this date (High Readability) */}
           {(calendarFilter === 'HOLIDAY' || (calendarFilter === 'SELECTED_DATE' && activeMode !== 'LOG' && activeMode !== 'PAYMENT_APPROVAL')) && (
             <div>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
-                  <h4 className="text-sm font-black text-slate-800">
-                    {calendarFilter === 'HOLIDAY' ? '학원/유치원 휴업일 및 방학' : '학원/유치원 행사 및 휴업일'}
+              <div className="flex items-center justify-between mb-3.5">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-2.5 h-6 bg-orange-500 rounded-full inline-block" />
+                  <h4 className="text-base font-extrabold text-slate-900 tracking-tight">
+                    {calendarFilter === 'HOLIDAY' ? '기관 휴업일 및 방학' : '기관 행사 및 휴업일'}
                   </h4>
-                  <span className="text-xs font-bold text-orange-600">
-                    ({calendarFilter === 'HOLIDAY' ? holidaysOnDate.length : selectedDateEvents.length}건)
+                  <span className="text-xs font-black text-orange-700 bg-orange-50 px-2.5 py-0.5 rounded-full border border-orange-200">
+                    {calendarFilter === 'HOLIDAY' ? holidaysOnDate.length : selectedDateEvents.length}건
                   </span>
                 </div>
               </div>
 
               {(calendarFilter === 'HOLIDAY' ? holidaysOnDate : selectedDateEvents).length === 0 ? (
-                <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-6 text-center">
-                  <p className="text-xs font-bold text-slate-400">
+                <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-8 text-center shadow-2xs">
+                  <p className="text-sm font-bold text-slate-400">
                     {calendarFilter === 'HOLIDAY' ? '선택한 날짜에 등록된 휴업일이나 방학이 없습니다.' : '선택한 날짜에 등록된 행사나 휴업일이 없습니다.'}
                   </p>
                 </div>
               ) : (
-                <div className="space-y-2.5">
+                <div className="space-y-3">
                   {(calendarFilter === 'HOLIDAY' ? holidaysOnDate : selectedDateEvents).map(event => {
                     const isHoliday = event.type === 'ACADEMY_HOLIDAY' || event.type === 'CLASS_HOLIDAY' || event.type === 'HOLIDAY';
                     const isVacation = event.type === 'VACATION';
                     return (
                       <div
                         key={event.id}
-                        className={`bg-white rounded-2xl border p-4 shadow-2xs flex items-center justify-between transition-all ${
+                        className={`bg-white rounded-2xl border p-4.5 shadow-xs flex items-center justify-between transition-all hover:shadow-sm ${
                           isHoliday
-                            ? 'border-orange-200 hover:border-orange-300'
+                            ? 'border-orange-200 hover:border-orange-400'
                             : isVacation
-                            ? 'border-purple-200 hover:border-purple-300'
-                            : 'border-blue-200 hover:border-blue-300'
+                            ? 'border-purple-200 hover:border-purple-400'
+                            : 'border-blue-200 hover:border-blue-400'
                         }`}
                       >
-                        <div className="flex items-start gap-3">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                        <div className="flex items-start gap-3.5">
+                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-sm shrink-0 shadow-2xs ${
                             isHoliday
-                              ? 'bg-orange-100 text-orange-700'
+                              ? 'bg-orange-100 text-orange-800'
                               : isVacation
-                              ? 'bg-purple-100 text-purple-700'
-                              : 'bg-blue-100 text-blue-700'
+                              ? 'bg-purple-100 text-purple-800'
+                              : 'bg-blue-100 text-blue-800'
                           }`}>
                             {isHoliday ? '휴업' : isVacation ? '방학' : '행사'}
                           </div>
                           <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-black text-slate-800 text-sm">{event.title}</span>
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-black text-slate-900 text-base leading-snug">{event.title}</span>
+                              <span className={`text-xs font-black px-2.5 py-0.5 rounded-lg border ${
                                 isHoliday
-                                  ? 'bg-orange-50 text-orange-700 border border-orange-200'
+                                  ? 'bg-orange-50 text-orange-700 border-orange-200'
                                   : isVacation
-                                  ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                                  : 'bg-blue-50 text-blue-700 border border-blue-200'
+                                  ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                  : 'bg-blue-50 text-blue-700 border-blue-200'
                               }`}>
-                                {isHoliday ? '휴업일' : isVacation ? '방학' : '학원 행사'}
+                                {isHoliday ? '휴업일' : isVacation ? '방학' : '기관 행사'}
                               </span>
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
-                                {event.targetClass ? `대상: ${event.targetClass}` : '전체 반 대상'}
+                              <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700">
+                                {event.targetClass ? `대상: ${event.targetClass}` : '전체 대상'}
                               </span>
                             </div>
-                            <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
-                              <span>기간: {event.startDate} {event.startDate !== event.endDate ? `~ ${event.endDate}` : ''}</span>
+                            <div className="text-xs sm:text-[13px] text-slate-600 font-semibold mt-1.5 flex items-center gap-2 flex-wrap">
+                              <span className="font-extrabold text-slate-800">기간: {event.startDate} {event.startDate !== event.endDate ? `~ ${event.endDate}` : ''}</span>
                               {event.reason && (
                                 <>
                                   <span className="text-slate-300">|</span>
-                                  <span>{event.reason}</span>
+                                  <span className="text-slate-600 font-medium">{event.reason}</span>
                                 </>
                               )}
                             </div>
@@ -1384,7 +1384,7 @@ export default function LogViewer({
                           <button
                             type="button"
                             onClick={() => setItemToDelete({ id: event.id, title: event.title, isOverride: false })}
-                            className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
+                            className="px-3.5 py-2 text-xs font-extrabold text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer shrink-0"
                             title="일정 삭제"
                           >
                             삭제
@@ -1401,41 +1401,43 @@ export default function LogViewer({
           {/* Section: 직원 휴가 및 연차 현황 (STAFF_LEAVE 필터 또는 선택일 상세) */}
           {(calendarFilter === 'STAFF_LEAVE' || (calendarFilter === 'SELECTED_DATE' && activeMode !== 'LOG' && activeMode !== 'PAYMENT_APPROVAL')) && (
             <div className="mt-2">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-purple-600" />
-                  <h4 className="text-sm font-black text-slate-800">직원 휴가 및 연차 현황</h4>
-                  <span className="text-xs font-bold text-purple-600">({staffLeavesOnDate.length}건)</span>
+              <div className="flex items-center justify-between mb-3.5">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-2.5 h-6 bg-purple-600 rounded-full inline-block" />
+                  <h4 className="text-base font-extrabold text-slate-900 tracking-tight">직원 휴가 및 연차 현황</h4>
+                  <span className="text-xs font-black text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
+                    {staffLeavesOnDate.length}건
+                  </span>
                 </div>
               </div>
 
               {staffLeavesOnDate.length === 0 ? (
-                <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-6 text-center">
-                  <p className="text-xs font-bold text-slate-400">선택한 날짜에 등록된 직원 휴가 일정이 없습니다.</p>
+                <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-8 text-center shadow-2xs">
+                  <p className="text-sm font-bold text-slate-400">선택한 날짜에 등록된 직원 휴가 일정이 없습니다.</p>
                 </div>
               ) : (
-                <div className="space-y-2.5">
+                <div className="space-y-3">
                   {staffLeavesOnDate.map(leave => (
                     <div
                       key={leave.id}
-                      className="bg-white rounded-2xl border border-purple-200 hover:border-purple-300 p-4 shadow-2xs flex items-center justify-between transition-all"
+                      className="bg-white rounded-2xl border border-purple-200 hover:border-purple-400 p-4.5 shadow-xs flex items-center justify-between transition-all hover:shadow-sm"
                     >
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-black text-xs shrink-0">
+                      <div className="flex items-start gap-3.5">
+                        <div className="w-12 h-12 rounded-2xl bg-purple-100 text-purple-800 flex items-center justify-center font-black text-sm shrink-0 shadow-2xs">
                           휴가
                         </div>
                         <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-black text-slate-900 text-sm">{leave.name}</span>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-black text-slate-900 text-base leading-snug">{leave.name}</span>
+                            <span className="text-xs font-black px-2.5 py-0.5 rounded-lg bg-purple-50 text-purple-700 border border-purple-200">
                               {leave.type}
                             </span>
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700">
                               {leave.role}
                             </span>
                           </div>
-                          <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
-                            <span>기간: {leave.period}</span>
+                          <div className="text-xs sm:text-[13px] text-slate-600 font-semibold mt-1.5 flex items-center gap-2 flex-wrap">
+                            <span className="font-extrabold text-slate-800">기간: {leave.period}</span>
                             <span className="text-slate-300">|</span>
                             <span className="text-blue-700 font-bold">{leave.substitute}</span>
                           </div>
@@ -1449,45 +1451,47 @@ export default function LogViewer({
           )}
           {calendarFilter === 'EVENT' && (
             <div>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                  <h4 className="text-sm font-black text-slate-800">학원/유치원 행사</h4>
-                  <span className="text-xs font-bold text-blue-600">({regularEventsOnDate.length}건)</span>
+              <div className="flex items-center justify-between mb-3.5">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-2.5 h-6 bg-blue-600 rounded-full inline-block" />
+                  <h4 className="text-base font-extrabold text-slate-900 tracking-tight">기관 행사</h4>
+                  <span className="text-xs font-black text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                    {regularEventsOnDate.length}건
+                  </span>
                 </div>
               </div>
 
               {regularEventsOnDate.length === 0 ? (
-                <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-6 text-center">
-                  <p className="text-xs font-bold text-slate-400">선택한 날짜에 등록된 학원/반 행사가 없습니다.</p>
+                <div className="bg-white rounded-2xl border border-dashed border-slate-200 p-8 text-center shadow-2xs">
+                  <p className="text-sm font-bold text-slate-400">선택한 날짜에 등록된 행사 일정이 없습니다.</p>
                 </div>
               ) : (
-                <div className="space-y-2.5">
+                <div className="space-y-3">
                   {regularEventsOnDate.map(event => (
                     <div
                       key={event.id}
-                      className="bg-white rounded-2xl border border-blue-200 hover:border-blue-300 p-4 shadow-2xs flex items-center justify-between transition-all"
+                      className="bg-white rounded-2xl border border-blue-200 hover:border-blue-400 p-4.5 shadow-xs flex items-center justify-between transition-all hover:shadow-sm"
                     >
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs shrink-0">
+                      <div className="flex items-start gap-3.5">
+                        <div className="w-12 h-12 rounded-2xl bg-blue-100 text-blue-800 flex items-center justify-center font-black text-sm shrink-0 shadow-2xs">
                           행사
                         </div>
                         <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-black text-slate-800 text-sm">{event.title}</span>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                              학원 행사
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-black text-slate-900 text-base leading-snug">{event.title}</span>
+                            <span className="text-xs font-black px-2.5 py-0.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">
+                              기관 행사
                             </span>
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
-                              {event.targetClass ? `대상: ${event.targetClass}` : '전체 반 대상'}
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700">
+                              {event.targetClass ? `대상: ${event.targetClass}` : '전체 대상'}
                             </span>
                           </div>
-                          <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
-                            <span>기간: {event.startDate} {event.startDate !== event.endDate ? `~ ${event.endDate}` : ''}</span>
+                          <div className="text-xs sm:text-[13px] text-slate-600 font-semibold mt-1.5 flex items-center gap-2 flex-wrap">
+                            <span className="font-extrabold text-slate-800">기간: {event.startDate} {event.startDate !== event.endDate ? `~ ${event.endDate}` : ''}</span>
                             {event.reason && (
                               <>
                                 <span className="text-slate-300">|</span>
-                                <span>{event.reason}</span>
+                                <span className="text-slate-600 font-medium">{event.reason}</span>
                               </>
                             )}
                           </div>
@@ -1498,7 +1502,7 @@ export default function LogViewer({
                         <button
                           type="button"
                           onClick={() => setItemToDelete({ id: event.id, title: event.title, isOverride: false })}
-                          className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer"
+                          className="px-3.5 py-2 text-xs font-extrabold text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors cursor-pointer shrink-0"
                           title="일정 삭제"
                         >
                           삭제
