@@ -187,12 +187,6 @@ export default function AuthViewer({
               원 인증: {academy?.authCode || '미발급'}
             </span>
           </div>
-          <p className="text-xs text-slate-500 mt-1">
-            {currentTab === 'STUDENT' && '앱에 원 인증코드를 입력하고 가입한 원아 및 학부모의 접근 권한을 승인하거나 해제합니다.'}
-            {currentTab === 'STAFF' && '통학차량 기사님과 차량선생님의 계정 연동 및 운행 권한을 관리합니다.'}
-            {currentTab === 'TEACHER' && '원 인증코드로 가입된 유치원 교사의 계정 연동 상태를 확인하고 관리합니다.'}
-            {currentTab === 'SUBSTITUTE' && '각 호차별 기사님의 휴식(연차·병가 등)에 따른 대체 기사 임시 로그인 계정 발급 및 활성화 상태를 일괄 관리합니다.'}
-          </p>
         </div>
 
         {/* Tab Pills & Actions */}
@@ -563,7 +557,6 @@ export default function AuthViewer({
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
               <div>
                 <h3 className="font-bold text-slate-800 text-sm">통학차량 스태프 가입 및 승인 현황</h3>
-                <p className="text-xs text-slate-500 mt-0.5">각 호차별 기사님 및 차량선생님의 앱 연동 승인 상태를 관리합니다.</p>
               </div>
               <div className="flex items-center gap-2 text-xs">
                 <span className="font-semibold text-slate-600">등록 차량:</span>
@@ -732,10 +725,6 @@ export default function AuthViewer({
                         </div>
                       </div>
                     </div>
-
-                    <div className="text-[11px] text-slate-400 bg-slate-50/50 p-2.5 rounded-xl border border-dashed border-slate-200">
-                      기사님/교사가 앱에서 회원가입 시 '운전기사' 또는 '차량선생님'를 선택하고 해당 차량을 지정하면 승인 대기 목록에 표시됩니다.
-                    </div>
                   </div>
                 );
               })}
@@ -756,9 +745,6 @@ export default function AuthViewer({
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h3 className="font-bold text-slate-800 text-sm">유치원 담당 교사 가입 및 승인 현황 ({teachers.length}명)</h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  교사 계정의 연동 상태를 확인합니다. 담임 배정 및 분반은 [반 관리] 메뉴에서 진행할 수 있습니다.
-                </p>
               </div>
               <div className="flex items-center gap-3 text-xs">
                 <span className="font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
