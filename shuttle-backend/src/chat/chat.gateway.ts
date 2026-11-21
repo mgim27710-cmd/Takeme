@@ -60,13 +60,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       if (uid !== message.sender?.id) {
         this.server.to(`user_${uid}`).emit('notificationReceived', {
+          id: message.id,
           type: 'MESSAGE',
           roomId,
+          room: { id: roomId },
           title: message.sender?.name ? `${message.sender.name}님의 메시지` : '새 메시지',
           message: message.text,
+          text: message.text,
           senderId: message.sender?.id,
           senderName: message.sender?.name,
+          sender: message.sender,
           createdAt: message.createdAt,
+          payload: message.payload,
         });
       }
     }

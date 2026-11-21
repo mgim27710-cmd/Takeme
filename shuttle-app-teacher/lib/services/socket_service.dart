@@ -10,41 +10,157 @@ class SocketService {
   SocketService._internal();
 
   io_client.Socket? _socket;
+  String? _currentToken;
   bool get isConnected => _socket?.connected ?? false;
 
+  /// 현재 사용자가 보고 있는 채팅방 ID (해당 방 메시지는 푸시 배너를 띄우지 않고 대화창에 실시간 표시)
+  int? activeChatRoomId;
+
+  // 이벤트 콜백 관리 리스트 (덮어쓰기로 인한 소멸 방지)
+  final List<Function(Map<String, dynamic>)> _notificationCallbacks = [];
+  final List<Function(Map<String, dynamic>)> _roomUpdatedCallbacks = [];
+  final List<Function(Map<String, dynamic>)> _receiveMessageCallbacks = [];
+  final List<Function(Map<String, dynamic>)> _messagesReadCallbacks = [];
+  final List<Function(Map<String, dynamic>)> _locationUpdatedCallbacks = [];
+  final List<Function(Map<String, dynamic>)> _routePathUpdatedCallbacks = [];
+
   void connect(String? token) {
-    if (_socket != null && _socket!.connected) return;
+    // 토큰이 변경되었거나 소켓이 없을 경우 재연결
+    if (_socket != null && _socket!.connected && _currentToken == token) return;
+
+    if (_socket != null) {
+      try {
+        _socket!.disconnect();
+        _socket!.dispose();
+      } catch (_) {}
+      _socket = null;
+    }
+    _currentToken = token;
 
     final options = io_client.OptionBuilder()
         .setTransports(['websocket'])
-        .disableAutoConnect();
+        .enableAutoConnect()
+        .enableReconnection();
 
     if (token != null && token.isNotEmpty) {
       options.setAuth({'token': token});
+      options.setQuery({'token': token});
     }
 
     _socket = io_client.io(AppConfig.apiHost, options.build());
 
     _socket!.onConnect((_) {
-      debugPrint('Socket connected: ${_socket!.id}');
-    });
-
-    _socket!.off('notificationReceived');
-    _socket!.on('notificationReceived', (data) {
-      debugPrint('[Socket] notificationReceived: $data');
-      if (data is Map<String, dynamic>) {
-        final title = data['title']?.toString() ?? 'TakeMe 알림';
-        final message = data['message']?.toString() ?? '';
-        PushNotificationService().showNotification(
-          title: title,
-          body: message,
-          payload: jsonEncode(data),
-        );
-      }
+      debugPrint('[Socket] Connected: ${_socket!.id}');
     });
 
     _socket!.onDisconnect((_) {
-      debugPrint('Socket disconnected');
+      debugPrint('[Socket] Disconnected');
+    });
+
+    // 1. notificationReceived (새 메시지 및 시스템 알림)
+    _socket!.on('notificationReceived', (data) {
+      debugPrint('[Socket] notificationReceived: $data');
+      if (data is Map<String, dynamic> || data is Map) {
+        final map = Map<String, dynamic>.from(data as Map);
+        final title = map['title']?.toString() ?? 'TakeMe 알림';
+        final message = map['message']?.toString() ?? '';
+        final roomId = int.tryParse(map['roomId']?.toString() ?? '');
+
+        // 현재 보고 있는 채팅방이 아니면 상단 푸시 알림 배너 팝업 발생!
+        if (roomId == null || roomId != activeChatRoomId) {
+          PushNotificationService().showNotification(
+            title: title,
+            body: message,
+            payload: jsonEncode(map),
+          );
+        }
+
+        // 채팅방 보고 있는 중이라면 receiveMessage 콜백으로도 전달하여 실시간 표시
+        if (roomId != null && roomId == activeChatRoomId) {
+          for (final cb in List.from(_receiveMessageCallbacks)) {
+            try {
+              cb(map);
+            } catch (e) {
+              debugPrint('[Socket] receiveMessage callback error: $e');
+            }
+          }
+        }
+
+        // 등록된 알림 콜백들 실행 (뱃지 카운트 갱신 등)
+        for (final cb in List.from(_notificationCallbacks)) {
+          try {
+            cb(map);
+          } catch (e) {
+            debugPrint('[Socket] notification callback error: $e');
+          }
+        }
+      }
+    });
+
+    // 2. roomUpdated (대화방 목록 및 안 읽은 수 갱신)
+    _socket!.on('roomUpdated', (data) {
+      debugPrint('[Socket] roomUpdated: $data');
+      final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      for (final cb in List.from(_roomUpdatedCallbacks)) {
+        try {
+          cb(map);
+        } catch (e) {
+          debugPrint('[Socket] roomUpdated callback error: $e');
+        }
+      }
+    });
+
+    // 3. receiveMessage (채팅방 내 실시간 메시지 수신)
+    _socket!.on('receiveMessage', (data) {
+      debugPrint('[Socket] receiveMessage: $data');
+      if (data is Map<String, dynamic> || data is Map) {
+        final map = Map<String, dynamic>.from(data as Map);
+        for (final cb in List.from(_receiveMessageCallbacks)) {
+          try {
+            cb(map);
+          } catch (e) {
+            debugPrint('[Socket] receiveMessage callback error: $e');
+          }
+        }
+      }
+    });
+
+    // 4. messagesRead (상대방 읽음 상태 실시간 반영)
+    _socket!.on('messagesRead', (data) {
+      if (data is Map<String, dynamic> || data is Map) {
+        final map = Map<String, dynamic>.from(data as Map);
+        for (final cb in List.from(_messagesReadCallbacks)) {
+          try {
+            cb(map);
+          } catch (e) {
+            debugPrint('[Socket] messagesRead callback error: $e');
+          }
+        }
+      }
+    });
+
+    // 5. locationUpdated
+    _socket!.on('locationUpdated', (data) {
+      if (data is Map<String, dynamic> || data is Map) {
+        final map = Map<String, dynamic>.from(data as Map);
+        for (final cb in List.from(_locationUpdatedCallbacks)) {
+          try {
+            cb(map);
+          } catch (_) {}
+        }
+      }
+    });
+
+    // 6. routePathUpdated
+    _socket!.on('routePathUpdated', (data) {
+      if (data is Map<String, dynamic> || data is Map) {
+        final map = Map<String, dynamic>.from(data as Map);
+        for (final cb in List.from(_routePathUpdatedCallbacks)) {
+          try {
+            cb(map);
+          } catch (_) {}
+        }
+      }
     });
 
     _socket!.connect();
@@ -63,8 +179,6 @@ class SocketService {
     required double lat,
     required double lng,
   }) {
-    // 서버(location.gateway.ts)가 받는 이벤트 이름은 'driverLocationUpdate'
-    // (예전 'updateLocation'은 서버에 없는 이름이라 위치가 전달되지 않았음)
     _socket?.emit('driverLocationUpdate', {
       'vehicleId': vehicleId,
       'lat': lat,
@@ -72,7 +186,6 @@ class SocketService {
     });
   }
 
-  /// 운행 시작·종료를 서버에 알림 → 관리자 웹·학부모 앱에 '운행 중' 표시
   void sendOperationStatus({required int vehicleId, required bool isOperating}) {
     _socket?.emit('driverOperationStatus', {
       'vehicleId': vehicleId,
@@ -80,89 +193,57 @@ class SocketService {
     });
   }
 
-  void onLocationUpdated(Function(Map<String, dynamic> data) callback) {
-    _socket?.on('locationUpdated', (data) {
-      if (data is Map<String, dynamic>) {
-        callback(data);
-      } else if (data is Map) {
-        callback(Map<String, dynamic>.from(data));
-      }
-    });
-  }
-
-  void onNotificationReceived(Function(Map<String, dynamic> data) callback) {
-    _socket?.off('notificationReceived');
-    _socket?.on('notificationReceived', (data) {
-      if (data is Map<String, dynamic>) {
-        callback(data);
-      } else if (data is Map) {
-        callback(Map<String, dynamic>.from(data));
-      } else {
-        callback(<String, dynamic>{});
-      }
-    });
-  }
-
-  void onRoutePathUpdated(Function(Map<String, dynamic> data) callback) {
-    _socket?.off('routePathUpdated');
-    _socket?.on('routePathUpdated', (data) {
-      if (data is Map<String, dynamic>) {
-        callback(data);
-      } else if (data is Map) {
-        callback(Map<String, dynamic>.from(data));
-      }
-    });
-  }
-
   void joinChatRoom(int roomId) {
+    activeChatRoomId = roomId;
     _socket?.emit('joinChatRoom', {'roomId': roomId});
   }
 
   void leaveChatRoom(int roomId) {
+    if (activeChatRoomId == roomId) {
+      activeChatRoomId = null;
+    }
     _socket?.emit('leaveChatRoom', {'roomId': roomId});
   }
 
-  void onReceiveMessage(Function(Map<String, dynamic> data) callback) {
-    _socket?.off('receiveMessage');
-    _socket?.on('receiveMessage', (data) {
-      if (data is Map<String, dynamic>) {
-        callback(data);
-      } else if (data is Map) {
-        callback(Map<String, dynamic>.from(data));
-      }
-    });
-  }
-
-  void onMessagesRead(Function(Map<String, dynamic> data) callback) {
-    _socket?.off('messagesRead');
-    _socket?.on('messagesRead', (data) {
-      if (data is Map<String, dynamic>) {
-        callback(data);
-      } else if (data is Map) {
-        callback(Map<String, dynamic>.from(data));
-      }
-    });
+  void onNotificationReceived(Function(Map<String, dynamic> data) callback) {
+    _notificationCallbacks.add(callback);
   }
 
   void onRoomUpdated(Function(Map<String, dynamic> data) callback) {
-    _socket?.off('roomUpdated');
-    _socket?.on('roomUpdated', (data) {
-      if (data is Map<String, dynamic>) {
-        callback(data);
-      } else if (data is Map) {
-        callback(Map<String, dynamic>.from(data));
-      }
-    });
+    _roomUpdatedCallbacks.add(callback);
+  }
+
+  void onReceiveMessage(Function(Map<String, dynamic> data) callback) {
+    _receiveMessageCallbacks.add(callback);
+  }
+
+  void onMessagesRead(Function(Map<String, dynamic> data) callback) {
+    _messagesReadCallbacks.add(callback);
+  }
+
+  void onLocationUpdated(Function(Map<String, dynamic> data) callback) {
+    _locationUpdatedCallbacks.add(callback);
+  }
+
+  void onRoutePathUpdated(Function(Map<String, dynamic> data) callback) {
+    _routePathUpdatedCallbacks.add(callback);
   }
 
   void offChatEvents() {
-    _socket?.off('receiveMessage');
-    _socket?.off('messagesRead');
-    _socket?.off('roomUpdated');
+    _receiveMessageCallbacks.clear();
+    _messagesReadCallbacks.clear();
   }
 
   void disconnect() {
+    activeChatRoomId = null;
+    _notificationCallbacks.clear();
+    _roomUpdatedCallbacks.clear();
+    _receiveMessageCallbacks.clear();
+    _messagesReadCallbacks.clear();
+    _locationUpdatedCallbacks.clear();
+    _routePathUpdatedCallbacks.clear();
     _socket?.disconnect();
     _socket = null;
+    _currentToken = null;
   }
 }

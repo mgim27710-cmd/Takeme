@@ -65,8 +65,18 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
       final msgRoomId = data['room']?['id'] ?? data['roomId'];
       if (msgRoomId != null && _toNumber(msgRoomId) == widget.roomId) {
         setState(() {
-          final exists = _messages.any((m) => m['id'] == data['id']);
+          final id = data['id'];
+          final exists = id != null && _messages.any((m) => m['id'] == id);
           if (!exists) {
+            if (data['sender'] == null && data['senderName'] != null) {
+              data['sender'] = {
+                'id': data['senderId'],
+                'name': data['senderName'],
+              };
+            }
+            if (data['text'] == null && data['message'] != null) {
+              data['text'] = data['message'];
+            }
             _messages.add(data);
           }
         });
