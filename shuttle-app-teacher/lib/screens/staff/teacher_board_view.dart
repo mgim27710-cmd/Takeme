@@ -334,7 +334,9 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
         currentUser.assignedClass != '미배정';
     final titleCtrl = TextEditingController();
     final contentCtrl = TextEditingController();
-    String? selectedCategory;
+    // 알림장과 게시물 중 기본 1개를 필수로 자동 선택 (현재 보고 있는 탭 기준, 기본값 NOTICE)
+    String selectedCategory = _selectedPostTypeFilter == 'POST' ? 'POST' : 'NOTICE';
+    String? errorMessage;
     final canUseMyClass = isHomeroom && hasClass;
     String visibility = canUseMyClass ? 'CLASS' : 'ALL';
     final String selectedClass = hasClass ? currentUser.assignedClass! : '';
@@ -371,9 +373,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                       Text(
                         selectedCategory == 'NOTICE'
                             ? '알림장 작성'
-                            : selectedCategory == 'POST'
-                                ? '게시물 작성'
-                                : '알림장 / 게시글 작성',
+                            : '게시물 작성',
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
@@ -500,6 +500,11 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   // Title Input
                   TextField(
                     controller: titleCtrl,
+                    onChanged: (_) {
+                      if (errorMessage != null) {
+                        setModalState(() => errorMessage = null);
+                      }
+                    },
                     decoration: InputDecoration(
                       labelText: '제목',
                       hintText: '게시글 제목을 입력하세요',
@@ -513,6 +518,11 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   TextField(
                     controller: contentCtrl,
                     maxLines: 4,
+                    onChanged: (_) {
+                      if (errorMessage != null) {
+                        setModalState(() => errorMessage = null);
+                      }
+                    },
                     decoration: InputDecoration(
                       labelText: '내용',
                       hintText: '활동 내용, 알림 사항 등을 작성하세요',
@@ -574,8 +584,25 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                 final mediaList = await ApiService().getMediaAssets();
                                 if (!ctx.mounted) return;
                                 if (mediaList.isEmpty) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('클라우드 보관함에 저장된 사진이 없습니다.')),
+                                  showDialog(
+                                    context: ctx,
+                                    builder: (dCtx) => AlertDialog(
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                      title: const Row(
+                                        children: [
+                                          Icon(Icons.info_outline, color: Color(0xFF2563EB), size: 22),
+                                          SizedBox(width: 8),
+                                          Text('보관함 안내', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                        ],
+                                      ),
+                                      content: const Text('클라우드 보관함에 저장된 사진이 없습니다.', style: TextStyle(fontSize: 14)),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(dCtx),
+                                          child: const Text('확인', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+                                        ),
+                                      ],
+                                    ),
                                   );
                                   return;
                                 }
@@ -708,6 +735,31 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   ),
                   const SizedBox(height: 20),
 
+                  // Error Message Banner (창 바로 위에 표시)
+                  if (errorMessage != null) ...[
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFFCA5A5)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.error_outline, size: 18, color: Color(0xFFDC2626)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              errorMessage!,
+                              style: const TextStyle(fontSize: 13, color: Color(0xFFDC2626), fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+
                   // Submit Button
                   ElevatedButton(
                     onPressed: isUploading
@@ -716,26 +768,43 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             final title = titleCtrl.text.trim();
                             final content = contentCtrl.text.trim();
 
-                            if (selectedCategory == null) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('카테고리(알림장 또는 게시물)를 선택해주세요.')),
+                            void showWarningDialog(String msg) {
+                              setModalState(() => errorMessage = msg);
+                              showDialog(
+                                context: ctx,
+                                builder: (dCtx) => AlertDialog(
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  title: const Row(
+                                    children: [
+                                      Icon(Icons.warning_amber_rounded, color: Color(0xFFEA580C), size: 22),
+                                      SizedBox(width: 8),
+                                      Text('입력 안내', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                  content: Text(msg, style: const TextStyle(fontSize: 14, color: Color(0xFF334155))),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(dCtx),
+                                      child: const Text('확인', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+                                    ),
+                                  ],
+                                ),
                               );
-                              return;
                             }
+
                             if (title.isEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('제목을 입력해주세요.')),
-                              );
+                              showWarningDialog('제목을 입력해주세요.');
                               return;
                             }
                             if (content.isEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('내용을 입력해주세요.')),
-                              );
+                              showWarningDialog('내용을 입력해주세요.');
                               return;
                             }
 
-                            setModalState(() => isUploading = true);
+                            setModalState(() {
+                              isUploading = true;
+                              errorMessage = null;
+                            });
 
                             // Upload all picked images to cloud
                             final List<String> uploadedCloudUrls = [];
@@ -775,10 +844,10 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             setModalState(() => isUploading = false);
 
                             if (!ctx.mounted) return;
-                            Navigator.pop(ctx);
 
-                            if (!mounted) return;
                             if (res['success'] == true) {
+                              Navigator.pop(ctx);
+                              if (!mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text('${selectedCategory == 'NOTICE' ? '알림장' : '게시물'}이 등록되었습니다. 학부모 및 관리자 웹과 실시간 공유됩니다.'),
@@ -786,16 +855,11 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                 ),
                               );
                               setState(() {
-                                _selectedPostTypeFilter = selectedCategory!;
+                                _selectedPostTypeFilter = selectedCategory;
                               });
                               _loadPosts();
                             } else {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(res['message'] ?? '게시글 등록에 실패했습니다.'),
-                                  backgroundColor: const Color(0xFFDC2626),
-                                ),
-                              );
+                              showWarningDialog(res['message'] ?? '게시글 등록에 실패했습니다.');
                             }
                           },
                     style: ElevatedButton.styleFrom(
@@ -815,9 +879,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                         : Text(
                             selectedCategory == 'NOTICE'
                                 ? '알림장 등록하기'
-                                : selectedCategory == 'POST'
-                                    ? '게시물 등록하기'
-                                    : '등록하기',
+                                : '게시물 등록하기',
                             style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
                           ),
                   ),
@@ -842,6 +904,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
     final existingImages = List<String>.from((post['images'] as List?)?.map((e) => e.toString()) ??
         (post['imageUrl'] != null ? [post['imageUrl'].toString()] : []));
     final List<XFile> newlyPickedImages = [];
+    String? errorMessage;
     bool isSaving = false;
 
     showModalBottomSheet(
@@ -998,6 +1061,11 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   // Title Input
                   TextField(
                     controller: titleCtrl,
+                    onChanged: (_) {
+                      if (errorMessage != null) {
+                        setModalState(() => errorMessage = null);
+                      }
+                    },
                     decoration: InputDecoration(
                       labelText: '제목',
                       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -1010,6 +1078,11 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   TextField(
                     controller: contentCtrl,
                     maxLines: 4,
+                    onChanged: (_) {
+                      if (errorMessage != null) {
+                        setModalState(() => errorMessage = null);
+                      }
+                    },
                     decoration: InputDecoration(
                       labelText: '내용',
                       contentPadding: const EdgeInsets.all(12),
@@ -1068,8 +1141,25 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                                 final mediaList = await ApiService().getMediaAssets();
                                 if (!ctx.mounted) return;
                                 if (mediaList.isEmpty) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('클라우드 보관함에 저장된 사진이 없습니다.')),
+                                  showDialog(
+                                    context: ctx,
+                                    builder: (dCtx) => AlertDialog(
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                      title: const Row(
+                                        children: [
+                                          Icon(Icons.info_outline, color: Color(0xFF2563EB), size: 22),
+                                          SizedBox(width: 8),
+                                          Text('보관함 안내', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                        ],
+                                      ),
+                                      content: const Text('클라우드 보관함에 저장된 사진이 없습니다.', style: TextStyle(fontSize: 14)),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(dCtx),
+                                          child: const Text('확인', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+                                        ),
+                                      ],
+                                    ),
                                   );
                                   return;
                                 }
@@ -1196,6 +1286,31 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                   ),
                   const SizedBox(height: 20),
 
+                  // Error Message Banner (창 바로 위에 표시)
+                  if (errorMessage != null) ...[
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFFCA5A5)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.error_outline, size: 18, color: Color(0xFFDC2626)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              errorMessage!,
+                              style: const TextStyle(fontSize: 13, color: Color(0xFFDC2626), fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+
                   // Save Button
                   ElevatedButton(
                     onPressed: isSaving
@@ -1203,20 +1318,44 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                         : () async {
                             final title = titleCtrl.text.trim();
                             final content = contentCtrl.text.trim();
-                            if (title.isEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('제목을 입력해주세요.')),
+
+                            void showWarningDialog(String msg) {
+                              setModalState(() => errorMessage = msg);
+                              showDialog(
+                                context: ctx,
+                                builder: (dCtx) => AlertDialog(
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  title: const Row(
+                                    children: [
+                                      Icon(Icons.warning_amber_rounded, color: Color(0xFFEA580C), size: 22),
+                                      SizedBox(width: 8),
+                                      Text('입력 안내', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                  content: Text(msg, style: const TextStyle(fontSize: 14, color: Color(0xFF334155))),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(dCtx),
+                                      child: const Text('확인', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
+                                    ),
+                                  ],
+                                ),
                               );
+                            }
+
+                            if (title.isEmpty) {
+                              showWarningDialog('제목을 입력해주세요.');
                               return;
                             }
                             if (content.isEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('내용을 입력해주세요.')),
-                              );
+                              showWarningDialog('내용을 입력해주세요.');
                               return;
                             }
 
-                            setModalState(() => isSaving = true);
+                            setModalState(() {
+                              isSaving = true;
+                              errorMessage = null;
+                            });
 
                             // Upload newly picked images
                             final List<String> allImages = List<String>.from(existingImages);
@@ -1246,17 +1385,16 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
                             setModalState(() => isSaving = false);
 
                             if (!ctx.mounted) return;
-                            Navigator.pop(ctx);
 
                             if (res['success'] == true) {
+                              Navigator.pop(ctx);
+                              if (!mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(content: Text('${selectedCategory == 'NOTICE' ? '알림장' : '게시물'}이 수정되었습니다.')),
                               );
                               _loadPosts();
                             } else {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(res['message'] ?? '게시글 수정에 실패했습니다.')),
-                              );
+                              showWarningDialog(res['message'] ?? '게시글 수정에 실패했습니다.');
                             }
                           },
                     style: ElevatedButton.styleFrom(
