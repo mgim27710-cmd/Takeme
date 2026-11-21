@@ -783,7 +783,7 @@ export class ChatService implements OnModuleInit {
 
       // 1:1 대화방의 경우, 현재 접속자(userId)의 관점에서 상대방 정보(displayName, targetUser)를 동적으로 매핑
       const isDirect = room.type === ChatRoomType.DIRECT || (!room.type && (room.members || []).length <= 2);
-      if (isDirect && room.type !== ChatRoomType.NOTIFICATION_SYSTEM && room.type !== ChatRoomType.PAYMENT_SYSTEM) {
+      if (isDirect && (room.type as any) !== ChatRoomType.NOTIFICATION_SYSTEM && (room.type as any) !== ChatRoomType.PAYMENT_SYSTEM) {
         const otherMember = (room.members || []).find(m => m.user && m.user.id !== userId);
         if (otherMember?.user) {
           const otherUser = otherMember.user;
