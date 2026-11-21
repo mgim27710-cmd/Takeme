@@ -503,7 +503,7 @@ export default function DocumentManager({
             {/* 상단 타이틀 & 알림 관리 헤더 */}
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200/80 pb-5">
               <div>
-                <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2.5">
+                <h2 className="text-xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2.5">
                   <span className="w-2.5 h-6 bg-blue-600 rounded-full inline-block"></span>
                   호차별 서류 및 안전교육 만료일 현황
                 </h2>
@@ -534,17 +534,17 @@ export default function DocumentManager({
                 onClick={() => setExpiryFilterTab('all')}
                 className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
                   expiryFilterTab === 'all'
-                    ? 'bg-slate-900 border-slate-900 text-white shadow-sm ring-2 ring-slate-900/20'
-                    : 'bg-slate-50 hover:bg-slate-100/80 border-slate-200 text-slate-800'
+                    ? 'bg-blue-600 border-blue-600 text-white shadow-sm ring-2 ring-blue-500/20'
+                    : 'bg-blue-50/50 hover:bg-blue-100/70 border-blue-200 text-blue-950'
                 }`}
               >
-                <div className={`text-xs font-bold ${expiryFilterTab === 'all' ? 'text-slate-300' : 'text-slate-500'}`}>
+                <div className={`text-xs font-bold ${expiryFilterTab === 'all' ? 'text-blue-100' : 'text-blue-600'}`}>
                   전체 관리 차량
                 </div>
                 <div className="text-2xl font-black mt-1">
                   {buses.length}<span className="text-sm font-semibold ml-1">대</span>
                 </div>
-                <div className={`text-[11px] mt-1 font-medium ${expiryFilterTab === 'all' ? 'text-slate-300' : 'text-slate-400'}`}>
+                <div className={`text-[11px] mt-1 font-medium ${expiryFilterTab === 'all' ? 'text-blue-100' : 'text-blue-600/80'}`}>
                   호차별 서류 통합 관리
                 </div>
               </button>
@@ -656,7 +656,7 @@ export default function DocumentManager({
                                 className="w-3.5 h-3.5 rounded-full shrink-0 shadow-2xs border border-white" 
                                 style={{ backgroundColor: bus.color || '#3b82f6' }} 
                               />
-                              <span className="text-base font-extrabold text-slate-900">{bus.name || bus.busNumber}</span>
+                              <span className="text-base font-extrabold text-slate-800">{bus.name || bus.busNumber}</span>
                             </div>
                             <div className="text-xs font-semibold text-slate-500 pl-6 mt-0.5">
                               {bus.plateNumber || '차량번호 미등록'}
@@ -665,7 +665,7 @@ export default function DocumentManager({
 
                           {/* 종합보험 */}
                           <td className="py-4 px-4">
-                            <div className="text-sm font-bold text-slate-900 mb-1.5">
+                            <div className="text-sm font-bold text-slate-800 mb-1.5">
                               {rec.insuranceExpiry || <span className="text-slate-400 font-normal">미등록</span>}
                             </div>
                             <span className={`inline-block text-xs font-extrabold px-2.5 py-1 rounded-lg border shadow-2xs ${insuranceD.bg} ${insuranceD.color} ${insuranceD.border}`}>
@@ -675,7 +675,7 @@ export default function DocumentManager({
 
                           {/* 정기검사 */}
                           <td className="py-4 px-4">
-                            <div className="text-sm font-bold text-slate-900 mb-1.5">
+                            <div className="text-sm font-bold text-slate-800 mb-1.5">
                               {rec.inspectionExpiry || <span className="text-slate-400 font-normal">미등록</span>}
                             </div>
                             <span className={`inline-block text-xs font-extrabold px-2.5 py-1 rounded-lg border shadow-2xs ${inspectionD.bg} ${inspectionD.color} ${inspectionD.border}`}>
@@ -693,7 +693,7 @@ export default function DocumentManager({
                                 {bus.driverName || <span className="text-slate-400 font-normal">미지정</span>}
                               </span>
                             </div>
-                            <div className="text-sm font-bold text-slate-900 mb-1.5">
+                            <div className="text-sm font-bold text-slate-800 mb-1.5">
                               {rec.driverEduExpiry || <span className="text-slate-400 font-normal">만료일 미등록</span>}
                             </div>
                             <span className={`inline-block text-xs font-extrabold px-2.5 py-1 rounded-lg border shadow-2xs ${driverEduD.bg} ${driverEduD.color} ${driverEduD.border}`}>
@@ -711,7 +711,7 @@ export default function DocumentManager({
                                 {bus.teacherName || <span className="text-slate-400 font-normal">미지정</span>}
                               </span>
                             </div>
-                            <div className="text-sm font-bold text-slate-900 mb-1.5">
+                            <div className="text-sm font-bold text-slate-800 mb-1.5">
                               {rec.companionEduExpiry || <span className="text-slate-400 font-normal">만료일 미등록</span>}
                             </div>
                             <span className={`inline-block text-xs font-extrabold px-2.5 py-1 rounded-lg border shadow-2xs ${companionEduD.bg} ${companionEduD.color} ${companionEduD.border}`}>
@@ -1298,7 +1298,7 @@ export default function DocumentManager({
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     onClick={() => handleOpenPreview(doc)}
-                    className="flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-800 text-slate-700 hover:text-white font-bold text-xs py-2.5 rounded-xl transition-all shadow-xs active:scale-[0.98]"
+                    className="flex items-center justify-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2.5 rounded-xl transition-all shadow-xs active:scale-[0.98]"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
