@@ -29,6 +29,8 @@ class KakaoMapView extends StatefulWidget {
   final bool isGohome;
   final bool isInteractive;
   final VoidCallback? onToggleFullscreen;
+  final bool isOperating;
+  final String? myChildBoardStatus;
 
   const KakaoMapView({
     super.key,
@@ -49,6 +51,8 @@ class KakaoMapView extends StatefulWidget {
     this.isGohome = false,
     this.isInteractive = true,
     this.onToggleFullscreen,
+    this.isOperating = false,
+    this.myChildBoardStatus,
   });
 
   @override
@@ -82,7 +86,9 @@ class _KakaoMapViewState extends State<KakaoMapView> {
     if (oldWidget.busLat != widget.busLat || oldWidget.busLng != widget.busLng) {
       _updateBusLocation();
     }
-    if (oldWidget.stops.length != widget.stops.length ||
+    if (oldWidget.isOperating != widget.isOperating ||
+        oldWidget.myChildBoardStatus != widget.myChildBoardStatus ||
+        oldWidget.stops.length != widget.stops.length ||
         oldWidget.academyLat != widget.academyLat ||
         oldWidget.academyLng != widget.academyLng ||
         oldWidget.isGohome != widget.isGohome) {
@@ -106,7 +112,7 @@ class _KakaoMapViewState extends State<KakaoMapView> {
         try {
           (state as dynamic).runJs(js);
         } catch (e) {
-          debugPrint('[_runJs Web] error: ' + e.toString());
+          debugPrint('[_runJs Web] error: $e');
         }
       }
     } else {
@@ -115,9 +121,11 @@ class _KakaoMapViewState extends State<KakaoMapView> {
   }
 
   void _updateBusLocation() {
-    if (widget.busLat != null && widget.busLng != null) {
-      final js = 'if (window.updateBus) { window.updateBus(' + widget.busLat.toString() + ', ' + widget.busLng.toString() + '); }';
+    if (widget.isOperating && widget.busLat != null && widget.busLng != null) {
+      final js = 'if (window.updateBus) { window.updateBus(${widget.busLat}, ${widget.busLng}); }';
       _runJs(js);
+    } else if (!widget.isOperating) {
+      _runJs('if (window.removeBus) { window.removeBus(); }');
     }
   }
 
@@ -143,13 +151,15 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           ${widget.academyLat ?? 'null'}, 
           ${widget.academyLng ?? 'null'}, 
           "${widget.academyName ?? ''}", 
-          ${widget.busLat ?? 'null'}, 
-          ${widget.busLng ?? 'null'},
+          ${widget.isOperating ? (widget.busLat ?? 'null') : 'null'}, 
+          ${widget.isOperating ? (widget.busLng ?? 'null') : 'null'},
           ${widget.isGohome},
           ${widget.myChildLat ?? 'null'},
           ${widget.myChildLng ?? 'null'},
           ${_roadPathJson()},
-          ${widget.progressIndex}
+          ${widget.progressIndex},
+          ${widget.isOperating},
+          "${widget.myChildBoardStatus ?? ''}"
         );
       }
     ''';
@@ -175,23 +185,75 @@ class _KakaoMapViewState extends State<KakaoMapView> {
   }
 
   Widget _naverMap() {
-    // 학부모에게는 내 아이 정류장만 보여준다
-    final mine = widget.stops.where((s) => s.isMyChild).toList();
-    final label = widget.isGohome ? '내리는 곳' : '타는 곳';
-    final stops = <NaverStopPoint>[
-      if (mine.isNotEmpty)
-        NaverStopPoint(lat: mine.first.latitude, lng: mine.first.longitude, label: label, isMine: true)
-      else if (widget.myChildLat != null && widget.myChildLng != null)
-        NaverStopPoint(lat: widget.myChildLat!, lng: widget.myChildLng!, label: label, isMine: true),
-    ];
+    final stops = <NaverStopPoint>[];
+
+    final isBoarded = widget.myChildBoardStatus == 'BOARDED';
+    final childLabel = isBoarded
+        ? (widget.isGohome ? '하차 완료' : '탑승 완료')
+        : (widget.isGohome ? '우리 아이 내리는 곳' : '우리 아이 타는 곳');
+
+    if (widget.isOperating) {
+      // 운행 중: 기사 지도처럼 전체 경유지 표시
+      // 개인정보 보호: 내 아이 정류장 외 다른 정류장은 순번(1, 2, 3...)으로만 표시
+      bool childIncluded = false;
+      for (var i = 0; i < widget.stops.length; i++) {
+        final s = widget.stops[i];
+        if (s.isMyChild) {
+          childIncluded = true;
+          stops.add(NaverStopPoint(
+            lat: s.latitude,
+            lng: s.longitude,
+            label: childLabel,
+            isMine: true,
+            popup: s.address ?? s.name,
+          ));
+        } else {
+          stops.add(NaverStopPoint(
+            lat: s.latitude,
+            lng: s.longitude,
+            label: '${i + 1}',
+            isMine: false,
+          ));
+        }
+      }
+
+      if (!childIncluded && widget.myChildLat != null && widget.myChildLng != null) {
+        stops.add(NaverStopPoint(
+          lat: widget.myChildLat!,
+          lng: widget.myChildLng!,
+          label: childLabel,
+          isMine: true,
+        ));
+      }
+    } else {
+      // 운행 전: 내 아이 정류장만 표시 (버스는 숨김)
+      final mine = widget.stops.where((s) => s.isMyChild).toList();
+      if (mine.isNotEmpty) {
+        stops.add(NaverStopPoint(
+          lat: mine.first.latitude,
+          lng: mine.first.longitude,
+          label: childLabel,
+          isMine: true,
+          popup: mine.first.address ?? mine.first.name,
+        ));
+      } else if (widget.myChildLat != null && widget.myChildLng != null) {
+        stops.add(NaverStopPoint(
+          lat: widget.myChildLat!,
+          lng: widget.myChildLng!,
+          label: childLabel,
+          isMine: true,
+        ));
+      }
+    }
+
     return NaverRouteMap(
       key: _naverKey,
       stops: stops,
       fallbackPoints: _latLngList(widget.routePoints),
       roadPath: _latLngList(widget.actualRoadPath),
       progressIndex: widget.progressIndex,
-      busLat: widget.busLat,
-      busLng: widget.busLng,
+      busLat: widget.isOperating ? widget.busLat : null,
+      busLng: widget.isOperating ? widget.busLng : null,
       academyLat: widget.academyLat,
       academyLng: widget.academyLng,
       academyName: widget.academyName,
@@ -200,7 +262,7 @@ class _KakaoMapViewState extends State<KakaoMapView> {
 
   /// [버스 위치] 버튼: 버스가 운행 중이면 지금 버스 위치로 이동, 아니면 안내
   void _goToBus() {
-    if (widget.busLat == null || widget.busLng == null) {
+    if (!widget.isOperating || widget.busLat == null || widget.busLng == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('지금 운행 중인 버스가 없어요. 운행이 시작되면 버스 위치를 볼 수 있어요.')),
       );
@@ -267,6 +329,10 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           academyName: widget.academyName,
           myChildName: widget.myChildName,
           myChildAddress: widget.myChildAddress,
+          myChildLat: widget.myChildLat,
+          myChildLng: widget.myChildLng,
+          isOperating: widget.isOperating,
+          myChildBoardStatus: widget.myChildBoardStatus,
         ),
       ),
     );
@@ -294,13 +360,13 @@ class _KakaoMapViewState extends State<KakaoMapView> {
       final acName = widget.academyName != null ? jsonEncode(widget.academyName) : "''";
       final acLat = widget.academyLat != null ? '${widget.academyLat}' : 'null';
       final acLng = widget.academyLng != null ? '${widget.academyLng}' : 'null';
-      final bLat = widget.busLat != null ? '${widget.busLat}' : 'null';
-      final bLng = widget.busLng != null ? '${widget.busLng}' : 'null';
+      final bLat = widget.isOperating && widget.busLat != null ? '${widget.busLat}' : 'null';
+      final bLng = widget.isOperating && widget.busLng != null ? '${widget.busLng}' : 'null';
 
       autoInitScript = '''
         setTimeout(function() {
           if (window.initData) {
-            window.initData($stopsJson, $pointsJson, $acLat, $acLng, $acName, $bLat, $bLng, ${widget.isGohome}, ${widget.myChildLat ?? 'null'}, ${widget.myChildLng ?? 'null'}, ${_roadPathJson()}, ${widget.progressIndex});
+            window.initData($stopsJson, $pointsJson, $acLat, $acLng, $acName, $bLat, $bLng, ${widget.isGohome}, ${widget.myChildLat ?? 'null'}, ${widget.myChildLng ?? 'null'}, ${_roadPathJson()}, ${widget.progressIndex}, ${widget.isOperating}, "${widget.myChildBoardStatus ?? ''}");
           }
         }, 300);
       ''';
@@ -330,6 +396,38 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           font-size: 11px;
           border: 3px solid white;
           box-shadow: 0 4px 10px rgba(239,68,68,0.5);
+        }
+
+        /* 우리 아이 정류장 배지 마커 */
+        .child-point-dot {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background-color: #7c3aed;
+          color: white;
+          font-size: 11px;
+          font-weight: 800;
+          padding: 3px 8px;
+          border-radius: 14px;
+          white-space: nowrap;
+          box-shadow: 0 0 0 3px rgba(124,58,237,0.35), 0 3px 8px rgba(0,0,0,0.3);
+          border: 2px solid white;
+        }
+
+        /* 다른 정류장 (순번 핀) */
+        .waypoint-dot {
+          width: 26px;
+          height: 26px;
+          background-color: #2563eb;
+          border: 2px solid #ffffff;
+          border-radius: 50%;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: 800;
+          font-size: 11px;
         }
 
         /* 타는 곳 점 마커 */
@@ -415,6 +513,22 @@ class _KakaoMapViewState extends State<KakaoMapView> {
         var busMarker = null;
         var myChildLatLng = null;
         var allBounds = null;
+        var hasUserInteracted = false;
+        var initialFitted = false;
+
+        map.on('movestart', function(e) {
+          if (e && e.originalEvent) {
+            hasUserInteracted = true;
+          }
+        });
+        map.on('dragstart', function() {
+          hasUserInteracted = true;
+        });
+        map.on('zoomstart', function(e) {
+          if (e && e.originalEvent) {
+            hasUserInteracted = true;
+          }
+        });
 
         window.zoomIn = function() { map.zoomIn(); };
         window.zoomOut = function() { map.zoomOut(); };
@@ -445,6 +559,13 @@ class _KakaoMapViewState extends State<KakaoMapView> {
             }).addTo(map);
           }
           map.setView([lat, lng], 16);
+        };
+
+        window.removeBus = function() {
+          if (busMarker) {
+            map.removeLayer(busMarker);
+            busMarker = null;
+          }
         };
 
         window.updateBus = function(lat, lng) {
@@ -503,20 +624,16 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           drawRoute(roadPath, progIdx, lastFallbackPoints);
         };
 
-        window.initData = function(stops, points, acLat, acLng, acName, bLat, bLng, isGohome, childLatArg, childLngArg, roadPath, progIdx) {
+        window.initData = function(stops, points, acLat, acLng, acName, bLat, bLng, isGohome, childLatArg, childLngArg, roadPath, progIdx, isOperating, myChildBoardStatus) {
           dataLayer.clearLayers();
           var pts = [];
           var hasAcademy = acLat && acLng;
           var acTitle = acName || '유치원';
+          var isBoarded = myChildBoardStatus === 'BOARDED';
 
-          // 내 아이 정류장 (학부모에게는 내 아이 정류장만 온다)
-          var myStop = null;
-          (stops || []).forEach(function(s) {
-            if (!myStop && s.lat && s.lng && s.isMyChild) myStop = s;
-          });
-          var childLat = childLatArg || (myStop ? myStop.lat : null);
-          var childLng = childLngArg || (myStop ? myStop.lng : null);
-          var childPlace = myStop ? (myStop.address || myStop.name) : '우리 아이 정류장';
+          var childLabel = isBoarded
+            ? (isGohome ? '하차 완료' : '탑승 완료')
+            : (isGohome ? '우리 아이 내리는 곳' : '우리 아이 타는 곳');
 
           function pointMarker(lat, lng, cls, label, popup, z) {
             var icon = L.divIcon({
@@ -528,16 +645,90 @@ class _KakaoMapViewState extends State<KakaoMapView> {
             return L.marker([lat, lng], { icon: icon, zIndexOffset: z }).bindPopup(popup).addTo(dataLayer);
           }
 
-          if (childLat && childLng) {
-            myChildLatLng = [childLat, childLng];
-            var label = isGohome ? '내리는 곳' : '타는 곳';
-            var m = pointMarker(childLat, childLng, isGohome ? 'dest' : 'pickup', label,
-              '<b>📍 우리 아이 ' + label + '</b><br/>' + childPlace, 1200);
-            m.openPopup();
-            pts.push([childLat, childLng]);
+          if (isOperating) {
+            // 1. 운행 중: 전체 경유지 및 버스 표시
+            var childFound = false;
+            (stops || []).forEach(function(s, idx) {
+              if (s.isMyChild) {
+                childFound = true;
+                myChildLatLng = [s.lat, s.lng];
+                var badgeIcon = L.divIcon({
+                  className: '',
+                  html: '<div class="child-point-dot">★ ' + childLabel + '</div>',
+                  iconSize: [110, 28],
+                  iconAnchor: [55, 14]
+                });
+                var m = L.marker([s.lat, s.lng], { icon: badgeIcon, zIndexOffset: 1200 })
+                  .bindPopup('<b>📍 우리 아이 ' + childLabel + '</b><br/>' + (s.address || s.name || '')).addTo(dataLayer);
+                m.openPopup();
+                pts.push([s.lat, s.lng]);
+              } else {
+                // 개인정보 보호: 순번 핀만 표시
+                var numIcon = L.divIcon({
+                  className: '',
+                  html: '<div class="waypoint-dot">' + (idx + 1) + '</div>',
+                  iconSize: [26, 26],
+                  iconAnchor: [13, 13]
+                });
+                L.marker([s.lat, s.lng], { icon: numIcon, zIndexOffset: 500 })
+                  .bindPopup('<b>경유지 ' + (idx + 1) + '</b>').addTo(dataLayer);
+                pts.push([s.lat, s.lng]);
+              }
+            });
+
+            if (!childFound && childLatArg && childLngArg) {
+              myChildLatLng = [childLatArg, childLngArg];
+              var badgeIcon = L.divIcon({
+                className: '',
+                html: '<div class="child-point-dot">★ ' + childLabel + '</div>',
+                iconSize: [110, 28],
+                iconAnchor: [55, 14]
+              });
+              var m = L.marker([childLatArg, childLngArg], { icon: badgeIcon, zIndexOffset: 1200 })
+                .bindPopup('<b>📍 우리 아이 ' + childLabel + '</b>').addTo(dataLayer);
+              m.openPopup();
+              pts.push([childLatArg, childLngArg]);
+            }
+
+            if (bLat && bLng) {
+              window.updateBus(bLat, bLng);
+              pts.push([bLat, bLng]);
+            } else if (busMarker) {
+              map.removeLayer(busMarker);
+              busMarker = null;
+            }
+          } else {
+            // 2. 운행 전: 내 아이 정류장만 표시, 버스는 숨김
+            if (busMarker) {
+              map.removeLayer(busMarker);
+              busMarker = null;
+            }
+            var myStop = null;
+            (stops || []).forEach(function(s) {
+              if (!myStop && s.lat && s.lng && s.isMyChild) myStop = s;
+            });
+            var childLat = childLatArg || (myStop ? myStop.lat : null);
+            var childLng = childLngArg || (myStop ? myStop.lng : null);
+            var childPlace = myStop ? (myStop.address || myStop.name) : '우리 아이 정류장';
+
+            if (childLat && childLng) {
+              myChildLatLng = [childLat, childLng];
+              var badgeIcon = L.divIcon({
+                className: '',
+                html: '<div class="child-point-dot">★ ' + childLabel + '</div>',
+                iconSize: [110, 28],
+                iconAnchor: [55, 14]
+              });
+              var m = L.marker([childLat, childLng], { icon: badgeIcon, zIndexOffset: 1200 })
+                .bindPopup('<b>📍 우리 아이 ' + childLabel + '</b><br/>' + childPlace).addTo(dataLayer);
+              m.openPopup();
+              pts.push([childLat, childLng]);
+            }
           }
+
           if (hasAcademy) {
-            pointMarker(acLat, acLng, isGohome ? 'pickup' : 'dest', isGohome ? '출발' : '도착',
+            var acLabel = isGohome ? '출발지' : (isBoarded ? '도착 예정지' : '도착지');
+            pointMarker(acLat, acLng, isGohome ? 'pickup' : 'dest', acLabel,
               '<b>🏫 ' + acTitle + '</b>', 800);
             pts.push([acLat, acLng]);
           }
@@ -545,14 +736,12 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           lastFallbackPoints = points || [];
           drawRoute(roadPath, progIdx, lastFallbackPoints).forEach(function(p) { pts.push(p); });
 
-          if (bLat && bLng) {
-            window.updateBus(bLat, bLng);
-            pts.push([bLat, bLng]);
-          }
-
           if (pts.length > 0) {
             allBounds = L.latLngBounds(pts);
-            map.fitBounds(allBounds, { padding: [50, 50], maxZoom: 16 });
+            if (!initialFitted && !hasUserInteracted) {
+              map.fitBounds(allBounds, { padding: [50, 50], maxZoom: 16 });
+              initialFitted = true;
+            }
           }
         };
 
@@ -782,6 +971,10 @@ class KakaoMapFullscreenPage extends StatefulWidget {
   final String? academyName;
   final String? myChildName;
   final String? myChildAddress;
+  final double? myChildLat;
+  final double? myChildLng;
+  final bool isOperating;
+  final String? myChildBoardStatus;
 
   const KakaoMapFullscreenPage({
     super.key,
@@ -797,6 +990,10 @@ class KakaoMapFullscreenPage extends StatefulWidget {
     this.academyName,
     this.myChildName,
     this.myChildAddress,
+    this.myChildLat,
+    this.myChildLng,
+    this.isOperating = false,
+    this.myChildBoardStatus,
   });
 
   @override
@@ -893,8 +1090,12 @@ class _KakaoMapFullscreenPageState extends State<KakaoMapFullscreenPage> {
               academyName: widget.academyName,
               myChildName: widget.myChildName,
               myChildAddress: widget.myChildAddress,
+              myChildLat: widget.myChildLat,
+              myChildLng: widget.myChildLng,
               isFullScreen: true,
               isGohome: widget.isGohome,
+              isOperating: widget.isOperating,
+              myChildBoardStatus: widget.myChildBoardStatus,
             ),
           ),
 

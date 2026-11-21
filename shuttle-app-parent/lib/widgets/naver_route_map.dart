@@ -234,7 +234,7 @@ class NaverRouteMapState extends State<NaverRouteMap> {
         final icon = await _image(
           's_${s.isMine}_${s.label}',
           _StopBadge(label: s.label, mine: s.isMine),
-          s.isMine ? const Size(84, 34) : const Size(30, 30),
+          s.isMine ? const Size(130, 34) : const Size(30, 30),
         );
         if (!mounted) return;
         final m = NMarker(id: 'stop_$i', position: NLatLng(s.lat, s.lng), icon: icon, anchor: NPoint.relativeCenter);

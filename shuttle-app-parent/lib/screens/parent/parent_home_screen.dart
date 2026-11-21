@@ -1541,6 +1541,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                       myChildLat: _childInfo?.latitude,
                       myChildLng: _childInfo?.longitude,
                       isInteractive: !_isModalOpen,
+                      isOperating: _isOperating == true,
+                      myChildBoardStatus: _childInfo?.boardStatus,
                     ),
                   ),
                 ),
