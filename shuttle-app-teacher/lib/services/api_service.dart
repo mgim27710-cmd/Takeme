@@ -118,7 +118,7 @@ class ApiService {
         body: jsonEncode({'refreshToken': rToken}),
       );
       if (res.statusCode == 200 || res.statusCode == 201) {
-        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        final data = _decodeBody(res);
         final newAccessToken = data['accessToken'] as String?;
         final newRefreshToken = data['refreshToken'] as String?;
         if (newAccessToken != null) {
@@ -251,7 +251,7 @@ class ApiService {
       throw Exception('서버에 연결할 수 없습니다. 인터넷 연결을 확인하고 잠시 후 다시 시도해 주세요.');
     }
 
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = _decodeBody(res);
 
     if (data['isWebAccount'] == true) {
       return {'success': false, 'isWebAccount': true, 'message': data['message'] ?? '본 계정은 웹기반 계정입니다.', 'data': data};
@@ -274,28 +274,28 @@ class ApiService {
   Future<Map<String, dynamic>> sendVerificationEmail(String email) async {
     final url = Uri.parse('${AppConfig.apiHost}/auth/email/send');
     final res = await http.post(url, headers: _headers(), body: jsonEncode({'email': email.trim()}));
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = _decodeBody(res);
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'data': data, 'message': data['message']};
   }
 
   Future<Map<String, dynamic>> sendSelfUnlockCode(String email) async {
     final url = Uri.parse('${AppConfig.apiHost}/auth/self-unlock/send');
     final res = await http.post(url, headers: _headers(), body: jsonEncode({'email': email.trim()}));
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = _decodeBody(res);
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
   }
 
   Future<Map<String, dynamic>> verifySelfUnlockCode(String email, String code) async {
     final url = Uri.parse('${AppConfig.apiHost}/auth/self-unlock/verify');
     final res = await http.post(url, headers: _headers(), body: jsonEncode({'email': email.trim(), 'code': code.trim()}));
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = _decodeBody(res);
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
   }
 
   Future<Map<String, dynamic>> verifyEmailCode(String email, String code) async {
     final url = Uri.parse('${AppConfig.apiHost}/auth/email/verify');
     final res = await http.post(url, headers: _headers(), body: jsonEncode({'email': email.trim(), 'code': code.trim()}));
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = _decodeBody(res);
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
   }
 
@@ -326,7 +326,7 @@ class ApiService {
     }
 
     final res = await http.post(url, headers: _headers(), body: jsonEncode(body));
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = _decodeBody(res);
     return {
       'success': res.statusCode == 200 || res.statusCode == 201,
       'message': data['message'] ?? '회원가입 요청 처리 완료',
@@ -339,7 +339,7 @@ class ApiService {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/auth/verify-auth-code');
       final res = await http.post(url, headers: _headers(), body: jsonEncode({'authCode': authCode.trim()}));
-      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      final data = _decodeBody(res);
       if (res.statusCode == 200 || res.statusCode == 201) {
         return {
           'success': true,
@@ -356,7 +356,7 @@ class ApiService {
   Future<Map<String, dynamic>> deleteAccount(String email) async {
     final url = Uri.parse('${AppConfig.apiHost}/auth/account?email=${Uri.encodeComponent(email)}');
     final res = await http.delete(url, headers: _headers());
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = _decodeBody(res);
     if (res.statusCode == 200) {
       await logout();
       return {'success': true, 'message': data['message']};
@@ -371,7 +371,7 @@ class ApiService {
       final url = Uri.parse('${AppConfig.apiHost}/routing/teacher/profile/${user.id}');
       final res = await getWithAuth(url);
       if (res.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        final data = _decodeBody(res);
         final updatedUser = UserModel(
           id: user.id,
           email: user.email,
@@ -395,7 +395,7 @@ class ApiService {
     final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications');
     final res = await getWithAuth(url);
     if (res.statusCode == 200) {
-      final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
+      final list = _decodeBody(res) as List<dynamic>;
       return list.map((item) => NotificationModel.fromJson(item as Map<String, dynamic>)).toList();
     }
     return [];
@@ -405,7 +405,7 @@ class ApiService {
     final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications/unread-count');
     final res = await getWithAuth(url);
     if (res.statusCode == 200) {
-      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      final data = _decodeBody(res);
       return (data['count'] as num?)?.toInt() ?? 0;
     }
     return 0;
@@ -433,7 +433,7 @@ class ApiService {
     final url = Uri.parse('${AppConfig.apiHost}/parent/notifications?email=${Uri.encodeComponent(email)}');
     final res = await getWithAuth(url);
     if (res.statusCode == 200) {
-      final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
+      final list = _decodeBody(res) as List<dynamic>;
       return list.map((item) => NotificationModel.fromJson(item as Map<String, dynamic>)).toList();
     }
     return [];
@@ -443,7 +443,7 @@ class ApiService {
     final url = Uri.parse('${AppConfig.apiHost}/parent/route?email=${Uri.encodeComponent(email)}');
     final res = await getWithAuth(url);
     if (res.statusCode == 200) {
-      final data = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      final data = _decodeBody(res) as Map<String, dynamic>;
       return RouteDataModel.fromJson(data);
     }
     return null;
@@ -453,7 +453,7 @@ class ApiService {
     final url = Uri.parse('${AppConfig.apiHost}/parent/my-child?email=${Uri.encodeComponent(email)}');
     final res = await getWithAuth(url);
     if (res.statusCode == 200) {
-      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      final data = _decodeBody(res);
       if (data != null && data is Map<String, dynamic>) {
         return StudentModel.fromJson(data);
       }
@@ -468,7 +468,7 @@ class ApiService {
       headers: _headers(),
       body: jsonEncode({'email': email, 'allergies': allergies.trim()}),
     );
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = _decodeBody(res);
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
   }
 
@@ -485,7 +485,7 @@ class ApiService {
         'overrideType': overrideType,
         'reason': reason,
       }));
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = _decodeBody(res);
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
   }
 
@@ -500,7 +500,7 @@ class ApiService {
         'targetRoles': targetRoles,
         'message': message,
       }));
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = _decodeBody(res);
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
   }
 
@@ -508,7 +508,7 @@ class ApiService {
     final url = Uri.parse('${AppConfig.apiHost}/parent/today-schedule?email=${Uri.encodeComponent(email)}');
     final res = await getWithAuth(url);
     if (res.statusCode == 200) {
-      return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>?;
+      return _decodeBody(res) as Map<String, dynamic>?;
     }
     return null;
   }
@@ -519,7 +519,7 @@ class ApiService {
         'studentEmail': studentEmail,
         'teacherEmail': teacherEmail,
       }));
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = _decodeBody(res);
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
   }
 
@@ -532,7 +532,7 @@ class ApiService {
     final res = await getWithAuth(url);
     throwIfServerError(res);
     if (res.statusCode == 200) {
-      final list = jsonDecode(utf8.decode(res.bodyBytes)) as List<dynamic>;
+      final list = _decodeBody(res) as List<dynamic>;
       return list.whereType<Map<String, dynamic>>().toList();
     }
     return [];
@@ -548,7 +548,7 @@ class ApiService {
     final res = await getWithAuth(url);
     throwIfServerError(res);
     if (res.statusCode == 200) {
-      return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>?;
+      return _decodeBody(res) as Map<String, dynamic>?;
     }
     return null;
   }
@@ -558,7 +558,7 @@ class ApiService {
     final res = await getWithAuth(url);
     throwIfServerError(res);
     if (res.statusCode == 200) {
-      final data = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      final data = _decodeBody(res) as Map<String, dynamic>;
       return RouteDataModel.fromJson(data);
     }
     return null;
@@ -571,7 +571,7 @@ class ApiService {
         'studentId': studentId,
         'reason': reason,
       }));
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = _decodeBody(res);
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
   }
 
@@ -581,14 +581,14 @@ class ApiService {
         'email': email,
         'studentId': studentId,
       }));
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = _decodeBody(res);
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
   }
 
   Future<Map<String, dynamic>> saveTeacherMemo(int studentId, String memo) async {
     final url = Uri.parse('${AppConfig.apiHost}/teacher/student/$studentId/memo');
     final res = await postWithAuth(url, jsonEncode({'memo': memo}));
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = _decodeBody(res);
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
   }
 
@@ -606,7 +606,7 @@ class ApiService {
         'targetRoles': targetRoles,
         'message': message,
       }));
-    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final data = _decodeBody(res);
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
   }
 
@@ -620,7 +620,7 @@ class ApiService {
       final uri = Uri.parse('${AppConfig.apiHost}/routing/board/posts').replace(queryParameters: qp.isEmpty ? null : qp);
       final res = await getWithAuth(uri);
       if (res.statusCode == 200) {
-        final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+        final decoded = _decodeBody(res);
         if (decoded is List) {
           return decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         }
@@ -642,7 +642,7 @@ class ApiService {
         'filename': filename,
         'mimeType': mimeType,
       }));
-      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      final data = _decodeBody(res);
       return {
         'success': res.statusCode == 200 || res.statusCode == 201,
         'url': data['url'],
@@ -680,7 +680,7 @@ class ApiService {
         'authorRole': authorRole,
         'academyId': academyId,
       }));
-      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      final data = _decodeBody(res);
       return {
         'success': res.statusCode == 200 || res.statusCode == 201,
         'data': data,
@@ -714,7 +714,7 @@ class ApiService {
         'authorName': authorName,
         'authorRole': authorRole,
       }));
-      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      final data = _decodeBody(res);
       return {
         'success': res.statusCode == 200 || res.statusCode == 201,
         'data': data,
@@ -742,7 +742,7 @@ class ApiService {
       if (postType != null) body['postType'] = postType;
       if (images != null) body['images'] = images;
       final res = await putWithAuth(url, body);
-      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      final data = _decodeBody(res);
       return {
         'success': res.statusCode == 200 || res.statusCode == 201,
         'data': data,
@@ -768,7 +768,7 @@ class ApiService {
       final url = Uri.parse('${AppConfig.apiHost}/teacher/inbox?email=${Uri.encodeComponent(email)}');
       final res = await getWithAuth(url);
       if (res.statusCode == 200) {
-        final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+        final decoded = _decodeBody(res);
         if (decoded is List) {
           return decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         }
@@ -782,7 +782,7 @@ class ApiService {
       final url = Uri.parse('${AppConfig.apiHost}/teacher/staff');
       final res = await getWithAuth(url);
       if (res.statusCode == 200) {
-        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>?;
+        return _decodeBody(res) as Map<String, dynamic>?;
       }
     } catch (_) {}
     return null;
@@ -804,7 +804,7 @@ class ApiService {
         'parentIds': parentIds ?? [],
         'staffUserIds': staffUserIds ?? [],
       }));
-      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      final data = _decodeBody(res);
       return {
         'success': res.statusCode == 200 || res.statusCode == 201,
         'message': data['message'] ?? (res.statusCode == 200 || res.statusCode == 201 ? '메시지가 성공적으로 전송되었습니다.' : '전송 실패'),
@@ -835,7 +835,7 @@ class ApiService {
       }));
 
       if (roomRes.statusCode == 200 || roomRes.statusCode == 201) {
-        final roomData = jsonDecode(utf8.decode(roomRes.bodyBytes));
+        final roomData = _decodeBody(roomRes);
         final roomId = roomData['id'];
         if (roomId != null) {
           final msgUrl = Uri.parse('${AppConfig.apiHost}/chat/messages');
@@ -858,7 +858,7 @@ class ApiService {
       final url = Uri.parse('${AppConfig.apiHost}/teacher/homeroom/attendance$query');
       final res = await getWithAuth(url);
       if (res.statusCode == 200) {
-        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+        return _decodeBody(res) as Map<String, dynamic>;
       }
     } catch (_) {}
     return null;
@@ -874,7 +874,7 @@ class ApiService {
         'date': date,
         'attendances': attendances,
       }));
-      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      final data = _decodeBody(res);
       return {
         'success': res.statusCode == 200 || res.statusCode == 201,
         'message': data['message'] ?? (res.statusCode == 200 || res.statusCode == 201 ? '출석부가 제출되었습니다.' : '제출 실패'),
@@ -891,7 +891,7 @@ class ApiService {
       final url = Uri.parse('${AppConfig.apiHost}/approval/class-today');
       final res = await getWithAuth(url);
       if (res.statusCode == 200) {
-        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+        return _decodeBody(res) as Map<String, dynamic>;
       }
     } catch (_) {}
     return null;
@@ -918,7 +918,7 @@ class ApiService {
         if (reason != null && reason.isNotEmpty) 'reason': reason,
       };
       final res = await postWithAuth(url, jsonEncode(payload));
-      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      final data = _decodeBody(res);
       return {
         'success': res.statusCode == 200 || res.statusCode == 201,
         'message': data['message'] ?? (res.statusCode == 200 || res.statusCode == 201 ? '신청이 정상 등록되었습니다.' : '신청 등록 실패'),
@@ -935,7 +935,7 @@ class ApiService {
       final url = Uri.parse('${AppConfig.apiHost}/chat/users');
       final res = await getWithAuth(url);
       if (res.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+        final data = _decodeBody(res) as Map<String, dynamic>;
         return {
           'success': true,
           'drivers': (data['drivers'] as List? ?? []).cast<Map<String, dynamic>>(),
@@ -974,7 +974,7 @@ class ApiService {
       final res = await getWithAuth(url);
       if (throwOnError) throwIfServerError(res);
       if (res.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        final data = _decodeBody(res);
         if (data is List) {
           return data.cast<Map<String, dynamic>>();
         }
@@ -992,7 +992,7 @@ class ApiService {
       final res = await getWithAuth(url);
       if (throwOnError) throwIfServerError(res);
       if (res.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        final data = _decodeBody(res);
         if (data is List) {
           return data.cast<Map<String, dynamic>>();
         }
@@ -1014,7 +1014,7 @@ class ApiService {
       };
       final res = await postWithAuth(url, jsonEncode(payload));
       if (res.statusCode == 200 || res.statusCode == 201) {
-        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+        return _decodeBody(res) as Map<String, dynamic>;
       }
     } catch (e) {
       debugPrint('[ApiService] createChatRoom error: $e');
@@ -1027,7 +1027,7 @@ class ApiService {
       final url = Uri.parse('${AppConfig.apiHost}/chat/messages');
       final res = await postWithAuth(url, jsonEncode({'roomId': roomId, 'text': text}));
       if (res.statusCode == 200 || res.statusCode == 201) {
-        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+        return _decodeBody(res) as Map<String, dynamic>;
       }
     } catch (e) {
       debugPrint('[ApiService] sendChatMessage error: $e');
@@ -1064,7 +1064,7 @@ class ApiService {
       final url = Uri.parse('${AppConfig.apiHost}/teacher/route-path');
       final res = await getWithAuth(url);
       if (res.statusCode == 200) {
-        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+        return _decodeBody(res) as Map<String, dynamic>;
       }
     } catch (_) {}
     return null;
@@ -1075,7 +1075,7 @@ class ApiService {
       final url = Uri.parse('${AppConfig.apiHost}/me/notification-settings');
       final res = await getWithAuth(url);
       if (res.statusCode == 200) {
-        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+        return _decodeBody(res) as Map<String, dynamic>;
       }
     } catch (_) {}
     return {};
@@ -1155,5 +1155,17 @@ class ApiService {
       throw const FormatException('서버에 이 기능이 아직 없습니다(배포 필요)');
     }
     return res.statusCode == 200 || res.statusCode == 204;
+  }
+}
+
+/// 서버 응답(JSON) 읽기. 서버가 잠깐 멈췄을 때 오는 HTML 오류 페이지 등 JSON 이 아니면
+/// 'FormatException' 대신 알아보기 쉬운 문구로 알려준다.
+dynamic _decodeBody(http.Response res) {
+  final text = utf8.decode(res.bodyBytes, allowMalformed: true);
+  try {
+    return jsonDecode(text);
+  } on FormatException {
+    debugPrint('[ApiService] JSON 이 아닌 응답 (${res.statusCode}) ${res.request?.url}');
+    throw Exception('서버에 일시적인 문제가 있습니다. 잠시 후 다시 시도해 주세요. (오류 코드 ${res.statusCode})');
   }
 }
