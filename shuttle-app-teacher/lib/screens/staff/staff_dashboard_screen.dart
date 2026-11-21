@@ -678,14 +678,32 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     bool isSending = false;
     String messageType = 'TRAFFIC'; // 'TRAFFIC' | 'CUSTOM'
     int delayMinutes = 10;
+    String trafficReason = '도로 정체'; // '도로 정체' | '사고 수습' | '도로 공사' | '기상 악화' | '신호 대기'
 
-    void updateTrafficMessage(int mins) {
+    void updateTrafficMessage(int mins, String reason) {
+      String causeText = '도로 교통 정체';
+      String actionText = '정류장에서 잠시만 여유를 갖고 기다려 주시면 안전하게 이동하겠습니다.';
+
+      if (reason == '사고 수습') {
+        causeText = '전방 교통사고 수습으로 인한 도로 정체';
+        actionText = '원아들의 안전을 최우선으로 이동 중이오니 잠시만 기다려 주시기 바랍니다.';
+      } else if (reason == '도로 공사') {
+        causeText = '구간 내 도로 공사 및 차선 통제';
+        actionText = '정류장에서 조금만 여유를 갖고 기다려 주시기 바랍니다.';
+      } else if (reason == '기상 악화') {
+        causeText = '기상 악화(눈/비)로 인한 안전 서행 운행';
+        actionText = '안전을 최우선으로 서행 운행 중이오니 양해 부탁드립니다.';
+      } else if (reason == '신호 대기') {
+        causeText = '교차로 신호 대기 및 도로 혼잡';
+        actionText = '정류장에서 잠시만 기다려 주시기 바랍니다.';
+      }
+
       _broadcastMessageController.text =
-          '[통학버스 지연 안내] 도로 교통 정체로 인하여 차량 운행이 약 $mins분 지연되고 있습니다. 정류장에서 잠시만 여유를 갖고 기다려 주시면 안전하게 이동하겠습니다.';
+          '[통학버스 지연 안내] $causeText로 인하여 차량 운행이 약 $mins분 지연되고 있습니다. $actionText';
     }
 
     // 기본 교통 정체 10분 지연 문구로 세팅
-    updateTrafficMessage(delayMinutes);
+    updateTrafficMessage(delayMinutes, trafficReason);
 
     final runStudents = _students.where((s) => s.runNumber == _currentRunNumber).toList();
     // 타지 않은 원아(탑승 대기 중)를 기본 대상으로 지정 (체크박스 선택된 원아가 있으면 해당 원아들 우선)
@@ -771,7 +789,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                       onSelected: (_) {
                         setModalState(() {
                           messageType = 'TRAFFIC';
-                          updateTrafficMessage(delayMinutes);
+                          updateTrafficMessage(delayMinutes, trafficReason);
                         });
                       },
                     ),
@@ -795,9 +813,52 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                   ],
                 ),
                 if (messageType == 'TRAFFIC') ...[
+                  const SizedBox(height: 12),
+                  // 1. 정체 원인(종류) 선택 칩
+                  const Text('정체 원인(종류) 선택:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+                  const SizedBox(height: 6),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        {'label': '🚦 도로 정체', 'value': '도로 정체'},
+                        {'label': '⚠️ 사고 수습', 'value': '사고 수습'},
+                        {'label': '🚧 도로 공사', 'value': '도로 공사'},
+                        {'label': '🌧️ 기상 악화', 'value': '기상 악화'},
+                        {'label': '🚥 신호 대기', 'value': '신호 대기'},
+                      ].map((item) {
+                        final val = item['value']!;
+                        final isSel = trafficReason == val;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: FilterChip(
+                            label: Text(item['label']!),
+                            selected: isSel,
+                            selectedColor: const Color(0xFFEFF6FF),
+                            labelStyle: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: isSel ? const Color(0xFF1D4ED8) : const Color(0xFF475569),
+                            ),
+                            side: BorderSide(
+                              color: isSel ? const Color(0xFF3B82F6) : const Color(0xFFCBD5E1),
+                              width: isSel ? 1.5 : 1,
+                            ),
+                            checkmarkColor: const Color(0xFF1D4ED8),
+                            onSelected: (_) {
+                              setModalState(() {
+                                trafficReason = val;
+                                updateTrafficMessage(delayMinutes, val);
+                              });
+                            },
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
                   const SizedBox(height: 10),
-                  // 지연 시간 선택 (5분, 10분, 15분, 20분, 30분)
-                  const Text('예상 지연 시간:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+                  // 2. 지연 시간 선택 (5분, 10분, 15분, 20분, 30분)
+                  const Text('예상 지연 시간 선택:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
                   const SizedBox(height: 6),
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
@@ -815,11 +876,15 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                               fontWeight: FontWeight.bold,
                               color: isSel ? const Color(0xFF1D4ED8) : const Color(0xFF475569),
                             ),
+                            side: BorderSide(
+                              color: isSel ? const Color(0xFF2563EB) : const Color(0xFFCBD5E1),
+                              width: isSel ? 1.5 : 1,
+                            ),
                             checkmarkColor: const Color(0xFF1D4ED8),
                             onSelected: (_) {
                               setModalState(() {
                                 delayMinutes = mins;
-                                updateTrafficMessage(mins);
+                                updateTrafficMessage(mins, trafficReason);
                               });
                             },
                           ),
