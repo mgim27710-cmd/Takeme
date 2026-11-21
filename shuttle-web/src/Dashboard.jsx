@@ -5100,6 +5100,331 @@ const parseKindergartenExcelSheet = (sheet) => {
 
             {/* Bus Cards List */}
             <div className="space-y-3.5 overflow-y-auto pr-0.5 flex-1">
+            {/* Helper to determine if a student needs extra bus */}
+            {(() => {
+              const isExtraBusStudent = (st) => {
+                if (st.isNotRiding || getStudentBoardingType(st) === 'NONE') return false;
+                const sixKm = checkSixKmRule(st, buses, academy, academyRadiusKm);
+                if (sixKm.isOutside6km) return false;
+                if (st.needsExtraBus || st.raw?.needsExtraBus || st.raw?.['증차필요'] || st.raw?.['중차필요']) return true;
+
+                const assignedBus = buses.find(b => b.id === (st.assignedBusId || st.assignedVehicle?.id));
+                if (assignedBus) {
+                  const riders = students.filter(s => !s.isNotRiding && (s.assignedBusId === assignedBus.id || s.assignedVehicle?.id === assignedBus.id));
+                  if (riders.length > (assignedBus.capacity || 25)) return true;
+                }
+
+                const isUnassigned = !st.assignedBusId && !st.assignedVehicle?.id;
+                let isInside = false;
+                if (assignedBus?.turfPolygon && st.lat && st.lng) {
+                  try {
+                    isInside = turf.booleanPointInPolygon(turf.point([Number(st.lng), Number(st.lat)]), assignedBus.turfPolygon);
+                  } catch (_) {}
+                }
+
+                if (isUnassigned || !isInside) {
+                  const hasAvailableNearbyBus = buses.some(b => {
+                    if (b.id === assignedBus?.id) return false;
+                    const riders = students.filter(s => !s.isNotRiding && (s.assignedBusId === b.id || s.assignedVehicle?.id === b.id));
+                    if (riders.length >= (b.capacity || 25)) return false;
+                    return calcDistToBusKm(st.lat, st.lng, b) <= 5.0;
+                  });
+                  if (!hasAvailableNearbyBus) return true;
+                }
+                return false;
+              };
+
+              const unassignedList = students.filter(st => {
+                if (st.isNotRiding || getStudentBoardingType(st) === 'NONE') return false;
+                if (st.assignedBusId || st.assignedVehicle?.id) return false;
+                if (isExtraBusStudent(st)) return false;
+                const sixKm = checkSixKmRule(st, buses, academy, academyRadiusKm);
+                if (sixKm.isOutside6km) return false;
+                return true;
+              });
+
+              const extraBusList = students.filter(isExtraBusStudent);
+
+              const allExtraSelected = extraBusList.length > 0 && extraBusList.every(s => selectedExtraBusStudentIds.has(s.id));
+
+              const handleToggleSelectAllExtra = () => {
+                if (allExtraSelected) {
+                  setSelectedExtraBusStudentIds(new Set());
+                } else {
+                  setSelectedExtraBusStudentIds(new Set(extraBusList.map(s => s.id)));
+                }
+              };
+
+              const handleToggleStudentCheck = (id) => {
+                setSelectedExtraBusStudentIds(prev => {
+                  const next = new Set(prev);
+                  if (next.has(id)) next.delete(id);
+                  else next.add(id);
+                  return next;
+                });
+              };
+
+              const handleConvertSelectedToNotRiding = async () => {
+                const targetIds = selectedExtraBusStudentIds.size > 0
+                  ? new Set([...selectedExtraBusStudentIds].filter(id => extraBusList.some(s => s.id === id)))
+                  : new Set(extraBusList.map(s => s.id));
+
+                if (targetIds.size === 0) {
+                  alert('미탑승으로 전환할 원아가 없습니다.');
+                  return;
+                }
+
+                if (!window.confirm(`선택한 중차(증차) 필요 원아 ${targetIds.size}명을 전원 '미탑승'(도보/자차)으로 전환하시겠습니까?`)) {
+                  return;
+                }
+
+                try {
+                  setIsProcessing(true);
+                  const targetList = extraBusList.filter(s => targetIds.has(s.id));
+                  const targetAcademyId = selectedAcademyId || currentUser?.academyId;
+
+                  setStudents(prev => prev.map(s => {
+                    if (targetIds.has(s.id)) {
+                      return {
+                        ...s,
+                        isNotRiding: true,
+                        boardingType: 'NONE',
+                        assignedBusId: null,
+                        assignedVehicle: null,
+                        needsExtraBus: false,
+                        raw: { ...(s.raw || {}), 차량미탑승: true, 미탑승: true, 탑승구분: 'NONE' }
+                      };
+                    }
+                    return s;
+                  }));
+
+                  await Promise.allSettled(
+                    targetList.map(st =>
+                      fetch(`${API_BASE_URL}/routing/student/${st.id}${targetAcademyId ? `?academyId=${targetAcademyId}` : ''}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          isNotRiding: true,
+                          boardingType: 'NONE',
+                          assignedVehicleId: null,
+                          academyId: targetAcademyId
+                        })
+                      })
+                    )
+                  );
+
+                  setSelectedExtraBusStudentIds(new Set());
+                  alert(`중차(증차) 필요 원아 ${targetIds.size}명이 '미탑승'으로 정상 전환되었습니다.\n지도에 회색(미탑승)으로 표시됩니다.`);
+                } catch (e) {
+                  console.error(e);
+                  alert('미탑승 전환 중 오류가 발생했습니다.');
+                } finally {
+                  setIsProcessing(false);
+                }
+              };
+
+              return (
+                <>
+                  {/* Persistent Unassigned Students Panel (미배정 원아 아코디언) */}
+                  <div className="mt-3 p-3 bg-amber-50/80 border border-amber-300 rounded-2xl shadow-xs shrink-0 transition-all">
+                    <div 
+                      onClick={() => setIsUnassignedCollapsed(!isUnassignedCollapsed)}
+                      className="flex items-center justify-between cursor-pointer select-none"
+                      title={isUnassignedCollapsed ? '클릭하여 미배정 원아 명단 펼치기' : '클릭하여 접기'}
+                    >
+                      <div className="flex items-center gap-2">
+                        {unassignedList.length > 0 && (
+                          <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+                        )}
+                        <h4 className="font-extrabold text-amber-950 text-xs">
+                          미배정 {terms.student} ({unassignedList.length}명)
+                        </h4>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800">
+                        <span className="text-[11px] bg-amber-100 hover:bg-amber-200 px-2 py-0.5 rounded-md border border-amber-200 transition-colors">
+                          {isUnassignedCollapsed ? '+ 펼치기' : '− 접기'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {!isUnassignedCollapsed && (
+                      <div className="mt-2.5 pt-2 border-t border-amber-200/80 animate-fade-in">
+                        {unassignedList.length === 0 ? (
+                          <p className="text-[11px] text-amber-800/80 font-medium py-1">현재 모든 {terms.student}이 통학 차량에 배정되어 있습니다.</p>
+                        ) : (
+                          <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+                            {unassignedList.map(st => {
+                              const homonym = getHomonymInfo(st, students);
+                              const isHomonym = Boolean(homonym?.isHomonym);
+                              return (
+                              <div key={st.id} className={`flex items-center justify-between p-2 rounded-xl text-xs shadow-2xs ${isHomonym ? 'bg-amber-50/70 border-2 border-amber-400 ring-1 ring-amber-300' : 'bg-white border border-amber-200'}`}>
+                                <div className="min-w-0 pr-2">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span 
+                                      onClick={() => handleStudentMapClick(st)}
+                                      className="font-extrabold text-slate-800 hover:text-blue-600 underline cursor-pointer truncate"
+                                      title="지도에서 위치 보기"
+                                    >
+                                      {st.name}
+                                    </span>
+                                    {isHomonym && (
+                                      <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-400 font-black text-[10px] shrink-0" title={homonym.subLabel}>
+                                        {homonym.label}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {isHomonym && homonym.subLabel && (
+                                    <div className="text-[10px] text-amber-800 font-bold mt-0.5">{homonym.subLabel}</div>
+                                  )}
+                                  <span className="text-[10px] text-slate-500 block truncate font-medium">{st.address || '주소 미등록'}</span>
+                                </div>
+                                <select
+                                  onChange={(e) => {
+                                    const targetBid = Number(e.target.value);
+                                    if (!targetBid) return;
+                                    setStudents(prev => prev.map(s => s.id === st.id ? { ...s, assignedBusId: targetBid } : s));
+                                    const targetAcademyId = selectedAcademyId || currentUser?.academyId;
+                                    fetch(`${API_BASE_URL}/routing/student/${st.id}${targetAcademyId ? `?academyId=${targetAcademyId}` : ''}`, {
+                                      method: 'PUT',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ assignedVehicleId: targetBid, academyId: targetAcademyId })
+                                    }).catch(err => console.error(err));
+                                  }}
+                                  defaultValue=""
+                                  className="text-[11px] font-bold py-1 px-1.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg shrink-0 cursor-pointer"
+                                >
+                                  <option value="" disabled>차량 배정</option>
+                                  {buses.map(b => (
+                                    <option key={b.id} value={b.id}>{b.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            );})}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Persistent Extra Bus Needed Students Panel (중차(증차) 필요 원아 아코디언 및 미탑승 일괄 전환) */}
+                  <div className="mt-2.5 p-3 bg-orange-50/90 border border-orange-300 rounded-2xl shadow-xs shrink-0 transition-all">
+                    <div 
+                      onClick={() => setIsExtraBusCollapsed(!isExtraBusCollapsed)}
+                      className="flex items-center justify-between cursor-pointer select-none"
+                      title={isExtraBusCollapsed ? '클릭하여 중차(증차) 필요 원아 명단 펼치기' : '클릭하여 접기'}
+                    >
+                      <div className="flex items-center gap-2">
+                        {extraBusList.length > 0 && (
+                          <span className="w-2.5 h-2.5 rounded-full bg-orange-600 animate-ping"></span>
+                        )}
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-1.5 py-0.5 rounded-md bg-orange-200 text-orange-900 text-[10px] font-black">!</span>
+                          <h4 className="font-extrabold text-orange-950 text-xs">
+                            중차(증차) 필요 {terms.student} ({extraBusList.length}명)
+                          </h4>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-orange-800">
+                        <span className="text-[11px] bg-orange-100 hover:bg-orange-200 px-2 py-0.5 rounded-md border border-orange-200 transition-colors">
+                          {isExtraBusCollapsed ? '+ 펼치기' : '− 접기'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {!isExtraBusCollapsed && (
+                      <div className="mt-2.5 pt-2 border-t border-orange-200 animate-fade-in">
+                        {extraBusList.length === 0 ? (
+                          <p className="text-[11px] text-orange-800/80 font-medium py-1">현재 중차(증차)가 필요한 원아가 없습니다.</p>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between bg-orange-100/70 p-1.5 rounded-xl border border-orange-200 text-[11px]">
+                              <label className="flex items-center gap-1.5 cursor-pointer font-bold text-orange-950">
+                                <input 
+                                  type="checkbox" 
+                                  checked={allExtraSelected} 
+                                  onChange={handleToggleSelectAllExtra}
+                                  className="w-3.5 h-3.5 rounded text-orange-600 cursor-pointer"
+                                />
+                                <span>전체 선택 ({selectedExtraBusStudentIds.size > 0 ? selectedExtraBusStudentIds.size : extraBusList.length}/{extraBusList.length})</span>
+                              </label>
+                              <button
+                                type="button"
+                                onClick={handleConvertSelectedToNotRiding}
+                                className="px-2.5 py-1 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-[11px] rounded-lg shadow-xs transition-all flex items-center gap-1 cursor-pointer"
+                                title="선택한 중차(증차) 필요 원아를 미탑승(도보/자차)으로 일괄 전환합니다"
+                              >
+                                <span>전원 미탑승으로 전환</span>
+                              </button>
+                            </div>
+
+                            <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
+                              {extraBusList.map(st => {
+                                const isChecked = selectedExtraBusStudentIds.size === 0 || selectedExtraBusStudentIds.has(st.id);
+                                const homonym = getHomonymInfo(st, students);
+                                const isHomonym = Boolean(homonym?.isHomonym);
+                                return (
+                                  <div 
+                                    key={st.id} 
+                                    className={`flex items-center justify-between p-2 rounded-xl text-xs shadow-2xs transition-colors ${
+                                      isHomonym 
+                                        ? 'bg-amber-50/70 border-2 border-amber-400 ring-1 ring-amber-300' 
+                                        : 'bg-white border border-orange-200 hover:border-orange-400'
+                                    }`}
+                                  >
+                                    <label className="flex items-center gap-2 min-w-0 pr-2 cursor-pointer flex-1">
+                                      <input 
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={() => handleToggleStudentCheck(st.id)}
+                                        className="w-3.5 h-3.5 rounded text-orange-600 cursor-pointer shrink-0"
+                                      />
+                                      <div className="min-w-0">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span 
+                                            onClick={(e) => { e.preventDefault(); handleStudentMapClick(st); }}
+                                            className="font-black text-slate-900 hover:text-blue-600 underline cursor-pointer truncate"
+                                            title="지도에서 위치 확인"
+                                          >
+                                            {st.name}
+                                          </span>
+                                          {isHomonym ? (
+                                            <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-400 font-black text-[10px] shrink-0" title={homonym.subLabel}>
+                                              {homonym.label}
+                                            </span>
+                                          ) : (
+                                            <span className="text-[10px] font-bold text-orange-700 bg-orange-100 px-1.5 py-0.2 rounded shrink-0">
+                                              증차 필요
+                                            </span>
+                                          )}
+                                        </div>
+                                        {isHomonym && homonym.subLabel && (
+                                          <div className="text-[10px] text-amber-800 font-bold mt-0.5">{homonym.subLabel}</div>
+                                        )}
+                                        <span className="text-[10px] text-slate-500 block truncate font-medium">
+                                          {st.address || st.boardingLocation || '주소 미등록'}
+                                        </span>
+                                      </div>
+                                    </label>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleStudentMapClick(st)}
+                                      className="text-[10px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg shrink-0 transition"
+                                    >
+                                      위치보기
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+
               {sortedBuses.length === 0 ? (
                 <div className="text-slate-400 text-sm text-center py-10">등록된 버스가 없습니다.</div>
               ) : (
@@ -5361,330 +5686,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                 })
               )}
 
-            {/* Helper to determine if a student needs extra bus */}
-            {(() => {
-              const isExtraBusStudent = (st) => {
-                if (st.isNotRiding || getStudentBoardingType(st) === 'NONE') return false;
-                const sixKm = checkSixKmRule(st, buses, academy, academyRadiusKm);
-                if (sixKm.isOutside6km) return false;
-                if (st.needsExtraBus || st.raw?.needsExtraBus || st.raw?.['증차필요']) return true;
 
-                const assignedBus = buses.find(b => b.id === (st.assignedBusId || st.assignedVehicle?.id));
-                if (assignedBus) {
-                  const riders = students.filter(s => !s.isNotRiding && (s.assignedBusId === assignedBus.id || s.assignedVehicle?.id === assignedBus.id));
-                  if (riders.length > (assignedBus.capacity || 25)) return true;
-                }
-
-                const isUnassigned = !st.assignedBusId && !st.assignedVehicle?.id;
-                let isInside = false;
-                if (assignedBus?.turfPolygon && st.lat && st.lng) {
-                  try {
-                    isInside = turf.booleanPointInPolygon(turf.point([Number(st.lng), Number(st.lat)]), assignedBus.turfPolygon);
-                  } catch (_) {}
-                }
-
-                if (isUnassigned || !isInside) {
-                  const hasAvailableNearbyBus = buses.some(b => {
-                    if (b.id === assignedBus?.id) return false;
-                    const riders = students.filter(s => !s.isNotRiding && (s.assignedBusId === b.id || s.assignedVehicle?.id === b.id));
-                    if (riders.length >= (b.capacity || 25)) return false;
-                    return calcDistToBusKm(st.lat, st.lng, b) <= 5.0;
-                  });
-                  if (!hasAvailableNearbyBus) return true;
-                }
-                return false;
-              };
-
-              const unassignedList = students.filter(st => {
-                if (st.isNotRiding || getStudentBoardingType(st) === 'NONE') return false;
-                if (st.assignedBusId || st.assignedVehicle?.id) return false;
-                if (isExtraBusStudent(st)) return false;
-                const sixKm = checkSixKmRule(st, buses, academy, academyRadiusKm);
-                if (sixKm.isOutside6km) return false;
-                return true;
-              });
-
-              const extraBusList = students.filter(isExtraBusStudent);
-
-              const allExtraSelected = extraBusList.length > 0 && extraBusList.every(s => selectedExtraBusStudentIds.has(s.id));
-
-              const handleToggleSelectAllExtra = () => {
-                if (allExtraSelected) {
-                  setSelectedExtraBusStudentIds(new Set());
-                } else {
-                  setSelectedExtraBusStudentIds(new Set(extraBusList.map(s => s.id)));
-                }
-              };
-
-              const handleToggleStudentCheck = (id) => {
-                setSelectedExtraBusStudentIds(prev => {
-                  const next = new Set(prev);
-                  if (next.has(id)) next.delete(id);
-                  else next.add(id);
-                  return next;
-                });
-              };
-
-              const handleConvertSelectedToNotRiding = async () => {
-                const targetIds = selectedExtraBusStudentIds.size > 0
-                  ? new Set([...selectedExtraBusStudentIds].filter(id => extraBusList.some(s => s.id === id)))
-                  : new Set(extraBusList.map(s => s.id));
-
-                if (targetIds.size === 0) {
-                  alert('미탑승으로 전환할 원아가 없습니다.');
-                  return;
-                }
-
-                if (!window.confirm(`선택한 증차 필요 원아 ${targetIds.size}명을 전원 '미탑승'(도보/자차)으로 전환하시겠습니까?`)) {
-                  return;
-                }
-
-                try {
-                  setIsProcessing(true);
-                  const targetList = extraBusList.filter(s => targetIds.has(s.id));
-                  const targetAcademyId = selectedAcademyId || currentUser?.academyId;
-
-                  setStudents(prev => prev.map(s => {
-                    if (targetIds.has(s.id)) {
-                      return {
-                        ...s,
-                        isNotRiding: true,
-                        boardingType: 'NONE',
-                        assignedBusId: null,
-                        assignedVehicle: null,
-                        needsExtraBus: false,
-                        raw: { ...(s.raw || {}), 차량미탑승: true, 미탑승: true, 탑승구분: 'NONE' }
-                      };
-                    }
-                    return s;
-                  }));
-
-                  await Promise.allSettled(
-                    targetList.map(st =>
-                      fetch(`${API_BASE_URL}/routing/student/${st.id}${targetAcademyId ? `?academyId=${targetAcademyId}` : ''}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          isNotRiding: true,
-                          boardingType: 'NONE',
-                          assignedVehicleId: null,
-                          academyId: targetAcademyId
-                        })
-                      })
-                    )
-                  );
-
-                  setSelectedExtraBusStudentIds(new Set());
-                  alert(`증차 필요 원아 ${targetIds.size}명이 '미탑승'으로 정상 전환되었습니다.\n지도에 회색(미탑승)으로 표시됩니다.`);
-                } catch (e) {
-                  console.error(e);
-                  alert('미탑승 전환 중 오류가 발생했습니다.');
-                } finally {
-                  setIsProcessing(false);
-                }
-              };
-
-              return (
-                <>
-                  {/* Persistent Unassigned Students Panel (미배정 원아 아코디언) */}
-                  <div className="mt-3 p-3 bg-amber-50/80 border border-amber-300 rounded-2xl shadow-xs shrink-0 transition-all">
-                    <div 
-                      onClick={() => setIsUnassignedCollapsed(!isUnassignedCollapsed)}
-                      className="flex items-center justify-between cursor-pointer select-none"
-                      title={isUnassignedCollapsed ? '클릭하여 미배정 원아 명단 펼치기' : '클릭하여 접기'}
-                    >
-                      <div className="flex items-center gap-2">
-                        {unassignedList.length > 0 && (
-                          <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
-                        )}
-                        <h4 className="font-extrabold text-amber-950 text-xs">
-                          미배정 {terms.student} ({unassignedList.length}명)
-                        </h4>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800">
-                        <span className="text-[11px] bg-amber-100 hover:bg-amber-200 px-2 py-0.5 rounded-md border border-amber-200 transition-colors">
-                          {isUnassignedCollapsed ? '+ 펼치기' : '− 접기'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {!isUnassignedCollapsed && (
-                      <div className="mt-2.5 pt-2 border-t border-amber-200/80 animate-fade-in">
-                        {unassignedList.length === 0 ? (
-                          <p className="text-[11px] text-amber-800/80 font-medium py-1">현재 모든 {terms.student}이 통학 차량에 배정되어 있습니다.</p>
-                        ) : (
-                          <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
-                            {unassignedList.map(st => {
-                              const homonym = getHomonymInfo(st, students);
-                              const isHomonym = Boolean(homonym?.isHomonym);
-                              return (
-                              <div key={st.id} className={`flex items-center justify-between p-2 rounded-xl text-xs shadow-2xs ${isHomonym ? 'bg-amber-50/70 border-2 border-amber-400 ring-1 ring-amber-300' : 'bg-white border border-amber-200'}`}>
-                                <div className="min-w-0 pr-2">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span 
-                                      onClick={() => handleStudentMapClick(st)}
-                                      className="font-extrabold text-slate-800 hover:text-blue-600 underline cursor-pointer truncate"
-                                      title="지도에서 위치 보기"
-                                    >
-                                      {st.name}
-                                    </span>
-                                    {isHomonym && (
-                                      <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-400 font-black text-[10px] shrink-0" title={homonym.subLabel}>
-                                        {homonym.label}
-                                      </span>
-                                    )}
-                                  </div>
-                                  {isHomonym && homonym.subLabel && (
-                                    <div className="text-[10px] text-amber-800 font-bold mt-0.5">{homonym.subLabel}</div>
-                                  )}
-                                  <span className="text-[10px] text-slate-500 block truncate font-medium">{st.address || '주소 미등록'}</span>
-                                </div>
-                                <select
-                                  onChange={(e) => {
-                                    const targetBid = Number(e.target.value);
-                                    if (!targetBid) return;
-                                    setStudents(prev => prev.map(s => s.id === st.id ? { ...s, assignedBusId: targetBid } : s));
-                                    const targetAcademyId = selectedAcademyId || currentUser?.academyId;
-                                    fetch(`${API_BASE_URL}/routing/student/${st.id}${targetAcademyId ? `?academyId=${targetAcademyId}` : ''}`, {
-                                      method: 'PUT',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ assignedVehicleId: targetBid, academyId: targetAcademyId })
-                                    }).catch(err => console.error(err));
-                                  }}
-                                  defaultValue=""
-                                  className="text-[11px] font-bold py-1 px-1.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg shrink-0 cursor-pointer"
-                                >
-                                  <option value="" disabled>차량 배정</option>
-                                  {buses.map(b => (
-                                    <option key={b.id} value={b.id}>{b.name}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            );})}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Persistent Extra Bus Needed Students Panel (증차 필요 원아 아코디언 및 미탑승 일괄 전환) */}
-                  <div className="mt-2.5 p-3 bg-orange-50/90 border border-orange-300 rounded-2xl shadow-xs shrink-0 transition-all">
-                    <div 
-                      onClick={() => setIsExtraBusCollapsed(!isExtraBusCollapsed)}
-                      className="flex items-center justify-between cursor-pointer select-none"
-                      title={isExtraBusCollapsed ? '클릭하여 증차 필요 원아 명단 펼치기' : '클릭하여 접기'}
-                    >
-                      <div className="flex items-center gap-2">
-                        {extraBusList.length > 0 && (
-                          <span className="w-2.5 h-2.5 rounded-full bg-orange-600 animate-ping"></span>
-                        )}
-                        <div className="flex items-center gap-1.5">
-                          <span className="px-1.5 py-0.5 rounded-md bg-orange-200 text-orange-900 text-[10px] font-black">!</span>
-                          <h4 className="font-extrabold text-orange-950 text-xs">
-                            증차 필요 {terms.student} ({extraBusList.length}명)
-                          </h4>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-orange-800">
-                        <span className="text-[11px] bg-orange-100 hover:bg-orange-200 px-2 py-0.5 rounded-md border border-orange-200 transition-colors">
-                          {isExtraBusCollapsed ? '+ 펼치기' : '− 접기'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {!isExtraBusCollapsed && (
-                      <div className="mt-2.5 pt-2 border-t border-orange-200 animate-fade-in">
-                        {extraBusList.length === 0 ? (
-                          <p className="text-[11px] text-orange-800/80 font-medium py-1">현재 증차가 필요한 원아가 없습니다.</p>
-                        ) : (
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between bg-orange-100/70 p-1.5 rounded-xl border border-orange-200 text-[11px]">
-                              <label className="flex items-center gap-1.5 cursor-pointer font-bold text-orange-950">
-                                <input 
-                                  type="checkbox" 
-                                  checked={allExtraSelected} 
-                                  onChange={handleToggleSelectAllExtra}
-                                  className="w-3.5 h-3.5 rounded text-orange-600 cursor-pointer"
-                                />
-                                <span>전체 선택 ({selectedExtraBusStudentIds.size > 0 ? selectedExtraBusStudentIds.size : extraBusList.length}/{extraBusList.length})</span>
-                              </label>
-                              <button
-                                type="button"
-                                onClick={handleConvertSelectedToNotRiding}
-                                className="px-2.5 py-1 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-[11px] rounded-lg shadow-xs transition-all flex items-center gap-1 cursor-pointer"
-                                title="선택한 증차 필요 원아를 미탑승(도보/자차)으로 일괄 전환합니다"
-                              >
-                                <span>전원 미탑승으로 전환</span>
-                              </button>
-                            </div>
-
-                            <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
-                              {extraBusList.map(st => {
-                                const isChecked = selectedExtraBusStudentIds.size === 0 || selectedExtraBusStudentIds.has(st.id);
-                                const homonym = getHomonymInfo(st, students);
-                                const isHomonym = Boolean(homonym?.isHomonym);
-                                return (
-                                  <div 
-                                    key={st.id} 
-                                    className={`flex items-center justify-between p-2 rounded-xl text-xs shadow-2xs transition-colors ${
-                                      isHomonym 
-                                        ? 'bg-amber-50/70 border-2 border-amber-400 ring-1 ring-amber-300' 
-                                        : 'bg-white border border-orange-200 hover:border-orange-400'
-                                    }`}
-                                  >
-                                    <label className="flex items-center gap-2 min-w-0 pr-2 cursor-pointer flex-1">
-                                      <input 
-                                        type="checkbox"
-                                        checked={isChecked}
-                                        onChange={() => handleToggleStudentCheck(st.id)}
-                                        className="w-3.5 h-3.5 rounded text-orange-600 cursor-pointer shrink-0"
-                                      />
-                                      <div className="min-w-0">
-                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                          <span 
-                                            onClick={(e) => { e.preventDefault(); handleStudentMapClick(st); }}
-                                            className="font-black text-slate-900 hover:text-blue-600 underline cursor-pointer truncate"
-                                            title="지도에서 위치 확인"
-                                          >
-                                            {st.name}
-                                          </span>
-                                          {isHomonym ? (
-                                            <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-400 font-black text-[10px] shrink-0" title={homonym.subLabel}>
-                                              {homonym.label}
-                                            </span>
-                                          ) : (
-                                            <span className="text-[10px] font-bold text-orange-700 bg-orange-100 px-1.5 py-0.2 rounded shrink-0">
-                                              증차 필요
-                                            </span>
-                                          )}
-                                        </div>
-                                        {isHomonym && homonym.subLabel && (
-                                          <div className="text-[10px] text-amber-800 font-bold mt-0.5">{homonym.subLabel}</div>
-                                        )}
-                                        <span className="text-[10px] text-slate-500 block truncate font-medium">
-                                          {st.address || st.boardingLocation || '주소 미등록'}
-                                        </span>
-                                      </div>
-                                    </label>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleStudentMapClick(st)}
-                                      className="text-[10px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg shrink-0 transition"
-                                    >
-                                      위치보기
-                                    </button>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </>
-              );
-            })()}
 
             </div>
           </div>
