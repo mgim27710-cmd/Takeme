@@ -7140,10 +7140,9 @@ const parseKindergartenExcelSheet = (sheet) => {
         {activeTab === 'log' && (
             <div className="flex flex-col h-full">
               <div className="p-5 border-b border-slate-100 bg-white">
-                <h2 className="text-xl font-extrabold text-slate-900 tracking-tight mb-1 flex items-center gap-2">
+                <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                   캘린더 및 로그
                 </h2>
-                <p className="text-xs text-slate-500 font-medium">원생의 출결과 로그를 확인하세요.</p>
               </div>
               <div className="p-4 flex flex-col gap-2.5">
                 <button onClick={() => setLogTab('ABSENCE_VARIABLE')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'ABSENCE_VARIABLE' || logTab === 'ALL' || logTab === 'EVENT_HOLIDAY' ? 'bg-rose-500 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>원아 결석 및 통학 변동</button>
