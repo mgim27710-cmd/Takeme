@@ -1586,6 +1586,9 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     if (room.type === 'NOTIFICATION_SYSTEM' || room.name === '실시간 알림 채널' || room.name === '공지사항' || room.name === '공지사항') {
       return room.name === 'TakeMe 알림' ? 'TakeMe 알림' : '공지사항';
     }
+    if (room.displayName) {
+      return room.displayName;
+    }
     if (room.name && room.name !== '1:1 대화' && !room.name.includes('(')) {
       return room.name;
     }

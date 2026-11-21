@@ -780,6 +780,27 @@ export class ChatService implements OnModuleInit {
         seenSpecialTypes.add(key);
         room.name = key === 'PERSONAL' ? PERSONAL_NOTI_ROOM_NAME : ACADEMY_NOTI_ROOM_NAME;
       }
+
+      // 1:1 대화방의 경우, 현재 접속자(userId)의 관점에서 상대방 정보(displayName, targetUser)를 동적으로 매핑
+      const isDirect = room.type === ChatRoomType.DIRECT || (!room.type && (room.members || []).length <= 2);
+      if (isDirect && room.type !== ChatRoomType.NOTIFICATION_SYSTEM && room.type !== ChatRoomType.PAYMENT_SYSTEM) {
+        const otherMember = (room.members || []).find(m => m.user && m.user.id !== userId);
+        if (otherMember?.user) {
+          const otherUser = otherMember.user;
+          const targetName = otherUser.name || otherUser.email || '대화 상대';
+          (room as any).displayName = targetName;
+          (room as any).targetUser = {
+            id: otherUser.id,
+            name: targetName,
+            email: otherUser.email,
+            role: otherUser.role,
+            assignedClass: otherUser.assignedClass,
+          };
+        }
+      } else {
+        (room as any).displayName = room.name;
+      }
+
       deduplicatedRooms.push(room);
     }
 
@@ -1093,10 +1114,28 @@ export class ChatService implements OnModuleInit {
       this.chatGateway?.server?.to(`user_${uid}`).emit('roomUpdated', { roomId: savedRoom.id });
     }
 
-    return this.roomRepo.findOne({
+    const createdRoom = await this.roomRepo.findOne({
       where: { id: savedRoom.id },
       relations: { members: { user: true } },
     });
+
+    if (createdRoom && isDirect) {
+      const otherMember = (createdRoom.members || []).find(m => m.user && m.user.id !== creator.id);
+      if (otherMember?.user) {
+        const otherUser = otherMember.user;
+        const targetName = otherUser.name || otherUser.email || '대화 상대';
+        (createdRoom as any).displayName = targetName;
+        (createdRoom as any).targetUser = {
+          id: otherUser.id,
+          name: targetName,
+          email: otherUser.email,
+          role: otherUser.role,
+          assignedClass: otherUser.assignedClass,
+        };
+      }
+    }
+
+    return createdRoom;
   }
 
   async sendMessageAndBroadcast(roomId: number, senderEmail: string, text: string, type: string = 'TEXT', payload?: any) {
