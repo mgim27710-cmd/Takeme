@@ -254,7 +254,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                       const SizedBox(width: 10),
                       const Expanded(
                         child: Text(
-                          '차량 내부 확인 완료\n(남아있는 원아가 없음을 확인했습니다)',
+                          '남아있는 원아가 없음을 확인했습니다',
                           style: TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w800,
@@ -872,10 +872,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     final items = <PopupMenuEntry<String>>[
       _menuItem('refresh', Icons.refresh, '노선·탑승지 새로고침'),
     ];
-    if (!_nav.driving) {
-      items.add(_menuItem('log', Icons.calendar_month, '운행 일지'));
-      items.add(_menuItem('test', Icons.science_outlined, '테스트 경로로 연습하기'));
-    } else {
+    if (_nav.driving) {
       items.add(_menuItem('sim', _nav.simulating ? Icons.pause : Icons.play_arrow,
           _nav.simulating ? '시뮬레이션 멈추기' : '주행 시뮬레이션 시작'));
       if (_nav.simulating) {
