@@ -989,7 +989,6 @@ export class ChatService implements OnModuleInit {
           messageIds: updatedIds,
         });
         this.chatGateway.broadcastReadStatus(roomId, currentUserId);
-        this.chatGateway.server?.emit('roomUpdated', { roomId });
       }
     }
 
@@ -1032,12 +1031,7 @@ export class ChatService implements OnModuleInit {
     }
 
     if (updatedIds.length > 0) {
-      this.chatGateway.server?.to(`chat_${roomId}`).emit('messagesRead', {
-        roomId,
-        userId,
-        messageIds: updatedIds,
-      });
-      this.chatGateway.server?.emit('roomUpdated', { roomId });
+      this.chatGateway.broadcastReadStatus(roomId, userId);
     }
 
     return { success: true, count: updatedIds.length };
@@ -1211,19 +1205,10 @@ export class ChatService implements OnModuleInit {
 
         for (const m of room.members) {
           if (m.user && m.user.id !== user.id) {
-            const receiverRole = m.user.role || '';
-            const targetRoles: string[] = [String(receiverRole)];
-            if (
-              receiverRole.includes('TEACHER') ||
-              receiverRole === 'HOMEROOM_TEACHER' ||
-              receiverRole === 'SHUTTLE_TEACHER'
-            ) {
-              targetRoles.push('TEACHER', 'HOMEROOM_TEACHER', 'SHUTTLE_TEACHER');
-            }
-
+            // 특정 멤버 1명에게 수신되는 대화 메시지이므로 targetRoles를 비워 전체 교사에게 중복 노출되는 현상 방지
             const pMsg = this.parentMessageRepo.create({
               receiverUser: m.user,
-              targetRoles: targetRoles,
+              targetRoles: [],
               message: `${prefix} ${text.trim()}`,
               isRead: false,
             });

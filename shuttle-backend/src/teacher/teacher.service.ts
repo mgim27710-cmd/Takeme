@@ -1912,14 +1912,16 @@ export class TeacherService {
     }
 
     // 2. Direct Messages (Admin / Parent messages)
+    // 수신자가 특정된(receiverUserId가 있는) 1:1 메시지는 오직 본인(uid) 것만 조회.
+    // targetRoles(전체/역할 공지)는 수신자가 지정되지 않은 공지성 메시지에 한해서만 적용.
     const msgQb = this.messageRepository.createQueryBuilder('msg')
       .leftJoinAndSelect('msg.student', 'student')
       .where('msg.receiverUserId = :uid', { uid: user.id });
 
     if (user.role === 'DRIVER') {
-      msgQb.orWhere("msg.targetRoles LIKE :dRole", { dRole: '%DRIVER%' });
+      msgQb.orWhere('(msg.receiverUserId IS NULL AND msg.targetRoles LIKE :dRole)', { dRole: '%DRIVER%' });
     } else if (user.role === 'HOMEROOM_TEACHER' || user.role === 'TEACHER') {
-      msgQb.orWhere("msg.targetRoles LIKE :tRole", { tRole: '%TEACHER%' });
+      msgQb.orWhere('(msg.receiverUserId IS NULL AND msg.targetRoles LIKE :tRole)', { tRole: '%TEACHER%' });
     }
 
     const msgs = await msgQb.orderBy('msg.createdAt', 'DESC').take(30).getMany();
