@@ -508,9 +508,6 @@ export default function DocumentManager({
                   <span className="w-2.5 h-6 bg-blue-600 rounded-full inline-block"></span>
                   호차별 서류 및 안전교육 만료일 현황
                 </h2>
-                <p className="text-xs text-slate-500 font-medium mt-1 pl-5">
-                  어린이통학버스 법정 의무서류(종합보험, 정기검사) 및 기사·동승교사 법정 안전교육 만료일을 실시간 관리합니다.
-                </p>
               </div>
 
               <div className="flex items-center gap-3">
