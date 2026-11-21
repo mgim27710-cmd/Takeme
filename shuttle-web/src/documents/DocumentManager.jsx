@@ -419,6 +419,65 @@ export default function DocumentManager({
     );
   };
 
+  const renderTemplateCard = ({ id, title, subtitle, tag, theme = 'blue', colSpan2 = false }) => {
+    const themeStyles = {
+      blue: {
+        borderLeft: 'border-l-blue-500 hover:border-blue-400',
+        tagBg: 'bg-blue-50 text-blue-700 border-blue-200',
+        btn: 'text-blue-700 hover:text-white bg-blue-50 hover:bg-blue-600 border-blue-200 hover:border-blue-600',
+      },
+      emerald: {
+        borderLeft: 'border-l-emerald-500 hover:border-emerald-400',
+        tagBg: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        btn: 'text-emerald-700 hover:text-white bg-emerald-50 hover:bg-emerald-600 border-emerald-200 hover:border-emerald-600',
+      },
+      indigo: {
+        borderLeft: 'border-l-indigo-500 hover:border-indigo-400',
+        tagBg: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+        btn: 'text-indigo-700 hover:text-white bg-indigo-50 hover:bg-indigo-600 border-indigo-200 hover:border-indigo-600',
+      },
+      rose: {
+        borderLeft: 'border-l-rose-500 hover:border-rose-400',
+        tagBg: 'bg-rose-50 text-rose-700 border-rose-200',
+        btn: 'text-rose-700 hover:text-white bg-rose-50 hover:bg-rose-600 border-rose-200 hover:border-rose-600',
+      },
+    }[theme];
+
+    return (
+      <div
+        key={id}
+        className={`bg-white border border-slate-200/90 border-l-[6px] ${themeStyles.borderLeft} rounded-2xl p-4.5 flex items-center justify-between gap-4 transition-all shadow-xs hover:shadow-md ${
+          colSpan2 ? 'md:col-span-2' : ''
+        }`}
+      >
+        <div className="min-w-0 pr-2">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <span className="text-[15px] font-extrabold text-slate-900 tracking-tight leading-snug">
+              {title}
+            </span>
+            {tag && (
+              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border ${themeStyles.tagBg}`}>
+                {tag}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500 font-medium leading-relaxed truncate">
+            {subtitle}
+          </p>
+        </div>
+        <button
+          onClick={() => handleDownloadTemplate(id)}
+          className={`inline-flex items-center gap-1.5 text-xs font-bold border px-3.5 py-2.5 rounded-xl transition-all shadow-2xs hover:shadow-xs shrink-0 cursor-pointer active:scale-95 ${themeStyles.btn}`}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+          </svg>
+          <span>서식 출력</span>
+        </button>
+      </div>
+    );
+  };
+
   return (
     <div
       className={`absolute inset-0 z-[2000] bg-slate-50 flex flex-col h-full overflow-hidden transition-all duration-300 ${
@@ -426,11 +485,12 @@ export default function DocumentManager({
       }`}
     >
       {/* Top Header */}
-      <div className="bg-white border-b border-slate-200 px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-white border-b border-slate-200 px-8 py-4 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">서류 관리</h1>
+          <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">서류 관리</h1>
           {expirySummary.urgentCount > 0 && (
-            <span className="bg-red-50 text-red-600 border border-red-200 text-xs font-semibold px-2.5 py-0.5 rounded-full">
+            <span className="inline-flex items-center gap-1.5 bg-red-50 text-red-600 border border-red-200 text-xs font-bold px-3 py-1 rounded-full shadow-2xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
               만료 임박 {expirySummary.urgentCount}건
             </span>
           )}
@@ -443,55 +503,66 @@ export default function DocumentManager({
             setUploadNote('');
             setShowUploadModal(true);
           }}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs px-3.5 py-2 rounded-lg transition-all shadow-xs cursor-pointer"
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-xs hover:shadow-sm cursor-pointer active:scale-95"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
           </svg>
           새 서류 등록
         </button>
       </div>
 
-      {/* Sub Navigation Tabs (Simple & Clean Underline Style) */}
-      <div className="bg-white border-b border-slate-200 px-8 flex items-center gap-2">
-        <button
-          onClick={() => setActiveSubTab('templates')}
-          className={`py-3 px-4 text-sm font-semibold border-b-2 transition-all cursor-pointer ${
-            activeSubTab === 'templates'
-              ? 'border-blue-600 text-blue-600 font-bold'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          서식 출력
-        </button>
-        <button
-          onClick={() => setActiveSubTab('expiry')}
-          className={`py-3 px-4 text-sm font-semibold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${
-            activeSubTab === 'expiry'
-              ? 'border-blue-600 text-blue-600 font-bold'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <span>만료일 현황</span>
-          {expirySummary.urgentCount > 0 && (
-            <span className="bg-red-500 text-white text-[11px] px-1.5 py-0.2 rounded-full font-bold">
-              {expirySummary.urgentCount}
+      {/* Sub Navigation Tabs (Pill / Segmented Style for Higher Readability) */}
+      <div className="bg-white border-b border-slate-200 px-8 py-2.5 flex items-center justify-between">
+        <div className="inline-flex p-1 bg-slate-100 rounded-xl gap-1">
+          <button
+            onClick={() => setActiveSubTab('templates')}
+            className={`py-2 px-4 text-xs font-extrabold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+              activeSubTab === 'templates'
+                ? 'bg-white text-blue-600 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <span>서식 출력</span>
+          </button>
+          <button
+            onClick={() => setActiveSubTab('expiry')}
+            className={`py-2 px-4 text-xs font-extrabold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+              activeSubTab === 'expiry'
+                ? 'bg-white text-blue-600 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>만료일 현황</span>
+            {expirySummary.urgentCount > 0 && (
+              <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-black">
+                {expirySummary.urgentCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveSubTab('documents')}
+            className={`py-2 px-4 text-xs font-extrabold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+              activeSubTab === 'documents'
+                ? 'bg-white text-blue-600 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
+            </svg>
+            <span>보관 서류</span>
+            <span className="bg-slate-200/80 text-slate-700 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+              {documents.length}
             </span>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveSubTab('documents')}
-          className={`py-3 px-4 text-sm font-semibold border-b-2 transition-all flex items-center gap-1.5 cursor-pointer ${
-            activeSubTab === 'documents'
-              ? 'border-blue-600 text-blue-600 font-bold'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <span>보관 서류</span>
-          <span className="bg-slate-100 text-slate-600 text-[11px] px-1.5 py-0.2 rounded-full">
-            {documents.length}
-          </span>
-        </button>
+          </button>
+        </div>
       </div>
 
       {/* Main Content Area */}
@@ -609,19 +680,19 @@ export default function DocumentManager({
             </div>
 
             {/* 2. 대형 고가독성 만료일 테이블 */}
-            <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-2xs">
+            <div className="overflow-x-auto rounded-2xl border border-slate-200/90 shadow-xs bg-white">
               <table className="w-full text-left text-sm border-collapse">
                 <thead>
-                  <tr className="bg-slate-100/90 border-b border-slate-200 text-slate-800 text-xs font-extrabold uppercase tracking-wider">
-                    <th className="py-3.5 px-4 w-44">차량(호차)</th>
-                    <th className="py-3.5 px-4">종합보험 만료일</th>
-                    <th className="py-3.5 px-4">정기검사 만료일</th>
-                    <th className="py-3.5 px-4 bg-blue-50/30">운전기사 안전교육</th>
-                    <th className="py-3.5 px-4 bg-purple-50/30">동승교사(선생님) 안전교육</th>
-                    <th className="py-3.5 px-4 text-center w-24">설정</th>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-700 text-xs font-black tracking-tight">
+                    <th className="py-4 px-5 w-48">차량(호차)</th>
+                    <th className="py-4 px-5">종합보험 만료일</th>
+                    <th className="py-4 px-5">정기검사 만료일</th>
+                    <th className="py-4 px-5 bg-blue-50/40">운전기사 안전교육</th>
+                    <th className="py-4 px-5 bg-purple-50/40">동승교사 안전교육</th>
+                    <th className="py-4 px-5 text-center w-28">만료일 변경</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200/80 bg-white">
+                <tbody className="divide-y divide-slate-100 bg-white">
                   {buses
                     .filter((bus) => {
                       if (selectedBusId !== 'all' && String(bus.id) !== String(selectedBusId)) return false;
@@ -646,82 +717,82 @@ export default function DocumentManager({
                       const companionEduD = calculateDday(rec.companionEduExpiry);
 
                       return (
-                        <tr key={bus.id} className="hover:bg-blue-50/30 even:bg-slate-50/40 transition-colors">
+                        <tr key={bus.id} className="hover:bg-blue-50/30 transition-colors">
                           {/* 차량 호차 정보 */}
-                          <td className="py-4 px-4 font-bold">
+                          <td className="py-4.5 px-5 font-bold">
                             <div className="flex items-center gap-2.5">
                               <span 
                                 className="w-3.5 h-3.5 rounded-full shrink-0 shadow-2xs border border-white" 
                                 style={{ backgroundColor: bus.color || '#3b82f6' }} 
                               />
-                              <span className="text-base font-extrabold text-slate-800">{bus.name || bus.busNumber}</span>
+                              <span className="text-base font-black text-slate-900 tracking-tight">{bus.name || bus.busNumber}</span>
                             </div>
-                            <div className="text-xs font-semibold text-slate-500 pl-6 mt-0.5">
+                            <div className="text-xs font-bold text-slate-500 pl-6 mt-1 tracking-tight">
                               {bus.plateNumber || '차량번호 미등록'}
                             </div>
                           </td>
 
                           {/* 종합보험 */}
-                          <td className="py-4 px-4">
-                            <div className="text-sm font-bold text-slate-800 mb-1.5">
-                              {rec.insuranceExpiry || <span className="text-slate-400 font-normal">미등록</span>}
+                          <td className="py-4.5 px-5">
+                            <div className="text-[13px] font-black text-slate-900 mb-1.5 tracking-tight">
+                              {rec.insuranceExpiry || <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">미등록</span>}
                             </div>
-                            <span className={`inline-block text-xs font-extrabold px-2.5 py-1 rounded-lg border shadow-2xs ${insuranceD.bg} ${insuranceD.color} ${insuranceD.border}`}>
+                            <span className={`inline-block text-[11px] font-black px-2.5 py-1 rounded-lg border shadow-2xs ${insuranceD.bg} ${insuranceD.color} ${insuranceD.border}`}>
                               {insuranceD.label}
                             </span>
                           </td>
 
                           {/* 정기검사 */}
-                          <td className="py-4 px-4">
-                            <div className="text-sm font-bold text-slate-800 mb-1.5">
-                              {rec.inspectionExpiry || <span className="text-slate-400 font-normal">미등록</span>}
+                          <td className="py-4.5 px-5">
+                            <div className="text-[13px] font-black text-slate-900 mb-1.5 tracking-tight">
+                              {rec.inspectionExpiry || <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">미등록</span>}
                             </div>
-                            <span className={`inline-block text-xs font-extrabold px-2.5 py-1 rounded-lg border shadow-2xs ${inspectionD.bg} ${inspectionD.color} ${inspectionD.border}`}>
+                            <span className={`inline-block text-[11px] font-black px-2.5 py-1 rounded-lg border shadow-2xs ${inspectionD.bg} ${inspectionD.color} ${inspectionD.border}`}>
                               {inspectionD.label}
                             </span>
                           </td>
 
                           {/* 운전기사 안전교육 */}
-                          <td className="py-4 px-4 bg-blue-50/15">
-                            <div className="flex items-center gap-1.5 mb-1">
-                              <span className="text-[11px] font-extrabold px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 border border-blue-200">
+                          <td className="py-4.5 px-5 bg-blue-50/20">
+                            <div className="flex items-center gap-1.5 mb-1.5">
+                              <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 border border-blue-200">
                                 기사
                               </span>
-                              <span className="text-xs font-bold text-slate-800">
-                                {bus.driverName || <span className="text-slate-400 font-normal">미지정</span>}
+                              <span className="text-xs font-black text-slate-800">
+                                {bus.driverName || <span className="text-slate-400 font-bold bg-slate-100 px-1.5 py-0.5 rounded">미지정</span>}
                               </span>
                             </div>
-                            <div className="text-sm font-bold text-slate-800 mb-1.5">
-                              {rec.driverEduExpiry || <span className="text-slate-400 font-normal">만료일 미등록</span>}
+                            <div className="text-[13px] font-black text-slate-900 mb-1.5 tracking-tight">
+                              {rec.driverEduExpiry || <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">만료일 미등록</span>}
                             </div>
-                            <span className={`inline-block text-xs font-extrabold px-2.5 py-1 rounded-lg border shadow-2xs ${driverEduD.bg} ${driverEduD.color} ${driverEduD.border}`}>
+                            <span className={`inline-block text-[11px] font-black px-2.5 py-1 rounded-lg border shadow-2xs ${driverEduD.bg} ${driverEduD.color} ${driverEduD.border}`}>
                               {driverEduD.label}
                             </span>
                           </td>
 
                           {/* 동승교사(차량선생님) 안전교육 */}
-                          <td className="py-4 px-4 bg-purple-50/15">
-                            <div className="flex items-center gap-1.5 mb-1">
-                              <span className="text-[11px] font-extrabold px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 border border-purple-200">
+                          <td className="py-4.5 px-5 bg-purple-50/20">
+                            <div className="flex items-center gap-1.5 mb-1.5">
+                              <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 border border-purple-200">
                                 동승교사
                               </span>
-                              <span className="text-xs font-bold text-slate-800">
-                                {bus.teacherName || <span className="text-slate-400 font-normal">미지정</span>}
+                              <span className="text-xs font-black text-slate-800">
+                                {bus.teacherName || <span className="text-slate-400 font-bold bg-slate-100 px-1.5 py-0.5 rounded">미지정</span>}
                               </span>
                             </div>
-                            <div className="text-sm font-bold text-slate-800 mb-1.5">
-                              {rec.companionEduExpiry || <span className="text-slate-400 font-normal">만료일 미등록</span>}
+                            <div className="text-[13px] font-black text-slate-900 mb-1.5 tracking-tight">
+                              {rec.companionEduExpiry || <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">만료일 미등록</span>}
                             </div>
-                            <span className={`inline-block text-xs font-extrabold px-2.5 py-1 rounded-lg border shadow-2xs ${companionEduD.bg} ${companionEduD.color} ${companionEduD.border}`}>
+                            <span className={`inline-block text-[11px] font-black px-2.5 py-1 rounded-lg border shadow-2xs ${companionEduD.bg} ${companionEduD.color} ${companionEduD.border}`}>
                               {companionEduD.label}
                             </span>
                           </td>
 
                           {/* 설정 버튼 */}
-                          <td className="py-4 px-4 text-center">
+                          <td className="py-4.5 px-5 text-center">
                             <button
                               onClick={() => handleOpenExpiryModal(bus)}
-                              className="text-xs font-bold text-blue-700 hover:text-white bg-blue-50 hover:bg-blue-600 border border-blue-200 hover:border-blue-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs cursor-pointer inline-flex items-center gap-1"
+                              className="text-xs font-extrabold text-blue-700 hover:text-white bg-blue-50 hover:bg-blue-600 border border-blue-200 hover:border-blue-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs hover:shadow-xs cursor-pointer inline-flex items-center gap-1.5 active:scale-95"
                             >
                               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -752,18 +823,22 @@ export default function DocumentManager({
         {/* TAB 1: Legal Templates (서식 출력 탭) */}
         {activeSubTab === 'templates' && (
           <div className="space-y-6 animate-in fade-in">
-            {/* Control Bar: Bus & Student Selection */}
-            <div className="bg-slate-100/90 border border-slate-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-2xs">
-              <div className="flex flex-wrap items-center gap-5">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-black text-slate-700">차량(호차):</span>
+            {/* Control Bar: Bus & Student Selection (Higher Readability Card) */}
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+              {/* Left: Selectors */}
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <span className="text-xs font-extrabold text-slate-700 whitespace-nowrap flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                    차량(호차)
+                  </span>
                   <select
                     value={selectedBusId}
                     onChange={(e) => {
                       setSelectedBusId(e.target.value);
                       setSelectedStudentId('none');
                     }}
-                    className="text-xs font-bold text-slate-800 bg-white border border-slate-300 rounded-xl px-3 py-1.5 outline-none cursor-pointer focus:border-blue-500 shadow-2xs min-h-[32px]"
+                    className="text-xs font-bold text-slate-800 bg-slate-50 hover:bg-slate-100/80 border border-slate-300 rounded-xl px-3.5 py-2 outline-none cursor-pointer focus:border-blue-500 focus:bg-white shadow-2xs transition-all min-w-[190px]"
                   >
                     <option value="all">전체 (공통 기본 양식)</option>
                     {buses.map((b) => (
@@ -774,12 +849,15 @@ export default function DocumentManager({
                   </select>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-black text-slate-700">대상 원아:</span>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <span className="text-xs font-extrabold text-slate-700 whitespace-nowrap flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
+                    대상 원아
+                  </span>
                   <select
                     value={selectedStudentId}
                     onChange={(e) => setSelectedStudentId(e.target.value)}
-                    className="text-xs font-bold text-slate-800 bg-white border border-slate-300 rounded-xl px-3 py-1.5 outline-none cursor-pointer focus:border-blue-500 shadow-2xs min-h-[32px]"
+                    className="text-xs font-bold text-slate-800 bg-slate-50 hover:bg-slate-100/80 border border-slate-300 rounded-xl px-3.5 py-2 outline-none cursor-pointer focus:border-blue-500 focus:bg-white shadow-2xs transition-all min-w-[210px]"
                   >
                     <option value="none">선택 안 함 (원아 정보 공란 / 수기 서식)</option>
                     {availableStudents.map((st) => (
@@ -791,345 +869,201 @@ export default function DocumentManager({
                 </div>
               </div>
 
-              <div className="text-xs text-slate-600 flex flex-wrap items-center gap-2">
-                {activeBus && (
+              {/* Right: Selected Summary Badges */}
+              <div className="flex flex-wrap items-center gap-2 pt-3 lg:pt-0 border-t lg:border-t-0 border-slate-100 text-xs">
+                {activeBus ? (
                   <>
-                    <span className="bg-white px-2.5 py-1 rounded-lg border border-slate-200 font-semibold shadow-2xs">
-                      차량번호: <strong className="text-slate-800">{activeBus.plateNumber || '미등록'}</strong>
+                    <span className="bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200/80 font-bold text-slate-700 shadow-2xs">
+                      차량: <strong className="text-blue-700 font-extrabold">{activeBus.plateNumber || '미등록'}</strong>
                     </span>
-                    <span className="bg-white px-2.5 py-1 rounded-lg border border-slate-200 font-semibold shadow-2xs">
-                      운전기사: <strong className="text-slate-800">{activeBus.driverName || '미지정'}</strong>
+                    <span className="bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200/80 font-bold text-slate-700 shadow-2xs">
+                      기사: <strong className="text-slate-900 font-extrabold">{activeBus.driverName || '미지정'}</strong>
                     </span>
-                    <span className="bg-white px-2.5 py-1 rounded-lg border border-slate-200 font-semibold shadow-2xs">
-                      차량선생님: <strong className="text-slate-800">{activeBus.teacherName || '미지정'}</strong>
+                    <span className="bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200/80 font-bold text-slate-700 shadow-2xs">
+                      선생님: <strong className="text-slate-900 font-extrabold">{activeBus.teacherName || '미지정'}</strong>
                     </span>
-                    <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-lg font-bold shadow-2xs">
-                      배정 원아: <strong>{activeBusStudents.length}명</strong>
+                    <span className="bg-blue-50 text-blue-700 border border-blue-200 px-3 py-1.5 rounded-xl font-black shadow-2xs">
+                      배정 원아 {activeBusStudents.length}명
                     </span>
                   </>
+                ) : (
+                  <span className="bg-slate-50 text-slate-600 px-3 py-1.5 rounded-xl border border-slate-200 font-semibold shadow-2xs">
+                    공통 서식 모드 (특정 차량 미선택)
+                  </span>
                 )}
                 {activeStudent ? (
-                  <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-lg font-bold shadow-2xs flex items-center gap-1">
-                    <span>✨ 자동완성 원아:</span>
+                  <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1.5 rounded-xl font-black shadow-2xs flex items-center gap-1">
+                    <span>✨ 자동완성:</span>
                     <strong>{activeStudent.name}</strong>
-                    <span className="text-[11px] font-normal">({activeStudent.className || activeStudent.raw?.['반명'] || '원아'})</span>
+                    <span className="text-[11px] font-bold text-emerald-600">({activeStudent.className || activeStudent.raw?.['반명'] || '원아'})</span>
                   </span>
                 ) : (
-                  <span className="bg-slate-200/80 text-slate-700 border border-slate-300/80 px-2.5 py-1 rounded-lg font-semibold shadow-2xs flex items-center gap-1">
-                    <span>원아 정보:</span>
-                    <strong className="text-slate-800">선택 안 함 (공란 발급)</strong>
+                  <span className="bg-slate-100/90 text-slate-600 px-3 py-1.5 rounded-xl border border-slate-200 font-bold shadow-2xs">
+                    원아 정보: 공란 발급
                   </span>
                 )}
               </div>
             </div>
 
-            {/* Template Groups */}
-            <div className="space-y-6">
-              {/* Group 1: 차량 및 운행 서식 */}
+            {/* Template Groups (Modern, High-Readability Card Grid) */}
+            <div className="space-y-7">
+              {/* Group 1: 차량 및 안전운행 서식 */}
               <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
-                  <h3 className="text-sm font-black text-slate-800">차량 및 안전운행 서식</h3>
-                  <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
-                    차량 안전 4종
+                <div className="flex items-center gap-2.5">
+                  <span className="w-2.5 h-6 bg-blue-600 rounded-full inline-block"></span>
+                  <h3 className="text-base font-extrabold text-slate-900 tracking-tight">차량 및 안전운행 서식</h3>
+                  <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                    차량 안전 5종
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  <div className="bg-white border border-slate-200/90 hover:border-blue-400 border-l-[5px] border-l-blue-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 tracking-tight">
-                        일일 안전점검표 {activeBus ? `(${activeBus.name})` : ''}
-                      </div>
-                      <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">
-                        운행 전 제동/등화/소화기/벨트 점검 및 기록
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDownloadTemplate('safety')}
-                      className="text-xs font-bold text-blue-600 hover:text-white bg-blue-50 hover:bg-blue-600 border border-blue-200 hover:border-blue-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer"
-                    >
-                      출력 / PDF
-                    </button>
-                  </div>
-
-                  <div className="bg-white border border-slate-200/90 hover:border-blue-400 border-l-[5px] border-l-blue-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 tracking-tight">
-                        동승보호자 탑승일지 및 승하차 명부
-                      </div>
-                      <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">
-                        승하차 인원, 안전벨트 착용 및 잔류원아 확인
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDownloadTemplate('companion')}
-                      className="text-xs font-bold text-blue-600 hover:text-white bg-blue-50 hover:bg-blue-600 border border-blue-200 hover:border-blue-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer"
-                    >
-                      출력 / PDF
-                    </button>
-                  </div>
-
-                  <div className="bg-white border border-slate-200/90 hover:border-blue-400 border-l-[5px] border-l-blue-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 tracking-tight flex items-center gap-1.5">
-                        <span>통학차량 탑승 원아 비상연락망</span>
-                        <span className="text-[10px] text-blue-700 bg-blue-50 font-bold px-1.5 py-0.2 rounded border border-blue-200">보호자 2인</span>
-                      </div>
-                      <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">
-                        호차 탑승 원아 및 학부모 2인 비상연락처·승하차 위치
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDownloadTemplate('emergency')}
-                      className="text-xs font-bold text-blue-600 hover:text-white bg-blue-50 hover:bg-blue-600 border border-blue-200 hover:border-blue-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer"
-                    >
-                      출력 / PDF
-                    </button>
-                  </div>
-
-                  <div className="bg-white border border-slate-200/90 hover:border-blue-400 border-l-[5px] border-l-blue-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 tracking-tight">
-                        호차별 운행 노선표 및 시간표
-                      </div>
-                      <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">
-                        정류장별 등·하원 예정시간 및 탑승 원아표
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDownloadTemplate('timetable')}
-                      className="text-xs font-bold text-blue-600 hover:text-white bg-blue-50 hover:bg-blue-600 border border-blue-200 hover:border-blue-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer"
-                    >
-                      출력 / PDF
-                    </button>
-                  </div>
-                  <div className="bg-white border border-slate-200/90 hover:border-indigo-400 border-l-[5px] border-l-indigo-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm md:col-span-2">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-                        <span>교직원 및 셔틀 운행인력 근태표 (월간 출근부) {activeBus ? `(${activeBus.name})` : ''}</span>
-                        <span className="text-[10px] text-indigo-700 bg-indigo-50 font-bold px-1.5 py-0.2 rounded border border-indigo-200">노무·근로기준법</span>
-                      </div>
-                      <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">
-                        {activeBus ? `[${activeBus.name}] 기사 및 차량선생님 출퇴근 시간 및 법정 근무기록부` : '교사, 기사, 차량선생님 출퇴근 시간 및 주휴수당·연장근로 산정용 표준 월간 출근부'}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDownloadTemplate('attendance-log')}
-                      className="text-xs font-bold text-indigo-700 hover:text-white bg-indigo-50 hover:bg-indigo-600 border border-indigo-200 hover:border-indigo-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer"
-                    >
-                      출력 / PDF
-                    </button>
-                  </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {renderTemplateCard({
+                    id: 'safety',
+                    title: `일일 안전점검표 ${activeBus ? `(${activeBus.name})` : ''}`,
+                    subtitle: '운행 전 제동·조향·등화·소화기·안전벨트 일일 안전 점검 및 서명 기록',
+                    tag: '법정의무',
+                    theme: 'blue',
+                  })}
+                  {renderTemplateCard({
+                    id: 'companion',
+                    title: '동승보호자 탑승일지 및 승하차 명부',
+                    subtitle: '승하차 인원, 안전벨트 착용 확인 및 운행 후 잔류 원아 최종 확인',
+                    tag: '동승교사',
+                    theme: 'blue',
+                  })}
+                  {renderTemplateCard({
+                    id: 'emergency',
+                    title: '통학차량 탑승 원아 비상연락망',
+                    subtitle: '호차 탑승 원아 및 학부모 2인 비상연락처·승하차 정류장 위치 종합부',
+                    tag: '보호자 2인',
+                    theme: 'blue',
+                  })}
+                  {renderTemplateCard({
+                    id: 'timetable',
+                    title: '호차별 운행 노선표 및 시간표',
+                    subtitle: '정류장별 등·하원 예정시간 및 탑승 원아 상세 명부',
+                    tag: '노선시간표',
+                    theme: 'blue',
+                  })}
+                  {renderTemplateCard({
+                    id: 'attendance-log',
+                    title: `교직원 및 셔틀 운행인력 근태표 (월간 출근부) ${activeBus ? `(${activeBus.name})` : ''}`,
+                    subtitle: activeBus ? `[${activeBus.name}] 기사 및 차량선생님 출퇴근 시간 및 법정 근무기록부` : '교사, 기사, 차량선생님 출퇴근 시간 및 주휴수당·연장근로 산정용 표준 월간 출근부',
+                    tag: '노무·출근부',
+                    theme: 'indigo',
+                    colSpan2: true,
+                  })}
                 </div>
               </div>
 
               {/* Group 2: 원아 및 학부모 동의서 */}
               <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                  <h3 className="text-sm font-black text-slate-800">원아 및 학부모 동의 서식</h3>
-                  <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-2.5 h-6 bg-emerald-600 rounded-full inline-block"></span>
+                  <h3 className="text-base font-extrabold text-slate-900 tracking-tight">원아 및 학부모 동의 서식</h3>
+                  <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
                     학부모 동의 3종
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  <div className="bg-white border border-slate-200/90 hover:border-emerald-400 border-l-[5px] border-l-emerald-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 tracking-tight">
-                        통학차량 이용 신청 및 안전동의서
-                      </div>
-                      <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">
-                        승차 신청 및 차량 내 안전수칙 준수 학부모 동의
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDownloadTemplate('consent')}
-                      className="text-xs font-bold text-emerald-700 hover:text-white bg-emerald-50 hover:bg-emerald-600 border border-emerald-200 hover:border-emerald-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer"
-                    >
-                      출력 / PDF
-                    </button>
-                  </div>
-
-                  <div className="bg-white border border-slate-200/90 hover:border-emerald-400 border-l-[5px] border-l-emerald-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 tracking-tight">
-                        영유아 귀가 및 응급처치 동의서
-                      </div>
-                      <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">
-                        하원 인계자 지정 및 위급 시 응급의료 위탁 동의
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDownloadTemplate('handover')}
-                      className="text-xs font-bold text-emerald-700 hover:text-white bg-emerald-50 hover:bg-emerald-600 border border-emerald-200 hover:border-emerald-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer"
-                    >
-                      출력 / PDF
-                    </button>
-                  </div>
-
-                  <div className="bg-white border border-slate-200/90 hover:border-emerald-400 border-l-[5px] border-l-emerald-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 tracking-tight">
-                        개인정보 수집·이용 동의서 (원생·학부모용)
-                      </div>
-                      <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">
-                        통학 안전 문자 및 승하차 알림용 정보 수집 동의
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDownloadTemplate('consent-privacy-student')}
-                      className="text-xs font-bold text-emerald-700 hover:text-white bg-emerald-50 hover:bg-emerald-600 border border-emerald-200 hover:border-emerald-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer"
-                    >
-                      출력 / PDF
-                    </button>
-                  </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {renderTemplateCard({
+                    id: 'consent',
+                    title: '통학차량 이용 신청 및 안전동의서',
+                    subtitle: '탑승 신청, 승하차 지점 확인 및 차량 내 안전수칙 준수 학부모 동의',
+                    tag: '신청·동의',
+                    theme: 'emerald',
+                  })}
+                  {renderTemplateCard({
+                    id: 'handover',
+                    title: '영유아 귀가 및 응급처치 동의서',
+                    subtitle: '하원 인계자(보호자 대리인) 지정 및 위급 시 응급의료 위탁 동의',
+                    tag: '귀가인계',
+                    theme: 'emerald',
+                  })}
+                  {renderTemplateCard({
+                    id: 'consent-privacy-student',
+                    title: '개인정보 수집·이용 동의서 (원생·학부모용)',
+                    subtitle: '통학 안전 문자 및 실시간 승하차 알림 제공을 위한 필수 정보 수집 동의',
+                    tag: '개인정보',
+                    theme: 'emerald',
+                    colSpan2: true,
+                  })}
                 </div>
               </div>
 
-              {/* Group 3: 종사자 및 회계 서식 */}
+              {/* Group 3: 종사자 및 회계 관리 서식 */}
               <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
-                  <h3 className="text-sm font-black text-slate-800">종사자 및 회계 관리 서식</h3>
-                  <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-2.5 h-6 bg-indigo-600 rounded-full inline-block"></span>
+                  <h3 className="text-base font-extrabold text-slate-900 tracking-tight">종사자 및 회계 관리 서식</h3>
+                  <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200">
                     운영·행정 3종
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  <div className="bg-white border border-slate-200/90 hover:border-indigo-400 border-l-[5px] border-l-indigo-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 tracking-tight">
-                        운전자 위치정보 수집·이용 동의서
-                      </div>
-                      <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">
-                        실시간 차량 위치관제 및 안심 알림 제공 동의
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDownloadTemplate('consent-driver-location')}
-                      className="text-xs font-bold text-indigo-700 hover:text-white bg-indigo-50 hover:bg-indigo-600 border border-indigo-200 hover:border-indigo-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer"
-                    >
-                      출력 / PDF
-                    </button>
-                  </div>
-
-                  <div className="bg-white border border-slate-200/90 hover:border-indigo-400 border-l-[5px] border-l-indigo-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 tracking-tight">
-                        통학차량 종사자 개인정보 동의서 (기사·교사용)
-                      </div>
-                      <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">
-                        인사·운행 배정 및 안전교육 이수증 등록용
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDownloadTemplate('consent-privacy-staff')}
-                      className="text-xs font-bold text-indigo-700 hover:text-white bg-indigo-50 hover:bg-indigo-600 border border-indigo-200 hover:border-indigo-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer"
-                    >
-                      출력 / PDF
-                    </button>
-                  </div>
-
-                  <div className="bg-white border border-slate-200/90 hover:border-indigo-400 border-l-[5px] border-l-indigo-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 tracking-tight">
-                        통학차량 운영비 및 정산서
-                      </div>
-                      <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">
-                        유류비, 통행료, 정비료 등 월간 지출 정산서
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDownloadTemplate('accounting-expense-report')}
-                      className="text-xs font-bold text-indigo-700 hover:text-white bg-indigo-50 hover:bg-indigo-600 border border-indigo-200 hover:border-indigo-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer"
-                    >
-                      출력 / PDF
-                    </button>
-                  </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {renderTemplateCard({
+                    id: 'consent-driver-location',
+                    title: '운전자 위치정보 수집·이용 동의서',
+                    subtitle: '실시간 통학차량 위치관제 및 학부모 안심 알림 제공을 위한 위치수집 동의',
+                    tag: '위치관제',
+                    theme: 'indigo',
+                  })}
+                  {renderTemplateCard({
+                    id: 'consent-privacy-staff',
+                    title: '통학차량 종사자 개인정보 동의서 (기사·교사용)',
+                    subtitle: '인사·운행 배정 및 안전교육 이수증 등록을 위한 교직원 개인정보 동의',
+                    tag: '종사자인사',
+                    theme: 'indigo',
+                  })}
+                  {renderTemplateCard({
+                    id: 'accounting-expense-report',
+                    title: '통학차량 운영비 및 정산서',
+                    subtitle: '유류비, 고속도로 통행료, 차량 정비 및 세차비 등 월간 지출 정산서',
+                    tag: '회계정산',
+                    theme: 'indigo',
+                    colSpan2: true,
+                  })}
                 </div>
               </div>
 
               {/* Group 4: 안전 관리 및 대응 자료 */}
               <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
-                  <h3 className="text-sm font-black text-slate-800">안전 관리 및 대응 자료</h3>
-                  <span className="text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-2.5 h-6 bg-rose-600 rounded-full inline-block"></span>
+                  <h3 className="text-base font-extrabold text-slate-900 tracking-tight">안전 관리 및 대응 자료</h3>
+                  <span className="text-xs font-bold text-rose-700 bg-rose-50 px-2.5 py-0.5 rounded-full border border-rose-200">
                     안전·보건 4종
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  <div className="bg-white border border-slate-200/90 hover:border-rose-400 border-l-[5px] border-l-rose-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 tracking-tight flex items-center gap-1.5">
-                        <span>원아 건강·알레르기 및 기저질환 명부</span>
-                        <span className="text-[10px] text-rose-700 bg-rose-50 font-bold px-1.5 py-0.2 rounded border border-rose-200">응급보건</span>
-                      </div>
-                      <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">
-                        식품·약품 알레르기, 기저질환, 상비약 및 응급 대처 요령
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDownloadTemplate('health-allergy')}
-                      className="text-xs font-bold text-rose-700 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer"
-                    >
-                      출력 / PDF
-                    </button>
-                  </div>
-
-                  <div className="bg-white border border-slate-200/90 hover:border-rose-400 border-l-[5px] border-l-rose-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 tracking-tight flex items-center gap-1.5">
-                        <span>통학버스 안전운행 표준 매뉴얼</span>
-                        <span className="text-[10px] text-rose-700 bg-rose-50 font-bold px-1.5 py-0.2 rounded border border-rose-200">기사·교사</span>
-                      </div>
-                      <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">
-                        출발 전 점검, 사각지대 승하차 지도, 잔류원아 확인 수칙
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDownloadTemplate('safety-manual')}
-                      className="text-xs font-bold text-rose-700 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer"
-                    >
-                      출력 / PDF
-                    </button>
-                  </div>
-
-                  <div className="bg-white border border-slate-200/90 hover:border-rose-400 border-l-[5px] border-l-rose-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 tracking-tight flex items-center gap-1.5">
-                        <span>원아 교통안전 교육 및 가정통신문</span>
-                        <span className="text-[10px] text-rose-700 bg-rose-50 font-bold px-1.5 py-0.2 rounded border border-rose-200">학부모용</span>
-                      </div>
-                      <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">
-                        원아 통학버스 3대 안전 약속 및 학부모 협조 안내문
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDownloadTemplate('safety-education')}
-                      className="text-xs font-bold text-rose-700 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer"
-                    >
-                      출력 / PDF
-                    </button>
-                  </div>
-
-                  <div className="bg-white border border-slate-200/90 hover:border-rose-400 border-l-[5px] border-l-rose-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm">
-                    <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 tracking-tight flex items-center gap-1.5">
-                        <span>비상사고 및 응급상황 위기대응 지침</span>
-                        <span className="text-[10px] text-rose-700 bg-rose-50 font-bold px-1.5 py-0.2 rounded border border-rose-200">응급지침</span>
-                      </div>
-                      <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">
-                        사고별 4단계 대응 프로세스, 영유아 CPR 및 하임리히법
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDownloadTemplate('emergency-protocol')}
-                      className="text-xs font-bold text-rose-700 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs shrink-0 cursor-pointer"
-                    >
-                      출력 / PDF
-                    </button>
-                  </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {renderTemplateCard({
+                    id: 'health-allergy',
+                    title: '원아 건강·알레르기 및 기저질환 명부',
+                    subtitle: '식품·약품 알레르기, 기저질환, 상비약 및 응급 대처 요령 기록부',
+                    tag: '응급보건',
+                    theme: 'rose',
+                  })}
+                  {renderTemplateCard({
+                    id: 'safety-manual',
+                    title: '통학버스 안전운행 표준 매뉴얼',
+                    subtitle: '출발 전 안전점검, 사각지대 승하차 지도, 잔류원아 확인 필수 행동 수칙',
+                    tag: '기사·교사',
+                    theme: 'rose',
+                  })}
+                  {renderTemplateCard({
+                    id: 'safety-education',
+                    title: '원아 교통안전 교육 및 가정통신문',
+                    subtitle: '원아 통학버스 3대 안전 약속 및 가정 내 통학 안전 지도 협조 안내문',
+                    tag: '가정통신문',
+                    theme: 'rose',
+                  })}
+                  {renderTemplateCard({
+                    id: 'emergency-protocol',
+                    title: '비상사고 및 응급상황 위기대응 지침',
+                    subtitle: '교통사고 4단계 대응 매뉴얼, 영유아 심폐소생술(CPR) 및 하임리히법 지침',
+                    tag: '응급지침',
+                    theme: 'rose',
+                  })}
                 </div>
               </div>
             </div>
