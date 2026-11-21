@@ -184,22 +184,13 @@ export default function DocumentSidebar({
       {/* Header - 다른 사이드바 창과 완전히 동일한 규격 및 타이포그래피 */}
       <div className="mb-4 shrink-0">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
-              서류 관리
-            </h2>
-            <span className={`text-xs px-2.5 py-1 rounded-lg font-black shadow-xs flex items-center gap-1 border ${terms?.themeBadge || 'bg-blue-100 text-blue-800 border-blue-200'}`}>
-              <span>{terms?.icon || '🏫'}</span>
-              <span>{currentEducationLevel}</span>
-            </span>
-          </div>
-          <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded-lg border border-slate-200">
+          <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
+            서류 관리
+          </h2>
+          <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2.5 py-1 rounded-lg border border-slate-200 font-semibold shadow-2xs">
             총 {documents.length}건
           </span>
         </div>
-        <p className="text-xs text-slate-600 font-medium mt-1">
-          법정 의무 서식 출력, 안전 서류 및 유효기간을 통합 관리합니다.
-        </p>
       </div>
 
       {/* Sidebar Sub Tabs - 세그먼트 버튼 */}
