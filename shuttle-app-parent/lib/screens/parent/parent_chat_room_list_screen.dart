@@ -530,80 +530,98 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> {
     final notiRooms = _rooms.where((r) => r.type == 'NOTIFICATION_SYSTEM').toList()
       ..sort((a, b) => (a.name == 'TakeMe 알림' ? 0 : 1).compareTo(b.name == 'TakeMe 알림' ? 0 : 1));
     final chatRooms = _rooms.where((r) => r.type == 'DIRECT' || r.type == 'GROUP').toList();
+    final allRooms = [...notiRooms, ...chatRooms];
 
     return RefreshIndicator(
       onRefresh: _loadRooms,
       color: const Color(0xFF2563EB),
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // 대화 상대 선택하기
-          InkWell(
-            onTap: _showContactPicker,
-            borderRadius: BorderRadius.circular(16),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFBFDBFE), width: 1.5),
-              ),
-              child: const Row(
+      child: (_loadError != null && allRooms.isEmpty)
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircleAvatar(
-                    radius: 22,
-                    backgroundColor: Color(0xFFEFF6FF),
-                    child: Icon(Icons.person_search_rounded, color: Color(0xFF2563EB), size: 24),
+                  const Icon(Icons.cloud_off_rounded, size: 48, color: Color(0xFFCBD5E1)),
+                  const SizedBox(height: 12),
+                  const Text('대화 목록을 불러오지 못했습니다.', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF334155))),
+                  const SizedBox(height: 6),
+                  Text(_loadError!, style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)), textAlign: TextAlign.center),
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: _loadRooms,
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('다시 시도'),
                   ),
-                  SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('대화 상대 선택하기', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
-                        SizedBox(height: 2),
-                        Text('한 명은 1:1 대화, 여러 명은 그룹 채팅', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
-                      ],
-                    ),
-                  ),
-                  Icon(Icons.arrow_forward_ios_rounded, color: Color(0xFF2563EB), size: 14),
                 ],
               ),
+            )
+          : allRooms.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 64,
+                    height: 64,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFF1F5F9),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.forum_outlined, size: 32, color: Color(0xFF94A3B8)),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    '진행 중인 대화가 없습니다.',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    '우측 하단의 "새 대화" 버튼을 눌러\n담임교사, 교직원과 실시간 대화를 시작해보세요.',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.4),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton.icon(
+                    onPressed: _showContactPicker,
+                    icon: const Icon(Icons.chat, size: 16),
+                    label: const Text('새 대화 시작하기'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2563EB),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : ListView.separated(
+              physics: const AlwaysScrollableScrollPhysics(),
+              itemCount: allRooms.length,
+              separatorBuilder: (_, __) => const Divider(height: 1, indent: 76, color: Color(0xFFF1F5F9)),
+              itemBuilder: (ctx, idx) => _buildRoomCard(allRooms[idx], isGroup: allRooms[idx].type == 'GROUP'),
             ),
-          ),
-          const SizedBox(height: 16),
-          if (_loadError != null && _rooms.isEmpty)
-            // 불러오기에 실패했을 때 "대화 없음"으로 보이지 않게 이유를 알려준다
-            _buildEmptyState('대화 목록을 불러오지 못했습니다.', '$_loadError\n화면을 아래로 당겨 다시 시도해 주세요.')
-          else ...[
-            ...notiRooms.map((room) => _buildRoomCard(room, isGroup: false)),
-            if (chatRooms.isEmpty)
-              _buildEmptyState('진행 중인 대화가 없습니다.', '[대화 상대 선택하기]로 대화를 시작하세요.')
-            else
-              ...chatRooms.map((room) => _buildRoomCard(room, isGroup: room.type == 'GROUP')),
-          ],
-        ],
-      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: Colors.white,
       appBar: AppBar(
         automaticallyImplyLeading: !widget.isEmbedded,
         elevation: 0,
         backgroundColor: Colors.white,
         centerTitle: false,
-        title: const Row(
-          children: [
-            Icon(Icons.chat_bubble_rounded, color: Color(0xFF2563EB), size: 22),
-            SizedBox(width: 8),
-            Text('채팅방', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF0F172A))),
-          ],
-        ),
+        title: const Text('대화방 & 메시지', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Color(0xFF0F172A))),
         actions: [
+          TextButton.icon(
+            onPressed: _showContactPicker,
+            icon: const Icon(Icons.add_comment_rounded, size: 16, color: Color(0xFF2563EB)),
+            label: const Text(
+              '새 대화',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF2563EB)),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded, color: Color(0xFF475569)),
             tooltip: '새로고침',
@@ -613,6 +631,16 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> {
             },
           ),
         ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(color: const Color(0xFFF1F5F9), height: 1),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showContactPicker,
+        backgroundColor: const Color(0xFF2563EB),
+        icon: const Icon(Icons.add_comment_rounded, color: Colors.white, size: 18),
+        label: const Text('새 대화', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)))
@@ -704,147 +732,160 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> {
             : '대화 내용이 없습니다.');
     final dateStr = lastMsg != null ? _formatDate(lastMsg.createdAt) : '';
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () => _enterRoom(
-            room.id,
-            title,
-            // 알림 방(TakeMe 알림·공지사항)은 상대가 없으므로 방 이름 그대로, 역할은 SYSTEM
-            room.type == 'NOTIFICATION_SYSTEM' ? 'SYSTEM' : opponentRole,
-            room.type == 'NOTIFICATION_SYSTEM' ? title : (opponent?.name ?? title),
-            isGroup: isGroup,
-            memberCount: memberCount,
-          ),
-          // 길게 누르면 맨 위 고정/채팅방 삭제 (TakeMe 알림은 항상 맨 위라 해당 없음)
-          onLongPress: room.type == 'NOTIFICATION_SYSTEM' ? null : () => _showRoomActions(room, title),
-          borderRadius: BorderRadius.circular(14),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                if (room.type == 'NOTIFICATION_SYSTEM' && room.name == 'TakeMe 알림')
-                  // TakeMe 알림: 차량선생님·기사 앱과 같은 어두운 종 아이콘
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0F172A),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Icon(Icons.notifications_active, color: Colors.white, size: 22),
-                  )
-                else if (room.type == 'NOTIFICATION_SYSTEM')
-                  // 공지사항: 기관 전체 공지
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFECFDF5),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Icon(Icons.campaign_rounded, color: Color(0xFF059669), size: 24),
-                  )
-                else
-                  CircleAvatar(
-                    radius: 22,
-                    backgroundColor: isGroup ? const Color(0xFFEDE9FE) : const Color(0xFFEFF6FF),
-                    child: Icon(
-                      isGroup ? Icons.groups_rounded : Icons.person_rounded,
-                      color: isGroup ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
-                      size: 24,
-                    ),
+    String roleBadge = '';
+    Color badgeColor = const Color(0xFF2563EB);
+    if (room.type == 'NOTIFICATION_SYSTEM') {
+      roleBadge = '시스템';
+      badgeColor = const Color(0xFF2563EB);
+    } else if (opponentRole == 'HOMEROOM_TEACHER') {
+      roleBadge = '담임교사';
+      badgeColor = const Color(0xFF2563EB);
+    } else if (opponentRole == 'SHUTTLE_TEACHER' || opponentRole == 'TEACHER') {
+      roleBadge = '지도교사';
+      badgeColor = const Color(0xFF0284C7);
+    } else if (opponentRole == 'DRIVER') {
+      roleBadge = '기사';
+      badgeColor = const Color(0xFFD97706);
+    } else if (opponentRole == 'ACADEMY_ADMIN' || opponentRole == 'SUPER_ADMIN') {
+      roleBadge = '원장';
+      badgeColor = const Color(0xFFDC2626);
+    }
+
+    return Material(
+      color: Colors.white,
+      child: InkWell(
+        onTap: () => _enterRoom(
+          room.id,
+          title,
+          room.type == 'NOTIFICATION_SYSTEM' ? 'SYSTEM' : opponentRole,
+          room.type == 'NOTIFICATION_SYSTEM' ? title : (opponent?.name ?? title),
+          isGroup: isGroup,
+          memberCount: memberCount,
+        ),
+        onLongPress: room.type == 'NOTIFICATION_SYSTEM' ? null : () => _showRoomActions(room, title),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              if (room.type == 'NOTIFICATION_SYSTEM' && room.name == 'TakeMe 알림')
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F172A),
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          if (room.isPinned) ...[
-                            const Icon(Icons.push_pin, size: 14, color: Color(0xFF64748B), semanticLabel: '고정됨'),
-                            const SizedBox(width: 4),
-                          ],
-                          Flexible(
-                            child: Text(
-                              title,
-                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (isGroup) ...[
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                              decoration: BoxDecoration(color: const Color(0xFFEDE9FE), borderRadius: BorderRadius.circular(10)),
-                              child: Text('$memberCount명', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF7C3AED))),
-                            ),
-                          ],
-                          const Spacer(),
-                          Text(dateStr, style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        lastText,
-                        style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                  child: const Icon(Icons.notifications_active, color: Colors.white, size: 22),
+                )
+              else if (room.type == 'NOTIFICATION_SYSTEM')
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFECFDF5),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(Icons.campaign_rounded, color: Color(0xFF059669), size: 24),
+                )
+              else
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: const Color(0xFFEFF6FF),
+                  child: Text(
+                    title.isNotEmpty ? title.substring(0, 1) : '?',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF2563EB)),
                   ),
                 ),
-                if (room.unreadCount > 0) ...[
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                    decoration: BoxDecoration(color: const Color(0xFFEF4444), borderRadius: BorderRadius.circular(10)),
-                    child: Text(
-                      '${room.unreadCount}',
-                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        if (room.isPinned) ...[
+                          const Icon(Icons.push_pin, size: 14, color: Color(0xFF64748B), semanticLabel: '고정됨'),
+                          const SizedBox(width: 4),
+                        ],
+                        Flexible(
+                          child: Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF0F172A),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (roleBadge.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: badgeColor.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: badgeColor.withValues(alpha: 0.3)),
+                            ),
+                            child: Text(
+                              roleBadge,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: badgeColor,
+                              ),
+                            ),
+                          ),
+                        ],
+                        if (isGroup) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(color: const Color(0xFFEDE9FE), borderRadius: BorderRadius.circular(10)),
+                            child: Text('$memberCount명', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF7C3AED))),
+                          ),
+                        ],
+                      ],
                     ),
-                  ),
+                    const SizedBox(height: 4),
+                    Text(
+                      lastText,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: room.unreadCount > 0 ? const Color(0xFF1E293B) : const Color(0xFF64748B),
+                        fontWeight: room.unreadCount > 0 ? FontWeight.w600 : FontWeight.normal,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(dateStr, style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                  const SizedBox(height: 6),
+                  if (room.unreadCount > 0)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(color: const Color(0xFFEF4444), borderRadius: BorderRadius.circular(10)),
+                      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                      alignment: Alignment.center,
+                      child: Text(
+                        room.unreadCount > 9 ? '9+' : '${room.unreadCount}',
+                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900),
+                      ),
+                    )
+                  else
+                    const SizedBox(height: 18),
                 ],
-              ],
-            ),
+              ),
+            ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildEmptyState(String title, String subtitle) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 40),
-      alignment: Alignment.center,
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: const BoxDecoration(color: Color(0xFFF1F5F9), shape: BoxShape.circle),
-            child: const Icon(Icons.chat_bubble_outline_rounded, size: 36, color: Color(0xFF94A3B8)),
-          ),
-          const SizedBox(height: 12),
-          Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF475569))),
-          const SizedBox(height: 4),
-          Text(subtitle, style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)), textAlign: TextAlign.center),
-        ],
       ),
     );
   }

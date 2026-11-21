@@ -1622,139 +1622,118 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
                             ),
             ),
 
-            // 알림 전용 방 안내
-            if (isAlertRoom)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                decoration: const BoxDecoration(
-                  color: Color(0xFFF8FAFC),
-                  border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
-                ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.lock_outline, size: 16, color: Color(0xFF64748B)),
-                    SizedBox(width: 8),
-                    Text('알림 전용 방이라 메시지를 보낼 수 없어요.', style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
-
             // 빠른 메시지 템플릿 칩 가로 스크롤
-            if (!isAlertRoom)
-              Container(
-                height: 42,
-                color: Colors.white,
-                child: ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _quickTemplates.length,
-                  separatorBuilder: (context, idx) => const SizedBox(width: 8),
-                  itemBuilder: (context, index) {
-                    final text = _quickTemplates[index];
-                    return InkWell(
-                      onTap: () {
-                        _textController.text = text;
-                        _focusNode.requestFocus();
-                      },
-                      borderRadius: BorderRadius.circular(16),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          text,
-                          style: const TextStyle(fontSize: 12, color: Color(0xFF334155), fontWeight: FontWeight.w500),
-                        ),
+            Container(
+              height: 42,
+              color: Colors.white,
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                scrollDirection: Axis.horizontal,
+                itemCount: _quickTemplates.length,
+                separatorBuilder: (context, idx) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final text = _quickTemplates[index];
+                  return InkWell(
+                    onTap: () {
+                      _textController.text = text;
+                      _focusNode.requestFocus();
+                    },
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
                       ),
-                    );
-                  },
-                ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        text,
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF334155), fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  );
+                },
               ),
+            ),
 
-            // 하단 입력 바 (교사 대화방과 동일한 [+] 버튼 및 입력 구조)
-            if (!isAlertRoom)
-              Container(
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  border: Border(top: BorderSide(color: Color(0xFFE2E8F0), width: 1)),
-                ),
-                padding: const EdgeInsets.fromLTRB(8, 8, 12, 8),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    // [+] 빠른 서식 / 결재 신청 버튼 (결석원, 지각원 등)
-                    IconButton(
-                      icon: const Icon(Icons.add_circle, color: Color(0xFF2563EB), size: 28),
-                      tooltip: '빠른 서식 / 결재 신청',
-                      onPressed: _showQuickActionsSheet,
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                      constraints: const BoxConstraints(),
-                    ),
-                    const SizedBox(width: 4),
-                    // 단일 캡슐형 입력창
-                    Expanded(
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(22),
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        child: TextField(
-                          controller: _textController,
-                          focusNode: _focusNode,
-                          maxLines: 4,
-                          minLines: 1,
-                          textInputAction: TextInputAction.send,
-                          onSubmitted: (_) => _handleSendMessage(),
-                          decoration: const InputDecoration(
-                            hintText: '메시지를 입력하세요...',
-                            hintStyle: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
-                            border: InputBorder.none,
-                            isDense: true,
-                            contentPadding: EdgeInsets.symmetric(vertical: 9),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // 전송 버튼
-                    InkWell(
-                      onTap: _isSending ? null : () => _handleSendMessage(),
-                      borderRadius: BorderRadius.circular(20),
-                      child: Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF2563EB),
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF2563EB).withValues(alpha: 0.3),
-                              blurRadius: 6,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: _isSending
-                            ? const Center(
-                                child: SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                ),
-                              )
-                            : const Icon(Icons.send_rounded, color: Colors.white, size: 19),
-                      ),
-                    ),
-                  ],
-                ),
+            // 하단 입력 바 (교사 대화방과 100% 동일한 [+] 버튼 및 단일 캡슐형 입력 구조)
+            Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(top: BorderSide(color: Color(0xFFE2E8F0), width: 1)),
               ),
+              padding: const EdgeInsets.fromLTRB(8, 8, 12, 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  // [+] 빠른 서식 / 결재 신청 버튼 (결석원, 지각원 등)
+                  IconButton(
+                    icon: const Icon(Icons.add_circle, color: Color(0xFF2563EB), size: 28),
+                    tooltip: '빠른 서식 / 결재 신청',
+                    onPressed: _showQuickActionsSheet,
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                    constraints: const BoxConstraints(),
+                  ),
+                  const SizedBox(width: 4),
+                  // 단일 캡슐형 입력창
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      child: TextField(
+                        controller: _textController,
+                        focusNode: _focusNode,
+                        maxLines: 4,
+                        minLines: 1,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _handleSendMessage(),
+                        decoration: const InputDecoration(
+                          hintText: '메시지를 입력하세요...',
+                          hintStyle: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(vertical: 9),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // 전송 버튼
+                  InkWell(
+                    onTap: _isSending ? null : () => _handleSendMessage(),
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: _isSending ? const Color(0xFF94A3B8) : const Color(0xFF2563EB),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF2563EB).withValues(alpha: 0.3),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: _isSending
+                          ? const Center(
+                              child: SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              ),
+                            )
+                          : const Icon(Icons.send_rounded, color: Colors.white, size: 19),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
