@@ -1,4 +1,5 @@
 class RouteStop {
+  final int? id;
   final String name;
   final String? rawName;
   final bool isMyChild;
@@ -8,6 +9,7 @@ class RouteStop {
   final String? expectedTime;
 
   RouteStop({
+    this.id,
     required this.name,
     this.rawName,
     this.isMyChild = false,
@@ -24,6 +26,7 @@ class RouteStop {
     }
 
     return RouteStop(
+      id: json['id'] is int ? json['id'] as int : int.tryParse(json['id']?.toString() ?? ''),
       name: json['name'] ?? json['title'] ?? '',
       rawName: json['rawName'],
       isMyChild: json['isMyChild'] == true,
