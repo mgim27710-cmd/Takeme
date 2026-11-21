@@ -1794,6 +1794,23 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
       {/* LEFT COLUMN: 채팅방 목록 (Kakao Style Room List) */}
       {/* ============================================================ */}
       <div className="w-[450px] h-full border-r border-slate-200 flex flex-col bg-white overflow-hidden flex-shrink-0 shadow-sm">
+        {/* Main Page Header */}
+        <div className="p-6 pb-4 border-b border-slate-100 bg-white shrink-0">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
+                소통·공지
+              </h2>
+              <span className={`text-xs px-2.5 py-1 rounded-lg font-black shadow-xs flex items-center gap-1 border ${
+                isKindergarten ? 'bg-blue-100 text-blue-800 border-blue-200' : (isElementary ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-indigo-100 text-indigo-800 border-indigo-200')
+              }`}>
+                <span>{isKindergarten ? '🏫' : (isElementary ? '🎒' : '🎓')}</span>
+                <span>{currentEducationLevel}</span>
+              </span>
+            </div>
+          </div>
+        </div>
+
         {/* Sub Navigation Tabs: 실시간 대화 <-> 공지·게시판 */}
         {onSwitchToBoard && (
           <div className="p-3 bg-white border-b border-slate-200 shrink-0">
