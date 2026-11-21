@@ -482,6 +482,57 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     );
   }
 
+  /// 동일 정류장의 대기 원아들을 한 번에 일괄 탑승 처리
+  Future<void> _boardStopStudents(List<StudentModel> students) async {
+    final waiting = students.where((s) => _canBoard(s)).toList();
+    if (waiting.isEmpty) return;
+
+    final names = waiting.map((s) => s.name).join(', ');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('${waiting.length}명 일괄 탑승', style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: Text('$names 원아를 모두 탑승 처리할까요?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981)),
+            child: const Text('모두 탑승', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true || !mounted) return;
+    final user = ApiService().currentUser;
+    if (user == null) return;
+
+    final failed = <String>[];
+    for (final s in waiting) {
+      try {
+        final res = await ApiService().manualBoardStudent(user.email, s.id, '');
+        if (res['success'] != true) failed.add(s.name);
+      } catch (_) {
+        failed.add(s.name);
+      }
+    }
+    _loadAllData();
+    final done = waiting.length - failed.length;
+    if (done > 0) {
+      _flutterTts.speak('$done명 탑승 완료');
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(failed.isEmpty
+            ? '$done명 탑승 처리했습니다.'
+            : '$done명 탑승 처리, ${failed.length}명 실패: ${failed.join(', ')}'),
+        backgroundColor: failed.isEmpty ? const Color(0xFF10B981) : Colors.red,
+      ),
+    );
+  }
+
   void _handleUnboardStudent(StudentModel student) {
     showDialog(
       context: context,
@@ -917,6 +968,152 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// 동일 정류장 그룹 카드 (정류장 헤더 + 해당 정류장에 속한 원아 묶음 목록)
+  Widget _buildStopGroup(String stopName, List<StudentModel> students) {
+    final waiting = students.where((s) => !s.boarded && !s.dropped && !s.absent).toList();
+    final boarded = students.where((s) => s.boarded).toList();
+    final canBoardList = students.where((s) => _canBoard(s)).toList();
+    final allSelected = students.isNotEmpty && students.every((s) => _selectedStudentIds.contains(s.id));
+    final expectedTime = students.map((s) => s.expectedTime).firstWhere((t) => t.isNotEmpty, orElse: () => '');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: const [
+          BoxShadow(color: Color(0x06000000), blurRadius: 6, offset: Offset(0, 2)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // 정류장 헤더 카드
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: const BoxDecoration(
+              color: Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(15)),
+              border: Border(bottom: BorderSide(color: Color(0xFFF1F5F9), width: 1.5)),
+            ),
+            child: Row(
+              children: [
+                // 정류장 단위 선택 체크박스
+                InkWell(
+                  onTap: () {
+                    setState(() {
+                      if (allSelected) {
+                        for (final s in students) {
+                          _selectedStudentIds.remove(s.id);
+                        }
+                      } else {
+                        for (final s in students) {
+                          _selectedStudentIds.add(s.id);
+                        }
+                      }
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Icon(
+                      allSelected ? Icons.check_box : Icons.check_box_outline_blank,
+                      size: 20,
+                      color: allSelected ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
+                    ),
+                  ),
+                ),
+                const Icon(Icons.location_on, size: 18, color: Color(0xFF2563EB)),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              stopName,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF0F172A),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (expectedTime.isNotEmpty) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFEFF6FF),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: const Color(0xFFBFDBFE)),
+                              ),
+                              child: Text(
+                                expectedTime,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF1D4ED8),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '원아 ${students.length}명 (대기 ${waiting.length} · 탑승 ${boarded.length})',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+                // 정류장 내 2명 이상 대기 시 '일괄 탑승' 버튼 노출
+                if (canBoardList.length >= 2) ...[
+                  const SizedBox(width: 6),
+                  SizedBox(
+                    height: 32,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _boardStopStudents(canBoardList),
+                      icon: const Icon(Icons.check, size: 15),
+                      label: Text(
+                        '${canBoardList.length}명 탑승',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF10B981),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          // 해당 정류장의 원아 카드들
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+            child: Column(
+              children: students.map((s) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _buildStudentCard(s),
+              )).toList(),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1404,13 +1601,28 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                     Expanded(
                       child: runList.isEmpty
                           ? const Center(child: Text('해당 회차에 배정된 원아가 없습니다.', style: TextStyle(color: Color(0xFF94A3B8))))
-                          : ListView.separated(
-                              controller: _scrollController,
-                              padding: EdgeInsets.fromLTRB(isLandscape ? 8 : 16, 4, 16, 16),
-                              itemCount: runList.length,
-                              separatorBuilder: (context, index) => const SizedBox(height: 8),
-                              itemBuilder: (ctx, idx) => _buildStudentCard(runList[idx]),
-                            ),
+                          : Builder(builder: (_) {
+                              // 원아 목록을 정류장(탑승지/주소) 단위로 그룹핑
+                              final stopGroups = <String, List<StudentModel>>{};
+                              for (final s in runList) {
+                                final stopName = (s.boardingLocation?.trim().isNotEmpty ?? false)
+                                    ? s.boardingLocation!.trim()
+                                    : (s.address.trim().isNotEmpty ? s.address.trim() : '정류장 미지정');
+                                stopGroups.putIfAbsent(stopName, () => []).add(s);
+                              }
+                              final groupKeys = stopGroups.keys.toList();
+
+                              return ListView.builder(
+                                controller: _scrollController,
+                                padding: EdgeInsets.fromLTRB(isLandscape ? 8 : 16, 4, 16, 16),
+                                itemCount: groupKeys.length,
+                                itemBuilder: (ctx, idx) {
+                                  final stopName = groupKeys[idx];
+                                  final stopStudents = stopGroups[stopName]!;
+                                  return _buildStopGroup(stopName, stopStudents);
+                                },
+                              );
+                            }),
                     ),
                   ],
                 );

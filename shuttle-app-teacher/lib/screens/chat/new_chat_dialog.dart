@@ -16,6 +16,7 @@ class _NewChatDialogState extends State<NewChatDialog> {
     'drivers': [],
     'parents': [],
   };
+  final Map<int, Map<String, dynamic>> _selectedUsers = {};
   bool _isLoading = true;
   bool _isCreating = false;
   String? _errorMessage;
@@ -87,20 +88,82 @@ class _NewChatDialogState extends State<NewChatDialog> {
     return '아직 승인된 계정이 없거나 대화 가능한 상대가 없습니다.';
   }
 
-  Future<void> _handleSelectUser(Map<String, dynamic> user) async {
+  void _toggleUserSelection(Map<String, dynamic> user) {
+    final uid = user['id'] as int?;
+    if (uid == null) return;
+    setState(() {
+      if (_selectedUsers.containsKey(uid)) {
+        _selectedUsers.remove(uid);
+      } else {
+        _selectedUsers[uid] = user;
+      }
+    });
+  }
+
+  void _toggleCategorySelection(List<Map<String, dynamic>> filteredList) {
+    if (filteredList.isEmpty) return;
+    final allSelected = filteredList.every((u) => _selectedUsers.containsKey(u['id']));
+    setState(() {
+      if (allSelected) {
+        for (final u in filteredList) {
+          final uid = u['id'] as int?;
+          if (uid != null) _selectedUsers.remove(uid);
+        }
+      } else {
+        for (final u in filteredList) {
+          final uid = u['id'] as int?;
+          if (uid != null) _selectedUsers[uid] = u;
+        }
+      }
+    });
+  }
+
+  Future<void> _handleStartChat({Map<String, dynamic>? singleTarget}) async {
     if (_isCreating) return;
+
+    final List<Map<String, dynamic>> targetUsers;
+    if (singleTarget != null) {
+      targetUsers = [singleTarget];
+    } else {
+      targetUsers = _selectedUsers.values.toList();
+    }
+
+    if (targetUsers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('대화할 상대를 최소 1명 이상 선택해 주세요.')),
+      );
+      return;
+    }
+
     setState(() => _isCreating = true);
 
-    final targetId = user['id'] as int;
-    final targetName = user['name']?.toString() ?? '상대방';
+    final targetIds = targetUsers.map((u) => u['id'] as int).toList();
+    final String groupName;
+    if (targetUsers.length == 1) {
+      groupName = targetUsers.first['name']?.toString() ?? '상대방';
+    } else {
+      final names = targetUsers.map((u) => u['name']?.toString() ?? '').where((n) => n.isNotEmpty).toList();
+      if (names.length <= 2) {
+        groupName = names.join(', ');
+      } else {
+        groupName = '${names[0]}, ${names[1]} 외 ${names.length - 2}명';
+      }
+    }
 
-    final room = await ApiService().createChatRoom([targetId], name: targetName);
+    final room = await ApiService().createChatRoom(
+      targetIds,
+      name: groupName,
+      type: targetUsers.length > 1 ? 'GROUP' : 'DIRECT',
+    );
     if (!mounted) return;
 
     setState(() => _isCreating = false);
 
     if (room != null) {
-      Navigator.pop(context, {'room': room, 'targetUser': user});
+      Navigator.pop(context, {
+        'room': room,
+        'targetUser': targetUsers.length == 1 ? targetUsers.first : null,
+      });
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -124,11 +187,13 @@ class _NewChatDialogState extends State<NewChatDialog> {
     final filtered = _filterUsers(users);
     if (filtered.isEmpty) return const SizedBox.shrink();
 
+    final allSelected = filtered.every((u) => _selectedUsers.containsKey(u['id']));
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
           child: Row(
             children: [
               Icon(icon, size: 16, color: color),
@@ -141,6 +206,34 @@ class _NewChatDialogState extends State<NewChatDialog> {
                   color: color,
                 ),
               ),
+              const Spacer(),
+              // 카테고리 전체 선택 / 전체 해제 버튼
+              InkWell(
+                onTap: () => _toggleCategorySelection(filtered),
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        allSelected ? Icons.check_box : Icons.check_box_outline_blank,
+                        size: 16,
+                        color: allSelected ? const Color(0xFF2563EB) : const Color(0xFF64748B),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        allSelected ? '선택 해제' : '전체 선택',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: allSelected ? const Color(0xFF2563EB) : const Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -151,27 +244,71 @@ class _NewChatDialogState extends State<NewChatDialog> {
           separatorBuilder: (_, index) => const Divider(height: 1, indent: 64, color: Color(0xFFF1F5F9)),
           itemBuilder: (ctx, idx) {
             final u = filtered[idx];
+            final uid = u['id'] as int;
             final name = u['name']?.toString() ?? '사용자';
             final subText = u['subText']?.toString() ?? '';
+            final isSelected = _selectedUsers.containsKey(uid);
 
-            return ListTile(
-              leading: CircleAvatar(
-                radius: 20,
-                backgroundColor: color.withValues(alpha: 0.12),
-                child: Text(
-                  name.isNotEmpty ? name.substring(0, 1) : '?',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color),
+            return InkWell(
+              onTap: () => _toggleUserSelection(u),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  children: [
+                    // 체크박스
+                    SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: Checkbox(
+                        value: isSelected,
+                        onChanged: (_) => _toggleUserSelection(u),
+                        activeColor: const Color(0xFF2563EB),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    // 아바타
+                    CircleAvatar(
+                      radius: 20,
+                      backgroundColor: color.withValues(alpha: 0.12),
+                      child: Text(
+                        name.isNotEmpty ? name.substring(0, 1) : '?',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // 이름 및 설명
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: isSelected ? FontWeight.w800 : FontWeight.w700,
+                              color: isSelected ? const Color(0xFF2563EB) : const Color(0xFF0F172A),
+                            ),
+                          ),
+                          if (subText.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              subText,
+                              style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    // 우측 1:1 대화 시작 버튼
+                    IconButton(
+                      icon: const Icon(Icons.chat_bubble_outline, size: 20, color: Color(0xFF94A3B8)),
+                      tooltip: '$name님과 1:1 대화',
+                      onPressed: () => _handleStartChat(singleTarget: u),
+                    ),
+                  ],
                 ),
               ),
-              title: Text(
-                name,
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
-              ),
-              subtitle: subText.isNotEmpty
-                  ? Text(subText, style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)))
-                  : null,
-              trailing: const Icon(Icons.chat_bubble_outline, size: 18, color: Color(0xFF94A3B8)),
-              onTap: () => _handleSelectUser(u),
             );
           },
         ),
@@ -182,6 +319,7 @@ class _NewChatDialogState extends State<NewChatDialog> {
   @override
   Widget build(BuildContext context) {
     final totalCount = _categoryUsers.values.fold<int>(0, (sum, list) => sum + list.length);
+    final selectedCount = _selectedUsers.length;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -192,10 +330,17 @@ class _NewChatDialogState extends State<NewChatDialog> {
           icon: const Icon(Icons.close, color: Color(0xFF1E293B)),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
-          '새 대화 상대 선택',
-          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
+        title: Text(
+          selectedCount > 0 ? '$selectedCount명 선택됨' : '새 대화 상대 선택',
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
         ),
+        actions: [
+          if (selectedCount > 0)
+            TextButton(
+              onPressed: () => setState(() => _selectedUsers.clear()),
+              child: const Text('전체 해제', style: TextStyle(color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
+            ),
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(color: const Color(0xFFF1F5F9), height: 1),
@@ -279,20 +424,70 @@ class _NewChatDialogState extends State<NewChatDialog> {
                             ),
                           )
                         : SingleChildScrollView(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              _buildCategorySection('기관 관리자', Icons.admin_panel_settings, const Color(0xFFDC2626), _categoryUsers['admins'] ?? []),
-                              _buildCategorySection('선생님', Icons.school, const Color(0xFF2563EB), _categoryUsers['teachers'] ?? []),
-                              _buildCategorySection('셔틀 기사님', Icons.directions_bus, const Color(0xFFF59E0B), _categoryUsers['drivers'] ?? []),
-                              _buildCategorySection('학부모', Icons.family_restroom, const Color(0xFF10B981), _categoryUsers['parents'] ?? []),
-                              const SizedBox(height: 24),
-                            ],
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                _buildCategorySection('기관 관리자', Icons.admin_panel_settings, const Color(0xFFDC2626), _categoryUsers['admins'] ?? []),
+                                _buildCategorySection('선생님', Icons.school, const Color(0xFF2563EB), _categoryUsers['teachers'] ?? []),
+                                _buildCategorySection('셔틀 기사님', Icons.directions_bus, const Color(0xFFF59E0B), _categoryUsers['drivers'] ?? []),
+                                _buildCategorySection('학부모', Icons.family_restroom, const Color(0xFF10B981), _categoryUsers['parents'] ?? []),
+                                const SizedBox(height: 80),
+                              ],
+                            ),
                           ),
-                        ),
-                ),
+                  ),
               ],
             ),
+      bottomSheet: selectedCount > 0
+          ? Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(color: Color(0x1A000000), blurRadius: 10, offset: Offset(0, -3)),
+                ],
+                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+              ),
+              child: SafeArea(
+                top: false,
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton(
+                    onPressed: _isCreating ? null : () => _handleStartChat(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2563EB),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
+                    ),
+                    child: _isCreating
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                          )
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                selectedCount > 1 ? Icons.groups : Icons.chat_bubble,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                selectedCount > 1
+                                    ? '$selectedCount명과 그룹 대화방 만들기'
+                                    : '1:1 대화 시작하기',
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+              ),
+            )
+          : null,
     );
   }
 }

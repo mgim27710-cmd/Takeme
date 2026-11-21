@@ -178,12 +178,15 @@ class _KakaoMapViewState extends State<KakaoMapView> {
   }
 
   Widget _naverMap() {
+    final hasAcademy = widget.academyLat != null && widget.academyLng != null;
     final stops = <NaverStopPoint>[
       for (var i = 0; i < widget.stops.length; i++)
         NaverStopPoint(
           lat: widget.stops[i].latitude,
           lng: widget.stops[i].longitude,
-          label: widget.stops[i].isMyChild ? '우리 아이' : '${i + 1}',
+          label: widget.stops[i].isMyChild
+              ? '우리 아이'
+              : (!hasAcademy && i == widget.stops.length - 1 ? '🏁 도착' : '${i + 1}'),
           isMine: widget.stops[i].isMyChild,
         ),
     ];
@@ -381,14 +384,29 @@ class _KakaoMapViewState extends State<KakaoMapView> {
         }
         
         .academy-marker {
-          background-color: #f59e0b;
+          background: linear-gradient(135deg, #ef4444, #dc2626);
           color: white;
-          border-radius: 8px;
-          padding: 4px 10px;
-          font-weight: 800;
+          border-radius: 20px;
+          padding: 6px 12px;
+          font-weight: 900;
           font-size: 12px;
           border: 2px solid white;
-          box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+          box-shadow: 0 4px 12px rgba(220,38,38,0.45);
+          white-space: nowrap;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+        
+        .last-stop-marker {
+          background: linear-gradient(135deg, #ef4444, #b91c1c);
+          color: white;
+          border-radius: 16px;
+          padding: 4px 10px;
+          font-weight: 800;
+          font-size: 11px;
+          border: 2px solid white;
+          box-shadow: 0 3px 8px rgba(239,68,68,0.4);
           white-space: nowrap;
         }
       </style>
@@ -488,14 +506,17 @@ class _KakaoMapViewState extends State<KakaoMapView> {
 
         window.initData = function(stops, points, acLat, acLng, acName, bLat, bLng, roadPath, progIdx) {
           var pts = [];
-          if (acLat && acLng) {
+          var hasAcademy = (acLat && acLng);
+          if (hasAcademy) {
             var acIcon = L.divIcon({
               className: '',
-              html: '<div class="academy-marker">🏫 ' + (acName || '유치원') + '</div>',
-              iconSize: [110, 26],
-              iconAnchor: [55, 13]
+              html: '<div class="academy-marker">🏁 <b>[도착]</b> ' + (acName || '유치원') + '</div>',
+              iconSize: [130, 30],
+              iconAnchor: [65, 15]
             });
-            L.marker([acLat, acLng], { icon: acIcon }).bindPopup('<b>🏫 ' + (acName || '유치원') + '</b>').addTo(map);
+            L.marker([acLat, acLng], { icon: acIcon, zIndexOffset: 2000 })
+              .bindPopup('<b>🏁 최종 도착지 (유치원)</b><br/>' + (acName || '유치원'))
+              .addTo(map);
             pts.push([acLat, acLng]);
           }
 
@@ -503,6 +524,7 @@ class _KakaoMapViewState extends State<KakaoMapView> {
             stops.forEach(function(s, idx) {
               if (s.lat && s.lng) {
                 pts.push([s.lat, s.lng]);
+                var isLastStopWithoutAcademy = (!hasAcademy && idx === stops.length - 1);
                 if (s.isMyChild) {
                   myChildLatLng = [s.lat, s.lng];
                   var myIcon = L.divIcon({
@@ -520,6 +542,21 @@ class _KakaoMapViewState extends State<KakaoMapView> {
                     }
                   });
                   marker.openPopup();
+                } else if (isLastStopWithoutAcademy) {
+                  var icon = L.divIcon({
+                    className: '',
+                    html: '<div class="last-stop-marker">🏁 [도착지] ' + (idx + 1) + '. ' + s.name + '</div>',
+                    iconSize: [130, 28],
+                    iconAnchor: [65, 14]
+                  });
+                  var m = L.marker([s.lat, s.lng], { icon: icon, zIndexOffset: 1500 })
+                    .bindPopup('<b>🏁 최종 도착지 (' + (idx + 1) + '번 정류장)</b><br/>' + (s.address || s.name))
+                    .addTo(map);
+                  m.on('click', function() {
+                    if (window.StopClickHandler) {
+                      window.StopClickHandler.postMessage(JSON.stringify({ index: idx, name: s.name }));
+                    }
+                  });
                 } else {
                   var icon = L.divIcon({
                     className: '',

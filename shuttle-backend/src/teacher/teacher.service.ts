@@ -1756,30 +1756,73 @@ export class TeacherService {
 
     for (const item of (payload.attendances || [])) {
       if (!item.studentId) continue;
-      const student = await this.studentRepository.findOne({ where: { id: item.studentId } });
+      const student = await this.studentRepository.findOne({
+        where: { id: item.studentId },
+        relations: { parentUser: true },
+      });
       if (!student) continue;
 
       let att = await this.attendanceRepository.findOne({
         where: { student: { id: student.id }, date },
       });
 
+      const oldStatus = att ? att.status : null;
+      const newStatus = item.status || AttendanceStatus.PRESENT;
+
       if (!att) {
         att = this.attendanceRepository.create({
           student,
           date,
-          status: item.status || AttendanceStatus.PRESENT,
+          status: newStatus,
           recordedBy: user,
           recordedByName: user.name ? formatTeacherName(user.name) : '담임선생님',
           memo: item.memo || '',
         });
       } else {
-        att.status = item.status || AttendanceStatus.PRESENT;
+        att.status = newStatus;
         att.recordedBy = user;
         att.recordedByName = user.name ? formatTeacherName(user.name) : '담임선생님';
         if (item.memo !== undefined) att.memo = item.memo;
       }
 
       await this.attendanceRepository.save(att);
+
+      // 상태가 신규 등록되었거나 변경되었을 때 학부모에게 실시간 알림 발송
+      if (student.parentUser?.id && oldStatus !== newStatus) {
+        const childName = student.adminDisplayName || student.name;
+        let notiTitle = '[TakeMe 출석 알림]';
+        let notiBody = `${childName} 원아가 오늘 안전하게 출석(등원)하였습니다.`;
+        if (newStatus === AttendanceStatus.ABSENT) {
+          notiTitle = '[TakeMe 결석 안내]';
+          notiBody = `${childName} 원아가 오늘 결석 처리되었습니다.`;
+        } else if (newStatus === AttendanceStatus.LATE) {
+          notiTitle = '[TakeMe 지각 안내]';
+          notiBody = `${childName} 원아가 오늘 지각 처리되었습니다.`;
+        } else if (newStatus === AttendanceStatus.EARLY_LEAVE) {
+          notiTitle = '[TakeMe 조퇴 안내]';
+          notiBody = `${childName} 원아가 오늘 조퇴 처리되었습니다.`;
+        }
+
+        try {
+          if (this.chatService) {
+            this.chatService.sendSystemNotificationToUser(
+              student.parentUser.id,
+              notiTitle,
+              notiBody,
+              { type: 'attendance', metadata: { studentId: student.id, status: newStatus, date } }
+            ).catch(e => console.error('[submitHomeroomAttendance] chatService alert error:', e));
+          }
+          const parentNoti = this.notificationRepository.create({
+            recipient: student.parentUser,
+            recipientRole: 'PARENT',
+            message: `${notiTitle} ${notiBody}`,
+            type: 'ATTENDANCE',
+          });
+          await this.notificationRepository.save(parentNoti);
+        } catch (alertErr) {
+          console.error('[submitHomeroomAttendance] parent alert failed:', alertErr);
+        }
+      }
 
       if (att.status === AttendanceStatus.PRESENT) presentCount++;
       else if (att.status === AttendanceStatus.ABSENT) absentCount++;

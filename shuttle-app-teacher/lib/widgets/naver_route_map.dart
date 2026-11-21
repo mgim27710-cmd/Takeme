@@ -149,13 +149,13 @@ class NaverRouteMapState extends State<NaverRouteMap> {
   }
 
   @override
-  void didUpdateWidget(covariant NaverRouteMap old) {
-    super.didUpdateWidget(old);
-    final onlyBusMoved = old.stops.length == widget.stops.length &&
-        identical(old.roadPath, widget.roadPath) &&
-        old.progressIndex == widget.progressIndex &&
-        old.fallbackPoints.length == widget.fallbackPoints.length &&
-        old.academyLat == widget.academyLat;
+  void didUpdateWidget(covariant NaverRouteMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final onlyBusMoved = oldWidget.stops.length == widget.stops.length &&
+        identical(oldWidget.roadPath, widget.roadPath) &&
+        oldWidget.progressIndex == widget.progressIndex &&
+        oldWidget.fallbackPoints.length == widget.fallbackPoints.length &&
+        oldWidget.academyLat == widget.academyLat;
     if (onlyBusMoved && _busMarker != null && widget.busLat != null && widget.busLng != null) {
       _busMarker!.setPosition(NLatLng(widget.busLat!, widget.busLng!));
       return;
@@ -415,20 +415,25 @@ class _AcademyBadge extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: const Color(0xFF10B981),
+          color: const Color(0xFFDC2626),
           borderRadius: BorderRadius.circular(17),
           border: Border.all(color: Colors.white, width: 2),
+          boxShadow: const [
+            BoxShadow(color: Color(0x60DC2626), blurRadius: 6, offset: Offset(0, 2)),
+          ],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.school, color: Colors.white, size: 15),
-            const SizedBox(width: 3),
+            const Icon(Icons.sports_score, color: Colors.white, size: 16),
+            const SizedBox(width: 4),
             Flexible(
-              child: Text(name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w900)),
+              child: Text(
+                '🏁 [도착] $name',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w900),
+              ),
             ),
           ],
         ),
