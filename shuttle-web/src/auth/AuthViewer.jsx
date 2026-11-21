@@ -541,12 +541,6 @@ export default function AuthViewer({
                           연동 해제
                         </button>
                       )}
-
-                      {(!st.approvalStatus || st.approvalStatus === 'UNREGISTERED') && (
-                        <span className="text-[11px] text-slate-400 italic">
-                          학부모가 앱에서 원 코드로 가입하면 대기 상태가 됩니다.
-                        </span>
-                      )}
                     </div>
                   </div>
                 );

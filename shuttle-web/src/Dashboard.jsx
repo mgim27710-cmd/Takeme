@@ -4862,7 +4862,6 @@ const parseKindergartenExcelSheet = (sheet) => {
                   <span>{activeEducationLevel}</span>
                 </span>
               </div>
-              <p className="text-xs text-slate-600 font-medium mt-1">호차별 운행 구역, 차량 정보 및 탑승 {terms.students}을 통합 관리합니다.</p>
             </div>
 
             {/* Action Buttons: Integrated Zone Mapping & Pickup Points */}
@@ -6001,9 +6000,6 @@ const parseKindergartenExcelSheet = (sheet) => {
                     <span>{activeEducationLevel}</span>
                   </span>
                 </div>
-                <p className="text-xs text-slate-600 font-medium mt-1">
-                  {terms.student}을 직접 추가하거나 엑셀 파일로 일괄 등록하고 통학 배차를 관리합니다.
-                </p>
               </div>
 
               {/* 원아 명단 <-> 반 관리 전환 탭 */}
@@ -6347,10 +6343,9 @@ const parseKindergartenExcelSheet = (sheet) => {
           <div className="flex flex-col h-full bg-white">
             {/* Header */}
             <div className="p-5 border-b border-slate-100 bg-white">
-              <h2 className="text-xl font-extrabold text-slate-900 tracking-tight mb-1 flex items-center gap-2">
+              <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
                 키 인증 관리
               </h2>
-              <p className="text-xs text-slate-500 font-medium">원생, 차량 스태프, 교사의 앱 연동과 승인을 관리합니다.</p>
             </div>
 
             <div className="p-4 flex flex-col gap-4 overflow-y-auto">
