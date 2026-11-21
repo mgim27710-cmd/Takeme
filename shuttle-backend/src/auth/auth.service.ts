@@ -236,8 +236,12 @@ export class AuthService {
   }
 
   async login(data: any, clientIp?: string) {
-    let { email, password, otpToken, clientType } = data;
+    let { email, password, otpToken, clientType } = data || {};
     const cleanEmail = (email || '').trim().toLowerCase();
+    const cleanPassword = (password || '').toString();
+    if (!cleanEmail || !cleanPassword) {
+      throw new BadRequestException('이메일과 비밀번호를 입력해 주세요.');
+    }
     let user = await this.usersRepository.findOne({ where: { email: cleanEmail } });
     
     // 교수님 평가/테스트용 유치원 관리자 계정
@@ -306,8 +310,8 @@ export class AuthService {
     if (isSpecialTestAccount && (password === '123456' || password === 'test1234!' || password === '12341234' || password === 'password123!' || password === 'takeme1234!')) {
       isPasswordValid = true;
     } else {
-      isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-      if (!isPasswordValid && (cleanEmail.endsWith('@takeme.com') || cleanEmail.endsWith('@takeme.test')) && (password === 'takeme1234!' || password === 'test1234!')) {
+      isPasswordValid = await bcrypt.compare(cleanPassword, user.passwordHash);
+      if (!isPasswordValid && (cleanEmail.endsWith('@takeme.com') || cleanEmail.endsWith('@takeme.test')) && (cleanPassword === 'takeme1234!' || cleanPassword === 'test1234!')) {
         isPasswordValid = true;
       }
     }
