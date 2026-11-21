@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { loadSecretsJson } from './config/secrets-json.config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { RoutingModule } from './routing/routing.module';
@@ -39,6 +40,8 @@ import { MediaModule } from './media/media.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env.development', '.env'],
+      // 네이버 길찾기 인증키 등은 shuttle-backend/secrets.json 에 넣을 수 있다 (secrets.example.json 참고)
+      load: [loadSecretsJson],
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],

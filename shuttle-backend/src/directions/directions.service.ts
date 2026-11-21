@@ -4,8 +4,12 @@ import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { DirectionsRequestDto, LatLngDto, RouteMode } from './directions.dto';
 
-const NAVER_DIRECTIONS_15_URL = 'https://naveropenapi.apigw.ntruss.com/map-direction-15/v1/driving';
-const NAVER_DIRECTIONS_5_URL = 'https://naveropenapi.apigw.ntruss.com/map-direction/v1/driving';
+// NCP 콘솔 "Maps"(VPC) 상품에서 만든 Application 은 maps.apigw.ntruss.com 을 쓴다.
+// (예전 AI·NAVER API 상품의 naveropenapi.apigw.ntruss.com 으로 보내면 인증 오류)
+// 다른 주소를 써야 하면 NAVER_DIRECTIONS_BASE_URL 로 바꿀 수 있다.
+const NAVER_DIRECTIONS_BASE_URL = (process.env.NAVER_DIRECTIONS_BASE_URL || 'https://maps.apigw.ntruss.com').replace(/\/+$/, '');
+const NAVER_DIRECTIONS_15_URL = `${NAVER_DIRECTIONS_BASE_URL}/map-direction-15/v1/driving`;
+const NAVER_DIRECTIONS_5_URL = `${NAVER_DIRECTIONS_BASE_URL}/map-direction/v1/driving`;
 const KAKAO_WAYPOINTS_URL = 'https://apis-navi.kakaomobility.com/v1/waypoints/directions';
 
 /** 안내 타입 중 회전이 아닌 것 (출발지 100, 목적지 101, 경유지 1000) */

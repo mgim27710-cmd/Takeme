@@ -16,3 +16,6 @@ scratch/
 *.apk
 release_apks/
 /*.js
+
+# 서버 인증키 파일 (shuttle-backend/secrets.example.json 참고)
+secrets.json
