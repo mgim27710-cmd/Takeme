@@ -45,13 +45,15 @@ class SocketService {
     _socket!.off('notificationReceived');
     _socket!.on('notificationReceived', (data) {
       debugPrint('[Socket] notificationReceived: $data');
-      if (data is Map<String, dynamic>) {
-        final title = data['title']?.toString() ?? 'TakeMe 알림';
-        final message = data['message']?.toString() ?? '';
+      if (data is Map) {
+        final map = Map<String, dynamic>.from(data);
+        final title = map['title']?.toString() ?? 'TakeMe 알림';
+        final message = (map['message'] ?? map['body'])?.toString().trim() ?? '';
+        if (message.isEmpty) return;
         PushNotificationService().showNotification(
           title: title,
           body: message,
-          payload: jsonEncode(data),
+          payload: jsonEncode(map),
         );
       }
     });

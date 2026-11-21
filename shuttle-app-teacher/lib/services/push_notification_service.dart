@@ -66,9 +66,12 @@ class PushNotificationService {
       // Foreground message listener
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         debugPrint('[PushNotificationService] Foreground message: ${message.notification?.title}');
+        final title = message.notification?.title ?? message.data['title']?.toString() ?? 'TakeMe 알림';
+        final body = message.notification?.body ?? message.data['body']?.toString() ?? message.data['message']?.toString() ?? '';
+        if (body.trim().isEmpty) return;
         showNotification(
-          title: message.notification?.title ?? message.data['title']?.toString() ?? 'TakeMe 알림',
-          body: message.notification?.body ?? message.data['body']?.toString() ?? message.data['message']?.toString() ?? '',
+          title: title,
+          body: body,
           payload: jsonEncode(message.data),
         );
       });
@@ -98,6 +101,8 @@ class PushNotificationService {
     required String body,
     String? payload,
   }) async {
+    final cleanBody = body.trim();
+    if (cleanBody.isEmpty) return;
     try {
       const androidDetails = AndroidNotificationDetails(
         'takeme_push_channel',
@@ -113,7 +118,7 @@ class PushNotificationService {
       await _localNotifications.show(
         DateTime.now().millisecondsSinceEpoch ~/ 1000,
         title,
-        body,
+        cleanBody,
         details,
         payload: payload,
       );
@@ -134,7 +139,7 @@ class PushNotificationService {
     }
 
     try {
-      final url = Uri.parse('${AppConfig.apiHost}/api/me/device-token');
+      final url = Uri.parse('${AppConfig.apiHost}/me/device-token');
       final res = await http.post(
         url,
         headers: {
@@ -147,7 +152,11 @@ class PushNotificationService {
         }),
       );
       if (res.statusCode >= 200 && res.statusCode < 300) {
-        debugPrint('[PushNotificationService] Device token registered to AWS SNS successfully!');
+        if (res.headers['content-type']?.contains('application/json') == true) {
+          debugPrint('[PushNotificationService] Device token registered to AWS SNS successfully!');
+        } else {
+          debugPrint('[PushNotificationService] Received non-JSON response for device token registration: ${res.statusCode}');
+        }
       } else {
         debugPrint('[PushNotificationService] Failed to register token: ${res.statusCode} ${res.body}');
       }

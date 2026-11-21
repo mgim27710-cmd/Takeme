@@ -194,7 +194,6 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     };
     if (this.server) {
       this.server.to(room).emit('vehicleOperatingStatus', payload);
-      this.server.to(room).emit('notificationReceived', { type: 'SHUTTLE', payload });
 
       let academyId = targetAcademyId;
       if (!academyId) {
@@ -273,11 +272,25 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       this.server.to(`vehicle_${data.vehicleId}`).emit('routeNeedsRefresh', { vehicleId: data.vehicleId });
       this.server.to(`vehicle_${data.vehicleId}`).emit('routeUpdated', { vehicleId: data.vehicleId });
       void this.emitToVehicleStaff(data.vehicleId, 'changeRequestDecided', data.request);
-      void this.emitToVehicleStaff(data.vehicleId, 'notificationReceived', { type: 'SCHEDULE_CHANGE', request: data.request });
+      const stName = data.request?.studentName || '원아';
+      const reqType = data.request?.type === 'ABSENT' ? '결석' : '탑승지 변경';
+      void this.emitToVehicleStaff(data.vehicleId, 'notificationReceived', {
+        type: 'SCHEDULE_CHANGE',
+        title: '원아 일정 변동 알림',
+        message: `${stName} 원아의 ${reqType} 신청이 처리되었습니다.`,
+        request: data.request,
+      });
     }
     if (data.parentUserId) {
       this.server.to(`user_${data.parentUserId}`).emit('changeRequestDecided', data.request);
-      this.server.to(`user_${data.parentUserId}`).emit('notificationReceived', { type: 'APPROVAL_RESULT', request: data.request });
+      const stName = data.request?.studentName || '원아';
+      const statusKr = data.request?.status === 'APPROVED' ? '승인' : '반려';
+      this.server.to(`user_${data.parentUserId}`).emit('notificationReceived', {
+        type: 'APPROVAL_RESULT',
+        title: '신청 결과 안내',
+        message: `${stName} 원아의 신청이 ${statusKr}되었습니다.`,
+        request: data.request,
+      });
     }
   }
 

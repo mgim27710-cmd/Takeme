@@ -63,7 +63,8 @@ class SocketService {
       if (data is Map<String, dynamic> || data is Map) {
         final map = Map<String, dynamic>.from(data as Map);
         final title = map['title']?.toString() ?? 'TakeMe 알림';
-        final message = map['message']?.toString() ?? '';
+        final message = (map['message'] ?? map['body'])?.toString().trim() ?? '';
+        if (message.isEmpty) return;
         final roomId = int.tryParse(map['roomId']?.toString() ?? '');
 
         // 현재 보고 있는 채팅방이 아니면 상단 푸시 알림 배너 팝업 발생!

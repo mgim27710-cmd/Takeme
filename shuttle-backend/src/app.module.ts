@@ -33,6 +33,7 @@ import { ApprovalModule } from './approval/approval.module';
 import { DirectionsModule } from './directions/directions.module';
 import { MediaAsset } from './entities/media-asset.entity';
 import { MediaModule } from './media/media.module';
+import { UserDevice } from './entities/user-device.entity';
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { MediaModule } from './media/media.module';
           CloudDocument,
           LegalExpiry,
           MediaAsset,
+          UserDevice,
         ],
         synchronize: true,
         ssl: config.get<string>('DB_SSL') === 'true' ? { rejectUnauthorized: false } : false,

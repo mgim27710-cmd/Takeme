@@ -255,9 +255,10 @@ export class ChatService implements OnModuleInit {
           const senderName = m.sender?.name || m.sender?.email || '학부모';
           const isDirect = roomWithMembers?.type === ChatRoomType.DIRECT || (roomWithMembers?.members || []).length <= 2;
           const pushTitle = isDirect ? senderName : `${roomWithMembers?.name || '대화방'} (${senderName})`;
+          const pushBody = (m.text || '').trim() || '새 메시지가 도착했습니다.';
           for (const member of roomWithMembers?.members || []) {
             if (member.user && member.user.id !== m.sender?.id) {
-              await this.sendPushToUser(member.user.id, pushTitle, m.text, {
+              await this.sendPushToUser(member.user.id, pushTitle, pushBody, {
                 roomId: m.room.id,
                 type: 'CHAT_MESSAGE',
                 senderId: m.sender?.id,
@@ -396,6 +397,8 @@ export class ChatService implements OnModuleInit {
     data?: Record<string, any>,
   ) {
     try {
+      const trimmedMsg = (message || '').trim();
+      if (!trimmedMsg) return; // 내용이 없는 빈 푸시는 발송하지 않음
       const user = await this.userRepo.findOne({ where: { id: userId } });
       if (!user) return;
       const devices = await this.userDeviceRepo.find({ where: { userId } });
@@ -406,7 +409,7 @@ export class ChatService implements OnModuleInit {
       }
 
       for (const ep of endpoints) {
-        await sendSnsPushNotification(ep, title, message, data);
+        await sendSnsPushNotification(ep, title, trimmedMsg, data);
       }
     } catch (snsErr) {
       console.warn(`[SNS] Failed to send push to user ${userId}:`, snsErr);
@@ -1264,7 +1267,14 @@ export class ChatService implements OnModuleInit {
         const senderName = user.name || user.email || 'TakeMe';
         const isDirect = room.type === ChatRoomType.DIRECT || room.members.length <= 2;
         const pushTitle = isDirect ? senderName : `${room.name || '대화방'} (${senderName})`;
-        const pushBody = text.trim();
+        let pushBody = (text || '').trim();
+        if (!pushBody) {
+          if (type === 'IMAGE' || payload?.imageUrl || payload?.photoUrl || payload?.fileUrl) {
+            pushBody = '사진을 보냈습니다.';
+          } else {
+            pushBody = '새 메시지가 도착했습니다.';
+          }
+        }
 
         for (const m of room.members) {
           if (m.user && m.user.id !== user.id) {

@@ -118,7 +118,7 @@ async function bootstrap() {
         next: express.NextFunction,
       ) => {
         // API 및 정적 업로드 경로는 웹 화면(index.html)으로 넘기지 않음
-        const apiPrefixes = ['/routing', '/auth', '/parent', '/teacher', '/chat', '/approval', '/api-docs', '/socket.io', '/directions', '/uploads'];
+        const apiPrefixes = ['/routing', '/auth', '/parent', '/teacher', '/chat', '/approval', '/api-docs', '/socket.io', '/directions', '/uploads', '/me', '/api'];
         if (req.method === 'GET' && !apiPrefixes.some((p) => req.path.startsWith(p))) {
           res.sendFile(join(webDistPath, 'index.html'));
         } else {

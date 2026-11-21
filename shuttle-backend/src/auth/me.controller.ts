@@ -9,7 +9,7 @@ import type { JwtPayload } from './auth-user.decorator';
 import { getUserNotificationSettings } from '../utils/notification.util';
 import { registerDeviceEndpoint, deleteDeviceEndpoint } from '../utils/sns.util';
 
-@Controller('me')
+@Controller(['me', 'api/me'])
 @UseGuards(JwtAuthGuard)
 export class MeController {
   constructor(
