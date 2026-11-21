@@ -1031,14 +1031,19 @@ class ApiService {
     required int roomId,
     required String text,
     required String senderEmail,
+    String? type,
+    Map<String, dynamic>? payload,
   }) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/chat/messages');
-      final res = await postWithAuth(url, jsonEncode({
+      final body = {
         'roomId': roomId,
         'text': text,
         'senderEmail': senderEmail,
-      })).timeout(const Duration(seconds: 6));
+        if (type != null) 'type': type,
+        if (payload != null) 'payload': payload,
+      };
+      final res = await postWithAuth(url, jsonEncode(body)).timeout(const Duration(seconds: 6));
       final data = jsonDecode(utf8.decode(res.bodyBytes));
       return {
         'success': res.statusCode == 200 || res.statusCode == 201,
@@ -1047,6 +1052,32 @@ class ApiService {
     } catch (e) {
       debugPrint('[ApiService] sendChatMessage error: $e');
       return {'success': false, 'message': '메시지 전송 실패: $e'};
+    }
+  }
+
+  /// 셔틀 탑승/위치 변경 결재 신청서 전송
+  Future<Map<String, dynamic>?> submitPaymentRequest(Map<String, dynamic> payload) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/payment-request');
+      final res = await postWithAuth(url, jsonEncode(payload));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('[ApiService] submitPaymentRequest error: $e');
+    }
+    return null;
+  }
+
+  /// 채팅방 읽음 처리
+  Future<bool> markChatRoomAsRead(int roomId) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/rooms/$roomId/read');
+      final res = await postWithAuth(url, '{}');
+      return res.statusCode == 200 || res.statusCode == 201;
+    } catch (e) {
+      debugPrint('[ApiService] markChatRoomAsRead error: $e');
+      return false;
     }
   }
 
