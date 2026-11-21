@@ -675,13 +675,24 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   }
 
   void _showBroadcastModal() {
-    _broadcastMessageController.clear();
     bool isSending = false;
+    String messageType = 'TRAFFIC'; // 'TRAFFIC' | 'CUSTOM'
+    int delayMinutes = 10;
+
+    void updateTrafficMessage(int mins) {
+      _broadcastMessageController.text =
+          '[통학버스 지연 안내] 도로 교통 정체로 인하여 차량 운행이 약 $mins분 지연되고 있습니다. 정류장에서 잠시만 여유를 갖고 기다려 주시면 안전하게 이동하겠습니다.';
+    }
+
+    // 기본 교통 정체 10분 지연 문구로 세팅
+    updateTrafficMessage(delayMinutes);
 
     final runStudents = _students.where((s) => s.runNumber == _currentRunNumber).toList();
+    // 타지 않은 원아(탑승 대기 중)를 기본 대상으로 지정 (체크박스 선택된 원아가 있으면 해당 원아들 우선)
+    final waitingStudents = runStudents.where((s) => !s.boarded && !s.dropped && !s.absent).toList();
     final targetStudents = _selectedStudentIds.isNotEmpty
         ? runStudents.where((s) => _selectedStudentIds.contains(s.id)).toList()
-        : runStudents;
+        : (waitingStudents.isNotEmpty ? waitingStudents : runStudents);
     final targetStudentIds = targetStudents.map((s) => s.id).toList();
 
     showModalBottomSheet(
@@ -719,11 +730,13 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                   ],
                 ),
                 const SizedBox(height: 10),
+                // 수신 대상 안내 배너 (미탑승 원아 학부모 대상 표시)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
+                    color: const Color(0xFFEFF6FF),
                     borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFBFDBFE)),
                   ),
                   child: Row(
                     children: [
@@ -732,21 +745,96 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                       Expanded(
                         child: Text(
                           targetStudents.isEmpty
-                              ? '현재 회차($_currentRunNumber차)에 원아가 없습니다.'
-                              : '수신 대상: $_currentRunNumber차 원아 학부모 총 ${targetStudents.length}명',
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF1E293B)),
+                              ? '현재 회차($_currentRunNumber차)에 대상 원아가 없습니다.'
+                              : _selectedStudentIds.isNotEmpty
+                                  ? '수신 대상: 선택된 원아 학부모 총 ${targetStudents.length}명'
+                                  : '수신 대상: 미탑승(대기) 원아 학부모 총 ${targetStudents.length}명',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF1D4ED8)),
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 12),
+                // 메시지 유형 선택 (교통 정체 / 직접 작성)
+                Row(
+                  children: [
+                    ChoiceChip(
+                      label: const Text('🚦 교통 정체 (지연 안내)'),
+                      selected: messageType == 'TRAFFIC',
+                      selectedColor: const Color(0xFF2563EB),
+                      labelStyle: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.bold,
+                        color: messageType == 'TRAFFIC' ? Colors.white : const Color(0xFF475569),
+                      ),
+                      onSelected: (_) {
+                        setModalState(() {
+                          messageType = 'TRAFFIC';
+                          updateTrafficMessage(delayMinutes);
+                        });
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('✏️ 기타 (직접 작성)'),
+                      selected: messageType == 'CUSTOM',
+                      selectedColor: const Color(0xFF2563EB),
+                      labelStyle: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.bold,
+                        color: messageType == 'CUSTOM' ? Colors.white : const Color(0xFF475569),
+                      ),
+                      onSelected: (_) {
+                        setModalState(() {
+                          messageType = 'CUSTOM';
+                          _broadcastMessageController.clear();
+                        });
+                      },
+                    ),
+                  ],
+                ),
+                if (messageType == 'TRAFFIC') ...[
+                  const SizedBox(height: 10),
+                  // 지연 시간 선택 (5분, 10분, 15분, 20분, 30분)
+                  const Text('예상 지연 시간:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+                  const SizedBox(height: 6),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [5, 10, 15, 20, 30].map((mins) {
+                        final isSel = delayMinutes == mins;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: FilterChip(
+                            label: Text('+$mins분'),
+                            selected: isSel,
+                            selectedColor: const Color(0xFFDBEAFE),
+                            labelStyle: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: isSel ? const Color(0xFF1D4ED8) : const Color(0xFF475569),
+                            ),
+                            checkmarkColor: const Color(0xFF1D4ED8),
+                            onSelected: (_) {
+                              setModalState(() {
+                                delayMinutes = mins;
+                                updateTrafficMessage(mins);
+                              });
+                            },
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
                 TextField(
                   controller: _broadcastMessageController,
                   maxLines: 4,
-                  autofocus: true,
+                  autofocus: messageType == 'CUSTOM',
                   decoration: InputDecoration(
-                    hintText: '전송할 메시지 내용을 입력하세요.\n(예: 현재 버스가 탑승지에 곧 도착할 예정입니다)',
+                    hintText: '전송할 메시지 내용을 입력하세요.',
                     hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
                     focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.5)),

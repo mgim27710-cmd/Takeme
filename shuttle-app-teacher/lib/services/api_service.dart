@@ -1035,6 +1035,38 @@ class ApiService {
     return null;
   }
 
+  /// 셔틀 탑승/위치 변경 결재 신청서 전송
+  Future<Map<String, dynamic>?> submitPaymentRequest(Map<String, dynamic> payload) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/payment-request');
+      final res = await postWithAuth(url, jsonEncode(payload));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('[ApiService] submitPaymentRequest error: $e');
+    }
+    return null;
+  }
+
+  /// 결재 신청건 승인 또는 반려 처리
+  Future<Map<String, dynamic>?> decidePaymentRequest(int messageId, String decision, {int? vehicleId}) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/payment-request/$messageId/decision');
+      final payload = {
+        'decision': decision,
+        if (vehicleId != null) 'vehicleId': vehicleId,
+      };
+      final res = await postWithAuth(url, jsonEncode(payload));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('[ApiService] decidePaymentRequest error: $e');
+    }
+    return null;
+  }
+
   Future<bool> markChatRoomAsRead(int roomId) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/chat/rooms/$roomId/read');
