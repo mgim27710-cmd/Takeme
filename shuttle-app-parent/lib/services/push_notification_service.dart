@@ -77,8 +77,11 @@ class PushNotificationService {
         final title = _firstText([message.notification?.title, message.data['title']]) ?? 'TakeMe 알림';
         final body = _firstText([message.notification?.body, message.data['body'], message.data['message']]) ?? '';
         debugPrint('[PushNotificationService] Foreground message: $title / $body');
-        // 운행 시작·하차는 앱이 켜져 있으면 LocalPush 가 소켓 이벤트로 이미 띄운다 (두 번 뜨지 않게)
-        if (message.data['type'] == 'shuttle' && (title == '운행 시작 안내' || title == '셔틀 하차 안내')) return;
+        // 운행 시작·도착 예정·하차는 앱이 켜져 있으면 LocalPush 가 소켓 이벤트로 이미 띄운다 (두 번 뜨지 않게)
+        if (message.data['type'] == 'shuttle' &&
+            (title == '운행 시작 안내' || title == '버스 도착 예정' || title == '셔틀 하차 안내')) {
+          return;
+        }
         showNotification(title: title, body: body, payload: jsonEncode(message.data));
       });
 
