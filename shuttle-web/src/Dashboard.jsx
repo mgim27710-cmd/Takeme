@@ -6531,7 +6531,6 @@ const parseKindergartenExcelSheet = (sheet) => {
           <div className="p-6 h-full flex flex-col overflow-y-auto break-keep">
             <div className="mb-4 shrink-0">
               <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">환경설정</h2>
-              <p className="text-xs text-slate-500 font-medium mt-1">기관 정보, 보안 설정 및 계정 권한을 관리합니다.</p>
             </div>
             
             <div className="space-y-4">
