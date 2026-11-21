@@ -497,85 +497,133 @@ export default function DocumentManager({
       <div className="flex-1 overflow-y-auto p-8 space-y-6">
 
 
-        {/* TAB 2: Expiry Dashboard Section (깔끔한 테이블 형식) */}
+        {/* TAB 2: Expiry Dashboard Section (가독성 대폭 강화된 대시보드 테이블) */}
         {activeSubTab === 'expiry' && (
-          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-5 animate-in fade-in">
-            {/* Filter Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4">
-              <h2 className="text-base font-bold text-slate-900 tracking-tight">
-                호차별 서류 및 안전교육 만료일 현황
-              </h2>
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 md:p-8 shadow-xs space-y-6 animate-in fade-in">
+            {/* 상단 타이틀 & 알림 관리 헤더 */}
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200/80 pb-5">
+              <div>
+                <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2.5">
+                  <span className="w-2.5 h-6 bg-blue-600 rounded-full inline-block"></span>
+                  호차별 서류 및 안전교육 만료일 현황
+                </h2>
+                <p className="text-xs text-slate-500 font-medium mt-1 pl-5">
+                  어린이통학버스 법정 의무서류(종합보험, 정기검사) 및 기사·동승교사 법정 안전교육 만료일을 실시간 관리합니다.
+                </p>
+              </div>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-3">
                 <button
                   onClick={() => setShowStaffNotiModal(true)}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition-all flex items-center gap-1.5 cursor-pointer mr-2"
+                  className="text-xs font-bold px-3.5 py-2 rounded-xl border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 transition-all flex items-center gap-2 shadow-2xs cursor-pointer"
                 >
-                  <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                   </svg>
-                  기사·교사 앱 알림 ({staffNotiSummary.allCount}건)
-                </button>
-
-                <button
-                  onClick={() => setExpiryFilterTab('all')}
-                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all cursor-pointer ${
-                    expiryFilterTab === 'all'
-                      ? 'bg-slate-800 text-white border-slate-800'
-                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                  }`}
-                >
-                  전체 ({buses.length})
-                </button>
-                <button
-                  onClick={() => setExpiryFilterTab('urgent')}
-                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all cursor-pointer ${
-                    expiryFilterTab === 'urgent'
-                      ? 'bg-red-600 text-white border-red-600'
-                      : 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
-                  }`}
-                >
-                  만료 임박 ({expirySummary.urgentCount})
-                </button>
-                <button
-                  onClick={() => setExpiryFilterTab('warning')}
-                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all cursor-pointer ${
-                    expiryFilterTab === 'warning'
-                      ? 'bg-amber-500 text-white border-amber-500'
-                      : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-                  }`}
-                >
-                  주의 ({expirySummary.warningCount})
-                </button>
-                <button
-                  onClick={() => setExpiryFilterTab('safe')}
-                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all cursor-pointer ${
-                    expiryFilterTab === 'safe'
-                      ? 'bg-emerald-600 text-white border-emerald-600'
-                      : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                  }`}
-                >
-                  정상 ({expirySummary.safeCount})
+                  <span>기사·교사 앱 푸시알림</span>
+                  <span className="bg-purple-600 text-white text-[11px] font-extrabold px-1.5 py-0.5 rounded-full">
+                    {staffNotiSummary.allCount}
+                  </span>
                 </button>
               </div>
             </div>
 
-            {/* Notification Rule Summary Banner */}
+            {/* 1. 상단 핵심 통계 카드 4종 (클릭 시 자동 필터링 지원) */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+              <button
+                onClick={() => setExpiryFilterTab('all')}
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                  expiryFilterTab === 'all'
+                    ? 'bg-slate-900 border-slate-900 text-white shadow-sm ring-2 ring-slate-900/20'
+                    : 'bg-slate-50 hover:bg-slate-100/80 border-slate-200 text-slate-800'
+                }`}
+              >
+                <div className={`text-xs font-bold ${expiryFilterTab === 'all' ? 'text-slate-300' : 'text-slate-500'}`}>
+                  전체 관리 차량
+                </div>
+                <div className="text-2xl font-black mt-1">
+                  {buses.length}<span className="text-sm font-semibold ml-1">대</span>
+                </div>
+                <div className={`text-[11px] mt-1 font-medium ${expiryFilterTab === 'all' ? 'text-slate-300' : 'text-slate-400'}`}>
+                  호차별 서류 통합 관리
+                </div>
+              </button>
 
-            {/* Clean Minimalist Table */}
-            <div className="overflow-x-auto rounded-xl border border-slate-200">
-              <table className="w-full text-left text-xs border-collapse">
+              <button
+                onClick={() => setExpiryFilterTab('urgent')}
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                  expiryFilterTab === 'urgent'
+                    ? 'bg-rose-600 border-rose-600 text-white shadow-sm ring-2 ring-rose-500/20'
+                    : 'bg-rose-50/60 hover:bg-rose-100/80 border-rose-200 text-rose-900'
+                }`}
+              >
+                <div className={`text-xs font-bold flex items-center justify-between ${expiryFilterTab === 'urgent' ? 'text-rose-100' : 'text-rose-600'}`}>
+                  <span>🚨 만료 임박 / 만료</span>
+                  <span className="text-[10px] font-extrabold px-1.5 py-0.2 bg-rose-200/50 rounded">30일 이내</span>
+                </div>
+                <div className="text-2xl font-black mt-1">
+                  {expirySummary.urgentCount}<span className="text-sm font-semibold ml-1">건</span>
+                </div>
+                <div className={`text-[11px] mt-1 font-medium ${expiryFilterTab === 'urgent' ? 'text-rose-100' : 'text-rose-600'}`}>
+                  즉시 갱신 조치 요망
+                </div>
+              </button>
+
+              <button
+                onClick={() => setExpiryFilterTab('warning')}
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                  expiryFilterTab === 'warning'
+                    ? 'bg-amber-500 border-amber-500 text-white shadow-sm ring-2 ring-amber-500/20'
+                    : 'bg-amber-50/60 hover:bg-amber-100/80 border-amber-200 text-amber-900'
+                }`}
+              >
+                <div className={`text-xs font-bold flex items-center justify-between ${expiryFilterTab === 'warning' ? 'text-amber-100' : 'text-amber-600'}`}>
+                  <span>⚠️ 갱신 주의</span>
+                  <span className="text-[10px] font-extrabold px-1.5 py-0.2 bg-amber-200/50 rounded">60일 이내</span>
+                </div>
+                <div className="text-2xl font-black mt-1">
+                  {expirySummary.warningCount}<span className="text-sm font-semibold ml-1">건</span>
+                </div>
+                <div className={`text-[11px] mt-1 font-medium ${expiryFilterTab === 'warning' ? 'text-amber-100' : 'text-amber-600'}`}>
+                  일정 사전 확인 권장
+                </div>
+              </button>
+
+              <button
+                onClick={() => setExpiryFilterTab('safe')}
+                className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                  expiryFilterTab === 'safe'
+                    ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm ring-2 ring-emerald-500/20'
+                    : 'bg-emerald-50/60 hover:bg-emerald-100/80 border-emerald-200 text-emerald-900'
+                }`}
+              >
+                <div className={`text-xs font-bold flex items-center justify-between ${expiryFilterTab === 'safe' ? 'text-emerald-100' : 'text-emerald-600'}`}>
+                  <span>✅ 유효 정상</span>
+                  <span className="text-[10px] font-extrabold px-1.5 py-0.2 bg-emerald-200/50 rounded">안전</span>
+                </div>
+                <div className="text-2xl font-black mt-1">
+                  {expirySummary.safeCount}<span className="text-sm font-semibold ml-1">건</span>
+                </div>
+                <div className={`text-[11px] mt-1 font-medium ${expiryFilterTab === 'safe' ? 'text-emerald-100' : 'text-emerald-600'}`}>
+                  모든 서류 유효함
+                </div>
+              </button>
+            </div>
+
+            {/* 2. 대형 고가독성 만료일 테이블 */}
+            <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-2xs">
+              <table className="w-full text-left text-sm border-collapse">
                 <thead>
-                  <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 font-bold">
-                    <th className="py-3 px-3.5">차량(호차)</th>
-                    <th className="py-3 px-3.5">종합보험 만료일</th>
-                    <th className="py-3 px-3.5">정기검사 만료일</th>
-                    <th className="py-3 px-3.5">운전자 안전교육</th>
-                    <th className="py-3 px-3.5">동승자 안전교육</th>
-                    <th className="py-3 px-3.5 text-right">설정</th>
+                  <tr className="bg-slate-100/90 border-b border-slate-200 text-slate-800 text-xs font-extrabold uppercase tracking-wider">
+                    <th className="py-3.5 px-4 w-44">차량(호차)</th>
+                    <th className="py-3.5 px-4">종합보험 만료일</th>
+                    <th className="py-3.5 px-4">정기검사 만료일</th>
+                    <th className="py-3.5 px-4 bg-blue-50/30">운전기사 안전교육</th>
+                    <th className="py-3.5 px-4 bg-purple-50/30">동승교사(선생님) 안전교육</th>
+                    <th className="py-3.5 px-4 text-center w-24">설정</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-200/80 bg-white">
                   {buses
                     .filter((bus) => {
                       if (selectedBusId !== 'all' && String(bus.id) !== String(selectedBusId)) return false;
@@ -600,49 +648,87 @@ export default function DocumentManager({
                       const companionEduD = calculateDday(rec.companionEduExpiry);
 
                       return (
-                        <tr key={bus.id} className="hover:bg-blue-50/40 even:bg-slate-50/50 transition-colors">
-                          <td className="py-3 px-3.5 font-bold text-slate-900">
-                            <div className="flex items-center gap-2">
+                        <tr key={bus.id} className="hover:bg-blue-50/30 even:bg-slate-50/40 transition-colors">
+                          {/* 차량 호차 정보 */}
+                          <td className="py-4 px-4 font-bold">
+                            <div className="flex items-center gap-2.5">
                               <span 
-                                className="w-2.5 h-2.5 rounded-full shrink-0" 
+                                className="w-3.5 h-3.5 rounded-full shrink-0 shadow-2xs border border-white" 
                                 style={{ backgroundColor: bus.color || '#3b82f6' }} 
                               />
-                              <span className="font-extrabold text-slate-900">{bus.name || bus.busNumber}</span>
+                              <span className="text-base font-extrabold text-slate-900">{bus.name || bus.busNumber}</span>
                             </div>
-                            <div className="text-[11px] font-normal text-slate-400 pl-4.5">{bus.plateNumber || '차량번호 미등록'}</div>
+                            <div className="text-xs font-semibold text-slate-500 pl-6 mt-0.5">
+                              {bus.plateNumber || '차량번호 미등록'}
+                            </div>
                           </td>
-                          <td className="py-3 px-3.5">
-                            <div className="text-slate-800 font-semibold mb-0.5">{rec.insuranceExpiry || '미등록'}</div>
-                            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${insuranceD.bg} ${insuranceD.color} ${insuranceD.border}`}>
+
+                          {/* 종합보험 */}
+                          <td className="py-4 px-4">
+                            <div className="text-sm font-bold text-slate-900 mb-1.5">
+                              {rec.insuranceExpiry || <span className="text-slate-400 font-normal">미등록</span>}
+                            </div>
+                            <span className={`inline-block text-xs font-extrabold px-2.5 py-1 rounded-lg border shadow-2xs ${insuranceD.bg} ${insuranceD.color} ${insuranceD.border}`}>
                               {insuranceD.label}
                             </span>
                           </td>
-                          <td className="py-3 px-3.5">
-                            <div className="text-slate-800 font-semibold mb-0.5">{rec.inspectionExpiry || '미등록'}</div>
-                            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${inspectionD.bg} ${inspectionD.color} ${inspectionD.border}`}>
+
+                          {/* 정기검사 */}
+                          <td className="py-4 px-4">
+                            <div className="text-sm font-bold text-slate-900 mb-1.5">
+                              {rec.inspectionExpiry || <span className="text-slate-400 font-normal">미등록</span>}
+                            </div>
+                            <span className={`inline-block text-xs font-extrabold px-2.5 py-1 rounded-lg border shadow-2xs ${inspectionD.bg} ${inspectionD.color} ${inspectionD.border}`}>
                               {inspectionD.label}
                             </span>
                           </td>
-                          <td className="py-3 px-3.5">
-                            <div className="text-slate-800 font-semibold">{rec.driverEduExpiry || '미등록'}</div>
-                            <div className="text-[11px] text-slate-400 mb-0.5">{bus.driverName || '기사'}</div>
-                            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${driverEduD.bg} ${driverEduD.color} ${driverEduD.border}`}>
+
+                          {/* 운전기사 안전교육 */}
+                          <td className="py-4 px-4 bg-blue-50/15">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className="text-[11px] font-extrabold px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 border border-blue-200">
+                                기사
+                              </span>
+                              <span className="text-xs font-bold text-slate-800">
+                                {bus.driverName || <span className="text-slate-400 font-normal">미지정</span>}
+                              </span>
+                            </div>
+                            <div className="text-sm font-bold text-slate-900 mb-1.5">
+                              {rec.driverEduExpiry || <span className="text-slate-400 font-normal">만료일 미등록</span>}
+                            </div>
+                            <span className={`inline-block text-xs font-extrabold px-2.5 py-1 rounded-lg border shadow-2xs ${driverEduD.bg} ${driverEduD.color} ${driverEduD.border}`}>
                               {driverEduD.label}
                             </span>
                           </td>
-                          <td className="py-3 px-3.5">
-                            <div className="text-slate-800 font-semibold">{rec.companionEduExpiry || '미등록'}</div>
-                            <div className="text-[11px] text-slate-400 mb-0.5">{bus.teacherName || '교사'}</div>
-                            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${companionEduD.bg} ${companionEduD.color} ${companionEduD.border}`}>
+
+                          {/* 동승교사(차량선생님) 안전교육 */}
+                          <td className="py-4 px-4 bg-purple-50/15">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className="text-[11px] font-extrabold px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 border border-purple-200">
+                                동승교사
+                              </span>
+                              <span className="text-xs font-bold text-slate-800">
+                                {bus.teacherName || <span className="text-slate-400 font-normal">미지정</span>}
+                              </span>
+                            </div>
+                            <div className="text-sm font-bold text-slate-900 mb-1.5">
+                              {rec.companionEduExpiry || <span className="text-slate-400 font-normal">만료일 미등록</span>}
+                            </div>
+                            <span className={`inline-block text-xs font-extrabold px-2.5 py-1 rounded-lg border shadow-2xs ${companionEduD.bg} ${companionEduD.color} ${companionEduD.border}`}>
                               {companionEduD.label}
                             </span>
                           </td>
-                          <td className="py-3 px-3.5 text-right">
+
+                          {/* 설정 버튼 */}
+                          <td className="py-4 px-4 text-center">
                             <button
                               onClick={() => handleOpenExpiryModal(bus)}
-                              className="text-xs font-bold text-slate-700 hover:text-blue-600 bg-white hover:bg-blue-50 border border-slate-200 hover:border-blue-300 px-3 py-1.5 rounded-lg transition-all shadow-2xs cursor-pointer"
+                              className="text-xs font-bold text-blue-700 hover:text-white bg-blue-50 hover:bg-blue-600 border border-blue-200 hover:border-blue-600 px-3.5 py-2 rounded-xl transition-all shadow-2xs cursor-pointer inline-flex items-center gap-1"
                             >
-                              설정
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                              <span>설정</span>
                             </button>
                           </td>
                         </tr>
@@ -651,7 +737,18 @@ export default function DocumentManager({
                 </tbody>
               </table>
             </div>
-        </div>
+
+            {/* 하단 도움말 배너 */}
+            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-4 flex flex-wrap items-center justify-between text-xs text-slate-600 gap-2">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                <span><b>도로교통법 제53조의3</b>: 어린이통학버스 운영자 및 운전자, 동승보호자는 <b>2년마다 안전교육을 정기 이수</b>해야 합니다.</span>
+              </div>
+              <div className="text-slate-400 font-medium">
+                * 만료 30일 전부터 기사 및 교사 앱으로 자동 알림 발송
+              </div>
+            </div>
+          </div>
         )}
 
         {/* TAB 1: Legal Templates (서식 출력 탭) */}
