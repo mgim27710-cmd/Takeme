@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../config.dart';
 import '../../models/chat_model.dart';
 import '../../services/api_service.dart';
+import '../../services/socket_service.dart';
 import 'parent_chat_room_screen.dart';
 
 /// 대화 가능한 유치원 교직원 및 통학차량 담당자 모델
@@ -53,6 +54,11 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> {
     _myEmail = ApiService().currentUser?.email ?? 'parent@takeme.com';
     _loadRooms();
     _loadContacts();
+
+    // 실시간 대화방 갱신 소켓 리스너
+    SocketService().onRoomUpdated((_) {
+      if (mounted) _loadRooms();
+    });
   }
 
   Future<void> _loadContacts() async {

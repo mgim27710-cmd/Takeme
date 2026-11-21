@@ -245,6 +245,30 @@ export class ChatService implements OnModuleInit {
       if (m.room?.id) {
         await this.roomRepo.update(m.room.id, { updatedAt: new Date() });
         await this.broadcastToRoom(m.room.id, m);
+
+        // 방해금지 해제된 메시지 수신자들에게 푸시 발송
+        try {
+          const roomWithMembers = await this.roomRepo.findOne({
+            where: { id: m.room.id },
+            relations: { members: { user: true } },
+          });
+          const senderName = m.sender?.name || m.sender?.email || '학부모';
+          const isDirect = roomWithMembers?.type === ChatRoomType.DIRECT || (roomWithMembers?.members || []).length <= 2;
+          const pushTitle = isDirect ? senderName : `${roomWithMembers?.name || '대화방'} (${senderName})`;
+          for (const member of roomWithMembers?.members || []) {
+            if (member.user && member.user.id !== m.sender?.id) {
+              await this.sendPushToUser(member.user.id, pushTitle, m.text, {
+                roomId: m.room.id,
+                type: 'CHAT_MESSAGE',
+                senderId: m.sender?.id,
+                senderName,
+                messageId: m.id,
+              });
+            }
+          }
+        } catch (e) {
+          console.warn('[ChatService] Push error in releaseDeferredMessages:', e);
+        }
       }
     }
     return due.length;
@@ -353,7 +377,27 @@ export class ChatService implements OnModuleInit {
     }
 
     // AWS SNS 모바일 푸시 알림 발송
+    await this.sendPushToUser(userId, title, message, {
+      roomId: room.id,
+      type: options?.type || 'SYSTEM',
+      ...(options?.metadata || {}),
+    });
+
+    return saved;
+  }
+
+  /**
+   * 사용자 ID 기준 등록된 모든 디바이스(및 레거시 엔드포인트)에 AWS SNS 푸시 전송
+   */
+  async sendPushToUser(
+    userId: number,
+    title: string,
+    message: string,
+    data?: Record<string, any>,
+  ) {
     try {
+      const user = await this.userRepo.findOne({ where: { id: userId } });
+      if (!user) return;
       const devices = await this.userDeviceRepo.find({ where: { userId } });
       const endpoints = new Set<string>();
       if (user.snsEndpointArn) endpoints.add(user.snsEndpointArn);
@@ -362,17 +406,11 @@ export class ChatService implements OnModuleInit {
       }
 
       for (const ep of endpoints) {
-        await sendSnsPushNotification(ep, title, message, {
-          roomId: room.id,
-          type: options?.type || 'SYSTEM',
-          ...(options?.metadata || {}),
-        });
+        await sendSnsPushNotification(ep, title, message, data);
       }
     } catch (snsErr) {
       console.warn(`[SNS] Failed to send push to user ${userId}:`, snsErr);
     }
-
-    return saved;
   }
 
   /** 여러 사용자에게 개인 알림 발송 */
@@ -1218,6 +1256,34 @@ export class ChatService implements OnModuleInit {
       }
     } catch (bridgeErr) {
       console.warn('[ChatService] ParentMessage sync error:', bridgeErr);
+    }
+
+    // AWS SNS 모바일 푸시 알림 발송: 대화방의 다른 멤버들에게 푸시 전송
+    try {
+      if (room && room.members) {
+        const senderName = user.name || user.email || 'TakeMe';
+        const isDirect = room.type === ChatRoomType.DIRECT || room.members.length <= 2;
+        const pushTitle = isDirect ? senderName : `${room.name || '대화방'} (${senderName})`;
+        const pushBody = text.trim();
+
+        for (const m of room.members) {
+          if (m.user && m.user.id !== user.id) {
+            // 교사 방해금지 시간(deliverAt) 중이면 교사에게는 즉시 푸시를 보내지 않음 (익일 08:00 해제 시 발송)
+            if (deliverAt && ChatService.TEACHER_ROLES.has(String(m.user.role))) {
+              continue;
+            }
+            await this.sendPushToUser(m.user.id, pushTitle, pushBody, {
+              roomId,
+              type: 'CHAT_MESSAGE',
+              senderId: user.id,
+              senderName,
+              messageId: saved.id,
+            });
+          }
+        }
+      }
+    } catch (pushErr) {
+      console.warn('[ChatService] Push notification error in sendMessageAndBroadcast:', pushErr);
     }
 
     return fullMessage;

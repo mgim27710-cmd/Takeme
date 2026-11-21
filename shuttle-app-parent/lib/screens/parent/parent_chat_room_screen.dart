@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/chat_model.dart';
 import '../../services/api_service.dart';
+import '../../services/socket_service.dart';
 
 class ParentChatRoomScreen extends StatefulWidget {
   final int roomId;
@@ -51,10 +52,39 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
   void initState() {
     super.initState();
     _myEmail = ApiService().currentUser?.email ?? 'parent@takeme.com';
+
+    // 1. 소켓 방 입장 및 실시간 메시지 수신 리스너 등록
+    SocketService().joinChatRoom(widget.roomId);
+
+    SocketService().onReceiveMessage((data) {
+      if (!mounted) return;
+      final msgRoomId = data['room']?['id'] ?? data['roomId'];
+      if (msgRoomId != null && msgRoomId.toString() == widget.roomId.toString()) {
+        final newMsg = ChatMessageModel.fromJson(data);
+        setState(() {
+          final idx = _messages.indexWhere((m) => m.id == newMsg.id);
+          if (idx >= 0) {
+            _messages[idx] = newMsg;
+          } else {
+            _messages.add(newMsg);
+          }
+        });
+        _scrollToBottom();
+      }
+    });
+
+    SocketService().onMessagesRead((data) {
+      if (!mounted) return;
+      final msgRoomId = data['roomId'];
+      if (msgRoomId != null && msgRoomId.toString() == widget.roomId.toString()) {
+        _loadMessages(initial: false);
+      }
+    });
+
     _loadMessages(initial: true);
 
-    // 2.5초 간격 실시간 폴링
-    _pollingTimer = Timer.periodic(const Duration(milliseconds: 2500), (_) {
+    // 2. 소켓 연결 불안정 시를 대비한 3초 간격 보조 폴링
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       if (mounted) {
         _loadMessages(initial: false);
       }
@@ -63,6 +93,8 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
 
   @override
   void dispose() {
+    SocketService().leaveChatRoom(widget.roomId);
+    SocketService().offChatEvents();
     _pollingTimer?.cancel();
     _textController.dispose();
     _scrollController.dispose();
@@ -87,7 +119,6 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      // 이미 보이는 메시지가 없을 때만 오류 화면 (주기적 갱신 실패는 보이는 대화를 그대로 둔다)
       if (_messages.isEmpty) {
         setState(() {
           _isLoading = false;
@@ -102,8 +133,6 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
     if (!mounted) return;
 
     final parsed = rawList.map((m) => ChatMessageModel.fromJson(m)).toList();
-    
-    // 메시지 개수가 바뀌었거나 초기 로드일 때만 갱신 및 스크롤
     final hasNewMessages = parsed.length != _messages.length;
     setState(() {
       _messages = parsed;
@@ -121,9 +150,14 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 250),
+          duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
         );
+      }
+    });
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (mounted && _scrollController.hasClients) {
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
       }
     });
   }
@@ -170,8 +204,23 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
           ),
         );
       } else {
-        // 선생님 방해금지 시간이면 언제 전달되는지 알려준다
         final data = res['data'];
+        if (data is Map<String, dynamic>) {
+          final realMsg = ChatMessageModel.fromJson(data);
+          setState(() {
+            final optIdx = _messages.indexWhere((m) => m.id == optimisticMsg.id);
+            if (optIdx >= 0) {
+              _messages[optIdx] = realMsg;
+            } else if (!_messages.any((m) => m.id == realMsg.id)) {
+              _messages.add(realMsg);
+            }
+          });
+          _scrollToBottom();
+        } else {
+          _loadMessages();
+        }
+
+        // 선생님 방해금지 시간이면 언제 전달되는지 알려준다
         final deliverAt = DateTime.tryParse(data is Map ? (data['deliverAt']?.toString() ?? '') : '')?.toLocal();
         if (deliverAt != null && deliverAt.isAfter(DateTime.now())) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -181,8 +230,6 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
             ),
           );
         }
-        // 성공 시 메시지 목록 재동기화
-        _loadMessages();
       }
     }
   }
