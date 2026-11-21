@@ -908,8 +908,9 @@ export default function DocumentManager({
                   </div>
                   <div className="bg-white border border-slate-200/90 hover:border-indigo-400 border-l-[5px] border-l-indigo-500 rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-sm md:col-span-2">
                     <div className="min-w-0">
-                      <div className="text-sm font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
-                        <span>교직원 및 셔틀 운행인력 근태표 (월간 출근부)</span>
+                      <div className="text-sm font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
+                        <span className="text-amber-500 font-black text-sm">★</span>
+                        <span>교직원 및 셔틀 운행인력 근태표 (월간 출근부) {activeBus ? `(${activeBus.name})` : ''}</span>
                         <span className="text-[10px] text-indigo-700 bg-indigo-50 font-bold px-1.5 py-0.2 rounded border border-indigo-200">노무·근로기준법</span>
                       </div>
                       <p className="text-[12px] text-slate-500 font-medium mt-0.5 truncate">

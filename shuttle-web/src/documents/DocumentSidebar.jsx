@@ -304,10 +304,13 @@ export default function DocumentSidebar({
               </button>
               <button
                 onClick={() => handleDownloadTemplate('attendance-log')}
-                className="w-full py-2.5 px-3 bg-white hover:bg-indigo-600 text-[13px] font-bold text-slate-800 hover:text-white border border-slate-200 hover:border-indigo-600 rounded-xl transition-all shadow-2xs flex items-center justify-between group"
+                className="w-full py-2.5 px-3.5 bg-white hover:bg-slate-50 text-xs sm:text-sm font-extrabold text-slate-800 border border-slate-200/90 border-l-4 border-l-amber-500 hover:border-amber-400 rounded-xl transition-all shadow-2xs flex items-center justify-between group cursor-pointer"
               >
-                <span>교직원·셔틀 근태표 (월간 출근부)</span>
-                <span className="text-xs bg-indigo-50 text-indigo-700 group-hover:bg-indigo-500 group-hover:text-white px-2 py-0.5 rounded-md font-bold">인쇄</span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-amber-500 text-sm font-black">★</span>
+                  <span className="truncate">교직원·셔틀 근태표 (월간 출근부) {activeBus ? `(${activeBus.name})` : ''}</span>
+                </div>
+                <span className="text-xs text-amber-700 font-black bg-amber-50 px-2 py-0.5 rounded-md group-hover:bg-amber-600 group-hover:text-white transition-colors shrink-0">출력</span>
               </button>
             </div>
 
