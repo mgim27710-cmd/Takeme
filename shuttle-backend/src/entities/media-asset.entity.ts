@@ -62,7 +62,7 @@ export class MediaAsset {
   @Column({ type: 'varchar', length: 100, nullable: true })
   className: string | null;
 
-  @Column({ length: 500, nullable: true })
+  @Column({ type: 'varchar', length: 500, nullable: true })
   storageKey: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
