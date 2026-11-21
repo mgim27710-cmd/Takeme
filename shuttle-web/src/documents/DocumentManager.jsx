@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   saveDocument,
   getDocuments,
@@ -1326,8 +1327,8 @@ export default function DocumentManager({
 
 
       {/* Upload Modal */}
-      {showUploadModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+      {showUploadModal && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-[9999] p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-lg font-black text-slate-800">
@@ -1415,12 +1416,13 @@ export default function DocumentManager({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Legal Expiry Edit Modal */}
-      {editingBusExpiry && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-[2100] p-4">
+      {editingBusExpiry && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-[9999] p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-slate-200 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
               <div>
@@ -1618,13 +1620,14 @@ export default function DocumentManager({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Staff Notifications Modal (기사 및 교사 앱 알림 발송 현황 모달) */}
-      {showStaffNotiModal && (
+      {showStaffNotiModal && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-[2250] p-4"
+          className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-[9999] p-4"
           onClick={() => setShowStaffNotiModal(false)}
         >
           <div
@@ -1798,13 +1801,14 @@ export default function DocumentManager({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Document Preview Modal */}
-      {previewDoc && (
+      {previewDoc && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-[2200] p-4"
+          className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-[9999] p-4"
           onClick={handleClosePreview}
         >
           <div
@@ -1915,7 +1919,8 @@ export default function DocumentManager({
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
