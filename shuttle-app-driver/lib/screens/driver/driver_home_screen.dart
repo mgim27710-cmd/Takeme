@@ -254,7 +254,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                       const SizedBox(width: 10),
                       const Expanded(
                         child: Text(
-                          '남아있는 원아가 없음을 확인했습니다',
+                          '남아있는 원아가 없음을\n확인했습니다',
                           style: TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w800,
