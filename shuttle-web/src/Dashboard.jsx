@@ -7145,9 +7145,9 @@ const parseKindergartenExcelSheet = (sheet) => {
                 </h2>
               </div>
               <div className="p-4 flex flex-col gap-2.5">
-                <button onClick={() => setLogTab('ABSENCE_VARIABLE')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'ABSENCE_VARIABLE' || logTab === 'ALL' || logTab === 'EVENT_HOLIDAY' ? 'bg-rose-500 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>원아 결석 및 통학 변동</button>
-                <button onClick={() => setLogTab('LOG')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'LOG' ? 'bg-slate-800 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>차량 운행 일지</button>
-                <button onClick={() => setLogTab('PAYMENT_APPROVAL')} className={`w-full py-3 rounded-xl font-bold transition-all ${logTab === 'PAYMENT_APPROVAL' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>호차별 결재함</button>
+                <button onClick={() => setLogTab('ABSENCE_VARIABLE')} className={`w-full py-3 px-3 rounded-xl font-bold transition-all text-xs sm:text-sm whitespace-nowrap truncate ${logTab === 'ABSENCE_VARIABLE' || logTab === 'ALL' || logTab === 'EVENT_HOLIDAY' ? 'bg-rose-500 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>원아 결석 및 통학 변동</button>
+                <button onClick={() => setLogTab('LOG')} className={`w-full py-3 px-3 rounded-xl font-bold transition-all text-xs sm:text-sm whitespace-nowrap truncate ${logTab === 'LOG' ? 'bg-slate-800 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>차량 운행 일지</button>
+                <button onClick={() => setLogTab('PAYMENT_APPROVAL')} className={`w-full py-3 px-3 rounded-xl font-bold transition-all text-xs sm:text-sm whitespace-nowrap truncate ${logTab === 'PAYMENT_APPROVAL' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>호차별 결재함</button>
               </div>
             </div>
           )}

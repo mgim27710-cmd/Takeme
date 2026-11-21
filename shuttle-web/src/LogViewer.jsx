@@ -790,97 +790,97 @@ export default function LogViewer({
             </button>
           </div>
 
-          {/* Color Legend / Interactive Filter Buttons (High Visibility) */}
+          {/* Color Legend / Interactive Filter Buttons (High Visibility & No Wrap) */}
           <div className="flex flex-wrap items-center gap-1.5 text-xs font-black pt-2 border-t border-slate-200/70">
             <button
               type="button"
               onClick={() => setCalendarFilter(prev => prev === 'HOLIDAY' ? 'SELECTED_DATE' : 'HOLIDAY')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 whitespace-nowrap ${
                 calendarFilter === 'HOLIDAY'
-                  ? 'bg-orange-500 text-white border-orange-600 shadow-xs font-black scale-105'
+                  ? 'bg-orange-500 text-white border-orange-600 shadow-xs font-black'
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-orange-50 hover:text-orange-700 hover:border-orange-300'
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${calendarFilter === 'HOLIDAY' ? 'bg-white' : 'bg-orange-500'}`} />
-              <span>휴업일</span>
+              <span className={`w-2 h-2 rounded-full shrink-0 ${calendarFilter === 'HOLIDAY' ? 'bg-white' : 'bg-orange-500'}`} />
+              <span className="whitespace-nowrap">휴업일</span>
             </button>
 
             <button
               type="button"
               onClick={() => setCalendarFilter(prev => prev === 'EVENT' ? 'SELECTED_DATE' : 'EVENT')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 whitespace-nowrap ${
                 calendarFilter === 'EVENT'
-                  ? 'bg-blue-600 text-white border-blue-700 shadow-xs font-black scale-105'
+                  ? 'bg-blue-600 text-white border-blue-700 shadow-xs font-black'
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300'
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${calendarFilter === 'EVENT' ? 'bg-white' : 'bg-blue-600'}`} />
-              <span>행사</span>
+              <span className={`w-2 h-2 rounded-full shrink-0 ${calendarFilter === 'EVENT' ? 'bg-white' : 'bg-blue-600'}`} />
+              <span className="whitespace-nowrap">행사</span>
             </button>
 
             <button
               type="button"
               onClick={() => setCalendarFilter(prev => prev === 'ABSENCE' ? 'SELECTED_DATE' : 'ABSENCE')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 whitespace-nowrap ${
                 calendarFilter === 'ABSENCE'
-                  ? 'bg-rose-600 text-white border-rose-700 shadow-xs font-black scale-105'
+                  ? 'bg-rose-600 text-white border-rose-700 shadow-xs font-black'
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300'
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${calendarFilter === 'ABSENCE' ? 'bg-white' : 'bg-rose-600'}`} />
-              <span>결석</span>
+              <span className={`w-2 h-2 rounded-full shrink-0 ${calendarFilter === 'ABSENCE' ? 'bg-white' : 'bg-rose-600'}`} />
+              <span className="whitespace-nowrap">결석</span>
             </button>
 
             <button
               type="button"
               onClick={() => setCalendarFilter(prev => prev === 'CHANGE' ? 'SELECTED_DATE' : 'CHANGE')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 whitespace-nowrap ${
                 calendarFilter === 'CHANGE'
-                  ? 'bg-amber-500 text-white border-amber-600 shadow-xs font-black scale-105'
+                  ? 'bg-amber-500 text-white border-amber-600 shadow-xs font-black'
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-amber-50 hover:text-amber-700 hover:border-amber-300'
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${calendarFilter === 'CHANGE' ? 'bg-white' : 'bg-amber-500'}`} />
-              <span>통학 변동</span>
+              <span className={`w-2 h-2 rounded-full shrink-0 ${calendarFilter === 'CHANGE' ? 'bg-white' : 'bg-amber-500'}`} />
+              <span className="whitespace-nowrap">통학 변동</span>
             </button>
 
             <button
               type="button"
               onClick={() => setCalendarFilter(prev => prev === 'APPROVAL' ? 'SELECTED_DATE' : 'APPROVAL')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 whitespace-nowrap ${
                 calendarFilter === 'APPROVAL'
-                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs font-black scale-105'
+                  ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs font-black'
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300'
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${calendarFilter === 'APPROVAL' ? 'bg-white' : 'bg-emerald-600'}`} />
-              <span>결재 승인</span>
+              <span className={`w-2 h-2 rounded-full shrink-0 ${calendarFilter === 'APPROVAL' ? 'bg-white' : 'bg-emerald-600'}`} />
+              <span className="whitespace-nowrap">결재 승인</span>
             </button>
 
             <button
               type="button"
               onClick={() => setCalendarFilter(prev => prev === 'STAFF_LEAVE' ? 'SELECTED_DATE' : 'STAFF_LEAVE')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 whitespace-nowrap ${
                 calendarFilter === 'STAFF_LEAVE'
-                  ? 'bg-purple-600 text-white border-purple-700 shadow-xs font-black scale-105'
+                  ? 'bg-purple-600 text-white border-purple-700 shadow-xs font-black'
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-purple-50 hover:text-purple-700 hover:border-purple-300'
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${calendarFilter === 'STAFF_LEAVE' ? 'bg-white' : 'bg-purple-600'}`} />
-              <span>직원 휴가</span>
+              <span className={`w-2 h-2 rounded-full shrink-0 ${calendarFilter === 'STAFF_LEAVE' ? 'bg-white' : 'bg-purple-600'}`} />
+              <span className="whitespace-nowrap">직원 휴가</span>
             </button>
 
             <button
               type="button"
               onClick={() => setCalendarFilter('SELECTED_DATE')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 whitespace-nowrap ${
                 calendarFilter === 'SELECTED_DATE'
-                  ? 'bg-slate-800 text-white border-slate-900 shadow-xs font-black scale-105'
+                  ? 'bg-slate-800 text-white border-slate-900 shadow-xs font-black'
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100 hover:text-slate-900'
               }`}
             >
-              <span className={`w-2 h-2 rounded-full ${calendarFilter === 'SELECTED_DATE' ? 'bg-white' : 'bg-slate-800'}`} />
-              <span>선택일 전체보기</span>
+              <span className={`w-2 h-2 rounded-full shrink-0 ${calendarFilter === 'SELECTED_DATE' ? 'bg-white' : 'bg-slate-800'}`} />
+              <span className="whitespace-nowrap">선택일</span>
             </button>
           </div>
         </div>
@@ -958,7 +958,7 @@ export default function LogViewer({
             </div>
 
             {/* Quick Action Buttons (일정/휴업 등록, 결석 등록) */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               {(isAdmin || isHomeroom || isTeacher) && (
                 <button
                   type="button"
@@ -970,12 +970,12 @@ export default function LogViewer({
                     }));
                     setIsEventModalOpen(true);
                   }}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer whitespace-nowrap"
                 >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
                   </svg>
-                  <span>일정/휴업 등록</span>
+                  <span className="whitespace-nowrap">일정/휴업 등록</span>
                 </button>
               )}
 
@@ -990,10 +990,10 @@ export default function LogViewer({
                     }));
                     setIsAbsenceModalOpen(true);
                   }}
-                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                  className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer whitespace-nowrap"
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                  <span>결석 등록</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                  <span className="whitespace-nowrap">결석 등록</span>
                 </button>
               )}
             </div>
@@ -1071,20 +1071,20 @@ export default function LogViewer({
             </h3>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg whitespace-nowrap shrink-0">
               직원 휴가 {staffLeavesOnDate.length}명
             </span>
-            <span className="text-xs font-bold px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg">
+            <span className="text-xs font-bold px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg whitespace-nowrap shrink-0">
               결석 {absencesOnDate.length}명
             </span>
-            <span className="text-xs font-bold px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg">
+            <span className="text-xs font-bold px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg whitespace-nowrap shrink-0">
               변동 {locationChangesOnDate.length + otherChangesOnDate.length}건
             </span>
-            <span className="text-xs font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg">
+            <span className="text-xs font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg whitespace-nowrap shrink-0">
               결재 승인 {approvedRidesOnDate.length}건
             </span>
-            <span className="text-xs font-bold px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg">
+            <span className="text-xs font-bold px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg whitespace-nowrap shrink-0">
               행사/휴업 {selectedDateEvents.length}건
             </span>
           </div>
