@@ -2,6 +2,7 @@ node_modules/
 .expo/
 dist/
 build/
+.dart_tool/
 .DS_Store
 .env
 .env.development
