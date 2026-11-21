@@ -81,7 +81,7 @@ export class MediaService {
         uploaderName: (user as any).name || (user as any).username || null,
         vehicleId,
         className,
-        storageKey: uploadResult.ref,
+        storageKey: uploadResult.ref || uploadResult.url || uploadResult.filename || 'unknown',
         filename: uploadResult.filename,
         mimeType: item.mimeType || null,
         size: uploadResult.size || 0,
@@ -177,7 +177,7 @@ export class MediaService {
 
     const filename = asset.filename || `photo_${asset.id}.jpg`;
 
-    if (asset.storageKey.startsWith(S3_REF_PREFIX)) {
+    if (asset.storageKey && asset.storageKey.startsWith(S3_REF_PREFIX)) {
       if (!isS3Enabled()) {
         throw new BadRequestException('S3 스토리지 설정이 되어 있지 않습니다.');
       }
@@ -187,9 +187,9 @@ export class MediaService {
     }
 
     // Disk storage: resolve file path
-    let relPath = asset.storageKey;
-    if (relPath.startsWith('/uploads/')) {
-      relPath = relPath.slice(1);
+    let relPath = asset.storageKey || '';
+    if (relPath.includes('uploads/')) {
+      relPath = relPath.substring(relPath.indexOf('uploads/'));
     } else if (relPath.startsWith('/')) {
       relPath = relPath.slice(1);
     }

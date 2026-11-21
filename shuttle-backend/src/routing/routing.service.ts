@@ -4148,6 +4148,7 @@ export class RoutingService {
 
     return {
       success: true,
+      ref: url,
       url,
       filename: randomName,
       size: buffer.length,
