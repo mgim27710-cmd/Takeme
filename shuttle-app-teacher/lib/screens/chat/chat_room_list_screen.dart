@@ -34,6 +34,7 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
   @override
   void initState() {
     super.initState();
+    ApiService().markAllTeacherNotificationsRead();
     _loadRooms();
     SocketService().onRoomUpdated((_) {
       if (mounted) _loadRooms(showLoading: false);

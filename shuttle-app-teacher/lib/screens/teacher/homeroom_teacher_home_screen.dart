@@ -21,7 +21,6 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
   int _selectedTabIndex = 0;
   late final PageController _pageController;
   bool _isRefreshing = false;
-  int _unreadNotificationCount = 0;
   int _unreadChatCount = 0;
   Timer? _notificationPollTimer;
 
@@ -49,11 +48,9 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
 
   Future<void> _loadUnreadCount() async {
     try {
-      final count = await ApiService().getTeacherUnreadCount();
       final chatCount = await ApiService().getChatTotalUnreadCount();
       if (mounted) {
         setState(() {
-          _unreadNotificationCount = count;
           _unreadChatCount = chatCount;
         });
       }
@@ -61,15 +58,16 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
   }
 
   Widget _buildNotificationButton() {
-    final totalUnread = _unreadNotificationCount + _unreadChatCount;
+    final totalUnread = _unreadChatCount;
     return Stack(
       clipBehavior: Clip.none,
       alignment: Alignment.center,
       children: [
         IconButton(
           icon: const Icon(Icons.forum_outlined, color: Color(0xFF0F172A), size: 24),
-          tooltip: '메신저 & 알림',
+          tooltip: '메신저',
           onPressed: () {
+            ApiService().markAllTeacherNotificationsRead();
             Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const ChatRoomListScreen()),
@@ -435,7 +433,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
                   index: 4,
                   icon: Icons.forum_outlined,
                   label: '메신저',
-                  badgeCount: _unreadChatCount + _unreadNotificationCount,
+                  badgeCount: _unreadChatCount,
                 ),
               ],
             ),

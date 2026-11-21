@@ -26,7 +26,6 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   RouteDataModel? _routeData;
 
   bool _isLoading = true;
-  int _unreadNotificationCount = 0;
   int _unreadChatCount = 0;
   Timer? _notificationPollTimer;
 
@@ -71,11 +70,9 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
 
   Future<void> _loadUnreadCount() async {
     try {
-      final count = await ApiService().getTeacherUnreadCount();
       final chatCount = await ApiService().getChatTotalUnreadCount();
       if (mounted) {
         setState(() {
-          _unreadNotificationCount = count;
           _unreadChatCount = chatCount;
         });
       }
@@ -1204,15 +1201,17 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
             children: [
               IconButton(
                 icon: const Icon(Icons.forum_outlined, color: Color(0xFF0F172A), size: 24),
-                tooltip: '메신저 & 알림',
+                tooltip: '메신저',
                 onPressed: () {
+                  // 메신저 진입 시 시스템 알림도 함께 읽음 처리
+                  ApiService().markAllTeacherNotificationsRead();
                   Navigator.push(
                     context,
                     MaterialPageRoute(builder: (_) => const ChatRoomListScreen()),
                   ).then((_) => _loadUnreadCount());
                 },
               ),
-              if ((_unreadNotificationCount + _unreadChatCount) > 0)
+              if (_unreadChatCount > 0)
                 Positioned(
                   right: 4,
                   bottom: 4,
@@ -1227,9 +1226,9 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                       constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
                       alignment: Alignment.center,
                       child: Text(
-                        (_unreadNotificationCount + _unreadChatCount) > 9
+                        _unreadChatCount > 9
                             ? '9+'
-                            : '${_unreadNotificationCount + _unreadChatCount}',
+                            : '$_unreadChatCount',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 10,
