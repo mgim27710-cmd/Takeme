@@ -8,10 +8,13 @@ class HomeroomAttendanceView extends StatefulWidget {
   State<HomeroomAttendanceView> createState() => _HomeroomAttendanceViewState();
 }
 
-class _HomeroomAttendanceViewState extends State<HomeroomAttendanceView> {
+class _HomeroomAttendanceViewState extends State<HomeroomAttendanceView> with AutomaticKeepAliveClientMixin {
   DateTime _selectedDate = DateTime.now();
   bool _isLoading = true;
   bool _isSubmitting = false;
+
+  @override
+  bool get wantKeepAlive => true;
 
   String? _assignedClass;
   bool _isSubmitted = false;
@@ -44,8 +47,10 @@ class _HomeroomAttendanceViewState extends State<HomeroomAttendanceView> {
     return '$y-$m-$d';
   }
 
-  Future<void> _loadAttendance() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadAttendance({bool silent = false}) async {
+    if (!silent && _students.isEmpty) {
+      setState(() => _isLoading = true);
+    }
     final dateStr = _formatDate(_selectedDate);
     final res = await ApiService().getHomeroomAttendance(date: dateStr);
 
@@ -163,6 +168,7 @@ class _HomeroomAttendanceViewState extends State<HomeroomAttendanceView> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     int presentCount = 0;
     int absentCount = 0;
     int lateCount = 0;

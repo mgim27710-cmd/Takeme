@@ -9,9 +9,12 @@ class HomeroomChangeRequestsView extends StatefulWidget {
   State<HomeroomChangeRequestsView> createState() => _HomeroomChangeRequestsViewState();
 }
 
-class _HomeroomChangeRequestsViewState extends State<HomeroomChangeRequestsView> {
+class _HomeroomChangeRequestsViewState extends State<HomeroomChangeRequestsView> with AutomaticKeepAliveClientMixin {
   bool _isLoading = true;
   String _selectedFilter = 'ALL'; // 'ALL', 'PENDING', 'ABSENCE', 'DISMISSAL'
+
+  @override
+  bool get wantKeepAlive => true;
   Map<String, dynamic> _summary = {
     'total': 0,
     'approved': 0,
@@ -34,8 +37,10 @@ class _HomeroomChangeRequestsViewState extends State<HomeroomChangeRequestsView>
     _loadData();
   }
 
-  Future<void> _loadData() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadData({bool silent = false}) async {
+    if (!silent && _requests.isEmpty) {
+      setState(() => _isLoading = true);
+    }
     final todayRes = await ApiService().getClassTodayChangeRequests();
     final attRes = await ApiService().getHomeroomAttendance();
 
@@ -163,6 +168,7 @@ class _HomeroomChangeRequestsViewState extends State<HomeroomChangeRequestsView>
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     if (_isLoading) {
       return const Center(
         child: CircularProgressIndicator(color: Color(0xFF2563EB)),

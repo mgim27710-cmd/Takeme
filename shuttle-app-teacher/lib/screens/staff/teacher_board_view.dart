@@ -14,13 +14,16 @@ class TeacherBoardView extends StatefulWidget {
   State<TeacherBoardView> createState() => _TeacherBoardViewState();
 }
 
-class _TeacherBoardViewState extends State<TeacherBoardView> {
+class _TeacherBoardViewState extends State<TeacherBoardView> with AutomaticKeepAliveClientMixin {
   List<Map<String, dynamic>> _posts = [];
   bool _isLoading = true;
   String _searchKeyword = '';
   String _selectedClassFilter = 'ALL';
   String _selectedPostTypeFilter = 'ALL'; // 'ALL', 'NOTICE', 'POST'
   final _searchController = TextEditingController();
+
+  @override
+  bool get wantKeepAlive => true;
 
   /// 반 필터 칩: 코드에 고정된 반 이름 대신, 불러온 글에 실제로 등장하는 반으로 구성한다
   List<String> get _classList {
@@ -242,8 +245,10 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
     );
   }
 
-  Future<void> _loadPosts() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadPosts({bool silent = false}) async {
+    if (!silent && _posts.isEmpty) {
+      setState(() => _isLoading = true);
+    }
     final user = ApiService().currentUser;
     final posts = await ApiService().getBoardPosts(
       academyId: user?.academyId,
@@ -1614,6 +1619,7 @@ class _TeacherBoardViewState extends State<TeacherBoardView> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final user = ApiService().currentUser;
     final displayPosts = _filteredPosts;
 

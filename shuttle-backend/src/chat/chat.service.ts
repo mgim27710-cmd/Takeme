@@ -209,23 +209,23 @@ export class ChatService implements OnModuleInit {
 
   /** 방해금지 시간이면 전달할 시각(다음 평일 08:00 KST), 아니면 null */
   private teacherDndDeliverAt(sender: User, room: ChatRoom): Date | null {
-    if (sender.role !== UserRole.PARENT && sender.role !== UserRole.STUDENT) return null;
-    const hasTeacher = (room.members || []).some(m => m.user && ChatService.TEACHER_ROLES.has(String(m.user.role)));
-    if (!hasTeacher) return null;
-    const { start, end } = ChatService.TEACHER_HOURS;
-    const kstNow = new Date(Date.now() + 9 * 3600 * 1000);
-    const isWeekday = (d: Date) => d.getUTCDay() >= 1 && d.getUTCDay() <= 5;
-    const h = kstNow.getUTCHours();
-    if (isWeekday(kstNow) && h >= start && h < end) return null;
-    // 오늘(평일, 아침 8시 전)이면 오늘 8시, 아니면 다음 평일 8시
-    const day = new Date(Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate()));
-    if (!(isWeekday(kstNow) && h < start)) day.setUTCDate(day.getUTCDate() + 1);
-    while (!isWeekday(day)) day.setUTCDate(day.getUTCDate() + 1);
-    // KST 08:00 = UTC 전날 23:00
-    return new Date(day.getTime() + (start - 9) * 3600 * 1000);
+    // 실시간 대화 및 전자결재(결석계, 귀가동의서 등)가 주말/야간에도 차단되지 않고 정상 전달되도록 null 반환
+    return null;
   }
 
-  onModuleInit() {
+  async onModuleInit() {
+    try {
+      // 기존에 DND(미래 deliverAt)로 인해 교사 화면에서 숨겨져 있던 메시지들을 즉시 해제 복원
+      await this.messageRepo
+        .createQueryBuilder()
+        .update(ChatMessage)
+        .set({ deliverAt: null })
+        .where('deliverAt IS NOT NULL')
+        .execute();
+    } catch (e) {
+      console.warn('[ChatService] Error clearing deliverAt on init:', e);
+    }
+
     // 1분마다 전달 시각이 된 메시지를 교사에게 보낸다 (스크립트 실행을 막지 않도록 unref)
     const timer = setInterval(() => {
       this.releaseDeferredMessages().catch(err => console.error('[ChatService] deferred release error:', err));
@@ -755,7 +755,6 @@ export class ChatService implements OnModuleInit {
           .leftJoin('msg.sender', 'sender')
           .where('room.id IN (:...roomIds)', { roomIds })
           .andWhere('(sender.id IS NULL OR sender.id != :userId)', { userId })
-          .andWhere('(msg.deliverAt IS NULL OR msg.deliverAt <= :nowDeliver)', { nowDeliver: new Date() })
           .getMany();
 
         for (const m of candidateMsgs) {
@@ -996,12 +995,11 @@ export class ChatService implements OnModuleInit {
 
     const memberCount = room?.members?.length && room.members.length > 0 ? room.members.length : 2;
 
-    const nowForDeliver = new Date();
-    const messages = (await this.messageRepo.find({
+    const messages = await this.messageRepo.find({
       where: { room: { id: roomId } },
       order: { createdAt: 'ASC' },
       relations: { sender: true },
-    })).filter(m => !m.deliverAt || m.deliverAt <= nowForDeliver || (currentUserId && m.sender?.id === currentUserId));
+    });
 
     const updatedIds: number[] = [];
     if (currentUserId) {

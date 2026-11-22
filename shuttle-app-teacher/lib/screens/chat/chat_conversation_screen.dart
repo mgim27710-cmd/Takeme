@@ -35,6 +35,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
   String? _loadError; // 메시지 불러오기 실패 이유 (null 이면 정상)
   bool _isSending = false;
   int? _currentUserId;
+  Timer? _pollingTimer;
 
   @override
   void initState() {
@@ -45,6 +46,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
 
   @override
   void dispose() {
+    _pollingTimer?.cancel();
     SocketService().leaveChatRoom(widget.roomId);
     SocketService().offChatEvents();
     _textController.dispose();
@@ -98,6 +100,13 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
         });
       }
     });
+
+    // 4. 보조 실시간 폴링 타이머 (소켓 지연/일시단절 대비 3초 주기 자동 동기화)
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (mounted) {
+        _loadMessages(silent: true);
+      }
+    });
   }
 
   int _toNumber(dynamic v) {
@@ -106,27 +115,31 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
   }
 
   /// userInitiated: 사용자가 직접 새로고침/다시 시도한 경우
-  Future<void> _loadMessages({bool userInitiated = false}) async {
-    if (_messages.isEmpty && mounted) {
+  Future<void> _loadMessages({bool userInitiated = false, bool silent = false}) async {
+    if (!silent && _messages.isEmpty && mounted) {
       setState(() {
         _isLoading = true;
         _loadError = null;
       });
     }
     try {
-      final list = await ApiService().getChatMessages(widget.roomId, throwOnError: true);
+      final list = await ApiService().getChatMessages(widget.roomId, throwOnError: !silent);
       if (mounted) {
+        final hasChanges = list.length != _messages.length ||
+            (list.isNotEmpty && _messages.isNotEmpty && list.last['id'] != _messages.last['id']);
         setState(() {
           _messages = list;
           _isLoading = false;
           _loadError = null;
         });
-        _scrollToBottom();
+        if (hasChanges) {
+          _scrollToBottom();
+        }
         // 메시지를 실제로 불러왔을 때만 읽음 처리 (못 본 메시지를 읽은 것으로 처리하지 않는다)
         ApiService().markChatRoomAsRead(widget.roomId);
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || silent) return;
       final message = friendlyError(e);
       setState(() {
         _isLoading = false;

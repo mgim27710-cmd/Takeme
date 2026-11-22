@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -26,10 +27,14 @@ class ChatRoomListScreen extends StatefulWidget {
   State<ChatRoomListScreen> createState() => _ChatRoomListScreenState();
 }
 
-class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
+class _ChatRoomListScreenState extends State<ChatRoomListScreen> with AutomaticKeepAliveClientMixin {
   List<Map<String, dynamic>> _rooms = [];
   bool _isLoading = true;
   String? _loadError; // 채팅방 목록 불러오기 실패 이유 (null 이면 정상)
+  Timer? _refreshTimer;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -39,11 +44,23 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
     SocketService().onRoomUpdated((_) {
       if (mounted) _loadRooms(showLoading: false);
     });
+    SocketService().onNotificationReceived((_) {
+      if (mounted) _loadRooms(showLoading: false);
+    });
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted) _loadRooms(showLoading: false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   /// userInitiated: 사용자가 직접 새로고침(당겨서 새로고침/다시 시도)한 경우
   Future<void> _loadRooms({bool showLoading = true, bool userInitiated = false}) async {
-    if (showLoading) setState(() => _isLoading = true);
+    if (showLoading && _rooms.isEmpty) setState(() => _isLoading = true);
     try {
       final rooms = await ApiService().getChatRooms(throwOnError: true);
       if (mounted) {
@@ -429,6 +446,7 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final body = RefreshIndicator(
       onRefresh: () => _loadRooms(showLoading: false, userInitiated: true),
       color: const Color(0xFF2563EB),

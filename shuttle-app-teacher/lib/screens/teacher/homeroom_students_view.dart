@@ -9,13 +9,16 @@ class HomeroomStudentsView extends StatefulWidget {
   State<HomeroomStudentsView> createState() => _HomeroomStudentsViewState();
 }
 
-class _HomeroomStudentsViewState extends State<HomeroomStudentsView> {
+class _HomeroomStudentsViewState extends State<HomeroomStudentsView> with AutomaticKeepAliveClientMixin {
   bool _isLoading = true;
   List<StudentModel> _students = [];
   String? _loadError; // 불러오기 실패 이유 (null 이면 정상)
   String _searchQuery = '';
   String _filterStatus = 'ALL'; // 'ALL' | 'WAITING' | 'BOARDED' | 'ABSENT'
   final TextEditingController _memoController = TextEditingController();
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -29,11 +32,13 @@ class _HomeroomStudentsViewState extends State<HomeroomStudentsView> {
     super.dispose();
   }
 
-  Future<void> _loadStudents() async {
-    setState(() {
-      _isLoading = true;
-      _loadError = null;
-    });
+  Future<void> _loadStudents({bool silent = false}) async {
+    if (!silent && _students.isEmpty) {
+      setState(() {
+        _isLoading = true;
+        _loadError = null;
+      });
+    }
     final user = ApiService().currentUser;
     if (user == null) {
       if (mounted) setState(() => _isLoading = false);
@@ -48,10 +53,12 @@ class _HomeroomStudentsViewState extends State<HomeroomStudentsView> {
         });
       }
     } catch (e) {
-      // 네트워크/서버 오류: 로딩 표시가 끝나지 않거나 "원아 없음"으로 보이지 않게 이유와 다시 시도를 보여준다
+      // 네트워크/서버 오류: 이미 데이터가 있으면 기존 화면 유지하고, 없으면 에러 표시
       if (mounted) {
         setState(() {
-          _loadError = friendlyError(e);
+          if (_students.isEmpty) {
+            _loadError = friendlyError(e);
+          }
           _isLoading = false;
         });
       }
@@ -142,6 +149,7 @@ class _HomeroomStudentsViewState extends State<HomeroomStudentsView> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)));
     }
