@@ -386,28 +386,29 @@ class _KakaoMapViewState extends State<KakaoMapView> {
         .academy-marker {
           background: linear-gradient(135deg, #ef4444, #dc2626);
           color: white;
-          border-radius: 20px;
-          padding: 6px 12px;
-          font-weight: 900;
-          font-size: 12px;
+          border-radius: 50%;
+          width: 32px;
+          height: 32px;
+          font-size: 15px;
           border: 2px solid white;
           box-shadow: 0 4px 12px rgba(220,38,38,0.45);
-          white-space: nowrap;
           display: flex;
           align-items: center;
-          gap: 4px;
+          justify-content: center;
         }
         
         .last-stop-marker {
           background: linear-gradient(135deg, #ef4444, #b91c1c);
           color: white;
-          border-radius: 16px;
-          padding: 4px 10px;
-          font-weight: 800;
-          font-size: 11px;
+          border-radius: 50%;
+          width: 30px;
+          height: 30px;
+          font-size: 14px;
           border: 2px solid white;
           box-shadow: 0 3px 8px rgba(239,68,68,0.4);
-          white-space: nowrap;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
       </style>
     </head>
@@ -510,12 +511,12 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           if (hasAcademy) {
             var acIcon = L.divIcon({
               className: '',
-              html: '<div class="academy-marker">🏁 <b>[도착]</b> ' + (acName || '유치원') + '</div>',
-              iconSize: [130, 30],
-              iconAnchor: [65, 15]
+              html: '<div class="academy-marker">🏁</div>',
+              iconSize: [32, 32],
+              iconAnchor: [16, 16]
             });
             L.marker([acLat, acLng], { icon: acIcon, zIndexOffset: 2000 })
-              .bindPopup('<b>🏁 최종 도착지 (유치원)</b><br/>' + (acName || '유치원'))
+              .bindPopup('<b>🏁 최종 도착지</b><br/>' + (acName || '유치원'))
               .addTo(map);
             pts.push([acLat, acLng]);
           }
@@ -545,9 +546,9 @@ class _KakaoMapViewState extends State<KakaoMapView> {
                 } else if (isLastStopWithoutAcademy) {
                   var icon = L.divIcon({
                     className: '',
-                    html: '<div class="last-stop-marker">🏁 [도착지] ' + (idx + 1) + '. ' + s.name + '</div>',
-                    iconSize: [130, 28],
-                    iconAnchor: [65, 14]
+                    html: '<div class="last-stop-marker">🏁</div>',
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 15]
                   });
                   var m = L.marker([s.lat, s.lng], { icon: icon, zIndexOffset: 1500 })
                     .bindPopup('<b>🏁 최종 도착지 (' + (idx + 1) + '번 정류장)</b><br/>' + (s.address || s.name))
@@ -599,6 +600,8 @@ class _KakaoMapViewState extends State<KakaoMapView> {
   @override
   Widget build(BuildContext context) {
     final viewPadding = MediaQuery.viewPaddingOf(context);
+    final isCompact = !widget.isFullScreen;
+    final gap = isCompact ? 3.0 : 6.0;
 
     return Stack(
       children: [
@@ -617,9 +620,10 @@ class _KakaoMapViewState extends State<KakaoMapView> {
 
         // Controls Overlay
         Positioned(
-          top: 12 + (widget.isFullScreen ? viewPadding.top : 0),
-          right: 12 + (widget.isFullScreen ? viewPadding.right : 0),
+          top: isCompact ? 8 : (12 + viewPadding.top),
+          right: isCompact ? 8 : (12 + viewPadding.right),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
               // Fullscreen Toggle
               _buildControlBtn(
@@ -627,50 +631,58 @@ class _KakaoMapViewState extends State<KakaoMapView> {
                 tooltip: widget.isFullScreen ? '화면 축소' : '전체화면으로 보기',
                 color: const Color(0xFF2563EB),
                 iconColor: Colors.white,
+                isCompact: isCompact,
                 onTap: widget.isFullScreen
                     ? () => Navigator.pop(context)
                     : _openFullscreen,
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: gap),
 
               // Zoom In
               _buildControlBtn(
                 icon: Icons.add,
                 tooltip: '지도 확대',
+                isCompact: isCompact,
                 onTap: _zoomIn,
               ),
-              const SizedBox(height: 4),
+              SizedBox(height: gap),
 
               // Zoom Out
               _buildControlBtn(
                 icon: Icons.remove,
                 tooltip: '지도 축소',
+                isCompact: isCompact,
                 onTap: _zoomOut,
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: gap),
 
-              // Focus My Child
-              _buildControlBtn(
-                icon: Icons.star_rounded,
-                tooltip: '우리 아이 탑승지로 이동',
-                iconColor: const Color(0xFF7C3AED),
-                onTap: _focusMyChild,
-              ),
-              const SizedBox(height: 4),
+              // Focus My Child (학부모 모드일 때만 표시)
+              if (widget.myChildName != null && widget.myChildName!.isNotEmpty) ...[
+                _buildControlBtn(
+                  icon: Icons.star_rounded,
+                  tooltip: '우리 아이 탑승지로 이동',
+                  iconColor: const Color(0xFF7C3AED),
+                  isCompact: isCompact,
+                  onTap: _focusMyChild,
+                ),
+                SizedBox(height: gap),
+              ],
 
               // Fit All
               _buildControlBtn(
                 icon: Icons.crop_free,
                 tooltip: '전체 노선 한눈에 보기',
+                isCompact: isCompact,
                 onTap: _fitAll,
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: gap),
 
               // 내 위치 (작은 빨간 점으로 표시)
               _buildControlBtn(
                 icon: Icons.my_location,
                 tooltip: '내 위치 보기',
                 iconColor: const Color(0xFFEF4444),
+                isCompact: isCompact,
                 onTap: _goToMyLocation,
               ),
             ],
@@ -714,24 +726,27 @@ class _KakaoMapViewState extends State<KakaoMapView> {
     required VoidCallback onTap,
     Color color = Colors.white,
     Color iconColor = const Color(0xFF1E293B),
+    bool isCompact = false,
   }) {
+    final btnSize = isCompact ? 30.0 : 38.0;
+    final iconSize = isCompact ? 16.0 : 20.0;
     return Material(
       color: color,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(isCompact ? 8 : 10),
         side: BorderSide(color: Colors.black.withValues(alpha: 0.08)),
       ),
       elevation: 2,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(isCompact ? 8 : 10),
         child: Tooltip(
           message: tooltip,
           child: Container(
-            width: 38,
-            height: 38,
+            width: btnSize,
+            height: btnSize,
             alignment: Alignment.center,
-            child: Icon(icon, size: 20, color: iconColor),
+            child: Icon(icon, size: iconSize, color: iconColor),
           ),
         ),
       ),

@@ -506,21 +506,29 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> with AutomaticK
                 ),
     );
 
+    final newChatFab = FloatingActionButton.extended(
+      onPressed: _openNewChat,
+      backgroundColor: const Color(0xFF2563EB),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 4,
+      icon: const Icon(Icons.add_box_rounded, color: Colors.white, size: 20),
+      label: const Text(
+        '새 대화',
+        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+      ),
+    );
+
     if (widget.isEmbeddedTab) {
       return Scaffold(
         backgroundColor: Colors.white,
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: _openNewChat,
-          backgroundColor: const Color(0xFF2563EB),
-          icon: const Icon(Icons.add_comment_rounded, color: Colors.white, size: 18),
-          label: const Text('새 대화', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        ),
+        floatingActionButton: newChatFab,
         body: body,
       );
     }
 
     return Scaffold(
       backgroundColor: Colors.white,
+      floatingActionButton: newChatFab,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
@@ -533,13 +541,10 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> with AutomaticK
           style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
         ),
         actions: [
-          TextButton.icon(
-            onPressed: _openNewChat,
-            icon: const Icon(Icons.add_comment_rounded, size: 16, color: Color(0xFF2563EB)),
-            label: const Text(
-              '새 대화',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF2563EB)),
-            ),
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Color(0xFF0F172A), size: 24),
+            tooltip: '새로고침',
+            onPressed: () => _loadRooms(showLoading: false, userInitiated: true),
           ),
           const SizedBox(width: 8),
         ],

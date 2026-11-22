@@ -33,6 +33,8 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
 
   // Track active operating vehicles in memory: vehicleId -> isOperating
   public operatingVehicles: Map<number, boolean> = new Map();
+  // 최신 버스 위치 메모리 캐시: vehicleId -> latest payload
+  public latestVehicleLocations: Map<number, any> = new Map();
 
   constructor(
     private readonly routingService: RoutingService,
@@ -72,7 +74,18 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
 
   /** 그 차량을 운행하는 사람인지: 차량 기사·차량선생님, 그 기관 원장·데스크, 통합 관리자 */
   private async canControlVehicle(client: Socket, vehicleId: number): Promise<boolean> {
-    const user = client.data.user as JwtPayload | undefined;
+    let user = client.data.user as JwtPayload | undefined;
+    if (!user?.sub) {
+      const token =
+        (client.handshake.auth?.token as string | undefined) ||
+        (client.handshake.query?.token as string | undefined);
+      if (token) {
+        try {
+          user = await this.verifyTokenForSocket(token);
+          client.data.user = user;
+        } catch (_) {}
+      }
+    }
     if (!user?.sub || !vehicleId) return false;
     const allowed: Set<number> = client.data.allowedSend || (client.data.allowedSend = new Set<number>());
     if (allowed.has(vehicleId)) return true;
@@ -194,6 +207,13 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     };
     if (this.server) {
       this.server.to(room).emit('vehicleOperatingStatus', payload);
+
+      if (isOperating) {
+        const lastLoc = this.latestVehicleLocations.get(vehicleId);
+        if (lastLoc) {
+          this.server.to(room).emit('locationUpdated', lastLoc);
+        }
+      }
 
       let academyId = targetAcademyId;
       if (!academyId) {
@@ -401,6 +421,12 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       initial: true,
       timestamp: new Date().toISOString(),
     });
+
+    // 캐시된 최신 버스 위치가 있으면 접속 즉시 전송하여 화면을 열자마자 버스가 바로 보이도록 함
+    const lastLoc = this.latestVehicleLocations.get(vehicleId);
+    if (lastLoc) {
+      client.emit('locationUpdated', lastLoc);
+    }
   }
 
   @SubscribeMessage('leaveVehicleRoom')
@@ -557,6 +583,9 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       speedKmh: data?.speedKmh ?? null,
       timestamp: new Date().toISOString(),
     };
+
+    // 최신 버스 위치 캐시 업데이트
+    this.latestVehicleLocations.set(vehicleId, payload);
 
     // 차량 방(그 차를 타는 원아의 학부모·기사·교사)과 기관 교직원 방에만 보낸다. 다른 차량 학부모에게는 가지 않는다.
     this.server.to(room).emit('locationUpdated', payload);

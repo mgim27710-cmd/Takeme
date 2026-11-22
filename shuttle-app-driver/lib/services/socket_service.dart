@@ -29,6 +29,7 @@ class SocketService {
 
     if (token != null && token.isNotEmpty) {
       options.setAuth({'token': token});
+      options.setQuery({'token': token});
     }
 
     _socket ??= io_client.io(AppConfig.apiHost, options.build());

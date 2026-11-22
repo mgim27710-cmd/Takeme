@@ -413,30 +413,18 @@ class _AcademyBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        width: 32,
+        height: 32,
         decoration: BoxDecoration(
           color: const Color(0xFFDC2626),
-          borderRadius: BorderRadius.circular(17),
-          border: Border.all(color: Colors.white, width: 2),
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 2.5),
           boxShadow: const [
             BoxShadow(color: Color(0x60DC2626), blurRadius: 6, offset: Offset(0, 2)),
           ],
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.sports_score, color: Colors.white, size: 16),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                '🏁 [도착] $name',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w900),
-              ),
-            ),
-          ],
-        ),
+        alignment: Alignment.center,
+        child: const Text('🏁', style: TextStyle(fontSize: 15)),
       ),
     );
   }

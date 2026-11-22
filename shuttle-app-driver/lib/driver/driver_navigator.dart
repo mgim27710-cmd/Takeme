@@ -1150,6 +1150,13 @@ class DriverNavigator extends ChangeNotifier {
       _registerSocketListeners();
       if (vehicleId != null) SocketService().joinVehicleRoom(vehicleId!);
       SocketService().sendOperationStatus(vehicleId: vehicleId!, isOperating: true);
+      if (position != null) {
+        SocketService().sendLocationUpdate(
+          vehicleId: vehicleId!,
+          lat: position!.lat,
+          lng: position!.lng,
+        );
+      }
 
       // 운행 중 화면 꺼짐 방지 활성화 + 다른 앱 위에 표시 권한 확인
       unawaited(_setKeepScreenOn(true));
