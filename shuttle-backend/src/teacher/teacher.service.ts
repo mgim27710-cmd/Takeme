@@ -1091,11 +1091,27 @@ export class TeacherService {
             this.chatService?.sendSystemNotificationToUsers(
               parentIds,
               '운행 시작 안내',
-              `${busName} 운행이 시작되었습니다. 지도에서 실시간 위치를 확인할 수 있습니다.`,
+              `기사님이 ${busName} 운행을 시작했습니다. 앱에서 버스 위치를 확인할 수 있어요.`,
               { type: 'shuttle' }
             ).catch(() => {});
           }
         }).catch(() => {});
+
+        // 그 차량의 지도교사·기사에게도 운행 시작 알림(TakeMe 알림 + 휴대폰 푸시)
+        this.vehicleRepository
+          .findOne({ where: { id: vehicle.id }, relations: { driverUser: true, teacherUser: true } })
+          .then((v) => {
+            const staffIds = [...new Set([v?.driverUser?.id, v?.teacherUser?.id, user.id]
+              .filter((id): id is number => typeof id === 'number'))];
+            if (staffIds.length === 0) return;
+            return this.chatService?.sendSystemNotificationToUsers(
+              staffIds,
+              '운행 시작',
+              `${busName} 운행을 시작했습니다.`,
+              { type: 'shuttle' },
+            );
+          })
+          .catch(() => {});
       }
     }
     return { success: true };
@@ -1157,11 +1173,27 @@ export class TeacherService {
             this.chatService?.sendSystemNotificationToUsers(
               parentIds,
               '운행 종료 안내',
-              `${busName} 운행이 안전하게 종료되었습니다.`,
+              `${busName} 운행이 종료되었습니다.`,
               { type: 'shuttle' }
             ).catch(() => {});
           }
         }).catch(() => {});
+
+        // 그 차량의 지도교사·기사에게도 운행 종료 알림(TakeMe 알림 + 휴대폰 푸시)
+        this.vehicleRepository
+          .findOne({ where: { id: vehicle.id }, relations: { driverUser: true, teacherUser: true } })
+          .then((v) => {
+            const staffIds = [...new Set([v?.driverUser?.id, v?.teacherUser?.id, user.id]
+              .filter((id): id is number => typeof id === 'number'))];
+            if (staffIds.length === 0) return;
+            return this.chatService?.sendSystemNotificationToUsers(
+              staffIds,
+              '운행 종료',
+              `${busName} 운행을 종료했습니다.`,
+              { type: 'shuttle' },
+            );
+          })
+          .catch(() => {});
       }
 
       // 미탑승 학생 자동 결석 처리

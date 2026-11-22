@@ -1054,21 +1054,33 @@ export class ChatService implements OnModuleInit {
     });
     if (!room) return { success: false, count: 0 };
 
+    // Postgres 는 따옴표 없는 m.roomId 를 m.roomid 로 바꿔 컬럼을 못 찾는다 -> 관계(join)로 조회한다
     const unreadMessages = await this.messageRepo
       .createQueryBuilder('m')
-      .where('m.roomId = :roomId', { roomId })
-      .andWhere('(m.senderId != :userId OR m.senderId IS NULL)', { userId })
+      .leftJoin('m.room', 'room')
+      .leftJoin('m.sender', 'sender')
+      .where('room.id = :roomId', { roomId })
+      .andWhere('(sender.id IS NULL OR sender.id != :userId)', { userId })
       .getMany();
 
     const updatedIds: number[] = [];
+    const toSave: ChatMessage[] = [];
     for (const m of unreadMessages) {
       const readList = (m.readBy || []).map(Number);
       if (!readList.includes(userId)) {
         readList.push(userId);
         m.readBy = readList;
-        await this.messageRepo.save(m);
+        toSave.push(m);
         updatedIds.push(m.id);
       }
+    }
+
+    if (toSave.length > 0) {
+      await this.messageRepo.save(toSave);
+      await this.memberRepo.update(
+        { room: { id: roomId }, user: { id: userId } },
+        { lastReadAt: new Date() },
+      ).catch(() => {});
     }
 
     if (updatedIds.length > 0) {

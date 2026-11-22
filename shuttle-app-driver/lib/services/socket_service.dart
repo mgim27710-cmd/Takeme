@@ -33,6 +33,7 @@ class SocketService {
 
     _socket ??= io_client.io(AppConfig.apiHost, options.build());
 
+    _attachRoomUpdated();
     _socket!.off('connect');
     _socket!.onConnect((_) {
       debugPrint('Socket connected: ${_socket!.id}');
@@ -265,13 +266,22 @@ class SocketService {
     });
   }
 
-  void onRoomUpdated(Function(Map<String, dynamic> data) callback) {
+  /// 대화방 변경(새 메시지·읽음 처리) 알림을 받을 화면들
+  final Map<String, Function(Map<String, dynamic> data)> _roomUpdatedListeners = {};
+
+  void onRoomUpdated(Function(Map<String, dynamic> data) callback, {String key = 'default'}) {
+    _roomUpdatedListeners[key] = callback;
+    _attachRoomUpdated();
+  }
+
+  void offRoomUpdated(String key) => _roomUpdatedListeners.remove(key);
+
+  void _attachRoomUpdated() {
     _socket?.off('roomUpdated');
     _socket?.on('roomUpdated', (data) {
-      if (data is Map<String, dynamic>) {
-        callback(data);
-      } else if (data is Map) {
-        callback(Map<String, dynamic>.from(data));
+      final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      for (final cb in List.of(_roomUpdatedListeners.values)) {
+        cb(map);
       }
     });
   }

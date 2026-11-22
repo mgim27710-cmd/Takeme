@@ -176,8 +176,10 @@ export class RoutingService {
       const name = st.adminDisplayName || st.name;
       const place = isMorning ? '탑승지' : '하차지';
       const etaMin = Math.max(1, Math.round(etaSec / 60));
-      const message = `차량이 ${name} 원아 ${place}에 약 ${etaMin}분 뒤 도착합니다. ${isMorning ? '미리 나와 주세요.' : '마중 나와 주세요.'}`;
-      this.notifyStudentRelated(st.id, '곧 도착해요', message, ['PARENT'], { type: 'shuttle' });
+      const rawBus = String(vehicle?.busNumber || '').trim();
+      const bus = !rawBus ? '버스' : rawBus.endsWith('호차') ? rawBus : rawBus.endsWith('호') ? `${rawBus}차` : `${rawBus}호차`;
+      const message = `${bus}가 약 ${etaMin}분 후 ${name} 원아 ${place}에 도착합니다. ${isMorning ? '미리 나와 주세요.' : '마중 나와 주세요.'}`;
+      this.notifyStudentRelated(st.id, '버스 도착 예정', message, ['PARENT'], { type: 'shuttle' });
       events.push({ kind: 'SOON', studentId: st.id, studentName: name, parentUserId: st.parentUser?.id, message });
     }
 

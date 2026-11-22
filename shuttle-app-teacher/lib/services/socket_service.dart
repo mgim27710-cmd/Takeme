@@ -210,7 +210,7 @@ class SocketService {
     _notificationCallbacks.add(callback);
   }
 
-  void onRoomUpdated(Function(Map<String, dynamic> data) callback) {
+  void onRoomUpdated(Function(Map<String, dynamic> data) callback, {String? key}) {
     _roomUpdatedCallbacks.add(callback);
   }
 
