@@ -507,6 +507,66 @@ export class ApprovalService {
   /**
    * 승인 또는 반려 처리 (관리자/데스크 전용)
    */
+  async hasTodayBoarding(studentId: number, targetDate: string): Promise<boolean> {
+    const req = await this.approvalRepo.findOne({
+      where: {
+        student: { id: studentId },
+        targetDate,
+        type: ChangeRequestType.ONE_TIME_BOARDING,
+      },
+    });
+    if (req) return true;
+    const ov = await this.overrideRepo.findOne({
+      where: {
+        student: { id: studentId },
+        startDate: targetDate,
+        overrideType: OverrideType.ONE_TIME_BOARDING,
+      },
+    });
+    return !!ov;
+  }
+
+  async cancelTodayBoarding(callingUser: User, studentId: number) {
+    const student = await this.studentRepo.findOne({
+      where: { id: studentId },
+      relations: { parentUser: true, assignedVehicle: true },
+    });
+    if (!student) throw new NotFoundException('원아를 찾을 수 없습니다.');
+
+    if (callingUser.role === UserRole.PARENT) {
+      const isParent = student.parentUser?.id === callingUser.id || student.parentUser?.email === callingUser.email;
+      if (!isParent) {
+        throw new ForbiddenException('본인의 자녀에 대해서만 신청을 취소할 수 있습니다.');
+      }
+    }
+
+    const todayStr = kstDateString();
+
+    const requests = await this.approvalRepo.find({
+      where: {
+        student: { id: student.id },
+        targetDate: todayStr,
+        type: ChangeRequestType.ONE_TIME_BOARDING,
+      },
+    });
+
+    for (const req of requests) {
+      await this.overrideRepo.delete({ approvalRequest: { id: req.id } });
+      await this.approvalRepo.remove(req);
+    }
+
+    await this.overrideRepo.delete({
+      student: { id: student.id },
+      startDate: todayStr,
+      overrideType: OverrideType.ONE_TIME_BOARDING,
+    });
+
+    return {
+      success: true,
+      message: '금일 신청한 탑승 신청이 취소되었습니다.',
+    };
+  }
+
   async decideRequest(
     callingUser: User,
     requestId: number,

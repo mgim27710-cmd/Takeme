@@ -6,11 +6,13 @@ import '../../services/api_service.dart';
 class ChangeRequestModal extends StatefulWidget {
   final String email;
   final VoidCallback onSuccess;
+  final String? initialType;
 
   const ChangeRequestModal({
     super.key,
     required this.email,
     required this.onSuccess,
+    this.initialType,
   });
 
   @override
@@ -26,7 +28,7 @@ class _ChangeRequestModalState extends State<ChangeRequestModal> {
   StudentModel? _selectedChild;
 
   // Step 2 Selection
-  String? _selectedType; // 'ABSENCE', 'LATENESS', 'INDIVIDUAL_DISMISSAL', 'PICKUP', 'NO_SHUTTLE', 'ONE_TIME_BOARDING'
+  String? _selectedType;
   String _direction = 'ALL'; // 'BOARDING', 'ALIGHTING', 'ALL'
 
   // Step 3 Inputs
@@ -35,61 +37,49 @@ class _ChangeRequestModalState extends State<ChangeRequestModal> {
   final TextEditingController _addressController = TextEditingController();
   final TextEditingController _reasonController = TextEditingController();
 
-  final List<Map<String, dynamic>> _types = [
+  List<Map<String, dynamic>> _availableStops = [];
+  bool _isLoadingStops = false;
+  int? _selectedStopIndex;
+
+  final List<Map<String, dynamic>> _allTypes = [
     {
       'code': 'ABSENCE',
       'title': '결석',
       'desc': '하루 종일 등원하지 않아요',
       'icon': Icons.event_busy,
-      'color': Color(0xFFEF4444),
-      'bg': Color(0xFFFEF2F2),
-    },
-    {
-      'code': 'LATENESS',
-      'title': '지각',
-      'desc': '예정보다 늦게 등원해요',
-      'icon': Icons.access_time_filled,
-      'color': Color(0xFFF59E0B),
-      'bg': Color(0xFFFFFBEB),
-    },
-    {
-      'code': 'INDIVIDUAL_DISMISSAL',
-      'title': '오늘 직접 하원',
-      'desc': '셔틀 안 타고 혼자/보호자와 귀가해요',
-      'icon': Icons.directions_walk,
-      'color': Color(0xFF3B82F6),
-      'bg': Color(0xFFEFF6FF),
+      'color': const Color(0xFFEF4444),
+      'bg': const Color(0xFFFEF2F2),
     },
     {
       'code': 'PICKUP',
-      'title': '오늘 보호자 픽업',
-      'desc': '보호자가 원으로 직접 데리러 가요',
+      'title': '오늘 직접 하원(픽업)',
+      'desc': '하원 셔틀을 타지 않고 보호자가 직접 데리러 가요',
       'icon': Icons.family_restroom,
-      'color': Color(0xFF8B5CF6),
-      'bg': Color(0xFFF5F3FF),
+      'color': const Color(0xFF8B5CF6),
+      'bg': const Color(0xFFF5F3FF),
     },
     {
-      'code': 'NO_SHUTTLE',
-      'title': '셔틀 안 탐',
-      'desc': '오늘 차량을 타지 않고 개별 이동해요',
-      'icon': Icons.no_transfer,
-      'color': Color(0xFF64748B),
-      'bg': Color(0xFFF8FAFC),
+      'code': 'CHANGE_LOCATION',
+      'title': '탑승지 변경',
+      'desc': '등/하원 정류장 위치를 변경해요',
+      'icon': Icons.edit_location_alt,
+      'color': const Color(0xFF0284C7),
+      'bg': const Color(0xFFF0F9FF),
     },
     {
       'code': 'ONE_TIME_BOARDING',
       'title': '하루 탑승',
-      'desc': '오늘 하루만 다른 차량/정류장 탑승해요',
+      'desc': '오늘 하루만 유치원 셔틀 차량에 탑승해요',
       'icon': Icons.directions_bus,
-      'color': Color(0xFF10B981),
-      'bg': Color(0xFFECFDF5),
+      'color': const Color(0xFF10B981),
+      'bg': const Color(0xFFECFDF5),
     },
   ];
 
   @override
   void initState() {
     super.initState();
-    // Default date is today if before 14:00, otherwise tomorrow
+    _selectedType = widget.initialType;
     final now = DateTime.now();
     _selectedDate = now.hour < 14 ? now : now.add(const Duration(days: 1));
     _loadChildren();
@@ -103,6 +93,25 @@ class _ChangeRequestModalState extends State<ChangeRequestModal> {
     super.dispose();
   }
 
+  Future<void> _loadRouteStops() async {
+    if (_selectedChild == null) return;
+    setState(() => _isLoadingStops = true);
+    try {
+      final route = await ApiService().getParentRoute(widget.email, studentId: _selectedChild!.id);
+      if (mounted && route != null) {
+        setState(() {
+          _availableStops = route.stops.map((s) => {
+            'name': s.name,
+            'address': s.address ?? s.name,
+            'lat': s.latitude,
+            'lng': s.longitude,
+          }).toList();
+        });
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _isLoadingStops = false);
+  }
+
   Future<void> _loadChildren() async {
     setState(() => _isLoadingChildren = true);
     final list = await ApiService().getMyChildren(widget.email);
@@ -113,8 +122,10 @@ class _ChangeRequestModalState extends State<ChangeRequestModal> {
       if (list.length == 1) {
         _selectedChild = list.first;
         _step = 2; // 1명이면 자동 선택하고 2단계(무엇을)로 바로 이동
+        _loadRouteStops();
       } else if (list.isNotEmpty) {
         _selectedChild = list.first;
+        _loadRouteStops();
       }
     });
   }
@@ -430,6 +441,7 @@ class _ChangeRequestModalState extends State<ChangeRequestModal> {
                 setState(() {
                   _selectedChild = c;
                 });
+                _loadRouteStops();
               },
               borderRadius: BorderRadius.circular(16),
               child: Container(
@@ -482,8 +494,18 @@ class _ChangeRequestModalState extends State<ChangeRequestModal> {
     );
   }
 
-  // 2단계: 무엇을? (큰 버튼 6개)
+  List<Map<String, dynamic>> _getFilteredTypes() {
+    final isNotRiding = _selectedChild?.isNotRiding == true;
+    if (isNotRiding) {
+      return _allTypes.where((t) => t['code'] == 'ONE_TIME_BOARDING' || t['code'] == 'ABSENCE').toList();
+    } else {
+      return _allTypes.where((t) => t['code'] != 'ONE_TIME_BOARDING').toList();
+    }
+  }
+
+  // 2단계: 무엇을?
   Widget _buildStep2TypeSelection() {
+    final types = _getFilteredTypes();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -512,17 +534,17 @@ class _ChangeRequestModalState extends State<ChangeRequestModal> {
           style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
         ),
         const SizedBox(height: 12),
-        for (int i = 0; i < _types.length; i += 2)
+        for (int i = 0; i < types.length; i += 2)
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: IntrinsicHeight(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(child: _buildTypeCard(_types[i])),
+                  Expanded(child: _buildTypeCard(types[i])),
                   const SizedBox(width: 10),
-                  if (i + 1 < _types.length)
-                    Expanded(child: _buildTypeCard(_types[i + 1]))
+                  if (i + 1 < types.length)
+                    Expanded(child: _buildTypeCard(types[i + 1]))
                   else
                     const Spacer(),
                 ],
@@ -608,11 +630,11 @@ class _ChangeRequestModalState extends State<ChangeRequestModal> {
 
   // 3단계: 언제/어디서? + 사유(선택) + 확인
   Widget _buildStep3DetailsAndConfirm() {
-    final typeObj = _types.firstWhere((t) => t['code'] == _selectedType, orElse: () => _types[0]);
+    final typeObj = _allTypes.firstWhere((t) => t['code'] == _selectedType, orElse: () => _allTypes[0]);
     final dateStr = DateFormat('yyyy년 M월 d일 (E)', 'ko').format(_selectedDate);
 
     final needsAddress = _selectedType == 'CHANGE_LOCATION' || _selectedType == 'ONE_TIME_BOARDING';
-    final needsTime = _selectedType == 'LATENESS' || _selectedType == 'INDIVIDUAL_DISMISSAL' || _selectedType == 'PICKUP';
+    final needsTime = _selectedType == 'PICKUP';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -713,7 +735,7 @@ class _ChangeRequestModalState extends State<ChangeRequestModal> {
           const SizedBox(height: 14),
         ],
 
-        // 시간 입력 (지각 / 픽업 등)
+        // 시간 입력 (픽업 등)
         if (needsTime) ...[
           const Text(
             '예상 시간 (선택)',
@@ -758,14 +780,98 @@ class _ChangeRequestModalState extends State<ChangeRequestModal> {
         // 주소 / 정류장 입력 (탑승지 변경 / 하루 탑승)
         if (needsAddress) ...[
           const Text(
-            '변경할 탑승 장소 / 도로명 주소',
+            '운행 노선 정류장 선택 (1개 선택 시 자동 할당)',
             style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
           ),
           const SizedBox(height: 6),
+          if (_isLoadingStops)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+            )
+          else if (_availableStops.isNotEmpty) ...[
+            Container(
+              constraints: const BoxConstraints(maxHeight: 160),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.all(8),
+                itemCount: _availableStops.length,
+                separatorBuilder: (ctx, idx) => const Divider(height: 8, color: Color(0xFFE2E8F0)),
+                itemBuilder: (ctx, idx) {
+                  final stop = _availableStops[idx];
+                  final isChosen = _selectedStopIndex == idx;
+                  final sName = stop['name']?.toString() ?? '정류장 ${idx + 1}';
+                  final sAddr = stop['address']?.toString() ?? sName;
+
+                  return InkWell(
+                    onTap: () {
+                      setState(() {
+                        _selectedStopIndex = idx;
+                        _addressController.text = sAddr;
+                      });
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isChosen ? const Color(0xFFEFF6FF) : Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isChosen ? const Color(0xFF2563EB) : Colors.transparent,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isChosen ? Icons.check_circle : Icons.location_on,
+                            size: 18,
+                            color: isChosen ? const Color(0xFF2563EB) : const Color(0xFF64748B),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  sName,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: isChosen ? FontWeight.bold : FontWeight.w600,
+                                    color: isChosen ? const Color(0xFF1E40AF) : const Color(0xFF1E293B),
+                                  ),
+                                ),
+                                if (sAddr != sName)
+                                  Text(
+                                    sAddr,
+                                    style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          const Text(
+            '신청 장소 / 도로명 주소 (직접 수정 가능)',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+          ),
+          const SizedBox(height: 4),
           TextField(
             controller: _addressController,
             decoration: InputDecoration(
-              hintText: '예: 성남시 분당구 정자동 123',
+              hintText: '정류장을 선택하거나 주소를 입력하세요',
               hintStyle: const TextStyle(fontSize: 14, color: Color(0xFF94A3B8)),
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),

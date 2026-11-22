@@ -550,8 +550,8 @@ export class ParentService {
     }
 
     const myChildStop = stops.find(s => s.isMyChild) || null;
-    // 개인정보 보호: 학부모에게는 내 아이 정류장만 전달 (다른 아이의 정류장 위치/이름 노출 차단)
-    const parentVisibleStops = stops.filter(s => s.isMyChild);
+    // 기사 지도와 동일하게 노선 전체의 경유지(탑승지/하차지)를 학부모 지도에도 모두 전달 (내 아이는 isMyChild=true)
+    const parentVisibleStops = stops;
 
     return {
       vehicleId: student.assignedVehicle.id,
@@ -754,6 +754,8 @@ export class ParentService {
       }
     }
 
+    (result as any).hasTodayBoarding = await this.approvalService.hasTodayBoarding(student.id, localISOTime);
+
     return result;
   }
 
@@ -791,7 +793,8 @@ export class ParentService {
       className: rawObj['반명'] || rawObj['반'] || '',
       academyName: student.academy?.name || rawObj['유치원명'] || '',
       vehicleName: student.assignedVehicle?.busNumber || '차량 미배정',
-      approvalStatus: student.approvalStatus
+      approvalStatus: student.approvalStatus,
+      isNotRiding: !!student.isNotRiding,
     };
   }
 
@@ -827,6 +830,7 @@ export class ParentService {
         academyName: s.academy?.name || rawObj['유치원명'] || '',
         vehicleName: s.assignedVehicle?.busNumber || '차량 미배정',
         approvalStatus: s.approvalStatus,
+        isNotRiding: !!s.isNotRiding,
       };
     });
   }

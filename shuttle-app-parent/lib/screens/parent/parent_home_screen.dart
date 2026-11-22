@@ -245,6 +245,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
               if (!mounted || data['lat'] == null || data['lng'] == null) return;
               final vid = (data['vehicleId'] as num?)?.toInt();
               if (vid != null && vid != routeVehicleId) return; // 내 아이 차량 것만
+              if (_isOperating == false) return; // 운행 종료 상태면 버스 위치 띄우지 않음
               setState(() {
                 _busLat = double.tryParse(data['lat'].toString());
                 _busLng = double.tryParse(data['lng'].toString());
@@ -1219,8 +1220,8 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
 
     final isGohome = _activeTab == 'gohome';
     final stepTitles = isGohome
-        ? ['원 하원 대기', '셔틀 탑승 중', '정류장 하차 완료']
-        : ['정류장 탑승 대기', '셔틀 이동 중', '원 도착 완료'];
+        ? ['하원 대기', '셔틀 이동', '도착 완료']
+        : ['탑승 대기', '셔틀 이동', '도착 완료'];
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -1247,11 +1248,14 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
           Row(
             children: [
               for (int i = 0; i < 3; i++) ...[
-                _buildStepNode(
-                  stepNumber: i + 1,
-                  title: stepTitles[i],
-                  isActive: i == currentStep,
-                  isDone: i < currentStep,
+                SizedBox(
+                  width: 80,
+                  child: _buildStepNode(
+                    stepNumber: i + 1,
+                    title: stepTitles[i],
+                    isActive: i == currentStep,
+                    isDone: i < currentStep,
+                  ),
                 ),
                 if (i < 2)
                   Expanded(
@@ -1304,6 +1308,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
         const SizedBox(height: 6),
         Text(
           title,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
             fontSize: 11,
             fontWeight: isActive || isDone ? FontWeight.bold : FontWeight.w500,
@@ -1314,8 +1321,54 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     );
   }
 
+  Future<void> _handleCancelTodayBoarding() async {
+    if (_childInfo == null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('하루 탑승 취소', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        content: Text(
+          '오늘 ${_childInfo!.name} 원아의 하루 탑승 신청을 취소하시겠습니까?',
+          style: const TextStyle(fontSize: 13, color: Color(0xFF334155), height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('닫기', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('취소 확인'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+    final res = await ApiService().cancelTodayBoarding(_childInfo!.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(res['message'] ?? '금일 신청한 탑승 신청이 취소되었습니다.'),
+        backgroundColor: res['success'] == true ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+      ),
+    );
+    if (res['success'] == true) {
+      _loadAllData();
+    }
+  }
+
   // 원클릭 빠른 일정 변경 바
   Widget _buildQuickActionRow() {
+    final isNotRiding = _childInfo?.isNotRiding == true;
+    final hasTodayBoarding = _todaySchedule?['hasTodayBoarding'] == true;
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1362,75 +1415,143 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
             ],
           ),
           const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: InkWell(
-                    onTap: () => _handleQuickChangeRequest(
-                      type: 'ABSENCE',
-                      title: '오늘 결석',
-                      description: '오늘 하루 종일 등원하지 않으며 차량에 탑승하지 않습니다.',
-                    ),
+          if (isNotRiding) ...[
+            // 기본 미탑승 학생: 셔틀 안탐 숨김. 하루 탑승 신청 또는 취소 버튼
+            if (hasTodayBoarding)
+              InkWell(
+                onTap: _handleCancelTodayBoarding,
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
                     borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFFFECACA)),
+                    border: Border.all(color: const Color(0xFFFECACA), width: 1.5),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.cancel_outlined, size: 18, color: Color(0xFFDC2626)),
+                      SizedBox(width: 8),
+                      Text(
+                        '오늘 하루 탑승 취소',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
                       ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text('🚨', style: TextStyle(fontSize: 13)),
-                          SizedBox(width: 6),
-                          Text(
-                            '오늘 하루 결석',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
-                          ),
-                        ],
+                    ],
+                  ),
+                ),
+              )
+            else
+              InkWell(
+                onTap: () async {
+                  final user = ApiService().currentUser;
+                  if (user == null) return;
+                  if (mounted) setState(() => _isModalOpen = true);
+                  await showDialog(
+                    context: context,
+                    builder: (_) => ChangeRequestModal(
+                      email: user.email,
+                      initialType: 'ONE_TIME_BOARDING',
+                      onSuccess: _loadAllData,
+                    ),
+                  );
+                  if (mounted) setState(() => _isModalOpen = false);
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF93C5FD), width: 1.5),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.directions_bus, size: 18, color: Color(0xFF2563EB)),
+                      SizedBox(width: 8),
+                      Text(
+                        '오늘 하루 탑승 신청',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ] else ...[
+            // 기본 탑승 학생: 하루 탑승 숨김. 오늘 하루 결석 / 오늘 직접 하원 (보호자 픽업)
+            Row(
+              children: [
+                Expanded(
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: InkWell(
+                      onTap: () => _handleQuickChangeRequest(
+                        type: 'ABSENCE',
+                        title: '오늘 결석',
+                        description: '오늘 하루 종일 등원하지 않으며 차량에 탑승하지 않습니다.',
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFFECACA)),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text('🚨', style: TextStyle(fontSize: 13)),
+                            SizedBox(width: 6),
+                            Text(
+                              '오늘 하루 결석',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: InkWell(
-                    onTap: () => _handleQuickChangeRequest(
-                      type: 'PICKUP',
-                      title: '직접 픽업',
-                      description: '하원 셔틀을 타지 않고 보호자가 원으로 직접 아이를 데리러 갑니다.',
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFFBFDBFE)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: InkWell(
+                      onTap: () => _handleQuickChangeRequest(
+                        type: 'PICKUP',
+                        title: '직접 하원(픽업)',
+                        description: '하원 셔틀을 타지 않고 보호자가 원으로 직접 아이를 데리러 갑니다.',
                       ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text('🚶', style: TextStyle(fontSize: 13)),
-                          SizedBox(width: 6),
-                          Text(
-                            '오늘 직접 픽업',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
-                          ),
-                        ],
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFBFDBFE)),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text('🚶', style: TextStyle(fontSize: 13)),
+                            SizedBox(width: 6),
+                            Text(
+                              '오늘 직접 하원(픽업)',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ],
       ),
     );

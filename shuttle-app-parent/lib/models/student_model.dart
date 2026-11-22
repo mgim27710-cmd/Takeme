@@ -19,6 +19,7 @@ class StudentModel {
   final String? academyName;
   final String? vehicleName;
   final String? approvalStatus;
+  final bool isNotRiding;
   String? boardStatus;
 
   StudentModel({
@@ -42,6 +43,7 @@ class StudentModel {
     this.academyName,
     this.vehicleName,
     this.approvalStatus,
+    this.isNotRiding = false,
     this.boardStatus,
   });
 
@@ -73,6 +75,7 @@ class StudentModel {
       academyName: json['academyName'],
       vehicleName: json['vehicleName'],
       approvalStatus: json['approvalStatus'],
+      isNotRiding: json['isNotRiding'] == true,
       boardStatus: json['boardStatus']?.toString(),
     );
   }

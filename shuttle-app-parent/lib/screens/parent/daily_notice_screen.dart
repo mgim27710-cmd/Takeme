@@ -507,32 +507,44 @@ class _DailyNoticeScreenState extends State<DailyNoticeScreen> {
                     Text(dateStr, style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
                     const Spacer(),
                     InkWell(
-                      onTap: () {
-                        setState(() {
-                          if (isConfirmed) {
-                            _confirmedNoticeIds.remove(id);
-                          } else {
-                            _confirmedNoticeIds.add(id);
-                          }
-                        });
-                      },
+                      onTap: isConfirmed
+                          ? () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('이미 확인을 완료한 알림장입니다.'),
+                                  duration: Duration(seconds: 1),
+                                ),
+                              );
+                            }
+                          : () {
+                              setState(() {
+                                _confirmedNoticeIds.add(id);
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('알림장을 확인 완료했습니다.'),
+                                  backgroundColor: Color(0xFF10B981),
+                                  duration: Duration(seconds: 1),
+                                ),
+                              );
+                            },
                       borderRadius: BorderRadius.circular(8),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         child: Row(
                           children: [
                             Icon(
-                              isConfirmed ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+                              isConfirmed ? Icons.check_circle_rounded : Icons.check_box_outline_blank_rounded,
                               size: 16,
-                              color: isConfirmed ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
+                              color: isConfirmed ? const Color(0xFF059669) : const Color(0xFF94A3B8),
                             ),
                             const SizedBox(width: 4),
                             Text(
-                              isConfirmed ? '확인 취소' : '확인했어요',
+                              isConfirmed ? '확인완료' : '확인하기',
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,
-                                color: isConfirmed ? const Color(0xFF2563EB) : const Color(0xFF64748B),
+                                color: isConfirmed ? const Color(0xFF059669) : const Color(0xFF64748B),
                               ),
                             ),
                           ],
@@ -780,21 +792,31 @@ class _DailyNoticeDetailScreenState extends State<DailyNoticeDetailScreen> {
 
             const SizedBox(height: 30),
 
-            // 학부모 확인 완료 버튼
+            // 학부모 확인 완료 버튼 (한 번 누르면 취소 불가 고정)
             SizedBox(
               width: double.infinity,
               height: 52,
               child: ElevatedButton.icon(
-                onPressed: () {
-                  setState(() => _confirmed = !_confirmed);
-                  widget.onConfirmChanged(_confirmed);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(_confirmed ? '알림장을 확인 완료했습니다.' : '알림장 확인 상태를 해제했습니다.'),
-                      backgroundColor: _confirmed ? const Color(0xFF10B981) : const Color(0xFF64748B),
-                    ),
-                  );
-                },
+                onPressed: _confirmed
+                    ? () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('이미 확인을 완료한 알림장입니다.'),
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      }
+                    : () {
+                        setState(() => _confirmed = true);
+                        widget.onConfirmChanged(true);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('알림장을 확인 완료했습니다.'),
+                            backgroundColor: Color(0xFF10B981),
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
                 icon: Icon(
                   _confirmed ? Icons.check_circle_rounded : Icons.check_circle_outline_rounded,
                   color: Colors.white,

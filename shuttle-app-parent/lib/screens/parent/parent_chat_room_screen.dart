@@ -6,6 +6,7 @@ import '../../services/socket_service.dart';
 import '../../widgets/load_error_view.dart';
 import 'board_community_screen.dart';
 import 'class_board_screen.dart';
+import 'change_request_modal.dart';
 
 class ParentChatRoomScreen extends StatefulWidget {
   final int roomId;
@@ -48,14 +49,6 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
   String? _myEmail;
   int? _myUserId;
   List<Map<String, dynamic>> _children = [];
-
-  final List<String> _quickTemplates = [
-    '💊 오늘 감기약 복용 부탁드립니다.',
-    '🚗 하원 시 보호자(가족)가 직접 픽업 예정입니다.',
-    '⏱️ 오늘 셔틀 도착 예상 시간 문의드립니다.',
-    '🏥 아이 컨디션 저조로 오늘 결석 신청합니다.',
-    '🙏 알림장 내용 잘 확인했습니다. 감사합니다!',
-  ];
 
   @override
   void initState() {
@@ -332,13 +325,13 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
                 },
               ),
               _buildFormTile(
-                icon: Icons.more_time,
-                color: const Color(0xFFD97706),
-                title: '등원 지각 알림서 (지각원)',
-                subtitle: '병원 진료 등 예상 등원 시간 및 사유 안내',
+                icon: Icons.directions_walk,
+                color: const Color(0xFF8B5CF6),
+                title: '오늘 직접 하원(픽업) 신청서',
+                subtitle: '셔틀을 타지 않고 보호자가 직접 데리러 가는 신청',
                 onTap: () {
                   Navigator.pop(ctx);
-                  _showLatenessDialog();
+                  _showParentPickupDialog();
                 },
               ),
               _buildFormTile(
@@ -352,23 +345,20 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
                 },
               ),
               _buildFormTile(
-                icon: Icons.directions_car,
-                color: const Color(0xFF0D9488),
-                title: '학부모 직접 픽업 신청서',
-                subtitle: '보호자 직접 픽업 및 셔틀 하차 제외 신청',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showParentPickupDialog();
-                },
-              ),
-              _buildFormTile(
                 icon: Icons.directions_bus,
                 color: const Color(0xFF2563EB),
-                title: '셔틀 탑승 및 배정/변경 결재 신청',
-                subtitle: '탑승지 변경 및 신규 셔틀 배정 요청',
+                title: '통학 변경 / 하루 탑승 신청서',
+                subtitle: '하루 탑승 신청 및 탑승지 변경 요청',
                 onTap: () {
                   Navigator.pop(ctx);
-                  _showShuttleApprovalDialog();
+                  final email = ApiService().currentUser?.email ?? _myEmail ?? '';
+                  showDialog(
+                    context: context,
+                    builder: (_) => ChangeRequestModal(
+                      email: email,
+                      onSuccess: () {},
+                    ),
+                  );
                 },
               ),
             ],
@@ -675,173 +665,6 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
   }
 
   // =========================================================================
-  // 2. 등원 지각 알림서 (지각원) 서식 다이얼로그
-  // =========================================================================
-
-  void _showLatenessDialog() {
-    final nameCtrl = TextEditingController(text: _getDefaultChildName());
-    final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final tomorrowStr = DateFormat('yyyy-MM-dd').format(DateTime.now().add(const Duration(days: 1)));
-
-    String date = todayStr;
-    final timeCtrl = TextEditingController(text: '10:30');
-    String reason = '병원 진료 후 등원';
-    final detailCtrl = TextEditingController();
-
-    final List<String> reasonChips = [
-      '병원 진료 후 등원',
-      '가정 사정 / 늦잠',
-      '교통 정체 / 차량 지연',
-      '기타',
-    ];
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFD97706).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.more_time, color: Color(0xFFD97706), size: 18),
-              ),
-              const SizedBox(width: 8),
-              const Text('등원 지각 알림서 (지각원)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: '대상 원아 이름', isDense: true),
-                ),
-                const SizedBox(height: 14),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('지각 일자:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
-                    Row(
-                      children: [
-                        InkWell(
-                          onTap: () => setDState(() => date = todayStr),
-                          borderRadius: BorderRadius.circular(6),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: date == todayStr ? const Color(0xFFD97706) : const Color(0xFFF1F5F9),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text('오늘', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: date == todayStr ? Colors.white : const Color(0xFF475569))),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        InkWell(
-                          onTap: () => setDState(() => date = tomorrowStr),
-                          borderRadius: BorderRadius.circular(6),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: date == tomorrowStr ? const Color(0xFFD97706) : const Color(0xFFF1F5F9),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text('내일', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: date == tomorrowStr ? Colors.white : const Color(0xFF475569))),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: timeCtrl,
-                  decoration: const InputDecoration(labelText: '예상 등원 시간', hintText: '예: 10:30', isDense: true),
-                ),
-                const SizedBox(height: 14),
-                const Text('지각 사유 빠른 선택:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: reasonChips.map((r) {
-                    final isSel = reason == r;
-                    return InkWell(
-                      onTap: () => setDState(() => reason = r),
-                      borderRadius: BorderRadius.circular(8),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: isSel ? const Color(0xFFFFFBEB) : Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: isSel ? const Color(0xFFD97706) : const Color(0xFFE2E8F0)),
-                        ),
-                        child: Text(
-                          r,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                            color: isSel ? const Color(0xFFD97706) : const Color(0xFF475569),
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: detailCtrl,
-                  maxLines: 2,
-                  decoration: const InputDecoration(labelText: '상세 사유', hintText: '상세 내용 입력', isDense: true),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
-            ElevatedButton(
-              onPressed: () {
-                final name = nameCtrl.text.trim();
-                final time = timeCtrl.text.trim();
-                final detail = detailCtrl.text.trim();
-                if (name.isEmpty) return;
-                Navigator.pop(ctx);
-
-                final fullReason = detail.isNotEmpty ? '$reason ($detail)' : reason;
-                final text = '[등원 지각 알림서 (지각원)]\n- 대상 원아: $name\n- 지각 일자: $date\n- 예상 등원 시간: $time\n- 지각 사유: $reason\n- 상세 내용: ${detail.isNotEmpty ? detail : '상세 사유 없음'}\n\n확인 및 출결 반영 부탁드립니다.';
-
-                final payload = {
-                  'isAbsenceForm': true,
-                  'formType': 'LATENESS',
-                  'formTitle': '등원 지각 알림서 (지각원)',
-                  'studentName': name,
-                  'targetTime': time,
-                  'startDate': date,
-                  'endDate': date,
-                  'reason': fullReason,
-                  'status': 'PENDING',
-                  'type': 'change_request',
-                };
-
-                _handleSendMessage(presetText: text, type: 'ABSENCE_REQUEST', payload: payload);
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD97706)),
-              child: const Text('지각원 제출', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // =========================================================================
   // 3. 연장 보육 신청서 서식 다이얼로그
   // =========================================================================
 
@@ -955,74 +778,6 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
             },
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488)),
             child: const Text('신청서 제출', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // =========================================================================
-  // 5. 셔틀 탑승 결재 신청 다이얼로그
-  // =========================================================================
-
-  void _showShuttleApprovalDialog() {
-    final nameCtrl = TextEditingController(text: _getDefaultChildName());
-    final busCtrl = TextEditingController(text: '1호차');
-    final locCtrl = TextEditingController();
-    final timeCtrl = TextEditingController(text: '08:40');
-    final noteCtrl = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('셔틀 탑승 결재 신청', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: '원아 이름', hintText: '예: 김하늘', isDense: true)),
-              const SizedBox(height: 10),
-              TextField(controller: busCtrl, decoration: const InputDecoration(labelText: '배정 희망 차량', hintText: '예: 1호차', isDense: true)),
-              const SizedBox(height: 10),
-              TextField(controller: locCtrl, decoration: const InputDecoration(labelText: '신청 탑승 장소', hintText: '예: 래미안아파트 후문', isDense: true)),
-              const SizedBox(height: 10),
-              TextField(controller: timeCtrl, decoration: const InputDecoration(labelText: '예상 탑승 시간', hintText: '예: 08:40', isDense: true)),
-              const SizedBox(height: 10),
-              TextField(controller: noteCtrl, maxLines: 2, decoration: const InputDecoration(labelText: '신청 메모 / 사유', hintText: '요청사항 및 메모', isDense: true)),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
-          ElevatedButton(
-            onPressed: () {
-              final name = nameCtrl.text.trim();
-              final bus = busCtrl.text.trim();
-              final loc = locCtrl.text.trim();
-              final time = timeCtrl.text.trim();
-              final note = noteCtrl.text.trim();
-              if (name.isEmpty || loc.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('원아 이름과 탑승 장소를 입력해주세요.')));
-                return;
-              }
-              Navigator.pop(ctx);
-
-              final text = '[신규 탑승 및 결재 신청]\n원아: $name\n탑승 차량: $bus\n신청 탑승지: $loc\n예상 시간: $time\n메모: ${note.isNotEmpty ? note : '신규 탑승 승인 요청'}\n\n승인 결재를 부탁드립니다.';
-              final payload = {
-                'studentName': name,
-                'busNumber': bus,
-                'boardingLocation': loc,
-                'targetTime': time,
-                'note': note,
-                'status': 'PENDING',
-                'type': 'change_request',
-              };
-
-              _handleSendMessage(presetText: text, type: 'PAYMENT_REQUEST', payload: payload);
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2563EB)),
-            child: const Text('신청서 보내기', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -1620,41 +1375,6 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
                                 return _buildMessageItem(msg, showDate, dateText);
                               },
                             ),
-            ),
-
-            // 빠른 메시지 템플릿 칩 가로 스크롤
-            Container(
-              height: 42,
-              color: Colors.white,
-              child: ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                scrollDirection: Axis.horizontal,
-                itemCount: _quickTemplates.length,
-                separatorBuilder: (context, idx) => const SizedBox(width: 8),
-                itemBuilder: (context, index) {
-                  final text = _quickTemplates[index];
-                  return InkWell(
-                    onTap: () {
-                      _textController.text = text;
-                      _focusNode.requestFocus();
-                    },
-                    borderRadius: BorderRadius.circular(16),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        text,
-                        style: const TextStyle(fontSize: 12, color: Color(0xFF334155), fontWeight: FontWeight.w500),
-                      ),
-                    ),
-                  );
-                },
-              ),
             ),
 
             // 하단 입력 바 (교사 대화방과 100% 동일한 [+] 버튼 및 단일 캡슐형 입력 구조)

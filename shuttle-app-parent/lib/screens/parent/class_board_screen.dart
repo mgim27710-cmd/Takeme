@@ -286,10 +286,90 @@ class _ClassBoardScreenState extends State<ClassBoardScreen> {
   }
 }
 
-class ClassBoardDetailScreen extends StatelessWidget {
+class ClassBoardDetailScreen extends StatefulWidget {
   final Map<String, dynamic> post;
 
   const ClassBoardDetailScreen({super.key, required this.post});
+
+  @override
+  State<ClassBoardDetailScreen> createState() => _ClassBoardDetailScreenState();
+}
+
+class _ClassBoardDetailScreenState extends State<ClassBoardDetailScreen> {
+  final TextEditingController _commentController = TextEditingController();
+  final List<Map<String, dynamic>> _comments = [];
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.post['comments'] is List) {
+      for (final c in (widget.post['comments'] as List)) {
+        if (c is Map) {
+          _comments.add(Map<String, dynamic>.from(c));
+        }
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submitComment() async {
+    final text = _commentController.text.trim();
+    if (text.isEmpty) return;
+
+    final postId = widget.post['id'] is int
+        ? widget.post['id']
+        : int.tryParse(widget.post['id']?.toString() ?? '0') ?? 0;
+    if (postId == 0) return;
+
+    final user = ApiService().currentUser;
+    final authorName = user?.name ?? '학부모';
+
+    setState(() => _isSubmitting = true);
+    final res = await ApiService().addPostComment(
+      postId,
+      content: text,
+      authorName: authorName,
+      authorRole: 'PARENT',
+    );
+    if (!mounted) return;
+    setState(() => _isSubmitting = false);
+
+    if (res['success'] == true) {
+      _commentController.clear();
+      final newComment = res['data'] is Map
+          ? Map<String, dynamic>.from(res['data'])
+          : {
+              'id': DateTime.now().millisecondsSinceEpoch,
+              'content': text,
+              'authorName': authorName,
+              'authorRole': 'PARENT',
+              'createdAt': DateTime.now().toIso8601String(),
+            };
+      setState(() {
+        _comments.add(newComment);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('댓글이 등록되었습니다.'),
+          duration: Duration(seconds: 1),
+          backgroundColor: Color(0xFF10B981),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['message'] ?? '댓글 작성에 실패했습니다.'),
+          backgroundColor: const Color(0xFFEF4444),
+        ),
+      );
+    }
+  }
 
   String _resolveImageUrl(String? url, {bool thumbnail = false}) {
     if (url == null || url.trim().isEmpty) return '';
@@ -349,6 +429,7 @@ class ClassBoardDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final post = widget.post;
     final title = post['title']?.toString() ?? '제목 없음';
     final content = post['content']?.toString() ?? '';
     final author = post['authorName']?.toString() ?? '선생님';
@@ -384,131 +465,275 @@ class ClassBoardDetailScreen extends StatelessWidget {
           child: Container(color: const Color(0xFFF1F5F9), height: 1),
         ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: isClassOnly ? const Color(0xFFDBEAFE) : const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(6),
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: isClassOnly ? const Color(0xFFDBEAFE) : const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          isClassOnly ? targetClass : '전체 공지',
+                          style: TextStyle(
+                            color: isClassOnly ? const Color(0xFF1D4ED8) : const Color(0xFF475569),
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        dateStr,
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                      ),
+                    ],
                   ),
-                  child: Text(
-                    isClassOnly ? targetClass : '전체 공지',
-                    style: TextStyle(
-                      color: isClassOnly ? const Color(0xFF1D4ED8) : const Color(0xFF475569),
-                      fontSize: 12,
+                  const SizedBox(height: 12),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 20,
                       fontWeight: FontWeight.bold,
+                      color: Color(0xFF0F172A),
+                      height: 1.3,
                     ),
                   ),
-                ),
-                const Spacer(),
-                Text(
-                  dateStr,
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF0F172A),
-                height: 1.3,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(Icons.account_circle, size: 20, color: Color(0xFF64748B)),
-                const SizedBox(width: 6),
-                Text(
-                  author,
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            const Divider(color: Color(0xFFF1F5F9)),
-            const SizedBox(height: 16),
-            Text(
-              content,
-              style: const TextStyle(
-                fontSize: 15,
-                height: 1.7,
-                color: Color(0xFF334155),
-              ),
-            ),
-            if (allImages.isNotEmpty) ...[
-              const SizedBox(height: 24),
-              const Text(
-                '첨부 사진 (터치하여 확대)',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
-              ),
-              const SizedBox(height: 10),
-              ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: allImages.length,
-                separatorBuilder: (ctx, idx) => const SizedBox(height: 12),
-                itemBuilder: (ctx, idx) {
-                  final imgUrl = allImages[idx];
-                  return GestureDetector(
-                    onTap: () => _openImageZoom(context, imgUrl),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(14),
-                      child: Stack(
-                        alignment: Alignment.bottomRight,
-                        children: [
-                          Image.network(
-                            _resolveImageUrl(imgUrl, thumbnail: true),
-                            width: double.infinity,
-                            fit: BoxFit.cover,
-                            cacheWidth: 800,
-                            filterQuality: FilterQuality.low,
-                            errorBuilder: (c, e, s) => Container(
-                              height: 180,
-                              color: const Color(0xFFF1F5F9),
-                              child: const Center(
-                                child: Icon(Icons.broken_image_outlined, color: Color(0xFF94A3B8), size: 36),
-                              ),
-                            ),
-                          ),
-                          Container(
-                            margin: const EdgeInsets.all(10),
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.6),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(Icons.account_circle, size: 20, color: Color(0xFF64748B)),
+                      const SizedBox(width: 6),
+                      Text(
+                        author,
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(color: Color(0xFFF1F5F9)),
+                  const SizedBox(height: 16),
+                  Text(
+                    content,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      height: 1.7,
+                      color: Color(0xFF334155),
+                    ),
+                  ),
+                  if (allImages.isNotEmpty) ...[
+                    const SizedBox(height: 24),
+                    const Text(
+                      '첨부 사진 (터치하여 확대)',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+                    ),
+                    const SizedBox(height: 10),
+                    ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: allImages.length,
+                      separatorBuilder: (ctx, idx) => const SizedBox(height: 12),
+                      itemBuilder: (ctx, idx) {
+                        final imgUrl = allImages[idx];
+                        return GestureDetector(
+                          onTap: () => _openImageZoom(context, imgUrl),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: Stack(
+                              alignment: Alignment.bottomRight,
                               children: [
-                                Icon(Icons.zoom_in, color: Colors.white, size: 16),
-                                SizedBox(width: 4),
-                                Text(
-                                  '확대보기',
-                                  style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                Image.network(
+                                  _resolveImageUrl(imgUrl, thumbnail: true),
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                  cacheWidth: 800,
+                                  filterQuality: FilterQuality.low,
+                                  errorBuilder: (c, e, s) => Container(
+                                    height: 180,
+                                    color: const Color(0xFFF1F5F9),
+                                    child: const Center(
+                                      child: Icon(Icons.broken_image_outlined, color: Color(0xFF94A3B8), size: 36),
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  margin: const EdgeInsets.all(10),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.6),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.zoom_in, color: Colors.white, size: 16),
+                                      SizedBox(width: 4),
+                                      Text(
+                                        '확대보기',
+                                        style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ],
                             ),
                           ),
-                        ],
-                      ),
+                        );
+                      },
                     ),
-                  );
-                },
+                  ],
+                  const SizedBox(height: 24),
+                  const Divider(color: Color(0xFFE2E8F0)),
+                  const SizedBox(height: 16),
+
+                  // 댓글 섹션
+                  Row(
+                    children: [
+                      const Icon(Icons.chat_bubble_outline, size: 18, color: Color(0xFF2563EB)),
+                      const SizedBox(width: 6),
+                      Text(
+                        '댓글 ${_comments.length}',
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (_comments.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 20),
+                      alignment: Alignment.center,
+                      child: const Text(
+                        '작성된 댓글이 없습니다. 첫 댓글을 남겨보세요.',
+                        style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+                      ),
+                    )
+                  else
+                    ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _comments.length,
+                      separatorBuilder: (ctx, idx) => const Divider(height: 16, color: Color(0xFFF1F5F9)),
+                      itemBuilder: (ctx, idx) {
+                        final c = _comments[idx];
+                        final cAuthor = c['authorName']?.toString() ?? '익명';
+                        final cRole = c['authorRole']?.toString() ?? 'USER';
+                        final cRoleKr = cRole == 'ADMIN'
+                            ? '원장님'
+                            : (cRole == 'TEACHER' || cRole == 'HOMEROOM_TEACHER' ? '선생님' : '학부모');
+                        final cTime = _formatDate(c['createdAt']);
+                        final cContent = c['content']?.toString() ?? '';
+
+                        return Container(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    cAuthor,
+                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: cRole == 'ADMIN'
+                                          ? const Color(0xFFFEF3C7)
+                                          : (cRole == 'PARENT' ? const Color(0xFFEFF6FF) : const Color(0xFFECFDF5)),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      cRoleKr,
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: cRole == 'ADMIN'
+                                            ? const Color(0xFFD97706)
+                                            : (cRole == 'PARENT' ? const Color(0xFF2563EB) : const Color(0xFF059669)),
+                                      ),
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  Text(
+                                    cTime,
+                                    style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                cContent,
+                                style: const TextStyle(fontSize: 14, color: Color(0xFF334155), height: 1.4),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  const SizedBox(height: 20),
+                ],
               ),
-            ],
-            const SizedBox(height: 30),
-          ],
-        ),
+            ),
+          ),
+
+          // 하단 댓글 입력창
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _commentController,
+                      decoration: InputDecoration(
+                        hintText: '댓글을 입력하세요...',
+                        hintStyle: const TextStyle(fontSize: 14, color: Color(0xFF94A3B8)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.5),
+                        ),
+                      ),
+                      minLines: 1,
+                      maxLines: 3,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: _isSubmitting ? null : _submitComment,
+                    icon: _isSubmitting
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.send_rounded, color: Color(0xFF2563EB)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

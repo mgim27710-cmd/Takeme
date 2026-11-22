@@ -192,58 +192,38 @@ class _KakaoMapViewState extends State<KakaoMapView> {
         ? (widget.isGohome ? '하차 완료' : '탑승 완료')
         : (widget.isGohome ? '우리 아이 내리는 곳' : '우리 아이 타는 곳');
 
-    if (widget.isOperating) {
-      // 운행 중: 기사 지도처럼 전체 경유지 표시
-      // 개인정보 보호: 내 아이 정류장 외 다른 정류장은 순번(1, 2, 3...)으로만 표시
-      bool childIncluded = false;
-      for (var i = 0; i < widget.stops.length; i++) {
-        final s = widget.stops[i];
-        if (s.isMyChild) {
-          childIncluded = true;
-          stops.add(NaverStopPoint(
-            lat: s.latitude,
-            lng: s.longitude,
-            label: childLabel,
-            isMine: true,
-            popup: s.address ?? s.name,
-          ));
-        } else {
-          stops.add(NaverStopPoint(
-            lat: s.latitude,
-            lng: s.longitude,
-            label: '${i + 1}',
-            isMine: false,
-          ));
-        }
+    // 기사 지도와 동일하게 운행 여부와 관계없이 전체 경유지(탑승지/하차지) 표시
+    // 내 아이 정류장은 강조, 다른 정류장은 순번(1, 2, 3...)으로 표시
+    bool childIncluded = false;
+    for (var i = 0; i < widget.stops.length; i++) {
+      final s = widget.stops[i];
+      if (s.isMyChild) {
+        childIncluded = true;
+        stops.add(NaverStopPoint(
+          lat: s.latitude,
+          lng: s.longitude,
+          label: childLabel,
+          isMine: true,
+          popup: s.address ?? s.name,
+        ));
+      } else {
+        stops.add(NaverStopPoint(
+          lat: s.latitude,
+          lng: s.longitude,
+          label: '${i + 1}',
+          isMine: false,
+          popup: s.name,
+        ));
       }
+    }
 
-      if (!childIncluded && widget.myChildLat != null && widget.myChildLng != null) {
-        stops.add(NaverStopPoint(
-          lat: widget.myChildLat!,
-          lng: widget.myChildLng!,
-          label: childLabel,
-          isMine: true,
-        ));
-      }
-    } else {
-      // 운행 전: 내 아이 정류장만 표시 (버스는 숨김)
-      final mine = widget.stops.where((s) => s.isMyChild).toList();
-      if (mine.isNotEmpty) {
-        stops.add(NaverStopPoint(
-          lat: mine.first.latitude,
-          lng: mine.first.longitude,
-          label: childLabel,
-          isMine: true,
-          popup: mine.first.address ?? mine.first.name,
-        ));
-      } else if (widget.myChildLat != null && widget.myChildLng != null) {
-        stops.add(NaverStopPoint(
-          lat: widget.myChildLat!,
-          lng: widget.myChildLng!,
-          label: childLabel,
-          isMine: true,
-        ));
-      }
+    if (!childIncluded && widget.myChildLat != null && widget.myChildLng != null) {
+      stops.add(NaverStopPoint(
+        lat: widget.myChildLat!,
+        lng: widget.myChildLng!,
+        label: childLabel,
+        isMine: true,
+      ));
     }
 
     return NaverRouteMap(
@@ -645,85 +625,55 @@ class _KakaoMapViewState extends State<KakaoMapView> {
             return L.marker([lat, lng], { icon: icon, zIndexOffset: z }).bindPopup(popup).addTo(dataLayer);
           }
 
-          if (isOperating) {
-            // 1. 운행 중: 전체 경유지 및 버스 표시
-            var childFound = false;
-            (stops || []).forEach(function(s, idx) {
-              if (s.isMyChild) {
-                childFound = true;
-                myChildLatLng = [s.lat, s.lng];
-                var badgeIcon = L.divIcon({
-                  className: '',
-                  html: '<div class="child-point-dot">★ ' + childLabel + '</div>',
-                  iconSize: [110, 28],
-                  iconAnchor: [55, 14]
-                });
-                var m = L.marker([s.lat, s.lng], { icon: badgeIcon, zIndexOffset: 1200 })
-                  .bindPopup('<b>📍 우리 아이 ' + childLabel + '</b><br/>' + (s.address || s.name || '')).addTo(dataLayer);
-                m.openPopup();
-                pts.push([s.lat, s.lng]);
-              } else {
-                // 개인정보 보호: 순번 핀만 표시
-                var numIcon = L.divIcon({
-                  className: '',
-                  html: '<div class="waypoint-dot">' + (idx + 1) + '</div>',
-                  iconSize: [26, 26],
-                  iconAnchor: [13, 13]
-                });
-                L.marker([s.lat, s.lng], { icon: numIcon, zIndexOffset: 500 })
-                  .bindPopup('<b>경유지 ' + (idx + 1) + '</b>').addTo(dataLayer);
-                pts.push([s.lat, s.lng]);
-              }
-            });
-
-            if (!childFound && childLatArg && childLngArg) {
-              myChildLatLng = [childLatArg, childLngArg];
+          // 전체 경유지(탑승지/하차지) 표시 (운행 여부와 무관하게 항상 표시)
+          var childFound = false;
+          (stops || []).forEach(function(s, idx) {
+            if (s.isMyChild) {
+              childFound = true;
+              myChildLatLng = [s.lat, s.lng];
               var badgeIcon = L.divIcon({
                 className: '',
                 html: '<div class="child-point-dot">★ ' + childLabel + '</div>',
                 iconSize: [110, 28],
                 iconAnchor: [55, 14]
               });
-              var m = L.marker([childLatArg, childLngArg], { icon: badgeIcon, zIndexOffset: 1200 })
-                .bindPopup('<b>📍 우리 아이 ' + childLabel + '</b>').addTo(dataLayer);
+              var m = L.marker([s.lat, s.lng], { icon: badgeIcon, zIndexOffset: 1200 })
+                .bindPopup('<b>📍 우리 아이 ' + childLabel + '</b><br/>' + (s.address || s.name || '')).addTo(dataLayer);
               m.openPopup();
-              pts.push([childLatArg, childLngArg]);
-            }
-
-            if (bLat && bLng) {
-              window.updateBus(bLat, bLng);
-              pts.push([bLat, bLng]);
-            } else if (busMarker) {
-              map.removeLayer(busMarker);
-              busMarker = null;
-            }
-          } else {
-            // 2. 운행 전: 내 아이 정류장만 표시, 버스는 숨김
-            if (busMarker) {
-              map.removeLayer(busMarker);
-              busMarker = null;
-            }
-            var myStop = null;
-            (stops || []).forEach(function(s) {
-              if (!myStop && s.lat && s.lng && s.isMyChild) myStop = s;
-            });
-            var childLat = childLatArg || (myStop ? myStop.lat : null);
-            var childLng = childLngArg || (myStop ? myStop.lng : null);
-            var childPlace = myStop ? (myStop.address || myStop.name) : '우리 아이 정류장';
-
-            if (childLat && childLng) {
-              myChildLatLng = [childLat, childLng];
-              var badgeIcon = L.divIcon({
+              pts.push([s.lat, s.lng]);
+            } else {
+              var numIcon = L.divIcon({
                 className: '',
-                html: '<div class="child-point-dot">★ ' + childLabel + '</div>',
-                iconSize: [110, 28],
-                iconAnchor: [55, 14]
+                html: '<div class="waypoint-dot">' + (idx + 1) + '</div>',
+                iconSize: [26, 26],
+                iconAnchor: [13, 13]
               });
-              var m = L.marker([childLat, childLng], { icon: badgeIcon, zIndexOffset: 1200 })
-                .bindPopup('<b>📍 우리 아이 ' + childLabel + '</b><br/>' + childPlace).addTo(dataLayer);
-              m.openPopup();
-              pts.push([childLat, childLng]);
+              L.marker([s.lat, s.lng], { icon: numIcon, zIndexOffset: 500 })
+                .bindPopup('<b>' + (s.name || ('경유지 ' + (idx + 1))) + '</b>' + (s.address ? '<br/>' + s.address : '')).addTo(dataLayer);
+              pts.push([s.lat, s.lng]);
             }
+          });
+
+          if (!childFound && childLatArg && childLngArg) {
+            myChildLatLng = [childLatArg, childLngArg];
+            var badgeIcon = L.divIcon({
+              className: '',
+              html: '<div class="child-point-dot">★ ' + childLabel + '</div>',
+              iconSize: [110, 28],
+              iconAnchor: [55, 14]
+            });
+            var m = L.marker([childLatArg, childLngArg], { icon: badgeIcon, zIndexOffset: 1200 })
+              .bindPopup('<b>📍 우리 아이 ' + childLabel + '</b>').addTo(dataLayer);
+            pts.push([childLatArg, childLngArg]);
+          }
+
+          // 버스 위치: 운행 중일 때만 표시, 운행 종료 시 숨김
+          if (isOperating && bLat && bLng) {
+            window.updateBus(bLat, bLng);
+            pts.push([bLat, bLng]);
+          } else if (busMarker) {
+            map.removeLayer(busMarker);
+            busMarker = null;
           }
 
           if (hasAcademy) {
