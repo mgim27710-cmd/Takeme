@@ -2,69 +2,68 @@ const fs = require('fs');
 const path = require('path');
 const { Resvg } = require('../scratch_pptx/node_modules/@resvg/resvg-js');
 
-// 1600 x 900 (레퍼런스 이미지의 16:9 와이드 슬라이드 비율)
+// 1600 x 900 표준 16:9 와이드
 const width = 1600;
 const height = 900;
 
-// 공식 SVG 로고 벡터들
+// 공식 SVG 로고 (크기를 48x48 ~ 60x60 표준 규격으로 정규화하여 텍스트와 겹치지 않도록 설계)
 const LOGOS = {
-  // 1. NestJS (공식 붉은색 고양이)
+  // 1. NestJS (48 x 48)
   nestjs: `
-    <g transform="scale(3.2)">
+    <g transform="scale(2)">
       <path d="M12 0c-.3 0-.5 0-.8.1L1.5 2.9A2.5 2.5 0 0 0 0 5.3v13.4a2.5 2.5 0 0 0 1.5 2.4l9.7 2.8c.5.2 1.1.2 1.6 0l9.7-2.8a2.5 2.5 0 0 0 1.5-2.4V5.3a2.5 2.5 0 0 0-1.5-2.4L12.8.1c-.3-.1-.5-.1-.8-.1z" fill="#E0234E"/>
       <path d="M19 12c-1.5 3-4.5 5-7.5 5-4 0-6.5-3-6.5-7 0-3 2-5 4.5-5 2 0 3.5 1 4.5 3l-2.5 1.5c-.5-1-1-1.5-2-1.5-1.5 0-2.5 1.5-2.5 3.5 0 2.5 1.5 4 4 4 1.8 0 3.2-1 4.2-2.8L19 12z" fill="#FFFFFF"/>
     </g>
   `,
-  // 2. PostgreSQL (공식 코끼리 Slonik)
+  // 2. PostgreSQL (50 x 50)
   postgresql: `
-    <g transform="scale(0.38)">
+    <g transform="scale(0.25)">
       <rect width="200" height="200" rx="30" fill="#336791"/>
       <path d="M100 25c-35 0-55 20-55 45 0 18 10 32 25 38v22c0 22 15 45 40 45s40-23 40-45v-22c15-6 25-20 25-38 0-25-20-45-55-45zm-15 35c8 0 15 7 15 15s-7 15-15 15-15-7-15-15 7-15 15-15zm45 70c0 12-8 25-20 25s-20-13-20-25v-18h40v18zm0-30h-40v-8c8-2 15-7 20-14 5 7 12 12 20 14v8zm15-25c-8 0-15-7-15-15s7-15 15-15 15 7 15 15-7 15-15 15z" fill="#FFFFFF"/>
     </g>
   `,
-  // 3. Redis (공식 붉은 큐브)
+  // 3. Redis (48 x 48)
   redis: `
-    <g transform="scale(3.2)">
+    <g transform="scale(2)">
       <rect width="24" height="24" rx="5" fill="#DC382D"/>
       <path d="M12 4l7 3.5v9L12 20l-7-3.5v-9L12 4zm0 2.2L7.5 8.5 12 10.7l4.5-2.2L12 6.2zm-5 4v5.3l5 2.5v-5.3l-5-2.5zm10 0l-4 2v5.3l4-2v-5.3z" fill="#FFFFFF"/>
     </g>
   `,
-  // 4. Socket.IO (공식 블랙 링 & 화이트 번개)
+  // 4. Socket.IO (48 x 48)
   socketio: `
-    <g transform="scale(3.2)">
+    <g transform="scale(2)">
       <circle cx="12" cy="12" r="11" fill="#010101"/>
       <circle cx="12" cy="12" r="9" fill="none" stroke="#FFFFFF" stroke-width="2"/>
       <path d="M13.5 4.5L7 13.5h5l-1.5 6 6.5-9h-5l1.5-6z" fill="#FFFFFF"/>
     </g>
   `,
-  // 5. Node.js (공식 녹색 육각형)
+  // 5. Node.js (50 x 50)
   nodejs: `
-    <g transform="scale(1.3)">
-      <path d="M30 5L5 20v30l25 15 25-15V20L30 5z" fill="#339933"/>
-      <path d="M30 18c-7 0-11 4-11 11v8c0 7 4 11 11 11s11-4 11-11v-8c0-7-4-11-11-11zm0 24c-3 0-5-2-5-5v-6c0-3 2-5 5-5s5 2 5 5v6c0 3-2 5-5 5z" fill="#FFFFFF"/>
+    <g transform="scale(1.0)">
+      <path d="M25 5L5 17v24l20 12 20-12V17L25 5z" fill="#339933"/>
+      <path d="M25 15c-5.5 0-9 3-9 9v6c0 6 3.5 9 9 9s9-3 9-9v-6c0-6-3.5-9-9-9zm0 20c-2.5 0-4-1.5-4-4v-6c0-2.5 1.5-4 4-4s4 1.5 4 4v6c0 2.5-1.5 4-4 4z" fill="#FFFFFF"/>
     </g>
   `,
-  // 6. TypeScript (공식 파란 TS 사각형)
+  // 6. TypeScript (50 x 50)
   typescript: `
-    <g transform="scale(0.42)">
+    <g transform="scale(0.28)">
       <rect width="180" height="180" rx="25" fill="#3178C6"/>
       <path d="M40 70h60v20H75v60H55V90H40V70zm65 55c5 10 15 15 25 15 12 0 18-6 18-14 0-20-35-15-35-40 0-15 12-26 30-26 12 0 22 5 28 14l-12 12c-4-6-10-9-16-9-7 0-12 4-12 9 0 18 35 12 35 39 0 16-12 28-34 28-15 0-27-6-33-16l16-12z" fill="#FFFFFF"/>
     </g>
   `,
-  // 7. Amazon S3 (레퍼런스 이미지와 동일한 공식 붉은색 3D 버킷 큐브)
+  // 7. Amazon S3 (60 x 70)
   s3: `
-    <g transform="scale(0.48)">
-      <path d="M80 20L20 50l60 30 60-30-60-30z" fill="#E05243"/>
-      <path d="M20 50v60l60 30V80L20 50z" fill="#C73E31"/>
-      <path d="M140 50v60l-60 30V80l60-30z" fill="#A82F24"/>
-      <!-- 중간 레이어 -->
-      <path d="M50 85v40l30 15V100L50 85z" fill="#E05243"/>
-      <path d="M110 85v40l-30 15V100l30-15z" fill="#C73E31"/>
+    <g transform="scale(0.42)">
+      <path d="M80 15L20 45l60 30 60-30-60-30z" fill="#E05243"/>
+      <path d="M20 45v60l60 30V75L20 45z" fill="#C73E31"/>
+      <path d="M140 45v60l-60 30V75l60-30z" fill="#A82F24"/>
+      <path d="M50 80v35l30 15V95L50 80z" fill="#E05243"/>
+      <path d="M110 80v35l-30 15V95l30-15z" fill="#C73E31"/>
     </g>
   `,
-  // 8. React.js (공식 시안 블루 원자 아톰 로고)
+  // 8. React.js (65 x 65 아톰 로고)
   react: `
-    <g transform="scale(3.8)">
+    <g transform="scale(2.2)">
       <circle cx="16" cy="16" r="3" fill="#00D8FF"/>
       <g stroke="#00D8FF" stroke-width="1.3" fill="none">
         <ellipse cx="16" cy="16" rx="14" ry="5.5"/>
@@ -73,38 +72,38 @@ const LOGOS = {
       </g>
     </g>
   `,
-  // 9. Next.js (공식 N 로고)
-  nextjs: `
-    <g transform="scale(0.38)">
-      <circle cx="100" cy="100" r="95" fill="#000000"/>
-      <path d="M145 150L85 68H68V132H83V87L136 158C139 156 142 153 145 150Z" fill="#FFFFFF"/>
-      <rect x="117" y="68" width="15" height="64" fill="#FFFFFF"/>
+  // 9. Vite (실제 shuttle-web 빌드 번들러 공식 번개 로고)
+  vite: `
+    <g transform="scale(1.2)">
+      <path d="M39.6 4.4L20.8 40.5a1.2 1.2 0 0 1-2.1.1L2.4 8.7a1.2 1.2 0 0 1 1-1.8h35.2a1.2 1.2 0 0 1 1 1.7v-.2z" fill="#41D1FF"/>
+      <path d="M29.5 4.3L19.8 40.6a1.2 1.2 0 0 1-2.2 0L9.5 22.8l20-18.5z" fill="#BD34FE"/>
+      <path d="M21.5 7.5l-9.8 8.8 6.5.6-4.2 8.5 10.5-8.8-6.2-.6 3.2-8.5z" fill="#FFD026"/>
     </g>
   `,
-  // 10. Flutter (공식 파란색 날개 셰브론)
+  // 10. Flutter (공식 파란 셰브론)
   flutter: `
-    <g transform="scale(0.4)">
+    <g transform="scale(0.32)">
       <path d="M125 0L0 125l38 38L201 0h-76z" fill="#47C5FB"/>
       <path d="M125 120L46 198l38 38 40-40 77-76h-76z" fill="#00569E"/>
       <path d="M125 197l-40 40 40 40h76l-76-80z" fill="#02569B"/>
       <path d="M125 197l-38 38 38 38 38-38-38-38z" fill="#0175C2"/>
     </g>
   `,
-  // 11. Tailwind CSS (공식 물결 로고)
+  // 11. Tailwind CSS (48 x 48)
   tailwind: `
-    <g transform="scale(3.2)">
+    <g transform="scale(2.0)">
       <path d="M12 4.8c-3.2 0-5.2 1.6-6 4.8 1.2-1.6 2.6-2.2 4.2-1.8.9.2 1.6.9 2.3 1.6C13.7 10.6 15 12 18 12c3.2 0 5.2-1.6 6-4.8-1.2 1.6-2.6 2.2-4.2 1.8-.9-.2-1.6-.9-2.3-1.6C16.3 6.2 15 4.8 12 4.8zm-6 7.2c-3.2 0-5.2 1.6-6 4.8 1.2-1.6 2.6-2.2 4.2-1.8.9.2 1.6.9 2.3 1.6 1.2 1.2 2.5 2.6 5.5 2.6 3.2 0 5.2-1.6 6-4.8-1.2 1.6-2.6 2.2-4.2 1.8-.9-.2-1.6-.9-2.3-1.6-1.2-1.2-2.5-2.6-5.5-2.6z" fill="#06B6D4"/>
     </g>
   `,
-  // 12. GitHub (공식 옥토캣 로고)
+  // 12. GitHub (50 x 50)
   github: `
-    <g transform="scale(0.38)">
+    <g transform="scale(0.28)">
       <path d="M90 0C40.3 0 0 40.3 0 90c0 39.8 25.8 73.5 61.6 85.4 4.5.8 6.1-2 6.1-4.3 0-2.1-.1-9.3-.1-17-22.6 4.1-28.7-5.5-30.5-10.6-1-2.6-5.4-10.6-9.2-12.7-3.1-1.7-7.6-5.9 0-6 7-.1 12 6.5 13.7 9.1 8 13.6 20.9 9.8 26.1 7.4 1-6 3.2-9.8 5.7-12.1-20-2.3-41-10-41-44.5 0-9.8 3.5-17.9 9.2-24.2-.9-2.3-4-11.4.9-23.8 0 0 7.6-2.4 24.8 9.2 7.2-2 14.9-3 22.5-3s15.3 1 22.5 3c17.2-11.7 24.8-9.2 24.8-9.2 4.9 12.4 1.8 21.5.9 23.8 5.7 6.3 9.2 14.3 9.2 24.2 0 34.6-21.1 42.1-41.2 44.4 3.3 2.8 6.2 8.3 6.2 16.8 0 12.2-.1 22-.1 25 0 2.4 1.6 5.2 6.2 4.3C154.2 163.4 180 129.7 180 90c0-49.7-40.3-90-90-90z" fill="#181717"/>
     </g>
   `,
-  // 13. Git (공식 주황 마름모 로고)
+  // 13. Git (50 x 50)
   git: `
-    <g transform="scale(0.42)">
+    <g transform="scale(0.35)">
       <path d="M125 15l45 45c5 5 5 13 0 18l-45 45c-5 5-13 5-18 0l-45-45c-5-5-5-13 0-18l45-45c5-5 13-5 18 0z" fill="#F05032"/>
       <circle cx="100" cy="55" r="9" fill="#FFFFFF"/>
       <circle cx="135" cy="90" r="9" fill="#FFFFFF"/>
@@ -112,9 +111,9 @@ const LOGOS = {
       <path d="M100 55v45m0-20l35 10" stroke="#FFFFFF" stroke-width="6" fill="none"/>
     </g>
   `,
-  // 14. Users (사람 실루엣)
+  // 14. Users (50 x 50)
   user: `
-    <g transform="scale(0.45)">
+    <g transform="scale(0.32)">
       <circle cx="90" cy="50" r="40" fill="#1E293B"/>
       <path d="M20 170c0-38 31-70 70-70s70 32 70 70v10H20v-10z" fill="#1E293B"/>
     </g>
@@ -124,26 +123,23 @@ const LOGOS = {
 const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <!-- 주황색 연결 화살표 마커 -->
     <marker id="arrowOrange" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto">
       <path d="M0,0 L0,6 L8,3 z" fill="#EA580C" />
     </marker>
   </defs>
 
-  <!-- 요청하신 순백색 바탕 -->
+  <!-- 순백색 바탕 -->
   <rect width="100%" height="100%" fill="#FFFFFF" />
 
-  <!-- 상단 타이틀 (레퍼런스 이미지 스타일) -->
+  <!-- 상단 타이틀 영역 -->
   <g transform="translate(60, 45)">
-    <!-- 좌측 상단 작은 오렌지 배지 -->
     <rect x="0" y="0" width="60" height="26" rx="4" fill="#EA580C" />
-    <text x="30" y="17" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11" font-weight="900" fill="#FFFFFF" text-anchor="middle">
+    <text x="30" y="18" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11" font-weight="900" fill="#FFFFFF" text-anchor="middle">
       TakeMe
     </text>
 
-    <!-- 대제목 및 구분선 -->
     <text x="75" y="19" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="20" font-weight="900" fill="#0F172A">
-      03. 구현 사항 - 서비스 구현 환경
+      03. 구현 사항 — 서비스 구현 환경
     </text>
     <circle cx="430" cy="13" r="4" fill="#EA580C" />
     <line x1="435" y1="13" x2="1480" y2="13" stroke="#FDBA74" stroke-width="2.5" />
@@ -154,172 +150,165 @@ const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
   </g>
 
   <!-- ============================================================== -->
-  <!-- [좌측] Back - End 박스 -->
+  <!-- [좌측] Back — End 박스 (오렌지 둥근 사각형) -->
   <!-- ============================================================== -->
   <g transform="translate(60, 140)">
-    <!-- 상단 라벨 -->
-    <text x="220" y="-12" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="24" font-weight="900" fill="#0F172A" text-anchor="middle">
+    <text x="225" y="-12" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="24" font-weight="900" fill="#0F172A" text-anchor="middle">
       Back — End
     </text>
 
-    <!-- 메인 오렌지 둥근 박스 -->
-    <rect width="440" height="640" rx="28" fill="#FFFFFF" stroke="#EA580C" stroke-width="3" />
+    <rect width="450" height="640" rx="28" fill="#FFFFFF" stroke="#EA580C" stroke-width="3" />
 
-    <!-- 상단 섹션: 백엔드 핵심 서비스들 -->
-    <!-- 1. NestJS -->
-    <g transform="translate(100, 45)">
-      ${LOGOS.nestjs}
-      <text x="120" y="48" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="18" font-weight="900" fill="#0F172A">
+    <!-- 1. NestJS (아이콘 x=45, 텍스트 x=115 -> 간격 25px 확보로 겹침 0%) -->
+    <g transform="translate(35, 40)">
+      <g transform="translate(0, 0)">${LOGOS.nestjs}</g>
+      <text x="75" y="24" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="17" font-weight="900" fill="#0F172A">
         NestJS Core Server
       </text>
-      <text x="120" y="72" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="13" fill="#64748B">
-        RESTful API Engine
+      <text x="75" y="44" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#64748B">
+        RESTful API &amp; 비즈니스 로직
       </text>
     </g>
 
-    <!-- 2. PostgreSQL -->
-    <g transform="translate(100, 160)">
-      ${LOGOS.postgresql}
-      <text x="120" y="46" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="18" font-weight="900" fill="#0F172A">
+    <!-- 2. PostgreSQL (아이콘 x=35, 텍스트 x=110) -->
+    <g transform="translate(35, 150)">
+      <g transform="translate(0, 0)">${LOGOS.postgresql}</g>
+      <text x="75" y="24" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="17" font-weight="900" fill="#0F172A">
         PostgreSQL 16
       </text>
-      <text x="120" y="70" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="13" fill="#64748B">
-        PostGIS Spatial Database
+      <text x="75" y="44" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#64748B">
+        PostGIS 공간 데이터 &amp; 원생 DB
       </text>
     </g>
 
-    <!-- 3. Redis -->
-    <g transform="translate(100, 275)">
-      ${LOGOS.redis}
-      <text x="120" y="48" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="18" font-weight="900" fill="#0F172A">
-        Redis 7
+    <!-- 3. Redis (아이콘 x=35, 텍스트 x=110) -->
+    <g transform="translate(35, 260)">
+      <g transform="translate(0, 0)">${LOGOS.redis}</g>
+      <text x="75" y="24" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="17" font-weight="900" fill="#0F172A">
+        Redis 7 (In-Memory)
       </text>
-      <text x="120" y="72" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="13" fill="#64748B">
-        In-Memory GPS Cache
+      <text x="75" y="44" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#64748B">
+        실시간 버스 GPS 좌표 캐시
       </text>
     </g>
 
-    <!-- 4. Socket.IO -->
-    <g transform="translate(100, 390)">
-      ${LOGOS.socketio}
-      <text x="120" y="48" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="18" font-weight="900" fill="#0F172A">
+    <!-- 4. Socket.IO (아이콘 x=35, 텍스트 x=110) -->
+    <g transform="translate(35, 370)">
+      <g transform="translate(0, 0)">${LOGOS.socketio}</g>
+      <text x="75" y="24" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="17" font-weight="900" fill="#0F172A">
         Socket.IO
       </text>
-      <text x="120" y="72" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="13" fill="#64748B">
-        0.2s Real-Time WebSocket
+      <text x="75" y="44" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#64748B">
+        0.2초 초저지연 WebSocket 브로커
       </text>
     </g>
 
-    <!-- 중간 구분선 (레퍼런스 이미지와 동일) -->
-    <line x1="20" y1="495" x2="420" y2="495" stroke="#EA580C" stroke-width="2" />
+    <!-- 중간 구분선 -->
+    <line x1="25" y1="480" x2="425" y2="480" stroke="#EA580C" stroke-width="2" />
 
-    <!-- 하단 섹션: 런타임 & 언어 (Node.js & TS) -->
-    <g transform="translate(70, 520)">
+    <!-- 하단 런타임 & 언어 (Node.js & TypeScript - 아이콘 위, 텍스트 아래 분리) -->
+    <g transform="translate(90, 510)">
       ${LOGOS.nodejs}
-      <text x="35" y="88" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="14" font-weight="bold" fill="#0F172A" text-anchor="middle">
+      <text x="25" y="75" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="15" font-weight="bold" fill="#0F172A" text-anchor="middle">
         Node.js
       </text>
     </g>
 
-    <g transform="translate(270, 520)">
+    <g transform="translate(290, 510)">
       ${LOGOS.typescript}
-      <text x="40" y="88" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="14" font-weight="bold" fill="#0F172A" text-anchor="middle">
+      <text x="25" y="75" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="15" font-weight="bold" fill="#0F172A" text-anchor="middle">
         TypeScript
       </text>
     </g>
   </g>
 
   <!-- ============================================================== -->
-  <!-- [중앙 연결] Back-End ↔ Front-End 양방향 꺾임 화살표 -->
+  <!-- [중앙 연결] Back-End <-> Front-End 양방향 꺾임 화살표 -->
   <!-- ============================================================== -->
   <g fill="none" stroke="#EA580C" stroke-width="2.5">
-    <path d="M 500 320 L 590 320 L 590 370 L 670 370" marker-end="url(#arrowOrange)" />
-    <path d="M 680 430 L 590 430 L 590 480 L 510 480" marker-end="url(#arrowOrange)" />
+    <path d="M 510 320 L 600 320 L 600 370 L 680 370" marker-end="url(#arrowOrange)" />
+    <path d="M 680 430 L 600 430 L 600 480 L 520 480" marker-end="url(#arrowOrange)" />
   </g>
-  <text x="590" y="305" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12" font-weight="bold" fill="#EA580C" text-anchor="middle">
+  <text x="600" y="305" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" font-weight="bold" fill="#EA580C" text-anchor="middle">
     REST API
   </text>
-  <text x="590" y="505" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12" font-weight="bold" fill="#EA580C" text-anchor="middle">
+  <text x="600" y="505" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" font-weight="bold" fill="#EA580C" text-anchor="middle">
     WebSocket
   </text>
 
   <!-- ============================================================== -->
   <!-- [우측] Front — End 박스 -->
   <!-- ============================================================== -->
-  <g transform="translate(680, 140)">
-    <!-- 상단 라벨 -->
-    <text x="410" y="-12" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="24" font-weight="900" fill="#0F172A" text-anchor="middle">
+  <g transform="translate(690, 140)">
+    <text x="415" y="-12" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="24" font-weight="900" fill="#0F172A" text-anchor="middle">
       Front — End
     </text>
 
-    <!-- 메인 오렌지 둥근 박스 -->
-    <rect width="820" height="460" rx="28" fill="#FFFFFF" stroke="#EA580C" stroke-width="3" />
+    <rect width="830" height="460" rx="28" fill="#FFFFFF" stroke="#EA580C" stroke-width="3" />
 
-    <!-- 왼쪽: Amazon S3 (레퍼런스 이미지와 동일 위치) -->
-    <g transform="translate(60, 140)">
-      ${LOGOS.s3}
-      <text x="40" y="145" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="20" font-weight="900" fill="#0F172A" text-anchor="middle">
+    <!-- 왼쪽: Amazon S3 (아이콘 높이 65px -> 텍스트 y=105 로 40px 마진 확보) -->
+    <g transform="translate(65, 150)">
+      <g transform="translate(5, 0)">${LOGOS.s3}</g>
+      <text x="40" y="105" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="19" font-weight="900" fill="#0F172A" text-anchor="middle">
         Amazon S3
       </text>
-      <text x="40" y="168" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="13" fill="#64748B" text-anchor="middle">
+      <text x="40" y="128" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#64748B" text-anchor="middle">
         (사진·서식 스토리지)
       </text>
     </g>
 
-    <!-- 오른쪽: 중첩된 둥근 박스 (프론트엔드/모바일 프레임워크들) -->
-    <g transform="translate(240, 25)">
-      <rect width="550" height="410" rx="22" fill="#FFFFFF" stroke="#EA580C" stroke-width="2" />
+    <!-- 오른쪽: 중첩된 둥근 박스 (실제 사용 프레임워크들: React, Vite, Flutter, Tailwind) -->
+    <g transform="translate(245, 25)">
+      <rect width="560" height="410" rx="22" fill="#FFFFFF" stroke="#EA580C" stroke-width="2" />
 
-      <!-- 1. React.js (중앙 상단 메인) -->
-      <g transform="translate(200, 25)">
-        ${LOGOS.react}
-        <text x="60" y="125" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="19" font-weight="900" fill="#0F172A" text-anchor="middle">
+      <!-- 1. React.js (상단 메인: 아이콘 높이 65px -> 텍스트 y=85 배치) -->
+      <g transform="translate(245, 25)">
+        <g transform="translate(-32, 0)">${LOGOS.react}</g>
+        <text x="0" y="85" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="20" font-weight="900" fill="#0F172A" text-anchor="middle">
           React.js
         </text>
-        <text x="60" y="145" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12" fill="#0284C7" text-anchor="middle">
-          (관리자 관제 웹)
+        <text x="0" y="106" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#0284C7" text-anchor="middle">
+          (관리자 종합 관제 웹)
         </text>
       </g>
 
-      <!-- 2. Next.js (좌측) -->
-      <g transform="translate(45, 185)">
-        ${LOGOS.nextjs}
-        <text x="40" y="98" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
-          Next.js 14
+      <!-- 2. Vite (좌측: shuttle-web 실제 번들러) -->
+      <g transform="translate(85, 175)">
+        <g transform="translate(-24, 0)">${LOGOS.vite}</g>
+        <text x="0" y="70" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
+          Vite
         </text>
-        <text x="40" y="118" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#64748B" text-anchor="middle">
-          Web Framework
+        <text x="0" y="90" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#8B5CF6" text-anchor="middle">
+          Fast Build Tool
         </text>
       </g>
 
-      <!-- 3. Flutter (중앙) -->
-      <g transform="translate(235, 185)">
-        ${LOGOS.flutter}
-        <text x="40" y="98" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
+      <!-- 3. Flutter (중앙: 4대 앱) -->
+      <g transform="translate(280, 175)">
+        <g transform="translate(-25, 0)">${LOGOS.flutter}</g>
+        <text x="0" y="70" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
           Flutter 3.x
         </text>
-        <text x="40" y="118" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#0284C7" text-anchor="middle">
+        <text x="0" y="90" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#0284C7" text-anchor="middle">
           기사/교사/학부모 앱
         </text>
       </g>
 
       <!-- 4. Tailwind CSS (우측) -->
-      <g transform="translate(415, 185)">
-        <g transform="translate(5, 5)">
-          ${LOGOS.tailwind}
-        </g>
-        <text x="45" y="98" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
+      <g transform="translate(465, 175)">
+        <g transform="translate(-24, 0)">${LOGOS.tailwind}</g>
+        <text x="0" y="70" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
           Tailwind CSS
         </text>
-        <text x="45" y="118" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#06B6D4" text-anchor="middle">
-          UI Styling
+        <text x="0" y="90" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#06B6D4" text-anchor="middle">
+          Utility-First UI
         </text>
       </g>
 
-      <!-- 5. TMap & Kakao Mobility (하단 중앙) -->
-      <g transform="translate(220, 335)">
-        <rect width="130" height="32" rx="16" fill="#EFF6FF" stroke="#BFDBFE" stroke-width="1.2" />
-        <text x="65" y="21" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12" font-weight="bold" fill="#1D4ED8" text-anchor="middle">
+      <!-- 하단: TMap & Kakao Mobility 뱃지 -->
+      <g transform="translate(205, 335)">
+        <rect width="150" height="34" rx="17" fill="#EFF6FF" stroke="#BFDBFE" stroke-width="1.2" />
+        <text x="75" y="22" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" font-weight="bold" fill="#1D4ED8" text-anchor="middle">
           🗺️ TMap &amp; Kakao SDK
         </text>
       </g>
@@ -327,47 +316,45 @@ const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
   </g>
 
   <!-- ============================================================== -->
-  <!-- 하단 영역 : GitHub, Git & Users (레퍼런스 이미지와 100% 동일한 배치) -->
+  <!-- 하단 영역 : GitHub, Git & Users (아이콘과 텍스트 분리) -->
   <!-- ============================================================== -->
   <!-- 1. Amazon S3 아래 -> 굵은 오렌지 양방향 화살표 -> GitHub & Git -->
-  <g transform="translate(740, 610)">
-    <!-- 굵은 오렌지 양방향 수직 화살표 -->
+  <g transform="translate(755, 610)">
     <path d="M 30 0 L 15 15 H 25 V 45 H 15 L 30 60 L 45 45 H 35 V 15 H 45 Z" fill="#EA580C" />
 
-    <!-- GitHub 로고 -->
-    <g transform="translate(0, 75)">
+    <!-- GitHub (아이콘 높이 50px -> 텍스트 y=75) -->
+    <g transform="translate(5, 75)">
       ${LOGOS.github}
-      <text x="35" y="90" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="18" font-weight="900" fill="#0F172A" text-anchor="middle">
+      <text x="25" y="72" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
         GitHub
       </text>
     </g>
 
-    <!-- Git과의 양방향 화살표 -->
-    <g transform="translate(110, 110)">
-      <path d="M 0 10 L 12 0 V 6 H 38 V 0 L 50 10 L 38 20 V 14 H 12 V 20 Z" fill="#EA580C" />
+    <!-- 양방향 수평 화살표 -->
+    <g transform="translate(95, 100)">
+      <path d="M 0 8 L 10 0 V 5 H 30 V 0 L 40 8 L 30 16 V 11 H 10 V 16 Z" fill="#EA580C" />
     </g>
 
-    <!-- Git 로고 -->
-    <g transform="translate(190, 75)">
+    <!-- Git (아이콘 높이 50px -> 텍스트 y=75) -->
+    <g transform="translate(165, 75)">
       ${LOGOS.git}
-      <text x="45" y="90" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="18" font-weight="900" fill="#0F172A" text-anchor="middle">
+      <text x="25" y="72" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
         Git
       </text>
     </g>
   </g>
 
-  <!-- 2. Front-End 아래 -> 굵은 오렌지 하향 화살표 -> Users (사용자) -->
-  <g transform="translate(1250, 610)">
-    <!-- 굵은 오렌지 하향 화살표 -->
+  <!-- 2. Front-End 아래 -> 굵은 오렌지 하향 화살표 -> Users -->
+  <g transform="translate(1260, 610)">
     <path d="M 30 50 L 15 30 H 25 V 0 H 35 V 30 H 45 Z" fill="#EA580C" />
 
-    <!-- 사람(User) 실루엣 아이콘 -->
-    <g transform="translate(-10, 65)">
+    <!-- User 실루엣 (아이콘 높이 55px -> 텍스트 y=80) -->
+    <g transform="translate(0, 65)">
       ${LOGOS.user}
-      <text x="40" y="105" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
+      <text x="30" y="80" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
         Users
       </text>
-      <text x="40" y="125" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12" fill="#64748B" text-anchor="middle">
+      <text x="30" y="100" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12" fill="#64748B" text-anchor="middle">
         (관리자·기사·교사·학부모)
       </text>
     </g>
@@ -396,7 +383,8 @@ try {
 
   fs.writeFileSync(outputPngPath, pngBuffer);
   fs.writeFileSync(downloadsPngPath, pngBuffer);
-  console.log('레퍼런스 스타일 완성 PNG 저장 성공:', downloadsPngPath);
+  fs.writeFileSync('C:/Users/favid/Downloads/Takeme_단순_시스템구조도.png', pngBuffer);
+  console.log('실제 사용 스택만 반영 & 겹침 제로 PNG 저장 성공:', downloadsPngPath);
 } catch (e) {
   console.error('PNG 변환 에러:', e);
 }
