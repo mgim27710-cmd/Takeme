@@ -409,10 +409,14 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
     if (pri == null || pri.isEmpty) return const [];
     if (_isNavigating) {
       final segIdx = _impl.routeProgressIndex.clamp(0, pri.length - 1);
-      final curPos = LatLng(_animatedLat, _animatedLng);
-      final active = <LatLng>[curPos];
-      if (segIdx + 1 < pri.length) {
-        active.addAll(pri.sublist(segIdx + 1));
+      // 차량이 경로(도로) 위에 있을 때만 현재 위치에서 경로를 이어 그린다.
+      // 도로에서 벗어나 있으면 '차량 → 경로' 직선을 그리지 않고 도로 경로만 보여준다.
+      final active = <LatLng>[];
+      if (_isSnappedToRoute) {
+        active.add(LatLng(_animatedLat, _animatedLng));
+        if (segIdx + 1 < pri.length) active.addAll(pri.sublist(segIdx + 1));
+      } else {
+        active.addAll(pri.sublist(segIdx));
       }
       return active;
     }
@@ -615,10 +619,12 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
 
         final List<LatLng> segPoints;
         if (_isNavigating && seg.from <= currentSegIdx && currentSegIdx <= seg.to) {
-          final curPos = LatLng(_animatedLat, _animatedLng);
           final nextIdx = (currentSegIdx + 1).clamp(0, pri.length);
           final toIdx = (seg.to + 1).clamp(0, pri.length);
-          segPoints = [curPos];
+          // 도로 위에 있을 때만 차량 위치에서 시작, 아니면 도로 경로 점에서 시작 (차량→경로 직선 금지)
+          segPoints = _isSnappedToRoute
+              ? [LatLng(_animatedLat, _animatedLng)]
+              : [pri[currentSegIdx.clamp(0, pri.length - 1)]];
           if (nextIdx < toIdx) segPoints.addAll(pri.sublist(nextIdx, toIdx));
         } else {
           final from = seg.from.clamp(0, pri.length - 1);
@@ -840,7 +846,7 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
 
       // 내 위치 차량 마커
       if (_hasInitialLocation && _meMarker == null) {
-        final icon = await _image('car', const _CarMarkerWidget(screenAngleDeg: 0), const Size(48, 48));
+        final icon = await _image('car', const _CarMarkerWidget(screenAngleDeg: 0), const Size(72, 72));
         if (!_canUseMap) return;
         final m = NMarker(
           id: 'me',
@@ -943,26 +949,34 @@ class _CarMarkerWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 48,
-      height: 48,
-      decoration: const BoxDecoration(
-        shape: BoxShape.circle,
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Color(0x52000000),
-            blurRadius: 10,
-            offset: Offset(0, 3),
-          ),
-        ],
-      ),
+    // 그림자가 이미지 가장자리에서 잘리면 모서리가 네모나게 검게 보인다.
+    // 그래서 72x72 투명 여백 안에 48 지름 원을 두고, 그림자는 여백 안에 들어오게 작게 한다.
+    return SizedBox(
+      width: 72,
+      height: 72,
       child: Center(
-        child: Transform.rotate(
-          angle: screenAngleDeg * math.pi / 180.0,
-          child: CustomPaint(
-            size: const Size(28, 28),
-            painter: _NavArrowPainter(),
+        child: Container(
+          width: 48,
+          height: 48,
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Color(0x40000000),
+                blurRadius: 6,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Center(
+            child: Transform.rotate(
+              angle: screenAngleDeg * math.pi / 180.0,
+              child: CustomPaint(
+                size: const Size(28, 28),
+                painter: _NavArrowPainter(),
+              ),
+            ),
           ),
         ),
       ),

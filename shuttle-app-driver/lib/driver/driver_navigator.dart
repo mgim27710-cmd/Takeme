@@ -181,6 +181,10 @@ class DriverNavigator extends ChangeNotifier {
   double _progressFrac = 0.0;
   int _offRouteCount = 0;
   DateTime _lastReroute = DateTime.fromMillisecondsSinceEpoch(0);
+  // 재탐색을 해도 계속 경로 밖이면(예: 아파트 단지 안에 서 있음) 간격을 점점 늘려 무한 반복을 막는다.
+  int _rerouteStreak = 0;
+  static const int _rerouteBaseGapSec = 8;
+  static const int _rerouteMaxGapSec = 120;
   DateTime _lastAutoRouteSync = DateTime.fromMillisecondsSinceEpoch(0);
 
   int _lastSyncedProgress = -1;
@@ -1619,13 +1623,22 @@ class DriverNavigator extends ChangeNotifier {
     final headingDeviated = (speedMpsVal >= 3.0 && curHeading != null)
         ? _angleDiff(curHeading, roadBearing) >= 100.0
         : false;
-    final isOff = (!isSnapped && off >= 35.0) || headingDeviated;
+    // 멈춰 있을 때(시속 3.6km 미만)는 GPS 흔들림일 뿐이라 이탈로 보지 않는다 (제자리에서 재탐색 반복 방지)
+    final isStationary = speedMpsVal < 1.0 && !simulating;
+    final isOff = !isStationary && ((!isSnapped && off >= 35.0) || headingDeviated);
+
+    // 경로 위로 돌아오면 재탐색 간격을 처음(8초)으로 되돌린다
+    if (isSnapped && !headingDeviated) _rerouteStreak = 0;
 
     _offRouteCount = isOff ? _offRouteCount + 1 : 0;
-    if (_offRouteCount >= 2 && !rerouting && DateTime.now().difference(_lastReroute).inSeconds >= 8) {
+    // 재탐색 간격: 8초 → 16초 → 32초 … 최대 120초 (재탐색해도 계속 경로 밖이면 점점 드물게)
+    final gapSec = math.min(_rerouteMaxGapSec, _rerouteBaseGapSec * (1 << math.min(_rerouteStreak, 4)));
+    if (_offRouteCount >= 2 && !rerouting && DateTime.now().difference(_lastReroute).inSeconds >= gapSec) {
       _offRouteCount = 0;
       _lastReroute = DateTime.now();
-      _speak('경로를 다시 찾습니다.');
+      // 음성 안내는 처음 한 번만 (계속 '다시 찾습니다'라고 말하지 않게)
+      if (_rerouteStreak == 0) _speak('경로를 다시 찾습니다.');
+      _rerouteStreak++;
       _reroute(reason: 'off-route');
       return;
     }
@@ -1760,6 +1773,7 @@ class DriverNavigator extends ChangeNotifier {
     if (!simulating) return;
     _offRouteTestTicks = 4;
     _lastReroute = DateTime.fromMillisecondsSinceEpoch(0);
+    _rerouteStreak = 0;
     notifyListeners();
   }
 
@@ -1770,6 +1784,7 @@ class DriverNavigator extends ChangeNotifier {
     if (!simulating) return;
     _wrongTurnTicks = 3;
     _lastReroute = DateTime.fromMillisecondsSinceEpoch(0);
+    _rerouteStreak = 0;
     notifyListeners();
   }
 
