@@ -4827,7 +4827,7 @@ const parseKindergartenExcelSheet = (sheet) => {
           <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
-          <span className="text-[12.5px] font-black tracking-tight">안전서류</span>
+          <span className="text-[12.5px] font-black tracking-tight">서류함</span>
           {urgentExpiryCount > 0 && (
             <span className="absolute top-1 right-2 bg-red-600 text-white text-[11px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-white animate-pulse shadow-sm">
               {urgentExpiryCount}
@@ -7508,8 +7508,6 @@ const parseKindergartenExcelSheet = (sheet) => {
               { id: 'WED', label: '수' },
               { id: 'THU', label: '목' },
               { id: 'FRI', label: '금' },
-              { id: 'SAT', label: '토' },
-              { id: 'SUN', label: '일' },
             ].map(day => (
               <button
                 key={day.id}

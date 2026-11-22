@@ -72,13 +72,13 @@ const GUIDE_ITEMS = [
   {
     id: 'documents-print',
     category: 'documents',
-    categoryLabel: '안전 서류',
+    categoryLabel: '서류함',
     badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
     question: '통학버스 운행기록일지나 안전 점검 서류는 어디서 출력하나요?',
     answer: (
       <div className="space-y-2 text-sm text-slate-600 leading-relaxed pt-1">
         <p>
-          좌측 네비게이션의 <strong className="text-indigo-700 font-bold">[안전서류]</strong> 탭을 클릭하여 법정 서류 관리함으로 이동합니다.
+          좌측 네비게이션의 <strong className="text-indigo-700 font-bold">[서류함]</strong> 탭을 클릭하여 법정 서류 관리함으로 이동합니다.
         </p>
         <div className="grid grid-cols-3 gap-2 text-xs my-1.5">
           <div className="p-2.5 bg-blue-50/70 rounded-xl border border-blue-100">
@@ -142,7 +142,7 @@ const CATEGORIES = [
   { id: 'all', label: '전체' },
   { id: 'students', label: '원아·출결' },
   { id: 'shuttle', label: '차량·노선' },
-  { id: 'documents', label: '안전서류' },
+  { id: 'documents', label: '서류함' },
   { id: 'account', label: '계정·대체' },
 ];
 
