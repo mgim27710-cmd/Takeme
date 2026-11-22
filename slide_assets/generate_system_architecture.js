@@ -1,0 +1,674 @@
+const fs = require('fs');
+const path = require('path');
+const { Resvg } = require('../scratch_pptx/node_modules/@resvg/resvg-js');
+
+const width = 1800;
+const height = 1250;
+
+// 공식 SVG 아이콘 정의 (Simple Icons 및 공식 표준 벡터 패스)
+const ICONS = {
+  react: `
+    <g transform="scale(0.8) translate(5, 5)">
+      <circle cx="20" cy="20" r="4" fill="#61DAFB"/>
+      <g stroke="#61DAFB" stroke-width="2" fill="none">
+        <ellipse cx="20" cy="20" rx="18" ry="7"/>
+        <ellipse cx="20" cy="20" rx="18" ry="7" transform="rotate(60 20 20)"/>
+        <ellipse cx="20" cy="20" rx="18" ry="7" transform="rotate(120 20 20)"/>
+      </g>
+    </g>
+  `,
+  nextjs: `
+    <g transform="scale(0.2) translate(10, 10)">
+      <circle cx="100" cy="100" r="95" fill="#000000"/>
+      <path d="M145 150L85 68H68V132H83V87L136 158C139 156 142 153 145 150Z" fill="#FFFFFF"/>
+      <rect x="117" y="68" width="15" height="64" fill="#FFFFFF"/>
+    </g>
+  `,
+  flutter: `
+    <g transform="scale(0.18) translate(15, 10)">
+      <path d="M125 0L0 125l38 38L201 0h-76z" fill="#47C5FB"/>
+      <path d="M125 120L46 198l38 38 40-40 77-76h-76z" fill="#00569E"/>
+      <path d="M125 197l-40 40 40 40h76l-76-80z" fill="#02569B"/>
+      <path d="M125 197l-38 38 38 38 38-38-38-38z" fill="#0175C2"/>
+    </g>
+  `,
+  typescript: `
+    <g transform="scale(0.2) translate(10, 10)">
+      <rect width="180" height="180" rx="25" fill="#3178C6"/>
+      <path d="M40 70h60v20H75v60H55V90H40V70zm65 55c5 10 15 15 25 15 12 0 18-6 18-14 0-20-35-15-35-40 0-15 12-26 30-26 12 0 22 5 28 14l-12 12c-4-6-10-9-16-9-7 0-12 4-12 9 0 18 35 12 35 39 0 16-12 28-34 28-15 0-27-6-33-16l16-12z" fill="#FFFFFF"/>
+    </g>
+  `,
+  tailwind: `
+    <g transform="scale(1.5) translate(2, 2)">
+      <path d="M12 4.8c-3.2 0-5.2 1.6-6 4.8 1.2-1.6 2.6-2.2 4.2-1.8.9.2 1.6.9 2.3 1.6C13.7 10.6 15 12 18 12c3.2 0 5.2-1.6 6-4.8-1.2 1.6-2.6 2.2-4.2 1.8-.9-.2-1.6-.9-2.3-1.6C16.3 6.2 15 4.8 12 4.8zm-6 7.2c-3.2 0-5.2 1.6-6 4.8 1.2-1.6 2.6-2.2 4.2-1.8.9.2 1.6.9 2.3 1.6 1.2 1.2 2.5 2.6 5.5 2.6 3.2 0 5.2-1.6 6-4.8-1.2 1.6-2.6 2.2-4.2 1.8-.9-.2-1.6-.9-2.3-1.6-1.2-1.2-2.5-2.6-5.5-2.6z" fill="#06B6D4"/>
+    </g>
+  `,
+  nestjs: `
+    <g transform="scale(1.5) translate(2, 2)">
+      <path d="M12 0c-.3 0-.5 0-.8.1L1.5 2.9A2.5 2.5 0 0 0 0 5.3v13.4a2.5 2.5 0 0 0 1.5 2.4l9.7 2.8c.5.2 1.1.2 1.6 0l9.7-2.8a2.5 2.5 0 0 0 1.5-2.4V5.3a2.5 2.5 0 0 0-1.5-2.4L12.8.1c-.3-.1-.5-.1-.8-.1z" fill="#E0234E"/>
+      <path d="M19 12c-1.5 3-4.5 5-7.5 5-4 0-6.5-3-6.5-7 0-3 2-5 4.5-5 2 0 3.5 1 4.5 3l-2.5 1.5c-.5-1-1-1.5-2-1.5-1.5 0-2.5 1.5-2.5 3.5 0 2.5 1.5 4 4 4 1.8 0 3.2-1 4.2-2.8L19 12z" fill="#FFFFFF"/>
+    </g>
+  `,
+  socketio: `
+    <g transform="scale(1.5) translate(2, 2)">
+      <circle cx="12" cy="12" r="11" fill="#010101"/>
+      <circle cx="12" cy="12" r="9" fill="none" stroke="#FFFFFF" stroke-width="2"/>
+      <path d="M13.5 4.5L7 13.5h5l-1.5 6 6.5-9h-5l1.5-6z" fill="#FFFFFF"/>
+    </g>
+  `,
+  postgresql: `
+    <g transform="scale(0.18) translate(15, 10)">
+      <rect width="200" height="200" rx="30" fill="#336791"/>
+      <path d="M100 25c-35 0-55 20-55 45 0 18 10 32 25 38v22c0 22 15 45 40 45s40-23 40-45v-22c15-6 25-20 25-38 0-25-20-45-55-45zm-15 35c8 0 15 7 15 15s-7 15-15 15-15-7-15-15 7-15 15-15zm45 70c0 12-8 25-20 25s-20-13-20-25v-18h40v18zm0-30h-40v-8c8-2 15-7 20-14 5 7 12 12 20 14v8zm15-25c-8 0-15-7-15-15s7-15 15-15 15 7 15 15-7 15-15 15z" fill="#FFFFFF"/>
+    </g>
+  `,
+  redis: `
+    <g transform="scale(1.5) translate(2, 2)">
+      <rect width="24" height="24" rx="5" fill="#DC382D"/>
+      <path d="M12 4l7 3.5v9L12 20l-7-3.5v-9L12 4zm0 2.2L7.5 8.5 12 10.7l4.5-2.2L12 6.2zm-5 4v5.3l5 2.5v-5.3l-5-2.5zm10 0l-4 2v5.3l4-2v-5.3z" fill="#FFFFFF"/>
+    </g>
+  `,
+  s3: `
+    <g transform="scale(0.18) translate(15, 10)">
+      <rect width="200" height="200" rx="30" fill="#E05243"/>
+      <ellipse cx="100" cy="55" rx="65" ry="25" fill="#FFFFFF"/>
+      <path d="M35 55v90c0 14 29 25 65 25s65-11 65-25V55c0 14-29 25-65 25S35 69 35 55z" fill="#FFFFFF" fill-opacity="0.85"/>
+      <ellipse cx="100" cy="55" rx="45" ry="16" fill="#E05243"/>
+      <path d="M85 95l15-15 15 15h-10v35h-10V95H85z" fill="#E05243"/>
+    </g>
+  `,
+  docker: `
+    <g transform="scale(1.5) translate(2, 2)">
+      <rect width="24" height="24" rx="5" fill="#2496ED"/>
+      <path d="M19.5 10c-.3-1.8-1.5-2.5-1.5-2.5-.5 1-1.2 1.5-1.2 1.5-.2-.1-.5-.2-.8-.2H14V7h2V5h-2V3h-2v4H9V5H7v2H5V7H3v4c0 4 3 7 8 7 5.5 0 8.5-3.5 8.5-8zM7 11H5V9h2v2zm3 0H8V9h2v2zm3 0h-2V9h2v2zm3 0h-2V9h2v2z" fill="#FFFFFF"/>
+    </g>
+  `,
+  googleauth: `
+    <g transform="scale(1.5) translate(2, 2)">
+      <circle cx="12" cy="12" r="11" fill="#4285F4"/>
+      <path d="M12 5a7 7 0 1 0 7 7h-7v-3h10a10 10 0 1 1-3-7l-2 3z" fill="#FFFFFF"/>
+      <circle cx="12" cy="12" r="3" fill="#34A853"/>
+    </g>
+  `,
+  nginx: `
+    <g transform="scale(1.5) translate(2, 2)">
+      <rect width="24" height="24" rx="5" fill="#009639"/>
+      <path d="M6 18V6l12 12V6" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </g>
+  `,
+  tmap: `
+    <g transform="scale(0.18) translate(15, 10)">
+      <rect width="200" height="200" rx="30" fill="#E60024"/>
+      <text x="100" y="145" font-family="'Arial Black', sans-serif" font-size="120" font-weight="900" fill="#FFFFFF" text-anchor="middle">T</text>
+    </g>
+  `,
+  firebase: `
+    <g transform="scale(1.5) translate(2, 2)">
+      <path d="M4 17.5L6.5 2.5 10 9l-6 8.5z" fill="#FFA000"/>
+      <path d="M4 17.5l9-13 3 5.5L4 17.5z" fill="#F57C00"/>
+      <path d="M12.5 21.5c4 0 7.5-3 7.5-7.5l-4-4-3.5 11.5z" fill="#FFCA28"/>
+      <path d="M4 17.5c0 3 3.5 4 8.5 4 3 0 5-1 6.5-2.5L4 17.5z" fill="#FFA000"/>
+    </g>
+  `
+};
+
+const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- 배경 그라데이션 -->
+    <linearGradient id="mainBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F8FAFC" />
+      <stop offset="100%" stop-color="#EFF6FF" />
+    </linearGradient>
+
+    <!-- 테마 그라데이션 -->
+    <linearGradient id="primaryHeader" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0F2D6B" />
+      <stop offset="100%" stop-color="#1D4ED8" />
+    </linearGradient>
+
+    <!-- 카드 쉐도우 필터 -->
+    <filter id="cardShadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0F172A" flood-opacity="0.06" />
+    </filter>
+    <filter id="glowBlue" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#2563EB" flood-opacity="0.25" />
+    </filter>
+    <filter id="glowAmber" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="#D97706" flood-opacity="0.25" />
+    </filter>
+
+    <!-- 화살표 마커 -->
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#2563EB" />
+    </marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#0D9488" />
+    </marker>
+    <marker id="arrowPurple" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#7C3AED" />
+    </marker>
+    <marker id="arrowDouble" markerWidth="12" markerHeight="12" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#0284C7" />
+    </marker>
+  </defs>
+
+  <!-- 전체 배경 -->
+  <rect width="100%" height="100%" fill="url(#mainBg)" />
+
+  <!-- ============================================================== -->
+  <!-- 1. 최상단 타이틀 헤더 -->
+  <!-- ============================================================== -->
+  <g transform="translate(80, 45)">
+    <rect x="0" y="0" width="230" height="32" rx="16" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1.2" />
+    <text x="115" y="21" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="12" font-weight="bold" fill="#1D4ED8" text-anchor="middle">
+      TakeMe SYSTEM ARCHITECTURE
+    </text>
+    <text x="0" y="68" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="28" font-weight="900" fill="#0F172A">
+      TakeMe 통합 시스템 아키텍처 및 데이터 흐름 구조도
+    </text>
+    <text x="0" y="94" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="13.5" fill="#475569">
+      공식 기술 스택(Official Logos) 기반의 4계층(Client - Gateway - Core - Data/Cloud) 유기적 상호작용 파이프라인
+    </text>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- LAYER 1: CLIENT APPS & WEB INTERFACE (Y: 170 ~ 400) -->
+  <!-- ============================================================== -->
+  <g transform="translate(80, 165)">
+    <!-- 레이어 배경 박스 -->
+    <rect width="1640" height="235" rx="18" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.5" filter="url(#cardShadow)" />
+    
+    <!-- 레이어 헤더 배지 -->
+    <path d="M0 18 Q0 0 18 0 L340 0 Q358 0 358 18 L358 36 L0 36 Z" fill="#1E3A8A" />
+    <text x="16" y="24" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="13" font-weight="900" fill="#FFFFFF">
+      LAYER 1 : CLIENT PLATFORMS (사용자 다중 플랫폼)
+    </text>
+    <text x="375" y="24" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="12" font-weight="bold" fill="#64748B">
+      교사·학부모·기사·관리자 4대 참여자별 맞춤형 네이티브 모바일 앱 &amp; 웹 콘솔
+    </text>
+
+    <!-- [카드 1-1] 관리자 종합 관제 웹 (React, Next.js, TS, Tailwind) -->
+    <g transform="translate(25, 55)">
+      <rect width="380" height="160" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="0" y="0" width="380" height="38" rx="14" fill="#EFF6FF" />
+      <text x="16" y="24" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="14" font-weight="900" fill="#1E40AF">
+        💻 관리자 종합 관제 웹 대시보드
+      </text>
+
+      <!-- 공식 아이콘 세트 (React, Next.js, TS, Tailwind) -->
+      <g transform="translate(18, 48)">
+        <g transform="translate(0, 0)">${ICONS.react}</g>
+        <g transform="translate(42, 0)">${ICONS.nextjs}</g>
+        <g transform="translate(84, 0)">${ICONS.typescript}</g>
+        <g transform="translate(126, 0)">${ICONS.tailwind}</g>
+      </g>
+      <text x="195" y="72" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" font-weight="bold" fill="#3B82F6">
+        React 18 · Next.js 14 · TS · Tailwind
+      </text>
+
+      <line x1="16" y1="96" x2="364" y2="96" stroke="#E2E8F0" stroke-width="1" />
+      <text x="16" y="115" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • K-Means/TSP 노선 5초 자동 배차 및 실시간 지도 관제
+      </text>
+      <text x="16" y="133" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • 대용량 엑셀 원생 일괄 I/O &amp; 법정 운행기록부 출력
+      </text>
+      <text x="16" y="150" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" font-weight="bold" fill="#0D9488">
+        • Google Authenticator 2단계 TOTP 보안 적용
+      </text>
+    </g>
+
+    <!-- [카드 1-2] 기사 전용 릴레이 내비 앱 (Flutter, TMap) -->
+    <g transform="translate(430, 55)">
+      <rect width="380" height="160" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="0" y="0" width="380" height="38" rx="14" fill="#EFF6FF" />
+      <text x="16" y="24" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="14" font-weight="900" fill="#1E40AF">
+        🚌 기사 전용 릴레이 내비 앱
+      </text>
+
+      <!-- 공식 아이콘 세트 (Flutter, TMap) -->
+      <g transform="translate(18, 48)">
+        <g transform="translate(0, 0)">${ICONS.flutter}</g>
+        <g transform="translate(46, 0)">${ICONS.tmap}</g>
+      </g>
+      <text x="120" y="72" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" font-weight="bold" fill="#0284C7">
+        Flutter 3.x · TMap Mobility SDK
+      </text>
+
+      <line x1="16" y1="96" x2="364" y2="96" stroke="#E2E8F0" stroke-width="1" />
+      <text x="16" y="115" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • 정류장 순차 길안내 릴레이 내비게이션
+      </text>
+      <text x="16" y="133" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • 백그라운드 GPS 위치 0.2초 초저지연 송신
+      </text>
+      <text x="16" y="150" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" font-weight="bold" fill="#E11D48">
+        • 운행 종료 즉시 아동 잔류 0명 검증 프로세스
+      </text>
+    </g>
+
+    <!-- [카드 1-3] 지도교사 안심 관리 앱 (Flutter, NFC) -->
+    <g transform="translate(835, 55)">
+      <rect width="380" height="160" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="0" y="0" width="380" height="38" rx="14" fill="#EFF6FF" />
+      <text x="16" y="24" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="14" font-weight="900" fill="#1E40AF">
+        👩‍🏫 지도교사 탑승 관리 앱
+      </text>
+
+      <!-- 공식 아이콘 세트 (Flutter) -->
+      <g transform="translate(18, 48)">
+        <g transform="translate(0, 0)">${ICONS.flutter}</g>
+      </g>
+      <text x="75" y="72" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" font-weight="bold" fill="#0284C7">
+        Flutter · NFC Tagging · QR Scanner
+      </text>
+
+      <line x1="16" y1="96" x2="364" y2="96" stroke="#E2E8F0" stroke-width="1" />
+      <text x="16" y="115" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • 원아 승하차 NFC 태그 즉시 탑승 확인
+      </text>
+      <text x="16" y="133" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • 정류장 순번 및 탑승 대기 원아 실시간 정렬
+      </text>
+      <text x="16" y="150" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" font-weight="bold" fill="#2563EB">
+        • 학부모 1:1 실시간 안심 채팅 상담 창구
+      </text>
+    </g>
+
+    <!-- [카드 1-4] 학부모 안심 모바일 앱 (Flutter, Firebase) -->
+    <g transform="translate(1240, 55)">
+      <rect width="375" height="160" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="0" y="0" width="375" height="38" rx="14" fill="#EFF6FF" />
+      <text x="16" y="24" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="14" font-weight="900" fill="#1E40AF">
+        👨‍👩‍👧 학부모 안심 모바일 앱
+      </text>
+
+      <!-- 공식 아이콘 세트 (Flutter, Firebase) -->
+      <g transform="translate(18, 48)">
+        <g transform="translate(0, 0)">${ICONS.flutter}</g>
+        <g transform="translate(46, 0)">${ICONS.firebase}</g>
+      </g>
+      <text x="120" y="72" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" font-weight="bold" fill="#D97706">
+        Flutter · Firebase Cloud Messaging
+      </text>
+
+      <line x1="16" y1="96" x2="359" y2="96" stroke="#E2E8F0" stroke-width="1" />
+      <text x="16" y="115" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • 통학버스 실시간 이동 동선 라이브 스트리밍
+      </text>
+      <text x="16" y="133" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • 지오펜스 3단계 도착 알림 푸시 (10분/3분/도착)
+      </text>
+      <text x="16" y="150" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" font-weight="bold" fill="#D97706">
+        • 오늘 미탑승(결석/직접픽업) 원클릭 신청
+      </text>
+    </g>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- LAYER 2: NETWORK & REAL-TIME PROTOCOL (Y: 430 ~ 570) -->
+  <!-- ============================================================== -->
+  <!-- 연결 화살표 (Layer 1 -> Layer 2) -->
+  <g stroke="#2563EB" stroke-width="2" fill="none">
+    <path d="M 270 400 L 270 440" marker-end="url(#arrowBlue)" />
+    <path d="M 620 400 L 620 440" marker-end="url(#arrowBlue)" />
+    <path d="M 1025 400 L 1025 440" marker-end="url(#arrowBlue)" />
+    <path d="M 1425 400 L 1425 440" marker-end="url(#arrowBlue)" />
+  </g>
+
+  <g transform="translate(80, 440)">
+    <rect width="1640" height="130" rx="18" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.5" filter="url(#cardShadow)" />
+    
+    <path d="M0 18 Q0 0 18 0 L360 0 Q378 0 378 18 L378 34 L0 34 Z" fill="#4338CA" />
+    <text x="16" y="23" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="13" font-weight="900" fill="#FFFFFF">
+      LAYER 2 : GATEWAY &amp; PROTOCOLS (네트워크 및 통신 관문)
+    </text>
+
+    <!-- [카드 2-1] Nginx 리버스 프록시 -->
+    <g transform="translate(30, 48)">
+      <rect width="480" height="68" rx="12" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <g transform="translate(16, 14)">${ICONS.nginx}</g>
+      <text x="68" y="30" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="13" font-weight="900" fill="#0F172A">
+        Nginx Reverse Proxy &amp; SSL/TLS
+      </text>
+      <text x="68" y="50" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#475569">
+        HTTPS (포트 443) 암호화 통신 · Let's Encrypt 자동 갱신 · 정적 에셋 캐싱
+      </text>
+    </g>
+
+    <!-- [카드 2-2] Socket.IO 웹소켓 게이트웨이 -->
+    <g transform="translate(560, 48)">
+      <rect width="520" height="68" rx="12" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1.5" filter="url(#glowBlue)" />
+      <g transform="translate(16, 14)">${ICONS.socketio}</g>
+      <text x="68" y="30" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="13.5" font-weight="900" fill="#1D4ED8">
+        Socket.IO 0.2초 초저지연 WebSocket 게이트웨이
+      </text>
+      <text x="68" y="50" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#1E40AF">
+        노선별 소켓 룸(Room) 격리 브로드캐스팅 · 0.2초 GPS 스트림 · 네트워크 대역폭 85% 절감
+      </text>
+    </g>
+
+    <!-- [카드 2-3] Google Authenticator (TOTP) -->
+    <g transform="translate(1130, 48)">
+      <rect width="480" height="68" rx="12" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <g transform="translate(16, 14)">${ICONS.googleauth}</g>
+      <text x="68" y="30" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="13" font-weight="900" fill="#0F172A">
+        Google Authenticator 2-Factor Auth (RFC 6238)
+      </text>
+      <text x="68" y="50" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#475569">
+        시간 기반 30초 동적 OTP 비밀번호 인증 · 관리자 계정 개인정보 철저 보안
+      </text>
+    </g>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- LAYER 3 : CORE BACKEND & SERVICE ENGINES (Y: 600 ~ 840) -->
+  <!-- ============================================================== -->
+  <!-- 연결 화살표 (Layer 2 -> Layer 3) -->
+  <g stroke="#4338CA" stroke-width="2" fill="none">
+    <path d="M 820 570 L 820 610" marker-end="url(#arrowPurple)" />
+  </g>
+
+  <g transform="translate(80, 610)">
+    <rect width="1640" height="235" rx="18" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.5" filter="url(#cardShadow)" />
+    
+    <path d="M0 18 Q0 0 18 0 L390 0 Q408 0 408 18 L408 36 L0 36 Z" fill="#6D28D9" />
+    <text x="16" y="24" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="13" font-weight="900" fill="#FFFFFF">
+      LAYER 3 : CORE BACKEND &amp; ENGINES (비즈니스 및 알고리즘 코어)
+    </text>
+    <text x="425" y="24" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="12" font-weight="bold" fill="#64748B">
+      NestJS 기반 코어 모듈화 아키텍처 &amp; 수학적 최적화·센싱 엔진 탑재
+    </text>
+
+    <!-- [코어 백엔드 메인] NestJS API Engine -->
+    <g transform="translate(30, 52)">
+      <rect width="470" height="165" rx="14" fill="#FAF5FF" stroke="#DDD6FE" stroke-width="1.5" />
+      <g transform="translate(18, 16)">${ICONS.nestjs}</g>
+      <text x="75" y="36" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="16" font-weight="900" fill="#5B21B6">
+        NestJS 코어 애플리케이션 서버
+      </text>
+      <text x="75" y="56" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" font-weight="bold" fill="#7C3AED">
+        Node.js / Express / TypeScript / TypeORM
+      </text>
+
+      <line x1="16" y1="72" x2="454" y2="72" stroke="#E9D5FF" stroke-width="1" />
+      <text x="16" y="93" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        ✔ AuthModule : JWT 토큰 발급 &amp; Google OTP 이중 인증
+      </text>
+      <text x="16" y="113" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        ✔ Student/StaffModule : 원아 출결 및 승하차 NFC 태깅 처리
+      </text>
+      <text x="16" y="133" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        ✔ ChatModule : 교사-학부모 1:1 대화방 관리 및 안심 알림
+      </text>
+      <text x="16" y="153" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" font-weight="bold" fill="#6D28D9">
+        ✔ MediaModule : AWS S3 연동 및 로컬 스토리지 자동 폴백
+      </text>
+    </g>
+
+    <!-- [엔진 3-1] GIS 배차 최적화 엔진 -->
+    <g transform="translate(530, 52)">
+      <rect width="345" height="165" rx="14" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.2" />
+      <rect x="0" y="0" width="345" height="36" rx="14" fill="#EEF2FF" />
+      <text x="16" y="23" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="13" font-weight="900" fill="#1E40AF">
+        🧭 GIS 배차 최적화 알고리즘 엔진
+      </text>
+      
+      <text x="16" y="60" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11.5" font-weight="bold" fill="#1E293B">
+        1. WGS84 좌표 지오코딩 &amp; 이상치 필터
+      </text>
+      <text x="16" y="78" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" fill="#64748B">
+        통학 불가 영역 자동 배제 및 좌표 정규화
+      </text>
+
+      <text x="16" y="104" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11.5" font-weight="bold" fill="#1E293B">
+        2. K-Means 클러스터링 (C-VRP)
+      </text>
+      <text x="16" y="122" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" fill="#64748B">
+        차량별 승차 정원 제약 반영 균등 군집화
+      </text>
+
+      <text x="16" y="148" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11.5" font-weight="bold" fill="#1D4ED8">
+        3. Convex Hull &amp; 2-Opt TSP 최단노선
+      </text>
+      <text x="16" y="166" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" fill="#1E40AF">
+        외곽 순회 U턴 방지 · 배차시간 2.5h→5s 단축
+      </text>
+    </g>
+
+    <!-- [엔진 3-2] Doze FSM & 지오펜스 모니터 -->
+    <g transform="translate(905, 52)">
+      <rect width="345" height="165" rx="14" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.2" />
+      <rect x="0" y="0" width="345" height="36" rx="14" fill="#F0FDF4" />
+      <text x="16" y="23" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="13" font-weight="900" fill="#047857">
+        📍 지오펜스 &amp; Doze FSM 상태머신
+      </text>
+
+      <text x="16" y="60" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11.5" font-weight="bold" fill="#1E293B">
+        1. 안드로이드 Doze 모드 대응 FSM
+      </text>
+      <text x="16" y="78" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" fill="#64748B">
+        Foreground Service로 강제 슬립 방지
+      </text>
+
+      <text x="16" y="104" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11.5" font-weight="bold" fill="#1E293B">
+        2. 반경 30m 지오펜스 &amp; 120s 타이머
+      </text>
+      <text x="16" y="122" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" fill="#64748B">
+        정류장 진입 즉시 3단계 사전 도착 알림
+      </text>
+
+      <text x="16" y="148" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11.5" font-weight="bold" fill="#047857">
+        3. 운행 종료 잔류 원아 0명 검증
+      </text>
+      <text x="16" y="166" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" fill="#065F46">
+        탑승-하차 명단 자동 크로스체크 및 비상 경보
+      </text>
+    </g>
+
+    <!-- [엔진 3-3] 도로교통법 서식 자동 발급 파이프라인 -->
+    <g transform="translate(1280, 52)">
+      <rect width="330" height="165" rx="14" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.2" />
+      <rect x="0" y="0" width="330" height="36" rx="14" fill="#FFFBEB" />
+      <text x="16" y="23" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="13" font-weight="900" fill="#B45309">
+        📑 법정 안전운행기록 서식 엔진
+      </text>
+
+      <text x="16" y="60" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11.5" font-weight="bold" fill="#1E293B">
+        1. 도로교통법 별지 제20호의2 준수
+      </text>
+      <text x="16" y="78" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" fill="#64748B">
+        정류장별 승하차 시각 시계열 자동 매핑
+      </text>
+
+      <text x="16" y="104" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11.5" font-weight="bold" fill="#1E293B">
+        2. PDFKit 고해상도 벡터 렌더러
+      </text>
+      <text x="16" y="122" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" fill="#64748B">
+        구청/경찰청 제출용 표준 서식 원클릭 발급
+      </text>
+
+      <text x="16" y="148" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11.5" font-weight="bold" fill="#B45309">
+        3. ExcelJS 대용량 엑셀 익스포트
+      </text>
+      <text x="16" y="166" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" fill="#92400E">
+        2행 복합 헤더 정규화 파싱 및 일괄 다운로드
+      </text>
+    </g>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- LAYER 4: DATA PERSISTENCE & CLOUD STORAGE (Y: 875 ~ 1110) -->
+  <!-- ============================================================== -->
+  <!-- 연결 화살표 (Layer 3 -> Layer 4) -->
+  <g stroke="#0D9488" stroke-width="2" fill="none">
+    <path d="M 270 845 L 270 885" marker-end="url(#arrowGreen)" />
+    <path d="M 690 845 L 690 885" marker-end="url(#arrowGreen)" />
+    <path d="M 1100 845 L 1100 885" marker-end="url(#arrowGreen)" />
+    <path d="M 1490 845 L 1490 885" marker-end="url(#arrowGreen)" />
+  </g>
+
+  <g transform="translate(80, 885)">
+    <rect width="1640" height="235" rx="18" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.5" filter="url(#cardShadow)" />
+    
+    <path d="M0 18 Q0 0 18 0 L400 0 Q418 0 418 18 L418 36 L0 36 Z" fill="#0F766E" />
+    <text x="16" y="24" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="13" font-weight="900" fill="#FFFFFF">
+      LAYER 4 : DATA &amp; CLOUD INFRASTRUCTURE (데이터 영속성 및 클라우드)
+    </text>
+    <text x="435" y="24" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="12" font-weight="bold" fill="#64748B">
+      관계형 DB, 초고속 인메모리 캐시, 오브젝트 스토리지 및 컨테이너 인프라
+    </text>
+
+    <!-- [카드 4-1] PostgreSQL 16 (PostGIS) -->
+    <g transform="translate(25, 55)">
+      <rect width="380" height="160" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="0" y="0" width="380" height="38" rx="14" fill="#F0FDFA" />
+      <text x="16" y="24" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="14" font-weight="900" fill="#0F766E">
+        🐘 PostgreSQL 16 (PostGIS 지리공간 DB)
+      </text>
+
+      <g transform="translate(18, 48)">
+        <g transform="translate(0, 0)">${ICONS.postgresql}</g>
+      </g>
+      <text x="75" y="72" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11.5" font-weight="bold" fill="#047857">
+        PostgreSQL 16 · PostGIS 공간 인덱스
+      </text>
+
+      <line x1="16" y1="96" x2="364" y2="96" stroke="#E2E8F0" stroke-width="1" />
+      <text x="16" y="115" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • 원생, 노선, 정류장, 학부모 등 구조화된 마스터 데이터
+      </text>
+      <text x="16" y="133" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • 일자별 법정 안전운행기록부 시계열 트랜잭션 적재
+      </text>
+      <text x="16" y="150" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" font-weight="bold" fill="#0F766E">
+        • 공간 인덱싱 기반 최근접 정류장 지오코딩 쿼리 고속화
+      </text>
+    </g>
+
+    <!-- [카드 4-2] Redis 7 인메모리 캐시 & 소켓 브로커 -->
+    <g transform="translate(430, 55)">
+      <rect width="380" height="160" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="0" y="0" width="380" height="38" rx="14" fill="#FEF2F2" />
+      <text x="16" y="24" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="14" font-weight="900" fill="#B91C1C">
+        🔴 Redis 7 (In-Memory Data Store)
+      </text>
+
+      <g transform="translate(18, 48)">
+        <g transform="translate(0, 0)">${ICONS.redis}</g>
+      </g>
+      <text x="75" y="72" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11.5" font-weight="bold" fill="#DC2626">
+        Redis 7 · Pub/Sub Socket Adapter
+      </text>
+
+      <line x1="16" y1="96" x2="364" y2="96" stroke="#E2E8F0" stroke-width="1" />
+      <text x="16" y="115" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • 운행 버스 최신 GPS 좌표 인메모리 초고속 캐싱
+      </text>
+      <text x="16" y="133" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • 지도 API 중복 호출 방지 캐시 (API 비용 70% 절감)
+      </text>
+      <text x="16" y="150" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" font-weight="bold" fill="#DC2626">
+        • 다중 소켓 인스턴스 간 Pub/Sub 메시지 브로커 동작
+      </text>
+    </g>
+
+    <!-- [카드 4-3] AWS S3 오브젝트 스토리지 -->
+    <g transform="translate(835, 55)">
+      <rect width="380" height="160" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="0" y="0" width="380" height="38" rx="14" fill="#FFF7ED" />
+      <text x="16" y="24" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="14" font-weight="900" fill="#C2410C">
+        🪣 AWS S3 (Cloud Object Storage)
+      </text>
+
+      <g transform="translate(18, 48)">
+        <g transform="translate(0, 0)">${ICONS.s3}</g>
+      </g>
+      <text x="75" y="72" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11.5" font-weight="bold" fill="#EA580C">
+        AWS Simple Storage Service (S3)
+      </text>
+
+      <line x1="16" y1="96" x2="364" y2="96" stroke="#E2E8F0" stroke-width="1" />
+      <text x="16" y="115" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • 알림장 게시판 원아 활동 사진 및 썸네일 안전 보관
+      </text>
+      <text x="16" y="133" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • 일자별 도로교통법 별지 제20호의2 PDF 자동 아카이빙
+      </text>
+      <text x="16" y="150" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" font-weight="bold" fill="#C2410C">
+        • 1시간 유효 Presigned URL로 DB 부하 없는 직접 로딩
+      </text>
+    </g>
+
+    <!-- [카드 4-4] Docker & AWS EC2 클라우드 인프라 -->
+    <g transform="translate(1240, 55)">
+      <rect width="375" height="160" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <rect x="0" y="0" width="375" height="38" rx="14" fill="#F0F9FF" />
+      <text x="16" y="24" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="14" font-weight="900" fill="#0369A1">
+        🐳 Docker &amp; AWS EC2 인프라
+      </text>
+
+      <g transform="translate(18, 48)">
+        <g transform="translate(0, 0)">${ICONS.docker}</g>
+      </g>
+      <text x="75" y="72" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11.5" font-weight="bold" fill="#0284C7">
+        Docker Compose · AWS EC2 (Ubuntu)
+      </text>
+
+      <line x1="16" y1="96" x2="359" y2="96" stroke="#E2E8F0" stroke-width="1" />
+      <text x="16" y="115" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • NestJS, PostgreSQL, Redis 일괄 컨테이너 오케스트레이션
+      </text>
+      <text x="16" y="133" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="11" fill="#334155">
+        • Elastic IP 및 VPC 보안그룹 기반 네트워크 격리
+      </text>
+      <text x="16" y="150" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="10.5" font-weight="bold" fill="#0369A1">
+        • GitHub Actions 연계 무중단 자동화 배포 파이프라인
+      </text>
+    </g>
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- 푸터 요약 바 -->
+  <!-- ============================================================== -->
+  <g transform="translate(80, 1145)">
+    <rect width="1640" height="48" rx="10" fill="#0F172A" />
+    <text x="30" y="30" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="13" font-weight="bold" fill="#94A3B8">
+      TakeMe ARCHITECTURE HIGHLIGHT
+    </text>
+    <text x="280" y="30" font-family="'Malgun Gothic', 'Noto Sans KR', sans-serif" font-size="13.5" font-weight="bold" fill="#FFFFFF">
+      고비용 전용 단말기 없이 모바일 센싱(Flutter)과 클라우드 백엔드(NestJS + Redis + PostgreSQL + AWS S3)로 완성한 100% 규제 컴플라이언스 솔루션
+    </text>
+  </g>
+
+</svg>`;
+
+// 파일 저장
+const outputSvgPath = path.resolve(__dirname, 'system_architecture_diagram.svg');
+const outputPngPath = path.resolve(__dirname, 'system_architecture_diagram.png');
+const downloadsPngPath = 'C:/Users/favid/Downloads/Takeme_공식아이콘_시스템구조도.png';
+
+fs.writeFileSync(outputSvgPath, svgContent, 'utf-8');
+console.log('SVG 구조도 생성 성공:', outputSvgPath);
+
+try {
+  const resvg = new Resvg(svgContent, {
+    fitTo: { mode: 'width', value: 2700 }, // 초고해상도 2700px 와이드
+    font: {
+      loadSystemFonts: true,
+      defaultFontFamily: 'Malgun Gothic'
+    }
+  });
+
+  const pngData = resvg.render();
+  const pngBuffer = pngData.asPng();
+
+  fs.writeFileSync(outputPngPath, pngBuffer);
+  console.log('PNG 로컬 생성 성공:', outputPngPath);
+
+  fs.writeFileSync(downloadsPngPath, pngBuffer);
+  console.log('PNG 다운로드 폴더 저장 성공:', downloadsPngPath);
+} catch (e) {
+  console.error('PNG 변환 에러:', e);
+}
