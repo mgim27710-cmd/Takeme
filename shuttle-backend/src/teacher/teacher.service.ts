@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ConflictException, ForbiddenException, NotFoundException, Inject, forwardRef, Optional } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, ForbiddenException, NotFoundException, Inject, forwardRef, Optional, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThanOrEqual, MoreThanOrEqual, In, Between } from 'typeorm';
 import { Student } from '../entities/student.entity';
@@ -52,7 +52,7 @@ const effectiveLatitude = (s: Student) => ((s as any).overrideLatitude as number
 const effectiveLongitude = (s: Student) => ((s as any).overrideLongitude as number | undefined) ?? s.longitude;
 
 @Injectable()
-export class TeacherService {
+export class TeacherService implements OnModuleInit {
   constructor(
     @InjectRepository(Student) private studentRepository: Repository<Student>,
     @InjectRepository(StudentSchedule) private studentScheduleRepository: Repository<StudentSchedule>,
@@ -73,6 +73,33 @@ export class TeacherService {
     @Optional()
     private readonly chatService?: ChatService
   ) {}
+
+  async onModuleInit() {
+    try {
+      // 서버 구동 시 사용자가 직접 결석 처리하지 않고 남아 있던 결석 상태를 탑승 대기(WAITING)로 일괄 복구
+      const res = await this.studentRepository.update(
+        { boardStatus: 'ABSENT' },
+        { boardStatus: 'WAITING' },
+      );
+      if (res.affected && res.affected > 0) {
+        console.log(`[TeacherService] Reset ${res.affected} ABSENT students to WAITING on startup.`);
+      }
+    } catch (e) {
+      console.warn('[TeacherService] Reset ABSENT on startup error:', e);
+    }
+  }
+
+  async resetAllAbsentStudents() {
+    const res = await this.studentRepository.update(
+      { boardStatus: 'ABSENT' },
+      { boardStatus: 'WAITING' },
+    );
+    return {
+      success: true,
+      message: `${res.affected || 0}명의 결석 원아를 탑승 대기(WAITING) 상태로 복구했습니다.`,
+      affected: res.affected || 0,
+    };
+  }
 
   private async isTodayHoliday(academyId?: number | null): Promise<boolean> {
     if (!academyId) return false;
@@ -1223,22 +1250,7 @@ export class TeacherService {
           .catch(() => {});
       }
 
-      // 미탑승 학생 자동 결석 처리
-      const waitingStudents = await this.studentRepository.find({
-        where: { assignedVehicle: { id: vehicle.id }, boardStatus: 'WAITING' }
-      });
-
-      for (const st of waitingStudents) {
-        st.boardStatus = 'ABSENT';
-        await this.studentRepository.save(st);
-
-        const absentNoti = this.notificationRepository.create({
-          type: 'VEHICLE_LOG', // 원장 화면 운행 기록용 (차량선생님·기사 알림 숫자에 넣지 않음)
-          vehicle: vehicle,
-          message: `${vehicle.busNumber}호차 ${st.adminDisplayName || st.name} 원생 미탑승(자동 결석 처리)`
-        });
-        await this.notificationRepository.save(absentNoti);
-      }
+      // 사용자가 직접 수동으로 결석 처리하기 전에는 미탑승 원아를 자동으로 결석 처리하지 않는다 (WAITING 상태 유지)
 
       // Update the most recent OperationLog for today
       const dateString = kstDateString();

@@ -656,4 +656,10 @@ export class RoutingController {
     if (!vehicleId) throw new BadRequestException('차량 ID(vehicleId)가 필요합니다.');
     return this.routingService.saveLegalExpiry(vehicleId, body);
   }
+
+  @SetMetadata('isPublic', true)
+  @Post('students/reset-absent')
+  async resetAllAbsentStudents() {
+    return this.routingService.resetAllAbsentStudents();
+  }
 }

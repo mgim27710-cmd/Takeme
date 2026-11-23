@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, BadRequestException, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, BadRequestException, Param, UseGuards, SetMetadata } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AuthEmail, Roles } from '../auth/auth-user.decorator';
@@ -85,6 +85,12 @@ export class TeacherController {
   async getOperationLogs(@AuthEmail() email: string, @Query('month') month: string) {
     if (!email) throw new BadRequestException('이메일이 필요합니다.');
     return this.teacherService.getOperationLogs(email, month);
+  }
+
+  @SetMetadata('isPublic', true)
+  @Post('reset-all-absent')
+  async resetAllAbsent() {
+    return this.teacherService.resetAllAbsentStudents();
   }
 
   @Post('board')

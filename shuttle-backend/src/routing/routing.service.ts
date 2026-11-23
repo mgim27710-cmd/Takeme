@@ -4645,4 +4645,16 @@ export class RoutingService {
     await this.legalExpiryRepository.save(rec);
     return { success: true, record: rec };
   }
+
+  async resetAllAbsentStudents() {
+    const res = await this.studentRepository.update(
+      { boardStatus: 'ABSENT' },
+      { boardStatus: 'WAITING' },
+    );
+    return {
+      success: true,
+      message: `${res.affected || 0}명의 결석 처리 원아를 탑승 대기(WAITING) 상태로 복구했습니다.`,
+      affected: res.affected || 0,
+    };
+  }
 }
