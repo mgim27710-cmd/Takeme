@@ -1431,7 +1431,7 @@ export class RoutingService {
       relations: { assignedVehicle: true, assignedDepartureVehicle: true, studentUser: true, parentUser: true, schedules: { assignedVehicle: true } } 
     });
     // Auto-rollback expired temporary rides (당일 1회 탑승 원아 익일 픽업으로 자동 원복)
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = kstDateString();
     const expiredStudents: Student[] = [];
     for (const st of dbStudents) {
       let parsedRaw: any = {};
@@ -1774,7 +1774,7 @@ export class RoutingService {
     await this.vehicleRepository.save(vehicle);
 
     // Log this change so admin can see it in Calendar Log
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = kstDateString();
     let log = await this.operationLogRepository.findOne({ 
       where: { vehicle: { id: vehicleId }, dateString: todayStr } 
     });
@@ -3174,8 +3174,10 @@ export class RoutingService {
     const logs = [];
 
     // 1. Get OperationLogs for the date and vehicle
-    const opLog = await this.operationLogRepository.findOne({
+    // 한국 날짜로 저장하게 되면서 같은 날 등원·하원 운행 일지가 함께 있을 수 있으니 모두 가져와 합친다
+    const opLogs = await this.operationLogRepository.find({
       where: { dateString: date, vehicle: { id: vehicleId } },
+      order: { id: 'ASC' },
     });
 
     const toSafeIsoString = (val: any) => {
@@ -3184,7 +3186,7 @@ export class RoutingService {
       return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
     };
 
-    if (opLog) {
+    for (const opLog of opLogs) {
       if (opLog.startTime) {
         logs.push({
           time: toSafeIsoString(opLog.startTime),
@@ -3491,7 +3493,7 @@ export class RoutingService {
     
     // Also log it
     const log = this.operationLogRepository.create({
-       dateString: new Date().toISOString().split('T')[0],
+       dateString: kstDateString(),
        boardingRecords: [{ action: 'ADMIN_MSG_SENT', message, targetRoles, vehicleId, studentIds }]
     });
     if (vehicleId) {

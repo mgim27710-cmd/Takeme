@@ -607,26 +607,8 @@ export class ApprovalService {
         await this.studentRepo.save(student);
       }
 
-      // 주소/정류장 영구 변경 요청이고 단일일자 지정이 아닌 경우 기본 주소 반영
-      if (req.type === ChangeRequestType.CHANGE_LOCATION && req.newAddress) {
-        student.boardingLocation = req.newAddress;
-        if (req.newLatitude && req.newLongitude) {
-          student.latitude = req.newLatitude;
-          student.longitude = req.newLongitude;
-        }
-        await this.studentRepo.save(student);
-
-        // 픽업 포인트 등록
-        const existingPt = await this.pickupPointRepo.findOne({ where: { name: req.newAddress } });
-        if (!existingPt && req.newLatitude && req.newLongitude) {
-          const pt = this.pickupPointRepo.create({
-            name: req.newAddress,
-            latitude: req.newLatitude,
-            longitude: req.newLongitude,
-          });
-          await this.pickupPointRepo.save(pt);
-        }
-      }
+      // 위치 변동은 승인한 그 날짜에만 적용한다 (위의 ScheduleOverride).
+      // 학생의 기본 탑승지·좌표와 정류장 목록은 바꾸지 않는다. 계속 바뀌는 위치는 원장님이 학생 정보에서 직접 고친다.
     }
 
     // 알림 생성

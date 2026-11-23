@@ -15,7 +15,7 @@ import { User } from '../entities/user.entity';
 import { PickupPoint } from '../entities/pickup-point.entity';
 
 import { BoardPost } from '../entities/board-post.entity';
-import { getStudentClassName } from '../utils/school.util';
+import { getStudentClassName, kstDateString } from '../utils/school.util';
 import { applyBoardVisibility, getLinkedClassNames } from '../utils/board-visibility.util';
 import { resolveMediaRef, resolveMediaRefs } from '../utils/s3.util';
 import { isNotificationEnabled, getUserNotificationSettings } from '../utils/notification.util';
@@ -470,8 +470,7 @@ export class ParentService {
 
     // 오늘 결석 또는 직접 픽업 원아 체크 (override 또는 boardStatus)
     const today = new Date();
-    const tzOffset = today.getTimezoneOffset() * 60000;
-    const localISOTime = (new Date(today.getTime() - tzOffset)).toISOString().slice(0, 10);
+    const localISOTime = kstDateString(); // 한국 날짜 (서버 시간대와 상관없이)
     const overrides = await this.overrideRepository.find({
       where: {
         startDate: localISOTime,
@@ -614,8 +613,7 @@ export class ParentService {
     let activeVehicle = student.assignedVehicle;
 
     const today = new Date();
-    const tzOffset = today.getTimezoneOffset() * 60000;
-    const localISOTime = (new Date(today.getTime() - tzOffset)).toISOString().slice(0, 10);
+    const localISOTime = kstDateString(); // 한국 날짜 (서버 시간대와 상관없이)
     
     const override = await this.overrideRepository.findOne({
       where: { 
@@ -729,8 +727,7 @@ export class ParentService {
       timeString: '15시 30분', // 임시 예상 시간
     };
 
-    const tzOffset = today.getTimezoneOffset() * 60000;
-    const localISOTime = (new Date(today.getTime() - tzOffset)).toISOString().slice(0, 10);
+    const localISOTime = kstDateString(); // 한국 날짜 (서버 시간대와 상관없이)
 
     const override = await this.overrideRepository.findOne({
       where: { 
