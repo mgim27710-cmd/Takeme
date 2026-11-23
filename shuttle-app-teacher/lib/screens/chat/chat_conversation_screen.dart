@@ -647,13 +647,66 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
             ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 final name = nameCtrl.text.trim();
                 if (name.isEmpty) return;
                 Navigator.pop(ctx);
-                final text = '[임직원 휴가·연차 신청서]\n신청자: $name\n구분: $leaveType\n기간: ${periodCtrl.text.trim()}\n대체 인력 배정: ${needSub ? '필요 (대체 인력 요청)' : '불필요'}\n신청 사유: ${reasonCtrl.text.trim().isNotEmpty ? reasonCtrl.text.trim() : '개인 사유'}\n\n원장님의 승인 결재를 부탁드립니다.';
-                _textController.text = text;
-                _handleSendMessage();
+
+                final rawPeriod = periodCtrl.text.trim();
+                final now = DateTime.now();
+                final todayStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+                String startDate = todayStr;
+                String endDate = todayStr;
+                if (rawPeriod.contains('~')) {
+                  final parts = rawPeriod.split('~');
+                  startDate = parts[0].trim();
+                  endDate = parts.length > 1 ? parts[1].trim() : startDate;
+                } else if (rawPeriod.isNotEmpty && rawPeriod != '오늘') {
+                  startDate = rawPeriod;
+                  endDate = rawPeriod;
+                }
+
+                final myRole = ApiService().currentUser?.role ?? 'TEACHER';
+                final res = await ApiService().createLeaveRequest(
+                  roomId: widget.roomId,
+                  applicantName: name,
+                  applicantRole: myRole == 'DRIVER' ? '기사' : '교사',
+                  leaveType: leaveType,
+                  startDate: startDate,
+                  endDate: endDate,
+                  needSubstitute: needSub,
+                  reason: reasonCtrl.text.trim().isNotEmpty ? reasonCtrl.text.trim() : '개인 사유',
+                );
+
+                if (!mounted) return;
+
+                if (res['success'] == true) {
+                  // ignore: use_build_context_synchronously
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('휴가·연차 결재 신청서가 원장님께 전송되었습니다.'),
+                      backgroundColor: Color(0xFF10B981),
+                    ),
+                  );
+                  if (res['data'] != null && res['data'] is Map<String, dynamic>) {
+                    setState(() {
+                      final newMsg = res['data'] as Map<String, dynamic>;
+                      final exists = _messages.any((m) => m['id'] == newMsg['id']);
+                      if (!exists) _messages.add(newMsg);
+                    });
+                    _scrollToBottom();
+                  } else {
+                    _loadMessages(userInitiated: true);
+                  }
+                } else {
+                  // ignore: use_build_context_synchronously
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(res['message']?.toString() ?? '휴가 신청서 전송에 실패했습니다.'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
               },
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF059669)),
               child: const Text('결재 신청', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
@@ -689,7 +742,13 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
 
     if (ok != true) return;
 
-    final res = await ApiService().decidePaymentRequest(messageId, decision);
+    final targetMsg = _messages.firstWhere((m) => m['id'] == messageId, orElse: () => <String, dynamic>{});
+    final isLeaveRequest = targetMsg['type'] == 'LEAVE_REQUEST' || targetMsg['payload']?['type'] == 'STAFF_LEAVE';
+
+    final res = isLeaveRequest
+        ? await ApiService().decideLeaveRequest(messageId, decision)
+        : await ApiService().decidePaymentRequest(messageId, decision);
+
     if (res != null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -703,7 +762,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
           if (m['id'] == messageId) {
             final p = Map<String, dynamic>.from(m['payload'] ?? {});
             p['status'] = decision;
-            p['decidedBy'] = ApiService().currentUser?.name ?? '담당자';
+            p['decidedBy'] = ApiService().currentUser?.name ?? '원장';
             m['payload'] = p;
           }
         }
@@ -742,6 +801,11 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
       statusIcon = Icons.hourglass_top;
     }
 
+    final isLeave = msg['type'] == 'LEAVE_REQUEST' ||
+        payload['type'] == 'STAFF_LEAVE' ||
+        text.contains('[임직원 휴가·연차 신청서]');
+    final cardTitle = isLeave ? '휴가·연차 결재 신청서' : '전자결재 신청서';
+
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
@@ -769,9 +833,9 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
             ),
             child: Row(
               children: [
-                Icon(Icons.assignment, size: 16, color: statusColor),
+                Icon(isLeave ? Icons.badge : Icons.assignment, size: 16, color: statusColor),
                 const SizedBox(width: 6),
-                const Text('전자결재 신청서', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: Color(0xFF0F172A))),
+                Text(cardTitle, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: Color(0xFF0F172A))),
                 const Spacer(),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -808,41 +872,71 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                     style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.w600),
                   ),
                 ],
-                // 결재 대기 중일 때 승인/반려 버튼 활성화
+                // 결재 대기 중일 때
                 if (status == 'PENDING' && msgId != null) ...[
-                  const SizedBox(height: 12),
-                  const Divider(height: 1, color: Color(0xFFE2E8F0)),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => _handleDecision(msgId, 'REJECTED'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: const Color(0xFFEF4444),
-                            side: const BorderSide(color: Color(0xFFEF4444)),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                          ),
-                          child: const Text('반려', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        ),
+                  if (isMe) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF3C7),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFFCD34D)),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () => _handleDecision(msgId, 'APPROVED'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF10B981),
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            elevation: 0,
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.hourglass_empty, size: 14, color: Color(0xFFD97706)),
+                          SizedBox(width: 6),
+                          Text(
+                            '원장선생님 결재 대기 중입니다.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFFB45309),
+                            ),
                           ),
-                          child: const Text('승인', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ] else ...[
+                    // 결재 권한자(원장/관리자)에게만 승인/반려 버튼 노출
+                    const SizedBox(height: 12),
+                    const Divider(height: 1, color: Color(0xFFE2E8F0)),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => _handleDecision(msgId, 'REJECTED'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFFEF4444),
+                              side: const BorderSide(color: Color(0xFFEF4444)),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                            child: const Text('반려', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () => _handleDecision(msgId, 'APPROVED'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF10B981),
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              elevation: 0,
+                            ),
+                            child: const Text('승인', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ],
             ),
@@ -1127,7 +1221,8 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
             child: (msg['type'] == 'PAYMENT_REQUEST' ||
-                    (msg['payload'] != null && msg['payload']['type'] == 'change_request') ||
+                    msg['type'] == 'LEAVE_REQUEST' ||
+                    (msg['payload'] != null && (msg['payload']['type'] == 'change_request' || msg['payload']['type'] == 'STAFF_LEAVE')) ||
                     text.contains('[신규 탑승 및 결재 신청]') ||
                     text.contains('[신규 결재 신청]') ||
                     text.contains('[임직원 휴가·연차 신청서]') ||

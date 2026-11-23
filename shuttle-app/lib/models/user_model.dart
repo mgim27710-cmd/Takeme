@@ -40,4 +40,25 @@ class UserModel {
       'assignedClass': assignedClass,
     };
   }
+
+  static String getRoleKorean(String? role) {
+    switch (role?.toUpperCase()) {
+      case 'ADMIN':
+      case 'ACADEMY_ADMIN':
+        return '원장님';
+      case 'TEACHER':
+      case 'STAFF':
+        return '선생님';
+      case 'DRIVER':
+        return '기사님';
+      case 'PARENT':
+        return '학부모님';
+      case 'STUDENT':
+        return '원아';
+      default:
+        return '사용자';
+    }
+  }
+
+  String get roleKorean => getRoleKorean(role);
 }

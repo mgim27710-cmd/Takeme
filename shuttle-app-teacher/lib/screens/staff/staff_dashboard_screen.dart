@@ -56,10 +56,36 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     SocketService().onRoomUpdated((_) {
       if (mounted) _loadUnreadCount();
     });
+    _initChangeListeners();
+  }
+
+  void _initChangeListeners() {
+    void handleRefresh(dynamic data) {
+      if (!mounted) return;
+      _loadAllData(silent: true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('원아 통학 변동사항이 실시간 반영되었습니다.'),
+          duration: Duration(seconds: 2),
+          backgroundColor: Color(0xFF2563EB),
+        ),
+      );
+    }
+
+    SocketService().on('studentStatusChanged', handleRefresh);
+    SocketService().on('changeRequestCreated', handleRefresh);
+    SocketService().on('changeRequestDecided', handleRefresh);
+    SocketService().on('routeUpdated', handleRefresh);
+    SocketService().on('routeNeedsRefresh', handleRefresh);
   }
 
   @override
   void dispose() {
+    SocketService().off('studentStatusChanged');
+    SocketService().off('changeRequestCreated');
+    SocketService().off('changeRequestDecided');
+    SocketService().off('routeUpdated');
+    SocketService().off('routeNeedsRefresh');
     _notificationPollTimer?.cancel();
     _scrollController.dispose();
     _broadcastMessageController.dispose();
@@ -84,8 +110,10 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     await _flutterTts.setSpeechRate(0.5);
   }
 
-  Future<void> _loadAllData() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadAllData({bool silent = false}) async {
+    if (!silent) {
+      setState(() => _isLoading = true);
+    }
     final user = ApiService().currentUser;
     if (user == null) return;
 

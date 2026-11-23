@@ -7,6 +7,9 @@ class RouteStop {
   final double longitude;
   final String? address;
   final String? expectedTime;
+  final String? stopMemo;
+  final bool isOneTime;
+  final String? overrideType;
 
   RouteStop({
     this.id,
@@ -17,6 +20,9 @@ class RouteStop {
     required this.longitude,
     this.address,
     this.expectedTime,
+    this.stopMemo,
+    this.isOneTime = false,
+    this.overrideType,
   });
 
   factory RouteStop.fromJson(Map<String, dynamic> json) {
@@ -24,6 +30,12 @@ class RouteStop {
       if (val is num) return val.toDouble();
       return double.tryParse(val?.toString() ?? '0') ?? 0.0;
     }
+
+    final bool isOneTime = json['isOneTimeBoarding'] == true ||
+        json['isOneTime'] == true ||
+        json['overrideType'] == 'ONE_TIME_BOARDING' ||
+        (json['name']?.toString().contains('[일일') ?? false) ||
+        (json['stopMemo']?.toString().contains('[일일') ?? false);
 
     return RouteStop(
       id: json['id'] is int ? json['id'] as int : int.tryParse(json['id']?.toString() ?? ''),
@@ -34,6 +46,9 @@ class RouteStop {
       longitude: parseCoord(json['longitude'] ?? json['lng']),
       address: json['address'],
       expectedTime: json['expectedTime'],
+      stopMemo: json['stopMemo'] ?? json['memo'] ?? json['address'],
+      isOneTime: isOneTime,
+      overrideType: json['overrideType']?.toString(),
     );
   }
 }

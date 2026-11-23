@@ -133,6 +133,20 @@ class ApiService {
     return res;
   }
 
+  Future<http.Response> putWithAuth(Uri url, dynamic body, [Map<String, String>? extra]) async {
+    final encoded = body is String ? body : jsonEncode(body);
+    var res = await http.put(url, headers: _headers(extra), body: encoded);
+    if (res.statusCode == 401 && _refreshToken != null) {
+      final refreshed = await tryRefreshToken();
+      if (refreshed) {
+        res = await http.put(url, headers: _headers(extra), body: encoded);
+      } else {
+        await logout();
+      }
+    }
+    return res;
+  }
+
   Future<http.Response> deleteWithAuth(Uri url, [Map<String, String>? extra]) async {
     var res = await http.delete(url, headers: _headers(extra));
     if (res.statusCode == 401 && _refreshToken != null) {
@@ -464,11 +478,12 @@ class ApiService {
   }
 
   // ==================== BOARD APIs ====================
-  Future<List<Map<String, dynamic>>> getBoardPosts({int? academyId, String? search}) async {
+  Future<List<Map<String, dynamic>>> getBoardPosts({int? academyId, String? search, String? postType}) async {
     try {
       final qp = <String, String>{};
       if (academyId != null) qp['academyId'] = academyId.toString();
       if (search != null && search.isNotEmpty) qp['search'] = search;
+      if (postType != null && postType.isNotEmpty) qp['postType'] = postType;
       final uri = Uri.parse('${AppConfig.apiHost}/routing/board/posts').replace(queryParameters: qp.isEmpty ? null : qp);
       final res = await getWithAuth(uri);
       if (res.statusCode == 200) {
@@ -511,6 +526,7 @@ class ApiService {
     required String content,
     String visibility = 'ALL',
     String? targetClass,
+    String? postType,
     String? imageUrl,
     List<String>? images,
     required String authorName,
@@ -524,6 +540,7 @@ class ApiService {
         'content': content,
         'visibility': visibility,
         'targetClass': targetClass,
+        'postType': postType ?? 'POST',
         'imageUrl': imageUrl,
         'images': images ?? (imageUrl != null ? [imageUrl] : []),
         'authorName': authorName,
@@ -538,6 +555,34 @@ class ApiService {
       };
     } catch (e) {
       return {'success': false, 'message': '게시글 등록에 실패했습니다.'};
+    }
+  }
+
+  Future<Map<String, dynamic>> updateBoardPost(int postId, {
+    String? title,
+    String? content,
+    String? visibility,
+    String? targetClass,
+    String? postType,
+    List<String>? images,
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId');
+      final body = <String, dynamic>{};
+      if (title != null) body['title'] = title;
+      if (content != null) body['content'] = content;
+      if (visibility != null) body['visibility'] = visibility;
+      if (targetClass != null) body['targetClass'] = targetClass;
+      if (postType != null) body['postType'] = postType;
+      if (images != null) body['images'] = images;
+      final res = await putWithAuth(url, body);
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'data': data,
+      };
+    } catch (e) {
+      return {'success': false, 'message': '게시글 수정에 실패했습니다.'};
     }
   }
 
@@ -634,5 +679,78 @@ class ApiService {
     } catch (e) {
       return {'success': false, 'message': '메시지 전송에 실패했습니다.'};
     }
+  }
+
+  Future<List<dynamic>> getMediaAssets({
+    String? from,
+    String? to,
+    int? vehicleId,
+    String? className,
+    String? sourceType,
+  }) async {
+    try {
+      final queryParams = <String, String>{};
+      if (from != null) queryParams['from'] = from;
+      if (to != null) queryParams['to'] = to;
+      if (vehicleId != null) queryParams['vehicleId'] = vehicleId.toString();
+      if (className != null) queryParams['className'] = className;
+      if (sourceType != null && sourceType.isNotEmpty) queryParams['sourceType'] = sourceType;
+
+      final uri = Uri.parse('${AppConfig.apiHost}/routing/media').replace(queryParameters: queryParams.isEmpty ? null : queryParams);
+      final res = await getWithAuth(uri);
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+        if (decoded is List) return decoded;
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  // ==================== LEAVE REQUEST (휴가·연차 전자결재) ====================
+  Future<Map<String, dynamic>> createLeaveRequest({
+    required int roomId,
+    required String applicantName,
+    required String applicantRole,
+    required String leaveType,
+    required String startDate,
+    required String endDate,
+    required bool needSubstitute,
+    required String reason,
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/leave-request');
+      final res = await postWithAuth(url, jsonEncode({
+        'roomId': roomId,
+        'applicantName': applicantName,
+        'applicantRole': applicantRole,
+        'leaveType': leaveType,
+        'startDate': startDate,
+        'endDate': endDate,
+        'needSubstitute': needSubstitute,
+        'reason': reason,
+      }));
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'data': data,
+        'message': data['message'],
+      };
+    } catch (e) {
+      return {'success': false, 'message': '휴가 신청서 전송에 실패했습니다.'};
+    }
+  }
+
+  Future<Map<String, dynamic>?> decideLeaveRequest(int messageId, String decision, {String? rejectionReason}) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/leave-request/$messageId/decision');
+      final res = await postWithAuth(url, jsonEncode({
+        'decision': decision,
+        if (rejectionReason != null) 'rejectionReason': rejectionReason,
+      }));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>?;
+      }
+    } catch (_) {}
+    return null;
   }
 }

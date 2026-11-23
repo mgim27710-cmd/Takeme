@@ -235,6 +235,23 @@ class SocketService {
     _messagesReadCallbacks.clear();
   }
 
+  /// 범용 이벤트 리스너 등록
+  void on(String event, Function(dynamic data) callback) {
+    _socket?.off(event);
+    _socket?.on(event, (data) {
+      if (data is Map && data is! Map<String, dynamic>) {
+        callback(Map<String, dynamic>.from(data));
+      } else {
+        callback(data);
+      }
+    });
+  }
+
+  /// 범용 이벤트 리스너 해제
+  void off(String event) {
+    _socket?.off(event);
+  }
+
   void disconnect() {
     activeChatRoomId = null;
     _notificationCallbacks.clear();

@@ -1188,4 +1188,52 @@ class ApiService {
     }
     return res.statusCode == 200 || res.statusCode == 204;
   }
+
+  // ==================== LEAVE REQUEST (휴가·연차 전자결재) ====================
+  Future<Map<String, dynamic>> createLeaveRequest({
+    required int roomId,
+    required String applicantName,
+    required String applicantRole,
+    required String leaveType,
+    required String startDate,
+    required String endDate,
+    required bool needSubstitute,
+    required String reason,
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/leave-request');
+      final res = await postWithAuth(url, jsonEncode({
+        'roomId': roomId,
+        'applicantName': applicantName,
+        'applicantRole': applicantRole,
+        'leaveType': leaveType,
+        'startDate': startDate,
+        'endDate': endDate,
+        'needSubstitute': needSubstitute,
+        'reason': reason,
+      }));
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'data': data,
+        'message': data['message'],
+      };
+    } catch (e) {
+      return {'success': false, 'message': '휴가 신청서 전송에 실패했습니다.'};
+    }
+  }
+
+  Future<Map<String, dynamic>?> decideLeaveRequest(int messageId, String decision, {String? rejectionReason}) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/leave-request/$messageId/decision');
+      final res = await postWithAuth(url, jsonEncode({
+        'decision': decision,
+        if (rejectionReason != null) 'rejectionReason': rejectionReason,
+      }));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>?;
+      }
+    } catch (_) {}
+    return null;
+  }
 }
