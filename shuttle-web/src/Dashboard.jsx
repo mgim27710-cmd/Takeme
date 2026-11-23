@@ -17,6 +17,7 @@ import { API_BASE_URL } from './config';
 import TeacherDashboard from './TeacherDashboard';
 import ClassManager from './classes/ClassManager';
 import AuthViewer from './auth/AuthViewer';
+import ApprovalRequestManager from './ApprovalRequestManager';
 import HelpManualCard from './settings/HelpManualCard';
 import AdminMainHome from './home/AdminMainHome';
 import { formatTeacherName, cleanTeacherBaseName } from './utils/teacherUtil';
@@ -489,7 +490,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const [buses, setBuses] = useState([]);
   const [students, setStudents] = useState([]); // Array of { name, address, lat, lng, assignedBusId, color }
   const [selectedBusId, setSelectedBusId] = useState(null);
-  const [activeTab, setActiveTab] = useState('home'); // 'home', 'status', 'buses', 'students', 'classes', 'auth', 'log', 'messages', 'documents', 'board', 'settings'
+  const [activeTab, setActiveTab] = useState('home'); // 'home', 'status', 'buses', 'students', 'classes', 'auth', 'approvals', 'log', 'messages', 'documents', 'board', 'settings'
   const [isLogClosing, setIsLogClosing] = useState(false);
   const [isMessageClosing, setIsMessageClosing] = useState(false);
   const [isDocumentsClosing, setIsDocumentsClosing] = useState(false);
@@ -497,6 +498,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   const [isClassesClosing, setIsClassesClosing] = useState(false);
   const [hasUnsavedClassChanges, setHasUnsavedClassChanges] = useState(false);
   const [isAuthClosing, setIsAuthClosing] = useState(false);
+  const [isApprovalsClosing, setIsApprovalsClosing] = useState(false);
   const [authTab, setAuthTab] = useState('STUDENT'); // 'STUDENT' | 'STAFF' | 'TEACHER' | 'SUBSTITUTE'
   const [boardSelectedClass, setBoardSelectedClass] = useState('ALL');
   const [boardSearchKeyword, setBoardSearchKeyword] = useState('');
@@ -678,6 +680,29 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     return () => window.removeEventListener('takeme_expiry_changed', updateExpiryStatus);
   }, [buses, activeEducationLevel]);
 
+  // Pending Approval Requests Count State
+  const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
+
+  const fetchPendingApprovalCount = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('takeme_token') || localStorage.getItem('token') || '';
+      const res = await fetch(`${API_BASE_URL}/approval/admin?status=PENDING`, {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : '',
+          'x-academy-id': String(selectedAcademyId || ''),
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPendingApprovalCount(Array.isArray(data) ? data.filter(r => r.status === 'PENDING').length : 0);
+      }
+    } catch (_) {}
+  }, [selectedAcademyId]);
+
+  useEffect(() => {
+    fetchPendingApprovalCount();
+  }, [fetchPendingApprovalCount]);
+
   // Real-time Director Alert State
   const [directorAlertToast, setDirectorAlertToast] = useState(null);
   const [unreadAlertCount, setUnreadAlertCount] = useState(0);
@@ -797,6 +822,12 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       setIsAuthClosing(true);
       setTimeout(() => {
         setIsAuthClosing(false);
+        setActiveTab(targetTab);
+      }, 300);
+    } else if (activeTab === 'approvals' && targetTab !== 'approvals') {
+      setIsApprovalsClosing(true);
+      setTimeout(() => {
+        setIsApprovalsClosing(false);
         setActiveTab(targetTab);
       }, 300);
     } else {
@@ -1035,7 +1066,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       setHighlightedStudentId(st.id);
       setHighlightedStudentLocation({ lat: sLat, lng: sLng, student: st, timestamp: Date.now() });
       // 만약 지도를 덮는 전면 뷰어/모달 탭이 열려있다면 원아 정보 탭으로 안전하게 복귀
-      if (['log', 'messages', 'documents', 'board', 'classes', 'auth'].includes(activeTab)) {
+      if (['log', 'messages', 'documents', 'board', 'classes', 'auth', 'approvals'].includes(activeTab)) {
         handleTabChange('students');
       }
     } else {
@@ -1088,7 +1119,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         timestamp: Date.now()
       });
       setSelectedBusId(null);
-      if (['log', 'messages', 'documents', 'board', 'classes', 'auth'].includes(activeTab)) {
+      if (['log', 'messages', 'documents', 'board', 'classes', 'auth', 'approvals'].includes(activeTab)) {
         handleTabChange('status');
       }
     } else {
@@ -1130,7 +1161,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       });
       setSelectedBusId(bus.id);
       // 만약 지도를 가리는 전면 뷰어 탭이 열려있다면 상태/현황 탭으로 복귀
-      if (['log', 'messages', 'documents', 'board', 'classes', 'auth'].includes(activeTab)) {
+      if (['log', 'messages', 'documents', 'board', 'classes', 'auth', 'approvals'].includes(activeTab)) {
         handleTabChange('status');
       }
     } else {
@@ -1166,7 +1197,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         timestamp: Date.now()
       });
       setHighlightedStudentId(oneTimeStudents[0].id);
-      if (['log', 'messages', 'documents', 'board', 'classes', 'auth'].includes(activeTab)) {
+      if (['log', 'messages', 'documents', 'board', 'classes', 'auth', 'approvals'].includes(activeTab)) {
         handleTabChange('status');
       }
     } else if (oneTimeStudents.length > 1) {
@@ -1175,7 +1206,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         bounds,
         timestamp: Date.now()
       });
-      if (['log', 'messages', 'documents', 'board', 'classes', 'auth'].includes(activeTab)) {
+      if (['log', 'messages', 'documents', 'board', 'classes', 'auth', 'approvals'].includes(activeTab)) {
         handleTabChange('status');
       }
     } else {
@@ -1196,7 +1227,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         timestamp: Date.now()
       });
       setHighlightedStudentId(unassigned[0].id);
-      if (['log', 'messages', 'documents', 'board', 'classes', 'auth'].includes(activeTab)) {
+      if (['log', 'messages', 'documents', 'board', 'classes', 'auth', 'approvals'].includes(activeTab)) {
         handleTabChange('status');
       }
     } else if (unassigned.length > 1) {
@@ -1205,7 +1236,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         bounds,
         timestamp: Date.now()
       });
-      if (['log', 'messages', 'documents', 'board', 'classes', 'auth'].includes(activeTab)) {
+      if (['log', 'messages', 'documents', 'board', 'classes', 'auth', 'approvals'].includes(activeTab)) {
         handleTabChange('status');
       }
     } else {
@@ -1789,6 +1820,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     socket.on('directorAlert', handleIncomingDirectorAlert);
     socket.on('globalDirectorAlert', handleIncomingDirectorAlert);
     socket.on('changeRequestCreated', (data) => {
+      setPendingApprovalCount(prev => prev + 1);
       handleIncomingDirectorAlert({
         id: data.id,
         category: data.type === 'ABSENCE' ? 'ABSENT' : data.type === 'ONE_TIME_BOARDING' ? 'SHUTTLE_REQUEST' : (data.type === 'PICKUP' || data.type === 'INDIVIDUAL_DISMISSAL') ? 'PICKUP' : 'GENERAL',
@@ -1799,6 +1831,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       });
     });
     socket.on('changeRequestDecided', (req) => {
+      setPendingApprovalCount(prev => Math.max(0, prev - 1));
       const studentName = req?.student?.adminDisplayName || req?.student?.name || '원아';
       const decisionKr = req?.decision === 'APPROVED' ? '승인' : '반려';
       handleIncomingDirectorAlert({
@@ -4792,6 +4825,22 @@ const parseKindergartenExcelSheet = (sheet) => {
           <span className="text-[12.5px] font-black tracking-tight">가입승인</span>
         </button>
         <button 
+          onClick={() => handleTabChange('approvals')} 
+          className={`relative w-[96px] py-3 px-1 rounded-2xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-2 ${activeTab === 'approvals' ? `bg-white ${terms.themeText} shadow-md scale-105 font-black` : 'text-white/90 hover:bg-white/15 hover:text-white font-semibold'}`} 
+          title="원아 변동신청 및 전자결재 관리"
+        >
+          {/* 전자결재 아이콘 */}
+          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+          </svg>
+          <span className="text-[12.5px] font-black tracking-tight">변동·결재</span>
+          {pendingApprovalCount > 0 && (
+            <span className="absolute top-1 right-2 bg-rose-600 text-white text-[11px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-white animate-pulse shadow-sm">
+              {pendingApprovalCount > 99 ? '99+' : pendingApprovalCount}
+            </span>
+          )}
+        </button>
+        <button 
           onClick={() => handleTabChange('log')} 
           className={`w-[96px] py-3 px-1 rounded-2xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-2 ${activeTab === 'log' ? `bg-white ${terms.themeText} shadow-md scale-105 font-black` : 'text-white/90 hover:bg-white/15 hover:text-white font-semibold'}`} 
           title="캘린더 및 출석 일지"
@@ -4849,7 +4898,7 @@ const parseKindergartenExcelSheet = (sheet) => {
       </div>
 
       {/* Sidebar Content Panel */}
-      <div className={`bg-white shadow-lg z-10 flex flex-col w-[450px] shrink-0 break-keep ${activeTab === 'messages' || activeTab === 'home' ? 'hidden' : ''}`}>
+      <div className={`bg-white shadow-lg z-10 flex flex-col w-[450px] shrink-0 break-keep ${activeTab === 'messages' || activeTab === 'home' || activeTab === 'approvals' ? 'hidden' : ''}`}>
 
         {(activeTab === 'status' || activeTab === 'buses') && (
           <div className="p-6 h-full flex flex-col overflow-y-auto break-keep">
@@ -7324,6 +7373,16 @@ const parseKindergartenExcelSheet = (sheet) => {
             handleUnlockUser={handleUnlockUser}
             onOpenSubstituteModal={handleOpenSubstituteModal}
             isProcessing={isProcessing}
+          />
+        )}
+
+        {activeTab === 'approvals' && (
+          <ApprovalRequestManager 
+            selectedAcademyId={selectedAcademyId}
+            currentUser={currentUser}
+            socket={socketRef.current}
+            onCountsChange={(count) => setPendingApprovalCount(count)}
+            onClose={() => handleTabChange('home')}
           />
         )}
 

@@ -16,6 +16,7 @@ import { RoutingService } from '../routing/routing.service';
 import { Vehicle } from '../entities/vehicle.entity';
 import { Student } from '../entities/student.entity';
 import { User } from '../entities/user.entity';
+import { ApprovalRequest } from '../entities/approval-request.entity';
 import { JwtPayload } from '../auth/auth-user.decorator';
 
 const SUPER_ADMIN_ROOM = 'super_admin';
@@ -42,6 +43,7 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     @InjectRepository(Vehicle) private readonly vehicleRepository: Repository<Vehicle>,
     @InjectRepository(Student) private readonly studentRepository: Repository<Student>,
     @InjectRepository(User) private readonly userRepository: Repository<User>,
+    @InjectRepository(ApprovalRequest) private readonly approvalRepository: Repository<ApprovalRequest>,
   ) {
     this.routingService.registerRouteUpdateNotifier((academyId, message) => {
       if (message) {
@@ -129,6 +131,23 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
         .andWhere('(av.id = :vid OR dv.id = :vid)', { vid: vehicleId })
         .getCount();
       ok = count > 0;
+
+      // 정규 배정 차량이 아니더라도 오늘 하루 탑승 또는 차량 변동 신청(승인/대기) 내역이 있는지 확인
+      if (!ok && this.approvalRepository) {
+        const todayKst = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+        const appCount = await this.approvalRepository
+          .createQueryBuilder('ar')
+          .innerJoin('ar.student', 's')
+          .leftJoin('s.parentUser', 'p')
+          .leftJoin('s.studentUser', 'u')
+          .innerJoin('ar.targetVehicle', 'tv')
+          .where('(p.id = :uid OR u.id = :uid)', { uid: user.sub })
+          .andWhere('tv.id = :vid', { vid: vehicleId })
+          .andWhere('ar.targetDate = :today', { today: todayKst })
+          .andWhere('ar.status IN (:...statuses)', { statuses: ['APPROVED', 'PENDING'] })
+          .getCount();
+        ok = appCount > 0;
+      }
     }
     if (ok) allowed.add(vehicleId);
     return ok;
@@ -198,6 +217,11 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
    */
   async broadcastOperationStatus(vehicleId: number, isOperating: boolean, busNumber?: string, targetAcademyId?: number) {
     this.operatingVehicles.set(vehicleId, isOperating);
+    if (!isOperating) {
+      this.latestVehicleLocations.delete(vehicleId);
+    }
+    await this.vehicleRepository.update({ id: vehicleId }, { isOperating }).catch(() => {});
+
     const room = `vehicle_${vehicleId}`;
     const payload = {
       vehicleId,
@@ -384,12 +408,21 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       timestamp: data.timestamp || new Date().toISOString(),
     };
     // 차량 방에는 같은 차를 타는 다른 학부모도 들어오므로 보내지 않는다. 그 원아의 학부모와 학생 본인에게만.
+    let parentUserId = data.parentUserId;
     let studentUserId = data.studentUserId;
-    if (!studentUserId) {
-      const st = await this.studentRepository.findOne({ where: { id: data.studentId }, relations: { studentUser: true } });
-      studentUserId = st?.studentUser?.id;
+    if (!parentUserId || !studentUserId) {
+      const st = await this.studentRepository.findOne({
+        where: { id: data.studentId },
+        relations: { parentUser: true, studentUser: true },
+      });
+      if (!parentUserId && st?.parentUser?.id) {
+        parentUserId = st.parentUser.id;
+      }
+      if (!studentUserId && st?.studentUser?.id) {
+        studentUserId = st.studentUser.id;
+      }
     }
-    for (const uid of new Set([data.parentUserId, studentUserId].filter(Boolean) as number[])) {
+    for (const uid of new Set([parentUserId, studentUserId].filter(Boolean) as number[])) {
       this.server.to(`user_${uid}`).emit('childBoardStatusChanged', payload);
     }
   }
@@ -413,7 +446,12 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     console.log(`Client ${client.id} joined room ${room}`);
 
     // If vehicle is currently operating, inform client immediately
-    const isOp = this.operatingVehicles.get(vehicleId) || false;
+    let isOp = this.operatingVehicles.get(vehicleId);
+    if (isOp === undefined) {
+      const v = await this.vehicleRepository.findOne({ where: { id: vehicleId } });
+      isOp = !!v?.isOperating;
+      this.operatingVehicles.set(vehicleId, isOp);
+    }
     // initial: 방에 들어올 때 알려주는 '현재 상태'. 앱은 이것으로 '운행 시작' 푸시를 띄우지 않는다.
     client.emit('vehicleOperatingStatus', {
       vehicleId,
@@ -422,10 +460,12 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       timestamp: new Date().toISOString(),
     });
 
-    // 캐시된 최신 버스 위치가 있으면 접속 즉시 전송하여 화면을 열자마자 버스가 바로 보이도록 함
-    const lastLoc = this.latestVehicleLocations.get(vehicleId);
-    if (lastLoc) {
-      client.emit('locationUpdated', lastLoc);
+    // 현재 운행 중일 때만 캐시된 최신 버스 위치 전송 (운행 종료된 버스가 유령 마커로 뜨는 버그 방지)
+    if (isOp) {
+      const lastLoc = this.latestVehicleLocations.get(vehicleId);
+      if (lastLoc) {
+        client.emit('locationUpdated', lastLoc);
+      }
     }
   }
 

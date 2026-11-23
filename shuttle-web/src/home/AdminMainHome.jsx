@@ -66,9 +66,9 @@ export default function AdminMainHome({
           }
         } catch (_) {}
 
-        // 3. Fetch Payment / Operational Approvals
+        // 3. Fetch Operational Approvals
         try {
-          const apprRes = await fetch(`${API_BASE_URL}/chat/payment/requests${academy?.id ? `?academyId=${academy.id}` : ''}`, {
+          const apprRes = await fetch(`${API_BASE_URL}/approval/admin?status=PENDING`, {
             headers: getAuthHeaders(),
           });
           if (apprRes.ok && isMounted) {
@@ -385,46 +385,51 @@ export default function AdminMainHome({
 
   // Pending Approvals List
   const pendingApprovalsList = useMemo(() => {
-    const list = approvalRequests.filter(r => r.status === 'PENDING');
-    if (list.length > 0) return list;
-
-    // Default sample items
-    return [
-      {
-        id: 'appr-mock-1',
-        title: '1호차 유류비 지출 정산 결재',
-        requester: '1호차 김기사',
-        category: '통학차량 운영비 (주유)',
-        amount: '125,000원',
-        date: '금일 접수',
-        status: 'PENDING',
-      },
-      {
-        id: 'appr-mock-2',
-        title: '당일 셔틀 탑승지 변경 신청 (이도윤 / 바다반)',
-        requester: '이도윤 보호자',
-        category: '통학 변동 승인',
-        amount: '승인 대기',
-        date: '08:42 접수',
-        status: 'PENDING',
-      },
-      {
-        id: 'appr-mock-3',
-        title: '4호차 정기 소모품 교체 정산서',
-        requester: '4호차 최기사',
-        category: '차량 정비비 (엔진오일)',
-        amount: '85,000원',
-        date: '어제 접수',
-        status: 'PENDING',
-      },
-    ];
+    return approvalRequests.filter(r => r.status === 'PENDING').map(r => {
+      const typeMap = {
+        ABSENCE: '결석 신청',
+        ONE_TIME_BOARDING: '당일 하루 탑승',
+        PICKUP: '보호자 직접 픽업',
+        INDIVIDUAL_DISMISSAL: '개별 하원 (셔틀 미탑승)',
+        CHANGE_LOCATION: '탑승지/정류장 변경',
+      };
+      const stName = r.student?.adminDisplayName || r.student?.name || r.studentName || '원아';
+      const typeKr = r.typeKr || typeMap[r.type] || r.type || '통학 변동';
+      const targetVehicleStr = r.targetVehicle?.busNumber ? ` (${r.targetVehicle.busNumber}호차)` : '';
+      return {
+        id: r.id,
+        title: `[${typeKr}] ${stName}${targetVehicleStr}`,
+        requester: r.requester?.name || (r.requesterRole === 'PARENT' ? `${stName} 보호자` : '교직원'),
+        amount: r.targetDate ? `적용일: ${r.targetDate}` : '당일 신청',
+        status: r.status,
+      };
+    });
   }, [approvalRequests]);
 
   // Quick Approval Action
-  const handleQuickDecision = (id, type) => {
-    const actionText = type === 'APPROVED' ? '승인' : '반려';
-    setActionNotice(`[결재 알림] ${id} 요청이 정상적으로 ${actionText} 처리되었습니다.`);
-    setTimeout(() => setActionNotice(null), 3500);
+  const handleQuickDecision = async (id, type) => {
+    try {
+      const actionText = type === 'APPROVED' ? '승인' : '반려';
+      const res = await fetch(`${API_BASE_URL}/approval/${id}/decision`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          decision: type,
+          rejectionReason: type === 'REJECTED' ? '관리자에 의해 반려되었습니다.' : undefined,
+        }),
+      });
+      if (res.ok) {
+        setActionNotice(`[결재 완료] 해당 요청이 정상적으로 ${actionText} 처리되었습니다.`);
+        setApprovalRequests(prev => prev.filter(r => r.id !== id));
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message || '결재 처리에 실패했습니다.');
+      }
+    } catch (e) {
+      alert('서버 통신 오류가 발생했습니다.');
+    } finally {
+      setTimeout(() => setActionNotice(null), 3500);
+    }
   };
 
   // Document & Safety Inspection D-Day Cards
@@ -818,7 +823,7 @@ export default function AdminMainHome({
                 </h3>
                 <button
                   type="button"
-                  onClick={() => onNavigateTab && onNavigateTab('log')}
+                  onClick={() => onNavigateTab && onNavigateTab('approvals')}
                   className="text-sm font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
                 >
                   <span>결재함 바로가기</span>

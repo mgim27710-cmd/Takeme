@@ -49,6 +49,9 @@ export class Vehicle {
   @Column({ type: 'simple-json', nullable: true })
   polygonCoordinates: any; // e.g. [[lat, lng], [lat, lng]]
 
+  @Column({ default: false })
+  isOperating: boolean;
+
   @ManyToOne(() => Academy, (academy) => academy.id, { onDelete: 'CASCADE' })
   academy: Academy;
 }

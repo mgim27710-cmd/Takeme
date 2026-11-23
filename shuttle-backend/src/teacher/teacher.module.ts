@@ -18,6 +18,7 @@ import { ChatRoom } from '../entities/chat-room.entity';
 import { ChatRoomMember } from '../entities/chat-room-member.entity';
 import { Attendance } from '../entities/attendance.entity';
 import { AttendanceSubmission } from '../entities/attendance-submission.entity';
+import { ApprovalRequest } from '../entities/approval-request.entity';
 import { RoutingModule } from '../routing/routing.module';
 import { ChatModule } from '../chat/chat.module';
 
@@ -39,6 +40,7 @@ import { ChatModule } from '../chat/chat.module';
       ChatRoomMember,
       Attendance,
       AttendanceSubmission,
+      ApprovalRequest,
     ]),
     RoutingModule,
     forwardRef(() => ChatModule),

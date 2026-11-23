@@ -1050,6 +1050,9 @@ export class TeacherService {
       });
       await this.notificationRepository.save(noti);
 
+      vehicle.isOperating = true;
+      await this.vehicleRepository.save(vehicle);
+
       // 새 운행 시작: 지난 운행의 탑승/하차 표시를 '탑승 전'으로 되돌린다.
       // 단, 끝나지 않은 운행이 있으면(앱 재시작 등) 아직 타고 있는 원아 정보가 지워지지 않게 그대로 둔다.
       // (결석은 결석 신청·당일 처리에서 정하므로 여기서 바꾸지 않는다)
@@ -1159,6 +1162,9 @@ export class TeacherService {
         type: 'SHUTTLE',
       });
       await this.notificationRepository.save(noti);
+
+      vehicle.isOperating = false;
+      await this.vehicleRepository.save(vehicle);
 
       if (this.locationGateway) {
         this.locationGateway.broadcastOperationStatus(vehicle.id, false, vehicle.busNumber);
