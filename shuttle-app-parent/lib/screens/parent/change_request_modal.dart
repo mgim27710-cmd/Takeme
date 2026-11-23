@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/student_model.dart';
 import '../../services/api_service.dart';
+import '../../widgets/daum_postcode_screen.dart';
 
 class ChangeRequestModal extends StatefulWidget {
   final String email;
@@ -110,6 +111,22 @@ class _ChangeRequestModalState extends State<ChangeRequestModal> {
       }
     } catch (_) {}
     if (mounted) setState(() => _isLoadingStops = false);
+  }
+
+  Future<void> _openAddressSearch() async {
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(builder: (_) => const DaumPostcodeScreen()),
+    );
+    if (result != null && mounted) {
+      final roadAddress = result['roadAddress']?.toString() ?? result['address']?.toString() ?? '';
+      final buildingName = result['buildingName']?.toString() ?? '';
+      final extra = buildingName.isNotEmpty ? ' ($buildingName)' : '';
+      setState(() {
+        _addressController.text = '$roadAddress$extra'.trim();
+        _selectedStopIndex = null;
+      });
+    }
   }
 
   Future<void> _loadChildren() async {
@@ -863,17 +880,50 @@ class _ChangeRequestModalState extends State<ChangeRequestModal> {
             ),
             const SizedBox(height: 10),
           ],
-          const Text(
-            '신청 장소 / 도로명 주소 (직접 수정 가능)',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                '신청 장소 / 도로명 주소',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+              ),
+              InkWell(
+                onTap: _openAddressSearch,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFBFDBFE)),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.search_rounded, size: 14, color: Color(0xFF2563EB)),
+                      SizedBox(width: 4),
+                      Text(
+                        '도로명 주소 검색',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           TextField(
             controller: _addressController,
             decoration: InputDecoration(
-              hintText: '정류장을 선택하거나 주소를 입력하세요',
+              hintText: '도로명 주소 검색 버튼을 눌러 선택하세요',
               hintStyle: const TextStyle(fontSize: 14, color: Color(0xFF94A3B8)),
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              prefixIcon: const Icon(Icons.location_on_rounded, color: Color(0xFF2563EB), size: 20),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.search_rounded, color: Color(0xFF64748B)),
+                onPressed: _openAddressSearch,
+              ),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFCBD5E1))),
               focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.5)),
             ),

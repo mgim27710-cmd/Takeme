@@ -826,6 +826,20 @@ class ApiService {
     return [];
   }
 
+  Future<Map<String, dynamic>?> getBoardPostById(int postId) async {
+    try {
+      final uri = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId');
+      final res = await getWithAuth(uri);
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+        if (decoded is Map) {
+          return Map<String, dynamic>.from(decoded);
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   Future<Map<String, dynamic>> uploadBoardImage({
     required Uint8List bytes,
     required String filename,
@@ -922,6 +936,16 @@ class ApiService {
   Future<Map<String, dynamic>> deleteBoardPost(int postId) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId');
+      final res = await deleteWithAuth(url);
+      return {'success': res.statusCode == 200 || res.statusCode == 204};
+    } catch (_) {
+      return {'success': false};
+    }
+  }
+
+  Future<Map<String, dynamic>> deleteBoardComment(int postId, int commentId) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId/comments/$commentId');
       final res = await deleteWithAuth(url);
       return {'success': res.statusCode == 200 || res.statusCode == 204};
     } catch (_) {

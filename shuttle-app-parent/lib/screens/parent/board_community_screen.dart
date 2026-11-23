@@ -383,12 +383,25 @@ class _BoardDetailScreenState extends State<BoardDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _likeCount = widget.post['likeCount'] as int? ?? 0;
+    _likeCount = int.tryParse(widget.post['likeCount']?.toString() ?? '') ?? 0;
     _comments = List.from(widget.post['comments'] as List? ?? []);
     final user = ApiService().currentUser;
     final likedUsers = widget.post['likedUserIds'] as List? ?? [];
     if (user != null && likedUsers.contains(user.id.toString())) {
       _isLiked = true;
+    }
+    _refreshPost();
+  }
+
+  Future<void> _refreshPost() async {
+    final postId = int.tryParse(widget.post['id']?.toString() ?? '') ?? 0;
+    if (postId == 0) return;
+    final updated = await ApiService().getBoardPostById(postId);
+    if (updated != null && mounted) {
+      setState(() {
+        _comments = List.from(updated['comments'] as List? ?? []);
+        _likeCount = int.tryParse(updated['likeCount']?.toString() ?? '') ?? _likeCount;
+      });
     }
   }
 
@@ -402,7 +415,8 @@ class _BoardDetailScreenState extends State<BoardDetailScreen> {
     final user = ApiService().currentUser;
     if (user == null) return;
 
-    final postId = widget.post['id'] as int;
+    final postId = int.tryParse(widget.post['id']?.toString() ?? '') ?? 0;
+    if (postId == 0) return;
     setState(() {
       _isLiked = !_isLiked;
       _likeCount += _isLiked ? 1 : -1;
@@ -416,14 +430,19 @@ class _BoardDetailScreenState extends State<BoardDetailScreen> {
     if (text.isEmpty || _isSubmittingComment) return;
 
     final user = ApiService().currentUser;
-    if (user == null) return;
+    final authorName = (user?.name != null && user!.name.isNotEmpty) ? user.name : '학부모';
 
     setState(() => _isSubmittingComment = true);
-    final postId = widget.post['id'] as int;
+    final postId = int.tryParse(widget.post['id']?.toString() ?? '') ?? 0;
+    if (postId == 0) {
+      setState(() => _isSubmittingComment = false);
+      return;
+    }
+
     final res = await ApiService().addPostComment(
       postId,
       content: text,
-      authorName: user.name,
+      authorName: authorName,
       authorRole: 'PARENT',
     );
 
@@ -431,14 +450,54 @@ class _BoardDetailScreenState extends State<BoardDetailScreen> {
       setState(() => _isSubmittingComment = false);
       if (res['success'] == true) {
         _commentController.clear();
-        setState(() {
-          _comments.add({
-            'authorName': user.name,
-            'authorRole': 'PARENT',
-            'content': text,
-            'createdAt': DateTime.now().toIso8601String(),
-          });
-        });
+        FocusScope.of(context).unfocus();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('댓글이 등록되었습니다.'),
+            duration: Duration(seconds: 2),
+            backgroundColor: Color(0xFF2563EB),
+          ),
+        );
+        await _refreshPost();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['message']?.toString() ?? '댓글 등록에 실패했습니다.'),
+            backgroundColor: const Color(0xFFEF4444),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteComment(int commentId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('댓글 삭제', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        content: const Text('댓글을 삭제하시겠습니까?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('취소', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('삭제', style: TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    final postId = int.tryParse(widget.post['id']?.toString() ?? '') ?? 0;
+    final res = await ApiService().deleteBoardComment(postId, commentId);
+    if (res['success'] == true && mounted) {
+      await _refreshPost();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('댓글이 삭제되었습니다.')),
+        );
       }
     }
   }
@@ -556,32 +615,70 @@ class _BoardDetailScreenState extends State<BoardDetailScreen> {
                       child: const Text('첫 댓글을 남겨보세요!', style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8))),
                     )
                   else
-                    ..._comments.map((c) => Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF8FAFC),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Text(c['authorName']?.toString() ?? '익명', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF334155))),
+                    ..._comments.map((c) {
+                      final author = c['authorName']?.toString() ?? '익명';
+                      final role = c['authorRole']?.toString() ?? 'PARENT';
+                      final content = c['content']?.toString() ?? '';
+                      final dateStr = c['createdAt']?.toString() ?? '';
+                      final commentId = int.tryParse(c['id']?.toString() ?? '') ?? 0;
+                      final currentUserName = ApiService().currentUser?.name;
+                      final isMyComment = (currentUserName != null && currentUserName.isNotEmpty && author == currentUserName) ||
+                          (role == 'PARENT' && currentUserName != null && author.contains(currentUserName));
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFF1F5F9)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(author, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF334155))),
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: role == 'PARENT' ? const Color(0xFFEFF6FF) : const Color(0xFFFEF3C7),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    role == 'PARENT' ? '학부모' : '교직원',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      color: role == 'PARENT' ? const Color(0xFF2563EB) : const Color(0xFFD97706),
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                if (dateStr.isNotEmpty) ...[
                                   const SizedBox(width: 6),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                    decoration: BoxDecoration(color: const Color(0xFFE2E8F0), borderRadius: BorderRadius.circular(4)),
-                                    child: Text(c['authorRole'] == 'PARENT' ? '학부모' : '교직원', style: const TextStyle(fontSize: 9, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
+                                  Text(
+                                    dateStr.length >= 16 ? dateStr.substring(5, 16).replaceAll('T', ' ') : dateStr,
+                                    style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
                                   ),
                                 ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(c['content']?.toString() ?? '', style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B))),
-                            ],
-                          ),
-                        )),
+                                const Spacer(),
+                                if (commentId > 0 && isMyComment)
+                                  InkWell(
+                                    onTap: () => _deleteComment(commentId),
+                                    child: const Padding(
+                                      padding: EdgeInsets.all(2.0),
+                                      child: Icon(Icons.close_rounded, size: 14, color: Color(0xFF94A3B8)),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(content, style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B), height: 1.35)),
+                          ],
+                        ),
+                      );
+                    }),
                 ],
               ),
             ),
@@ -598,6 +695,7 @@ class _BoardDetailScreenState extends State<BoardDetailScreen> {
                 Expanded(
                   child: TextField(
                     controller: _commentController,
+                    onSubmitted: (_) => _addComment(),
                     decoration: const InputDecoration(
                       hintText: '댓글을 입력하세요...',
                       hintStyle: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
@@ -606,10 +704,20 @@ class _BoardDetailScreenState extends State<BoardDetailScreen> {
                     ),
                   ),
                 ),
-                IconButton(
-                  onPressed: _addComment,
-                  icon: const Icon(Icons.send_rounded, color: Color(0xFF2563EB)),
-                ),
+                if (_isSubmittingComment)
+                  const SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: Padding(
+                      padding: EdgeInsets.all(4.0),
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2563EB)),
+                    ),
+                  )
+                else
+                  IconButton(
+                    onPressed: _addComment,
+                    icon: const Icon(Icons.send_rounded, color: Color(0xFF2563EB)),
+                  ),
               ],
             ),
           ),
