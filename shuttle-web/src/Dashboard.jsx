@@ -4998,22 +4998,6 @@ const parseKindergartenExcelSheet = (sheet) => {
           <span className="text-[12.5px] font-black tracking-tight">가입승인</span>
         </button>
         <button 
-          onClick={() => handleTabChange('approvals')} 
-          className={`relative w-[96px] py-3 px-1 rounded-2xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-2 ${activeTab === 'approvals' ? `bg-white ${terms.themeText} shadow-md scale-105 font-black` : 'text-white/90 hover:bg-white/15 hover:text-white font-semibold'}`} 
-          title="원아 변동신청 및 전자결재 관리"
-        >
-          {/* 전자결재 아이콘 */}
-          <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-          </svg>
-          <span className="text-[12.5px] font-black tracking-tight">변동·결재</span>
-          {pendingApprovalCount > 0 && (
-            <span className="absolute top-1 right-2 bg-rose-600 text-white text-[11px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-white animate-pulse shadow-sm">
-              {pendingApprovalCount > 99 ? '99+' : pendingApprovalCount}
-            </span>
-          )}
-        </button>
-        <button 
           onClick={() => handleTabChange('log')} 
           className={`w-[96px] py-3 px-1 rounded-2xl transition-all shrink-0 cursor-pointer flex flex-col items-center justify-center gap-2 ${activeTab === 'log' ? `bg-white ${terms.themeText} shadow-md scale-105 font-black` : 'text-white/90 hover:bg-white/15 hover:text-white font-semibold'}`} 
           title="캘린더 및 출석 일지"

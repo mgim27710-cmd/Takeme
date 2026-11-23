@@ -821,16 +821,6 @@ export default function AdminMainHome({
                     </span>
                   )}
                 </h3>
-                <button
-                  type="button"
-                  onClick={() => onNavigateTab && onNavigateTab('approvals')}
-                  className="text-sm font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
-                >
-                  <span>결재함 바로가기</span>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
               </div>
 
               <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
