@@ -245,36 +245,6 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                 },
               ),
               _buildFormTile(
-                icon: Icons.event_busy,
-                color: const Color(0xFFE11D48),
-                title: '원아 결석계 (결석원)',
-                subtitle: '질병·가정사 등 공식 결석 서식 신청',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showAbsenceDialog();
-                },
-              ),
-              _buildFormTile(
-                icon: Icons.more_time,
-                color: const Color(0xFFD97706),
-                title: '등원 지각 알림서',
-                subtitle: '병원 진료 등 예상 등원 시간 안내',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showLatenessDialog();
-                },
-              ),
-              _buildFormTile(
-                icon: Icons.family_restroom,
-                color: const Color(0xFF7C3AED),
-                title: '연장 보육 / 개별 하원 신청서',
-                subtitle: '직접 픽업 및 셔틀 하차 제외 신청',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showExtendedCareDialog();
-                },
-              ),
-              _buildFormTile(
                 icon: Icons.beach_access,
                 color: const Color(0xFF059669),
                 title: '임직원 휴가·연차 신청서',
@@ -420,300 +390,413 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
     );
   }
 
-  /// 2. 원아 결석계 서식 다이얼로그
-  void _showAbsenceDialog() {
-    final nameCtrl = TextEditingController(text: widget.targetUser?['name'] ?? '');
-    String reason = '감기/발열';
-    final detailCtrl = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('원아 결석계 (결석원)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: '원아 이름', hintText: '예: 박민준', isDense: true),
-                ),
-                const SizedBox(height: 12),
-                const Text('결석 사유 선택:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
-                const SizedBox(height: 6),
-                DropdownButton<String>(
-                  value: reason,
-                  isExpanded: true,
-                  items: ['감기/발열', '병원 진료', '가정사', '체험학습', '기타']
-                      .map((r) => DropdownMenuItem(value: r, child: Text(r)))
-                      .toList(),
-                  onChanged: (v) {
-                    if (v != null) setDState(() => reason = v);
-                  },
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: detailCtrl,
-                  maxLines: 2,
-                  decoration: const InputDecoration(labelText: '상세 사유', hintText: '증상 또는 기타 상세 내용 입력', isDense: true),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
-            ElevatedButton(
-              onPressed: () {
-                final name = nameCtrl.text.trim();
-                final detail = detailCtrl.text.trim();
-                if (name.isEmpty) return;
-                Navigator.pop(ctx);
-                final text = '[원아 결석계 (결석원)]\n원아명: $name\n결석 일자: 오늘\n결석 사유: $reason\n상세 내용: ${detail.isNotEmpty ? detail : '사유 기재 없음'}\n\n출결 및 통학버스 결석 승인을 요청합니다.';
-                _textController.text = text;
-                _handleSendMessage();
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE11D48)),
-              child: const Text('결석계 제출', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 3. 등원 지각 알림서 다이얼로그
-  void _showLatenessDialog() {
-    final nameCtrl = TextEditingController(text: widget.targetUser?['name'] ?? '');
-    final timeCtrl = TextEditingController(text: '10:30');
-    final reasonCtrl = TextEditingController(text: '병원 진료 후 등원');
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('등원 지각 알림서', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: '원아 이름', isDense: true),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: timeCtrl,
-                decoration: const InputDecoration(labelText: '예상 등원 시간', hintText: '예: 10:30', isDense: true),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: reasonCtrl,
-                decoration: const InputDecoration(labelText: '지각 사유', isDense: true),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
-          ElevatedButton(
-            onPressed: () {
-              final name = nameCtrl.text.trim();
-              if (name.isEmpty) return;
-              Navigator.pop(ctx);
-              final text = '[등원 지각 알림서]\n원아명: $name\n지각 일자: 오늘\n예상 등원 시간: ${timeCtrl.text.trim()}\n사유: ${reasonCtrl.text.trim()}\n\n확인 부탁드립니다.';
-              _textController.text = text;
-              _handleSendMessage();
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD97706)),
-            child: const Text('전송하기', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 4. 연장 보육 / 개별 하원 신청서 다이얼로그
-  void _showExtendedCareDialog() {
-    final nameCtrl = TextEditingController(text: widget.targetUser?['name'] ?? '');
-    final timeCtrl = TextEditingController(text: '17:30');
-    final parentCtrl = TextEditingController(text: '학부모 직접 픽업');
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('연장 보육 / 개별 하원 신청서', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: '원아 이름', isDense: true),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: timeCtrl,
-                decoration: const InputDecoration(labelText: '직접 픽업 예정 시간', hintText: '예: 17:30', isDense: true),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: parentCtrl,
-                decoration: const InputDecoration(labelText: '보호자 / 픽업자 정보', isDense: true),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
-          ElevatedButton(
-            onPressed: () {
-              final name = nameCtrl.text.trim();
-              if (name.isEmpty) return;
-              Navigator.pop(ctx);
-              final text = '[연장 보육 / 개별 하원 신청서]\n원아명: $name\n픽업 예정 시간: ${timeCtrl.text.trim()}\n보호자 정보: ${parentCtrl.text.trim()}\n셔틀 하차 제외: 신청 완료\n\n확인 결재를 부탁드립니다.';
-              _textController.text = text;
-              _handleSendMessage();
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF7C3AED)),
-            child: const Text('신청서 제출', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 5. 임직원 휴가·연차 신청서 다이얼로그
+  /// 2. 임직원 휴가·연차 신청서 (모던 바텀시트 UI)
   void _showStaffLeaveDialog() {
     final rawName = ApiService().currentUser?.name ?? '교사';
     final cleanName = rawName.replaceAll(RegExp(r'(?:\s*(?:담임선생님|선생님|담임교사|교사))+$'), '').trim();
     final nameCtrl = TextEditingController(text: cleanName.isNotEmpty ? cleanName : rawName);
     String leaveType = '연차';
-    final periodCtrl = TextEditingController(text: '오늘');
+    DateTime startDate = DateTime.now();
+    DateTime endDate = DateTime.now();
     bool needSub = false;
     final reasonCtrl = TextEditingController();
 
-    showDialog(
+    showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (ctx) => StatefulBuilder(
-        builder: (context, setDState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('임직원 휴가·연차 신청서', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: '신청자 성명', isDense: true),
-                ),
-                const SizedBox(height: 10),
-                const Text('휴가 구분:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
-                const SizedBox(height: 4),
-                DropdownButton<String>(
-                  value: leaveType,
-                  isExpanded: true,
-                  items: ['연차', '오전 반차', '오후 반차', '병가', '경조사', '공가']
-                      .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                      .toList(),
-                  onChanged: (v) {
-                    if (v != null) setDState(() => leaveType = v);
-                  },
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: periodCtrl,
-                  decoration: const InputDecoration(labelText: '휴가 기간', hintText: '예: 2026-11-25 ~ 2026-11-26', isDense: true),
-                ),
-                const SizedBox(height: 10),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('대체 인력 배정 필요 (대체 교사/기사)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                  value: needSub,
-                  onChanged: (v) => setDState(() => needSub = v ?? false),
-                  controlAffinity: ListTileControlAffinity.leading,
-                ),
-                TextField(
-                  controller: reasonCtrl,
-                  maxLines: 2,
-                  decoration: const InputDecoration(labelText: '휴가 사유', hintText: '개인 사정 등', isDense: true),
-                ),
-              ],
+        builder: (context, setDState) {
+          final isSingleDay = startDate.year == endDate.year &&
+              startDate.month == endDate.month &&
+              startDate.day == endDate.day;
+          final daysDiff = isSingleDay
+              ? (leaveType.contains('반차') ? 0.5 : 1.0)
+              : endDate.difference(startDate).inDays + 1.0;
+
+          final startStr = "${startDate.year}-${startDate.month.toString().padLeft(2, '0')}-${startDate.day.toString().padLeft(2, '0')}";
+          final endStr = "${endDate.year}-${endDate.month.toString().padLeft(2, '0')}-${endDate.day.toString().padLeft(2, '0')}";
+
+          final leaveTypes = ['연차', '오전 반차', '오후 반차', '병가', '경조사', '공가'];
+
+          return Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
             ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
-            ElevatedButton(
-              onPressed: () async {
-                final name = nameCtrl.text.trim();
-                if (name.isEmpty) return;
-                Navigator.pop(ctx);
-
-                final rawPeriod = periodCtrl.text.trim();
-                final now = DateTime.now();
-                final todayStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
-                String startDate = todayStr;
-                String endDate = todayStr;
-                if (rawPeriod.contains('~')) {
-                  final parts = rawPeriod.split('~');
-                  startDate = parts[0].trim();
-                  endDate = parts.length > 1 ? parts[1].trim() : startDate;
-                } else if (rawPeriod.isNotEmpty && rawPeriod != '오늘') {
-                  startDate = rawPeriod;
-                  endDate = rawPeriod;
-                }
-
-                final myRole = ApiService().currentUser?.role ?? 'TEACHER';
-                final res = await ApiService().createLeaveRequest(
-                  roomId: widget.roomId,
-                  applicantName: name,
-                  applicantRole: myRole == 'DRIVER' ? '기사' : '교사',
-                  leaveType: leaveType,
-                  startDate: startDate,
-                  endDate: endDate,
-                  needSubstitute: needSub,
-                  reason: reasonCtrl.text.trim().isNotEmpty ? reasonCtrl.text.trim() : '개인 사유',
-                );
-
-                if (!mounted) return;
-
-                if (res['success'] == true) {
-                  // ignore: use_build_context_synchronously
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('휴가·연차 결재 신청서가 원장님께 전송되었습니다.'),
-                      backgroundColor: Color(0xFF10B981),
-                    ),
-                  );
-                  if (res['data'] != null && res['data'] is Map<String, dynamic>) {
-                    setState(() {
-                      final newMsg = res['data'] as Map<String, dynamic>;
-                      final exists = _messages.any((m) => m['id'] == newMsg['id']);
-                      if (!exists) _messages.add(newMsg);
-                    });
-                    _scrollToBottom();
-                  } else {
-                    _loadMessages(userInitiated: true);
-                  }
-                } else {
-                  // ignore: use_build_context_synchronously
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(res['message']?.toString() ?? '휴가 신청서 전송에 실패했습니다.'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF059669)),
-              child: const Text('결재 신청', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom,
             ),
-          ],
-        ),
+            child: SafeArea(
+              top: false,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // 드래그 핸들바
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFCBD5E1),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // 헤더
+                    Row(
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFECFDF5),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.beach_access_rounded, color: Color(0xFF059669), size: 24),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '임직원 휴가·연차 신청',
+                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                '원장님께 전자결재로 승인 요청이 전달됩니다.',
+                                style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Color(0xFF94A3B8), size: 22),
+                          onPressed: () => Navigator.pop(ctx),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+
+                    // 신청자
+                    const Text('신청자 성명', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF334155))),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: nameCtrl,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFF059669), width: 1.5),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // 휴가 구분 선택 칩
+                    const Text('휴가 구분', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF334155))),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: leaveTypes.map((type) {
+                        final isSelected = leaveType == type;
+                        return InkWell(
+                          onTap: () {
+                            setDState(() {
+                              leaveType = type;
+                              if (type.contains('반차')) {
+                                endDate = startDate;
+                              }
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(10),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                            decoration: BoxDecoration(
+                              color: isSelected ? const Color(0xFF059669) : const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isSelected ? const Color(0xFF059669) : const Color(0xFFE2E8F0),
+                              ),
+                              boxShadow: isSelected
+                                  ? [
+                                      BoxShadow(
+                                        color: const Color(0xFF059669).withValues(alpha: 0.25),
+                                        blurRadius: 6,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ]
+                                  : null,
+                            ),
+                            child: Text(
+                              type,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                                color: isSelected ? Colors.white : const Color(0xFF475569),
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // 휴가 기간 (달력 날짜 픽커 연동)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('휴가 기간', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF334155))),
+                        Text(
+                          '총 $daysDiff일 신청',
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFF059669)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    InkWell(
+                      onTap: () async {
+                        if (leaveType.contains('반차')) {
+                          // 반차는 단일 날짜 선택
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: startDate,
+                            firstDate: DateTime.now().subtract(const Duration(days: 30)),
+                            lastDate: DateTime.now().add(const Duration(days: 365)),
+                            builder: (context, child) => Theme(
+                              data: Theme.of(context).copyWith(
+                                colorScheme: const ColorScheme.light(
+                                  primary: Color(0xFF059669),
+                                  onPrimary: Colors.white,
+                                  onSurface: Color(0xFF0F172A),
+                                ),
+                              ),
+                              child: child!,
+                            ),
+                          );
+                          if (picked != null) {
+                            setDState(() {
+                              startDate = picked;
+                              endDate = picked;
+                            });
+                          }
+                        } else {
+                          // 전일/휴가는 날짜 범위 선택
+                          final pickedRange = await showDateRangePicker(
+                            context: context,
+                            firstDate: DateTime.now().subtract(const Duration(days: 30)),
+                            lastDate: DateTime.now().add(const Duration(days: 365)),
+                            initialDateRange: DateTimeRange(start: startDate, end: endDate),
+                            builder: (context, child) => Theme(
+                              data: Theme.of(context).copyWith(
+                                colorScheme: const ColorScheme.light(
+                                  primary: Color(0xFF059669),
+                                  onPrimary: Colors.white,
+                                  onSurface: Color(0xFF0F172A),
+                                ),
+                              ),
+                              child: child!,
+                            ),
+                          );
+                          if (pickedRange != null) {
+                            setDState(() {
+                              startDate = pickedRange.start;
+                              endDate = pickedRange.end;
+                            });
+                          }
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.calendar_today_rounded, size: 18, color: Color(0xFF059669)),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                isSingleDay ? startStr : '$startStr ~ $endStr',
+                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE2E8F0),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text('날짜 변경', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF475569))),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // 대체 인력 배정 스위치 카드
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  '대체 인력 배정 요청',
+                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF1E293B)),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  needSub ? '대체 교사/기사 배정 필요가 체크되었습니다.' : '대체 인력 지원이 필요한 경우 켜주세요.',
+                                  style: TextStyle(fontSize: 11.5, color: needSub ? const Color(0xFF059669) : const Color(0xFF64748B)),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Switch(
+                            value: needSub,
+                            activeThumbColor: const Color(0xFF059669),
+                            onChanged: (val) => setDState(() => needSub = val),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // 휴가 사유
+                    const Text('휴가 사유', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF334155))),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: reasonCtrl,
+                      maxLines: 2,
+                      decoration: InputDecoration(
+                        hintText: '사유를 입력해주세요 (예: 개인 사정, 건강 검진 등)',
+                        hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFF059669), width: 1.5),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // 신청 버튼
+                    ElevatedButton(
+                      onPressed: () async {
+                        final name = nameCtrl.text.trim();
+                        if (name.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('신청자 성명을 입력해주세요.')),
+                          );
+                          return;
+                        }
+                        Navigator.pop(ctx);
+
+                        final myRole = ApiService().currentUser?.role ?? 'TEACHER';
+                        final res = await ApiService().createLeaveRequest(
+                          roomId: widget.roomId,
+                          applicantName: name,
+                          applicantRole: myRole == 'DRIVER' ? '기사' : '교사',
+                          leaveType: leaveType,
+                          startDate: startStr,
+                          endDate: endStr,
+                          needSubstitute: needSub,
+                          reason: reasonCtrl.text.trim().isNotEmpty ? reasonCtrl.text.trim() : '개인 사유',
+                        );
+
+                        if (!mounted) return;
+
+                        if (res['success'] == true) {
+                          // ignore: use_build_context_synchronously
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('휴가·연차 결재 신청서가 원장님께 전송되었습니다.'),
+                              backgroundColor: Color(0xFF10B981),
+                            ),
+                          );
+                          if (res['data'] != null && res['data'] is Map<String, dynamic>) {
+                            setState(() {
+                              final newMsg = res['data'] as Map<String, dynamic>;
+                              final exists = _messages.any((m) => m['id'] == newMsg['id']);
+                              if (!exists) _messages.add(newMsg);
+                            });
+                            _scrollToBottom();
+                          } else {
+                            _loadMessages(userInitiated: true);
+                          }
+                        } else {
+                          // ignore: use_build_context_synchronously
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(res['message']?.toString() ?? '휴가 신청서 전송에 실패했습니다.'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF059669),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        elevation: 0,
+                      ),
+                      child: const Text(
+                        '원장님께 결재 신청하기',
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
