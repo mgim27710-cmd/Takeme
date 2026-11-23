@@ -455,17 +455,19 @@ class _NavMapViewState extends State<NavMapView> with SingleTickerProviderStateM
 
       final isPassed = _impl.passedStopIndices.contains(i) || s['passed'] == true;
       final isTest = s['test'] == true;
+      final isOneTime = s['isOneTime'] == true;
 
       markers.add(
         Marker(
           point: LatLng(lat.toDouble(), lng.toDouble()),
-          width: 28,
-          height: 28,
+          width: isOneTime ? 38 : 28,
+          height: isOneTime ? 42 : 28,
           rotate: true, // 회전되어도 글자 똑바로
           child: _StopMarkerWidget(
             index: i,
             isPassed: isPassed,
             isTest: isTest,
+            isOneTime: isOneTime,
           ),
         ),
       );
@@ -649,20 +651,95 @@ class _NavArrowPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-/// 정류장 마커 (원형, 번호 표시, 지난 정류장 회색, 테스트 정류장 주황 T)
+/// 정류장 마커 (원형, 번호 표시, 지난 정류장 회색, 테스트 정류장 주황 T, 일일 탑승 전용 보라/황금 별 뱃지)
 class _StopMarkerWidget extends StatelessWidget {
   final int index;
   final bool isPassed;
   final bool isTest;
+  final bool isOneTime;
 
   const _StopMarkerWidget({
     required this.index,
     this.isPassed = false,
     this.isTest = false,
+    this.isOneTime = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (isOneTime) {
+      // 🌟 일일 탑승 전용 차별화 아이콘 & 마커 디자인
+      Color bgStart = isPassed ? const Color(0xFF94A3B8) : const Color(0xFF8B5CF6);
+      Color bgEnd = isPassed ? const Color(0xFF64748B) : const Color(0xFF6D28D9);
+
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 상단 미니 뱃지: "일일"
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+            decoration: BoxDecoration(
+              color: isPassed ? const Color(0xFF64748B) : const Color(0xFFF59E0B),
+              borderRadius: BorderRadius.circular(4),
+              boxShadow: const [
+                BoxShadow(color: Color(0x33000000), blurRadius: 2, offset: Offset(0, 1)),
+              ],
+            ),
+            child: const Text(
+              '일일',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 8,
+                fontWeight: FontWeight.w900,
+                height: 1.1,
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          // 원형 마커 본체 (별표 아이콘 + 정류장 번호)
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [bgStart, bgEnd],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: isPassed ? Colors.white : const Color(0xFFFDE047), // 황금빛 하이라이트 링
+                width: 2,
+              ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x667C3AED),
+                  blurRadius: 8,
+                  offset: Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.star, color: Color(0xFFFDE047), size: 10),
+                  Text(
+                    '${index + 1}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     Color bg = const Color(0xFF2563EB);
     if (isPassed) {
       bg = const Color(0xFF94A3B8);

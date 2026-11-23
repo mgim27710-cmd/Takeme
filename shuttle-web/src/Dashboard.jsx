@@ -8113,10 +8113,15 @@ const parseKindergartenExcelSheet = (sheet) => {
               ` : isPureNotRiding ? `
                 <div style="background-color: ${NOT_RIDING_COLOR}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.35);" title="${isOutside6kmNotRiding ? '구역 외 미탑승 원아' : '미탑승 원아'}"></div>
               ` : isOneTimeStudent ? `
-                <div style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">
-                  <span style="position: absolute; inset: -2px; border-radius: 50%; background: #f43f5e; opacity: 0.45; animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
-                  <div style="position: relative; background: #f43f5e; width: 20px; height: 20px; border-radius: 50%; border: 2.5px solid white; box-shadow: 0 3px 8px rgba(244,63,94,0.7); display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: 900; line-height: 1;">
-                    1
+                <div style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 900;">
+                  <div style="position: absolute; top: -16px; background: #f59e0b; color: white; padding: 1px 4px; border-radius: 4px; font-size: 9px; font-weight: 900; white-space: nowrap; box-shadow: 0 2px 5px rgba(245,158,11,0.5); border: 1px solid #fde047;">
+                    일일
+                  </div>
+                  <div style="position: relative; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;">
+                    <span style="position: absolute; inset: -2px; border-radius: 50%; background: #8b5cf6; opacity: 0.45; animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
+                    <div style="position: relative; background: linear-gradient(135deg, #8b5cf6, #6d28d9); width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid #fde047; box-shadow: 0 3px 8px rgba(124,58,237,0.7); display: flex; align-items: center; justify-content: center; color: #fde047; font-size: 11px; font-weight: 900; line-height: 1;">
+                      ★
+                    </div>
                   </div>
                 </div>
               ` : `

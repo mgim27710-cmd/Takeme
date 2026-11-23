@@ -7,6 +7,8 @@ class RouteStop {
   final String? address;
   final String? stopMemo;
   final String? expectedTime;
+  final bool isOneTime;
+  final String? overrideType;
 
   RouteStop({
     required this.name,
@@ -17,6 +19,8 @@ class RouteStop {
     this.address,
     this.stopMemo,
     this.expectedTime,
+    this.isOneTime = false,
+    this.overrideType,
   });
 
   factory RouteStop.fromJson(Map<String, dynamic> json) {
@@ -24,6 +28,12 @@ class RouteStop {
       if (val is num) return val.toDouble();
       return double.tryParse(val?.toString() ?? '0') ?? 0.0;
     }
+
+    final bool isOneTime = json['isOneTimeBoarding'] == true ||
+        json['isOneTime'] == true ||
+        json['overrideType'] == 'ONE_TIME_BOARDING' ||
+        (json['name']?.toString().contains('[일일') ?? false) ||
+        (json['stopMemo']?.toString().contains('[일일') ?? false);
 
     return RouteStop(
       name: json['name'] ?? json['title'] ?? '',
@@ -34,6 +44,8 @@ class RouteStop {
       address: json['address'],
       stopMemo: json['stopMemo'] ?? json['memo'] ?? json['address'],
       expectedTime: json['expectedTime'],
+      isOneTime: isOneTime,
+      overrideType: json['overrideType']?.toString(),
     );
   }
 }

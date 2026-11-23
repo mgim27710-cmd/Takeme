@@ -37,10 +37,11 @@ class NavStop {
   final GeoPoint point;
   final String stopMemo; // 정차 위치 안내 메모 (예: "○○아파트 정문 앞, 오른쪽에 정차")
   final bool isTest; // 테스트 경로용 가짜 정류장 (서버·학부모에게 보내지 않음)
+  final bool isOneTime; // 당일 1회 일일 탑승 정류장 여부
   bool passed = false;
   bool saidApproach = false;
   int pathIndex = 0;
-  NavStop(this.name, this.point, {String? stopMemo, this.isTest = false})
+  NavStop(this.name, this.point, {String? stopMemo, this.isTest = false, this.isOneTime = false})
       : stopMemo = (stopMemo != null && stopMemo.trim().isNotEmpty)
             ? stopMemo.trim()
             : '$name 정문 앞, 오른쪽에 정차';
@@ -439,6 +440,7 @@ class DriverNavigator extends ChangeNotifier {
               s.name,
               GeoPoint(s.latitude, s.longitude),
               stopMemo: s.stopMemo ?? s.address,
+              isOneTime: s.isOneTime,
             );
             stop.passed = passedNames.contains(s.name);
             stop.saidApproach = approachedNames.contains(s.name);
@@ -500,6 +502,7 @@ class DriverNavigator extends ChangeNotifier {
                   s.name,
                   GeoPoint(s.latitude, s.longitude),
                   stopMemo: s.stopMemo ?? s.address,
+                  isOneTime: s.isOneTime,
                 )));
         }
         if (vehicleId != null) SocketService().joinVehicleRoom(vehicleId!);
@@ -805,7 +808,13 @@ class DriverNavigator extends ChangeNotifier {
   }
 
   List<Map<String, dynamic>> _stopsJson(List<NavStop> list) => [
-        for (final s in list) {'lat': s.point.lat, 'lng': s.point.lng, 'passed': s.passed, 'test': s.isTest},
+        for (final s in list) {
+          'lat': s.point.lat,
+          'lng': s.point.lng,
+          'passed': s.passed,
+          'test': s.isTest,
+          'isOneTime': s.isOneTime,
+        },
       ];
 
   /// 경로 모드 선택
@@ -1156,14 +1165,16 @@ class DriverNavigator extends ChangeNotifier {
       // 1) 정류장 160m 전방 접근 시 정확한 정차 지점 메모 음성 안내
       if (dist <= 160 && dist > 45 && !s.saidApproach) {
         s.saidApproach = true;
-        _speak('잠시 후 다음 정류장, ${s.name}, ${s.stopMemo}해 주세요.');
+        final prefix = s.isOneTime ? '일일 탑승 정류장, ' : '';
+        _speak('잠시 후 다음 $prefix${s.name}, ${s.stopMemo}해 주세요.');
       }
       // 2) 정류장 도착 (40m 이내)
       if (dist < 40) {
         s.passed = true;
         s.saidApproach = true;
         map.markStopPassed(i);
-        _speak('${s.name} 정류장에 도착했습니다. ${s.stopMemo}. 원아 탑승 후 차량선생님의 출발 신호를 기다려 주세요.');
+        final prefix = s.isOneTime ? '오늘 하루 일일 탑승 정류장인 ' : '';
+        _speak('$prefix${s.name} 정류장에 도착했습니다. ${s.stopMemo}. 원아 탑승 후 차량선생님의 출발 신호를 기다려 주세요.');
       }
       break; // 다음 정류장 하나만 확인
     }

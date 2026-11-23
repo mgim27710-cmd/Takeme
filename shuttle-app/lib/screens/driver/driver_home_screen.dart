@@ -1085,10 +1085,37 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
+                    if (next?.isOneTime == true) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF8B5CF6),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.star, size: 10, color: Color(0xFFFDE047)),
+                            SizedBox(width: 2),
+                            Text(
+                              '일일 탑승',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                    ],
                     Icon(
-                      _nav.isMovingFast ? Icons.lock_outline : Icons.place_outlined,
+                      _nav.isMovingFast
+                          ? Icons.lock_outline
+                          : (next?.isOneTime == true ? Icons.auto_awesome : Icons.place_outlined),
                       size: 14,
-                      color: _C.blue,
+                      color: next?.isOneTime == true ? const Color(0xFF7C3AED) : _C.blue,
                     ),
                     const SizedBox(width: 4),
                     Flexible(
@@ -1096,7 +1123,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                         subtitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: _C.slate600),
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: next?.isOneTime == true ? const Color(0xFF6D28D9) : _C.slate600,
+                        ),
                       ),
                     ),
                   ],

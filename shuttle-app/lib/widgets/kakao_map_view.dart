@@ -86,6 +86,7 @@ class _KakaoMapViewState extends State<KakaoMapView> {
     final stopsJson = jsonEncode(widget.stops.map((s) => {
       'name': s.name,
       'isMyChild': s.isMyChild,
+      'isOneTime': s.isOneTime,
       'lat': s.latitude,
       'lng': s.longitude,
       'address': s.address ?? '',
@@ -227,6 +228,38 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           box-shadow: 0 2px 4px rgba(0,0,0,0.2);
           border: 1px solid #fef08a;
         }
+
+        .one-time-marker {
+          background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+          color: #fde047;
+          border-radius: 50%;
+          width: 32px;
+          height: 32px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 900;
+          font-size: 12px;
+          border: 2px solid #fde047;
+          box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.4), 0 3px 8px rgba(0,0,0,0.3);
+          position: relative;
+        }
+
+        .one-time-badge {
+          position: absolute;
+          top: -16px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: #f59e0b;
+          color: white;
+          font-size: 9px;
+          font-weight: 900;
+          padding: 1px 5px;
+          border-radius: 6px;
+          white-space: nowrap;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.25);
+          border: 1px solid #fde047;
+        }
         
         .academy-marker {
           background-color: #f59e0b;
@@ -324,6 +357,16 @@ class _KakaoMapViewState extends State<KakaoMapView> {
                     .bindPopup('<b>⭐ 우리 아이 탑승지</b><br/>' + (s.address || s.name))
                     .addTo(map);
                   marker.openPopup();
+                } else if (s.isOneTime) {
+                  var oneTimeIcon = L.divIcon({
+                    className: '',
+                    html: '<div class="one-time-marker"><span class="one-time-badge">일일</span>★' + (idx + 1) + '</div>',
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 16]
+                  });
+                  L.marker([s.lat, s.lng], { icon: oneTimeIcon, zIndexOffset: 950 })
+                    .bindPopup('<b>🌟 일일 탑승 경유지 (' + (idx + 1) + '번)</b><br/>' + (s.address || s.name))
+                    .addTo(map);
                 } else {
                   var icon = L.divIcon({
                     className: '',

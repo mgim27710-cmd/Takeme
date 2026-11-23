@@ -385,16 +385,21 @@ export class TeacherService {
           ? (daySched?.inTime || raw['등원시간'] || raw['예상탑승시간'] || defaultTime)
           : (daySched?.outTime || raw['하원시간'] || raw['예상탑승시간'] || defaultTime);
 
+        const isOneTime = Boolean((s as any).isOneTimeBoarding || (s as any).overrideType === 'ONE_TIME_BOARDING');
+        const studentDisplayName = s.adminDisplayName || s.name;
+
         return {
           id: s.id,
-          name: s.adminDisplayName || s.name,
+          name: isOneTime ? `[일일] ${studentDisplayName}` : studentDisplayName,
+          rawName: studentDisplayName,
           address: stopAddress,
           latitude: parseFloat(s.latitude as any),
           longitude: parseFloat(s.longitude as any),
           expectedTime,
-          isOneTimeBoarding: (s as any).isOneTimeBoarding || false,
+          isOneTimeBoarding: isOneTime,
+          isOneTime: isOneTime,
           isOverride: (s as any).isOverride || false,
-          overrideType: (s as any).overrideType || null,
+          overrideType: (s as any).overrideType || (isOneTime ? 'ONE_TIME_BOARDING' : null),
         };
       });
 
