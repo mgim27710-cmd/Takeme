@@ -29,6 +29,22 @@ export const ACADEMY_NOTI_ROOM_NAME = '공지사항';
 export const LEGACY_ACADEMY_NOTI_ROOM_NAME = '실시간 알림 채널';
 const ACADEMY_NOTI_ROOM_NAMES = [ACADEMY_NOTI_ROOM_NAME, LEGACY_ACADEMY_NOTI_ROOM_NAME];
 
+/** '님' 중복 방지 호칭 헬퍼 (예: '이선생님' -> '이선생님', '이담임' -> '이담임님') */
+export function withNim(name: string): string {
+  if (!name) return '선생님';
+  const trimmed = name.trim();
+  if (trimmed.endsWith('님')) return trimmed;
+  return `${trimmed}님`;
+}
+
+/** '님의' 중복 방지 헬퍼 (예: '이선생님' -> '이선생님의', '박기사님' -> '박기사님의', '이담임' -> '이담임님의') */
+export function withNimUi(name: string): string {
+  if (!name) return '선생님의';
+  const trimmed = name.trim();
+  if (trimmed.endsWith('님')) return `${trimmed}의`;
+  return `${trimmed}님의`;
+}
+
 @Injectable()
 export class ChatService implements OnModuleInit {
   constructor(
@@ -1450,10 +1466,29 @@ export class ChatService implements OnModuleInit {
         where: { id: Number(data.vehicleId) },
         relations: { teacherUser: true, driverUser: true, academy: true },
       });
+    } else if ((data as any).busNumber && requester.academyId) {
+      const bNum = String((data as any).busNumber).trim();
+      vehicle = await this.vehicleRepo.findOne({
+        where: { academy: { id: requester.academyId }, busNumber: bNum },
+        relations: { teacherUser: true, driverUser: true, academy: true },
+      }) || await this.vehicleRepo.findOne({
+        where: { academy: { id: requester.academyId } },
+        relations: { teacherUser: true, driverUser: true, academy: true },
+      });
+    } else if (requester.academyId) {
+      vehicle = await this.vehicleRepo.findOne({
+        where: { academy: { id: requester.academyId } },
+        relations: { teacherUser: true, driverUser: true, academy: true },
+      });
     }
 
     if (!vehicle) {
-      throw new BadRequestException('결재 신청을 위한 지정 차량을 찾을 수 없습니다.');
+      // 차량이 전혀 없는 경우에도 결재는 원장에게 전달될 수 있도록 처리
+      const dummyVehicle = this.vehicleRepo.create({
+        busNumber: (data as any).busNumber || '1호차',
+        academy: { id: requester.academyId } as any,
+      });
+      vehicle = dummyVehicle;
     }
 
     if (vehicle?.academy?.id && requester.academyId && vehicle.academy.id !== requester.academyId) {
@@ -1643,7 +1678,7 @@ export class ChatService implements OnModuleInit {
       await this.sendSystemNotificationToUsers(
         Array.from(approverIds),
         '신규 결재 신청',
-        `[신규 결재 신청] ${requester.name || requester.email}님이 ${studentName} 원아의 [${payload.busNumber}] 탑승 결재를 신청하였습니다. (탑승지: ${payload.boardingLocation})`,
+        `[신규 결재 신청] ${withNim(requester.name || requester.email)}이 ${studentName} 원아의 [${payload.busNumber}] 탑승 결재를 신청하였습니다. (탑승지: ${payload.boardingLocation})`,
         {
           type: 'change_request',
           metadata: { type: 'change_request', messageId: saved.id, roomId: targetRoom.id },
@@ -1684,8 +1719,19 @@ export class ChatService implements OnModuleInit {
       where: { id: Number(messageId) },
       relations: { room: true, sender: true },
     });
-    if (!message || message.type !== 'PAYMENT_REQUEST') {
+    const isTextApproval = message && (
+      message.text?.includes('[신규 탑승 및 결재 신청]') ||
+      message.text?.includes('[신규 결재 신청]') ||
+      message.text?.includes('[원아 결석계') ||
+      message.text?.includes('[등원 지각 알림서]') ||
+      message.text?.includes('[연장 보육 / 개별 하원 신청서]')
+    );
+    if (!message || (message.type !== 'PAYMENT_REQUEST' && !isTextApproval)) {
       throw new BadRequestException('결재 신청 메시지를 찾을 수 없습니다.');
+    }
+
+    if (message.type !== 'PAYMENT_REQUEST') {
+      message.type = 'PAYMENT_REQUEST';
     }
 
     if (decider.role !== UserRole.SUPER_ADMIN && message.room?.academyId && decider.academyId && message.room.academyId !== decider.academyId) {
@@ -2023,7 +2069,7 @@ export class ChatService implements OnModuleInit {
         await this.sendSystemNotificationToUsers(
           targetAdminIds,
           '휴가 결재 요청',
-          `[휴가 결재 요청] ${data.applicantName}(${data.applicantRole})님이 ${data.leaveType} (${data.startDate}~${data.endDate}) 승인을 요청하였습니다.`,
+          `[휴가 결재 요청] ${withNim(data.applicantName)}${data.applicantRole ? `(${data.applicantRole})` : ''}이 ${data.leaveType} (${data.startDate}~${data.endDate}) 승인을 요청하였습니다.`,
           {
             type: 'leave_request',
             metadata: { type: 'leave_request', messageId: saved.id, roomId: room.id },
@@ -2057,7 +2103,7 @@ export class ChatService implements OnModuleInit {
     if (!decider) throw new BadRequestException('승인자 계정을 찾을 수 없습니다.');
 
     // 오직 원장 및 관리자만 승인/반려 가능
-    const isAdmin = decider.role === UserRole.ACADEMY_ADMIN || decider.role === UserRole.SUPER_ADMIN;
+    const isAdmin = decider.role === UserRole.ACADEMY_ADMIN || decider.role === UserRole.SUPER_ADMIN || decider.role === UserRole.DESK_STAFF;
     if (!isAdmin) {
       throw new ForbiddenException('원장 및 기관 관리자만 휴가 신청을 결재할 수 있습니다.');
     }
@@ -2066,8 +2112,13 @@ export class ChatService implements OnModuleInit {
       where: { id: Number(messageId) },
       relations: { room: true, sender: true },
     });
-    if (!message || (message.type !== 'LEAVE_REQUEST' && message.payload?.type !== 'STAFF_LEAVE')) {
+    const isTextLeave = message && (message.text?.includes('[임직원 휴가·연차 신청서]') || message.text?.includes('[휴가 신청서]'));
+    if (!message || (message.type !== 'LEAVE_REQUEST' && message.payload?.type !== 'STAFF_LEAVE' && !isTextLeave)) {
       throw new BadRequestException('휴가 결재 신청 메시지를 찾을 수 없습니다.');
+    }
+
+    if (message.type !== 'LEAVE_REQUEST') {
+      message.type = 'LEAVE_REQUEST';
     }
 
     const payload = message.payload || {};
@@ -2118,8 +2169,8 @@ export class ChatService implements OnModuleInit {
       if (applicantId) {
         const notiTitle = decision === 'APPROVED' ? '휴가 승인 완료' : '휴가 반려 안내';
         const notiBody = decision === 'APPROVED'
-          ? `[휴가 승인] 원장선생님께서 ${payload.applicantName}님의 ${payload.leaveType} (${payload.startDate}~${payload.endDate}) 신청을 승인하셨습니다.`
-          : `[휴가 반려] 원장선생님께서 ${payload.applicantName}님의 ${payload.leaveType} 신청을 반려하셨습니다.${rejectionReason ? ` (사유: ${rejectionReason})` : ''}`;
+          ? `[휴가 승인] 원장선생님께서 ${withNimUi(payload.applicantName)} ${payload.leaveType} (${payload.startDate}~${payload.endDate}) 신청을 승인하셨습니다.`
+          : `[휴가 반려] 원장선생님께서 ${withNimUi(payload.applicantName)} ${payload.leaveType} 신청을 반려하셨습니다.${rejectionReason ? ` (사유: ${rejectionReason})` : ''}`;
 
         await this.sendSystemNotificationToUser(applicantId, notiTitle, notiBody, {
           type: 'leave_decision',

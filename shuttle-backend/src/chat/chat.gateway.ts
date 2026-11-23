@@ -64,7 +64,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           type: 'MESSAGE',
           roomId,
           room: { id: roomId },
-          title: message.sender?.name ? `${message.sender.name}님의 메시지` : '새 메시지',
+          title: message.sender?.name
+            ? `${message.sender.name.trim().endsWith('님') ? message.sender.name.trim() : `${message.sender.name.trim()}님`}의 메시지`
+            : '새 메시지',
           message: message.text,
           text: message.text,
           senderId: message.sender?.id,

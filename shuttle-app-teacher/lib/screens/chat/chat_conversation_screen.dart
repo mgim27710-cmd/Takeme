@@ -588,8 +588,9 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
 
   /// 5. 임직원 휴가·연차 신청서 다이얼로그
   void _showStaffLeaveDialog() {
-    final myName = ApiService().currentUser?.name ?? '교사';
-    final nameCtrl = TextEditingController(text: myName);
+    final rawName = ApiService().currentUser?.name ?? '교사';
+    final cleanName = rawName.replaceAll(RegExp(r'(?:\s*(?:담임선생님|선생님|담임교사|교사))+$'), '').trim();
+    final nameCtrl = TextEditingController(text: cleanName.isNotEmpty ? cleanName : rawName);
     String leaveType = '연차';
     final periodCtrl = TextEditingController(text: '오늘');
     bool needSub = false;
@@ -806,6 +807,24 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
         text.contains('[임직원 휴가·연차 신청서]');
     final cardTitle = isLeave ? '휴가·연차 결재 신청서' : '전자결재 신청서';
 
+    // 결재 권한 및 신청자 여부 정밀 판별
+    final myUser = ApiService().currentUser;
+    final myRole = (myUser?.role ?? '').toUpperCase();
+    final bool isDirectorOrAdmin = myRole == 'ACADEMY_ADMIN' || myRole == 'SUPER_ADMIN' || myRole == 'DIRECTOR';
+
+    final myId = _toNumber(myUser?.id ?? _currentUserId);
+    final myEmail = (myUser?.email ?? '').toLowerCase().trim();
+    final senderId = _toNumber(msg['sender']?['id'] ?? msg['senderId']);
+    final senderEmail = (msg['sender']?['email'] ?? msg['senderEmail'] ?? '').toString().toLowerCase().trim();
+    final applicantId = _toNumber(payload['applicantId'] ?? payload['requesterId']);
+    final applicantEmail = (payload['applicantEmail'] ?? payload['requesterEmail'] ?? '').toString().toLowerCase().trim();
+
+    final bool isApplicant = isMe ||
+        (myId > 0 && (myId == senderId || myId == applicantId)) ||
+        (myEmail.isNotEmpty && (myEmail == senderEmail || myEmail == applicantEmail));
+
+    final bool canApprove = isDirectorOrAdmin && !isApplicant;
+
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
@@ -874,35 +893,8 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                 ],
                 // 결재 대기 중일 때
                 if (status == 'PENDING' && msgId != null) ...[
-                  if (isMe) ...[
-                    const SizedBox(height: 12),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEF3C7),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFFCD34D)),
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.hourglass_empty, size: 14, color: Color(0xFFD97706)),
-                          SizedBox(width: 6),
-                          Text(
-                            '원장선생님 결재 대기 중입니다.',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFFB45309),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ] else ...[
-                    // 결재 권한자(원장/관리자)에게만 승인/반려 버튼 노출
+                  if (canApprove) ...[
+                    // 오직 결재 권한자(원장/관리자)에게만 승인/반려 버튼 노출!
                     const SizedBox(height: 12),
                     const Divider(height: 1, color: Color(0xFFE2E8F0)),
                     const SizedBox(height: 10),
@@ -935,6 +927,34 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                           ),
                         ),
                       ],
+                    ),
+                  ] else ...[
+                    // 신청자 본인 및 결재 권한이 없는 교사에게는 대기 배지만 노출 (자가 결재 원천 차단)
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF3C7),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFFCD34D)),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.hourglass_empty, size: 14, color: Color(0xFFD97706)),
+                          SizedBox(width: 6),
+                          Text(
+                            '원장선생님 결재 대기 중입니다.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFFB45309),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ],

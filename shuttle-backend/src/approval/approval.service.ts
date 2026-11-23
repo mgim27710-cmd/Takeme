@@ -860,11 +860,12 @@ export class ApprovalService {
     }
 
     // 역할별 열람 범위 차등화:
-    // 학부모: 기관 전체 + 자녀 반 행사만
+    // 학부모: 기관 전체 + 자녀 반 행사만 (교직원 휴가 STAFF_LEAVE는 절대 열람 불가)
     // 차량선생님: 기관 전체 + 담당 반(있다면) 행사만
     // 담임교사: 기관 전체 + 자기 반 행사만
     // 원장/관리자: 모든 일정 반 구분 없이 전체 열람 (특정 반 선택 시 필터링)
     if (callingUser.role === UserRole.PARENT) {
+      holidayQb.andWhere("h.type != 'STAFF_LEAVE'");
       const whereConditions: any[] = [
         { parentUser: { id: callingUser.id } },
         { studentUser: { id: callingUser.id } },

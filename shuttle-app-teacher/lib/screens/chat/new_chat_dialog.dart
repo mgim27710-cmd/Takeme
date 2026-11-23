@@ -438,51 +438,55 @@ class _NewChatDialogState extends State<NewChatDialog> {
                   ),
               ],
             ),
-      bottomSheet: selectedCount > 0
+      bottomNavigationBar: selectedCount > 0
           ? Container(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(color: Color(0x1A000000), blurRadius: 10, offset: Offset(0, -3)),
-                ],
-                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-              ),
+              color: Colors.white,
               child: SafeArea(
                 top: false,
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    onPressed: _isCreating ? null : () => _handleStartChat(),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2563EB),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      elevation: 0,
+                bottom: true,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(color: Color(0x1A000000), blurRadius: 10, offset: Offset(0, -3)),
+                    ],
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                  ),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: _isCreating ? null : () => _handleStartChat(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2563EB),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        elevation: 0,
+                      ),
+                      child: _isCreating
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                            )
+                          : Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  selectedCount > 1 ? Icons.groups : Icons.chat_bubble,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  selectedCount > 1
+                                      ? '$selectedCount명과 그룹 대화방 만들기'
+                                      : '1:1 대화 시작하기',
+                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                                ),
+                              ],
+                            ),
                     ),
-                    child: _isCreating
-                        ? const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
-                          )
-                        : Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                selectedCount > 1 ? Icons.groups : Icons.chat_bubble,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                selectedCount > 1
-                                    ? '$selectedCount명과 그룹 대화방 만들기'
-                                    : '1:1 대화 시작하기',
-                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-                              ),
-                            ],
-                          ),
                   ),
                 ),
               ),

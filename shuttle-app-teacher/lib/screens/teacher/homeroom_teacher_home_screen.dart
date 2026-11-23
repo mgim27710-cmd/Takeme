@@ -205,6 +205,15 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
     }
   }
 
+  String _formatTeacherDisplayName(String rawName) {
+    final trimmed = rawName.trim();
+    if (trimmed.isEmpty) return '담임선생님';
+    // '담임선생님', '선생님', '담임교사', '교사' 등의 직함 중복 방지 정규화
+    final cleaned = trimmed.replaceAll(RegExp(r'(?:\s*(?:담임선생님|선생님|담임교사|교사))+$'), '').trim();
+    if (cleaned.isEmpty) return '담임선생님';
+    return '$cleaned 선생님';
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = ApiService().currentUser;
@@ -327,7 +336,6 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
       );
     }
 
-    final teacherName = user.name.isNotEmpty ? user.name : '담임교사';
     final assignedClass = user.assignedClass!;
 
     return Scaffold(
@@ -359,7 +367,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
             ),
             const SizedBox(height: 2),
             Text(
-              '$teacherName 담임선생님',
+              _formatTeacherDisplayName(user.name),
               style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
             ),
           ],

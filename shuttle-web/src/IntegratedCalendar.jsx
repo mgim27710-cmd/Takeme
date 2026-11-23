@@ -168,7 +168,14 @@ export default function IntegratedCalendar({
   }
 
   // Selected date events & changes
+  const selectedDayStaffLeaves = (calendarData.holidays || []).filter(h => {
+    const isLeave = h.type === 'STAFF_LEAVE' || (h.title && (h.title.includes('휴가') || h.title.includes('연차') || h.title.includes('병가') || h.title.includes('연수')));
+    return isLeave && h.startDate <= selectedDateStr && h.endDate >= selectedDateStr;
+  });
+
   const selectedDayEvents = (calendarData.holidays || []).filter(h => {
+    const isLeave = h.type === 'STAFF_LEAVE' || (h.title && (h.title.includes('휴가') || h.title.includes('연차') || h.title.includes('병가') || h.title.includes('연수')));
+    if (isLeave) return false;
     return h.startDate <= selectedDateStr && h.endDate >= selectedDateStr;
   });
 
@@ -401,12 +408,45 @@ export default function IntegratedCalendar({
               <div className="text-base font-extrabold text-slate-800">{selectedDateStr}</div>
             </div>
             <span className="text-xs text-slate-500 font-semibold">
-              총 {selectedDayEvents.length + selectedDayChanges.length}건
+              총 {selectedDayEvents.length + selectedDayStaffLeaves.length + selectedDayChanges.length}건
             </span>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {/* 1. 휴업 및 행사 섹션 */}
+            {/* 1. 교직원 휴가·연차 현황 섹션 */}
+            {selectedDayStaffLeaves.length > 0 && (
+              <div>
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <span>🌿 직원 휴가 및 연차 현황</span>
+                  <span className="bg-purple-100 text-purple-800 px-1.5 py-0.2 rounded-full text-[10px] font-bold">
+                    {selectedDayStaffLeaves.length}
+                  </span>
+                </h4>
+                <div className="space-y-2">
+                  {selectedDayStaffLeaves.map(h => (
+                    <div key={h.id} className="p-3 rounded-xl border border-purple-200 bg-purple-50/50 relative group">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-purple-900">{h.title}</span>
+                        <button
+                          onClick={() => handleDeleteEvent(h.id)}
+                          className="text-slate-400 hover:text-red-600 text-xs font-bold cursor-pointer"
+                          title="삭제"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <div className="text-[11px] text-purple-700 mt-1 font-semibold">
+                        기간: {h.startDate} ~ {h.endDate}
+                        {h.targetClass && <span className="ml-1.5 font-bold text-purple-900">({h.targetClass})</span>}
+                      </div>
+                      {h.reason && <div className="text-[11px] text-slate-600 mt-0.5">{h.reason}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 2. 휴업 및 행사 섹션 */}
             <div>
               <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                 <span>기관 휴업 / 행사</span>

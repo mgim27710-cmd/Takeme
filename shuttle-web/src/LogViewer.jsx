@@ -348,9 +348,11 @@ export default function LogViewer({
     return () => controller.abort();
   }, [activeMode, selectedDateStr, selectedBusId, getAuthHeaders]);
 
-  // Filtered Daily Variables for Selected Date
+  // Filtered Daily Variables for Selected Date (직원 휴가는 전용 섹션에서 보여주므로 행사/휴업 목록에서는 제외)
   const selectedDateEvents = useMemo(() => {
     return calendarHolidays.filter(h => {
+      const isStaffLeave = h.type === 'STAFF_LEAVE' || (h.title && (h.title.includes('휴가') || h.title.includes('연차') || h.title.includes('병가') || h.title.includes('연수')));
+      if (isStaffLeave) return false;
       const s = toDateStr(h.startDate);
       const e = toDateStr(h.endDate);
       const matchDate = selectedDateStr >= s && selectedDateStr <= e;

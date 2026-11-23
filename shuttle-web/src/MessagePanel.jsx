@@ -2219,26 +2219,68 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     (myIdNum !== null && senderIdNum !== null && myIdNum === senderIdNum));
                   const senderName = msg.sender?.name || msg.sender?.email || '알 수 없음';
                   const senderRole = msg.sender?.role;
+                  const rawPayload = msg.payload || {};
+                  const msgText = msg.text || '';
+                  const isTextPayment = msgText.includes('[신규 탑승 및 결재 신청]') ||
+                    msgText.includes('[신규 결재 신청]') ||
+                    msgText.includes('[원아 결석계') ||
+                    msgText.includes('[등원 지각 알림서]') ||
+                    msgText.includes('[연장 보육 / 개별 하원 신청서]');
+                  const isTextLeave = msgText.includes('[임직원 휴가·연차 신청서]') || msgText.includes('[휴가 신청서]');
+
+                  // 텍스트 메시지 기반 결재 신청서 정보 파싱 보강
+                  const parsedFromText = (() => {
+                    if (!isTextPayment && !isTextLeave) return {};
+                    const lines = msgText.split('\n');
+                    const getField = (prefix) => {
+                      const l = lines.find((line) => line.startsWith(prefix) || line.includes(prefix));
+                      if (!l) return '';
+                      const parts = l.split(':');
+                      return parts.length > 1 ? parts.slice(1).join(':').trim() : '';
+                    };
+                    return {
+                      studentName: getField('원아:') || getField('원아명:') || '원아',
+                      busNumber: getField('탑승 차량:') || getField('차량:') || '셔틀버스',
+                      boardingLocation: getField('신청 탑승지:') || getField('탑승 장소:') || getField('탑승지:') || '원내 지정 위치',
+                      targetTime: getField('예상 시간:') || getField('지각 일자:') || getField('픽업 예정 시간:') || '',
+                      note: getField('메모:') || getField('사유:') || getField('보호자 정보:') || '',
+                      applicantName: getField('신청자 성명:') || getField('신청 임직원:') || senderName,
+                      leaveType: getField('휴가 구분:') || '연차',
+                      startDate: getField('휴가 기간:')?.split('~')?.[0]?.trim() || '',
+                      endDate: getField('휴가 기간:')?.split('~')?.[1]?.trim() || getField('휴가 기간:')?.split('~')?.[0]?.trim() || '',
+                      reason: getField('휴가 사유:') || '개인 사유',
+                    };
+                  })();
+
+                  const payload = {
+                    ...parsedFromText,
+                    ...rawPayload,
+                  };
+
                   const isNotificationRoom = isCurrentRoomNotificationSystem || activeRoom?.type === 'NOTIFICATION_SYSTEM';
                   const isPaymentRoom = isCurrentRoomPaymentSystem || activeRoom?.type === 'PAYMENT_SYSTEM';
-                  const payload = msg.payload || {};
                   const isSystemAlert = Boolean(payload.isSystemAlert || msg.type === 'SYSTEM_ALERT' || isNotificationRoom);
-                  const isLeaveRequest = !isNotificationRoom && (msg.type === 'LEAVE_REQUEST' || payload.type === 'STAFF_LEAVE');
-                  const isPaymentRequest = !isNotificationRoom && !isLeaveRequest && (msg.type === 'PAYMENT_REQUEST' || (isPaymentRoom && Boolean(payload.studentName && !isSystemAlert)));
+                  const isLeaveRequest = !isNotificationRoom && (msg.type === 'LEAVE_REQUEST' || payload.type === 'STAFF_LEAVE' || isTextLeave);
+                  const isPaymentRequest = !isNotificationRoom && !isLeaveRequest && (
+                    msg.type === 'PAYMENT_REQUEST' ||
+                    payload.type === 'change_request' ||
+                    isTextPayment ||
+                    (isPaymentRoom && Boolean(payload.studentName && !isSystemAlert))
+                  );
                   const isContest = Boolean(payload.isPublicContest || payload.requestType === 'CONTEST');
+                  const isAdmin = ['ACADEMY_ADMIN', 'SUPER_ADMIN', 'ADMIN', 'DIRECTOR', 'DESK_STAFF', 'PRINCIPAL'].includes(myUser?.role);
                   const isRequester =
-                    isMine ||
+                    (!isAdmin && isMine) ||
                     Boolean(payload.requesterEmail && myUser?.email && payload.requesterEmail.toLowerCase() === myUser.email.toLowerCase()) ||
                     Boolean(payload.requesterId && myIdNum !== null && Number(payload.requesterId) === myIdNum);
                   const isLeaveRequester =
-                    isMine ||
+                    (!isAdmin && isMine) ||
                     Boolean(payload.applicantEmail && myUser?.email && payload.applicantEmail.toLowerCase() === myUser.email.toLowerCase()) ||
                     Boolean(payload.applicantId && myIdNum !== null && Number(payload.applicantId) === myIdNum);
                   const isTargetTeacher =
                     Boolean(payload.targetTeacherEmail && myUser?.email && payload.targetTeacherEmail.toLowerCase() === myUser.email.toLowerCase()) ||
                     Boolean(payload.targetTeacherId && myIdNum !== null && Number(payload.targetTeacherId) === myIdNum) ||
                     Boolean(payload.teacherEmail && myUser?.email && payload.teacherEmail.toLowerCase() === myUser.email.toLowerCase());
-                  const isAdmin = myUser?.role === 'ACADEMY_ADMIN' || myUser?.role === 'SUPER_ADMIN';
 
                   return (
                     <React.Fragment key={msg.id}>
