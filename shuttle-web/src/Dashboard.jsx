@@ -204,6 +204,129 @@ const checkSixKmRule = (st, buses = [], academy = null, maxRadiusKm = 6.0) => {
   return { isOutside6km: true, distKm };
 };
 
+// 증차 필요 원아 판별 헬퍼 (지도 마커 및 사이드바/원아관리 목록 100% 동기화)
+export const getStudentExtraBusInfo = (st, buses = [], students = [], operationMode = 'ALL', selectedDay = 'ALL', academy = null, academyRadiusKm = 6.0) => {
+  if (!st) return { needsExtraBus: false };
+  const bType = getStudentBoardingType(st);
+
+  // Filter out students who don't ride during the selected operation mode
+  if (operationMode === 'MORNING' && bType === 'AFTERNOON_ONLY') return { needsExtraBus: false };
+  if (operationMode === 'AFTERNOON' && bType === 'MORNING_ONLY') return { needsExtraBus: false };
+
+  let displayLat = Number(st.lat !== undefined ? st.lat : st.latitude);
+  let displayLng = Number(st.lng !== undefined ? st.lng : st.longitude);
+  let displayBusId = (operationMode === 'AFTERNOON')
+    ? (st.assignedDepartureBusId || st.assignedBusId)
+    : st.assignedBusId;
+
+  if (selectedDay !== 'ALL') {
+    const weekly = st.raw?.['요일별일정'] || st.raw?.weeklySchedules || st.weeklySchedules;
+    if (weekly && weekly[selectedDay] && weekly[selectedDay].enabled === false) {
+      return { needsExtraBus: false };
+    }
+    const sched = st.schedules?.find(s => s.dayOfWeek === selectedDay);
+    if (sched && sched.latitude && sched.longitude) {
+      displayLat = Number(sched.latitude);
+      displayLng = Number(sched.longitude);
+      displayBusId = sched.assignedVehicle ? sched.assignedVehicle.id : null;
+    }
+  }
+
+  const isOneTimeStudent = Boolean(
+    st.isOneTimeRide ||
+    st.oneTimeType ||
+    st.raw?.isTemporaryRide ||
+    st.raw?.rideType === 'TODAY_ONLY' ||
+    st.raw?.isTemporaryLocation
+  );
+
+  const sixKmCheck = checkSixKmRule(st, buses, academy, academyRadiusKm);
+  const isOutside6kmNotRiding = Boolean(sixKmCheck.isOutside6km && !st.isNotRiding && bType !== 'NONE' && !isOneTimeStudent);
+  const isPureNotRiding = Boolean((st.isNotRiding || bType === 'NONE' || isOutside6kmNotRiding) && !isOneTimeStudent);
+
+  const isApprovalPending = Boolean(
+    (st.approvalStatus === 'PENDING' || st.raw?.approvalStatus === 'PENDING' || st.raw?.paymentStatus === 'PENDING') &&
+    st.approvalStatus !== 'APPROVED'
+  );
+
+  if (isPureNotRiding || isApprovalPending) {
+    return { 
+      needsExtraBus: false, 
+      isPureNotRiding, 
+      isApprovalPending, 
+      isOneTimeStudent,
+      isOutside6kmNotRiding,
+      displayLat,
+      displayLng,
+      displayBusId
+    };
+  }
+
+  const assignedBus = displayBusId ? buses.find(b => b.id === displayBusId) : null;
+  let isInsideAssignedZone = false;
+  if (assignedBus?.turfPolygon && !isNaN(displayLat) && !isNaN(displayLng)) {
+    try {
+      isInsideAssignedZone = turf.booleanPointInPolygon(turf.point([displayLng, displayLat]), assignedBus.turfPolygon);
+    } catch (_) {
+      isInsideAssignedZone = false;
+    }
+  }
+
+  const currentBusRiders = displayBusId
+    ? students.filter(s => {
+        const sBType = getStudentBoardingType(s);
+        if (sBType === 'NONE' || s.isNotRiding) return false;
+        if (operationMode === 'MORNING') {
+          if (sBType === 'AFTERNOON_ONLY') return false;
+          return s.assignedBusId === displayBusId || s.assignedVehicle?.id === displayBusId;
+        } else if (operationMode === 'AFTERNOON') {
+          if (sBType === 'MORNING_ONLY') return false;
+          const sDep = s.assignedDepartureBusId || s.assignedBusId;
+          return sDep === displayBusId;
+        }
+        return (s.assignedBusId === displayBusId || s.assignedDepartureBusId === displayBusId || s.assignedVehicle?.id === displayBusId);
+      })
+    : [];
+
+  const isOverCapacity = currentBusRiders.length > (assignedBus?.capacity || 25);
+  const isUnassigned = !displayBusId;
+
+  let needsExtraBus = Boolean(st.needsExtraBus || st.raw?.needsExtraBus || st.raw?.['증차필요'] || st.raw?.['중차필요']);
+  let reason = needsExtraBus ? '수동 등록' : null;
+
+  if (isOverCapacity) {
+    needsExtraBus = true;
+    reason = `정원 초과 (${assignedBus?.name || '배정 차량'} ${currentBusRiders.length}/${assignedBus?.capacity || 25}명)`;
+  } else if (isUnassigned || !isInsideAssignedZone) {
+    const hasAvailableNearbyBus = buses.some(b => {
+      if (b.id === assignedBus?.id) return false;
+      const riders = students.filter(s => !s.isNotRiding && (s.assignedBusId === b.id || s.assignedVehicle?.id === b.id));
+      if (riders.length >= (b.capacity || 25)) return false;
+      return calcDistToBusKm(displayLat, displayLng, b) <= 5.0;
+    });
+    if (!hasAvailableNearbyBus) {
+      needsExtraBus = true;
+      reason = isUnassigned ? '미배차 (주변 5km 내 여유 차량 없음)' : '구역 외 (주변 5km 내 대체 차량 없음)';
+    }
+  }
+
+  return {
+    needsExtraBus,
+    reason,
+    isOverCapacity,
+    isUnassigned,
+    isInsideAssignedZone,
+    isPureNotRiding,
+    isApprovalPending,
+    isOneTimeStudent,
+    isOutside6kmNotRiding,
+    displayLat,
+    displayLng,
+    displayBusId,
+    assignedBus
+  };
+};
+
 // 차량별 정규 탑승자와 당일 1회 탑승자 분류 및 총 탑승 인원 산출 헬퍼
 export const getBusRiderDetails = (bus, studentList = [], operationMode = 'ALL', selectedDay = 'ALL') => {
   if (!bus || !Array.isArray(studentList)) {
@@ -1648,6 +1771,11 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   // Filter students based on search keyword and class filter
   const filteredStudents = useMemo(() => {
     return students.filter(st => {
+      // 0. Extra Bus Filter Mode
+      if (studentFilterMode === 'EXTRA_BUS') {
+        const ex = getStudentExtraBusInfo(st, buses, students, operationMode, selectedDay, academy, academyRadiusKm);
+        if (!ex.needsExtraBus) return false;
+      }
       // 1. Class Filter
       if (studentClassFilter !== 'ALL') {
         const raw = getStudentRaw(st);
@@ -1664,7 +1792,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       }
       return true;
     });
-  }, [students, studentSearchKeyword, studentClassFilter]);
+  }, [students, studentSearchKeyword, studentClassFilter, studentFilterMode, buses, operationMode, selectedDay, academy, academyRadiusKm]);
 
   const getGroupedStudents = () => {
     if (studentFilterMode === 'CLASS') {
@@ -5196,40 +5324,13 @@ const parseKindergartenExcelSheet = (sheet) => {
             {/* Helper to determine if a student needs extra bus */}
             {(() => {
               const isExtraBusStudent = (st) => {
-                if (st.isNotRiding || getStudentBoardingType(st) === 'NONE') return false;
-                const sixKm = checkSixKmRule(st, buses, academy, academyRadiusKm);
-                if (sixKm.isOutside6km) return false;
-                if (st.needsExtraBus || st.raw?.needsExtraBus || st.raw?.['증차필요'] || st.raw?.['중차필요']) return true;
-
-                const assignedBus = buses.find(b => b.id === (st.assignedBusId || st.assignedVehicle?.id));
-                if (assignedBus) {
-                  const riders = students.filter(s => !s.isNotRiding && (s.assignedBusId === assignedBus.id || s.assignedVehicle?.id === assignedBus.id));
-                  if (riders.length > (assignedBus.capacity || 25)) return true;
-                }
-
-                const isUnassigned = !st.assignedBusId && !st.assignedVehicle?.id;
-                let isInside = false;
-                if (assignedBus?.turfPolygon && st.lat && st.lng) {
-                  try {
-                    isInside = turf.booleanPointInPolygon(turf.point([Number(st.lng), Number(st.lat)]), assignedBus.turfPolygon);
-                  } catch (_) {}
-                }
-
-                if (isUnassigned || !isInside) {
-                  const hasAvailableNearbyBus = buses.some(b => {
-                    if (b.id === assignedBus?.id) return false;
-                    const riders = students.filter(s => !s.isNotRiding && (s.assignedBusId === b.id || s.assignedVehicle?.id === b.id));
-                    if (riders.length >= (b.capacity || 25)) return false;
-                    return calcDistToBusKm(st.lat, st.lng, b) <= 5.0;
-                  });
-                  if (!hasAvailableNearbyBus) return true;
-                }
-                return false;
+                return Boolean(getStudentExtraBusInfo(st, buses, students, operationMode, selectedDay, academy, academyRadiusKm)?.needsExtraBus);
               };
 
               const unassignedList = students.filter(st => {
                 if (st.isNotRiding || getStudentBoardingType(st) === 'NONE') return false;
-                if (st.assignedBusId || st.assignedVehicle?.id) return false;
+                const assignedBid = (operationMode === 'AFTERNOON') ? (st.assignedDepartureBusId || st.assignedBusId) : st.assignedBusId;
+                if (assignedBid || st.assignedVehicle?.id) return false;
                 if (isExtraBusStudent(st)) return false;
                 const sixKm = checkSixKmRule(st, buses, academy, academyRadiusKm);
                 if (sixKm.isOutside6km) return false;
@@ -5399,12 +5500,12 @@ const parseKindergartenExcelSheet = (sheet) => {
                     )}
                   </div>
 
-                  {/* Persistent Extra Bus Needed Students Panel (중차(증차) 필요 원아 아코디언 및 미탑승 일괄 전환) */}
+                  {/* Persistent Extra Bus Needed Students Panel (증차 필요 원아 아코디언 및 미탑승 일괄 전환) */}
                   <div className="mt-2.5 p-3 bg-orange-50/90 border border-orange-300 rounded-2xl shadow-xs shrink-0 transition-all">
                     <div 
                       onClick={() => setIsExtraBusCollapsed(!isExtraBusCollapsed)}
                       className="flex items-center justify-between cursor-pointer select-none"
-                      title={isExtraBusCollapsed ? '클릭하여 중차(증차) 필요 원아 명단 펼치기' : '클릭하여 접기'}
+                      title={isExtraBusCollapsed ? '클릭하여 증차 필요 원아 명단 펼치기' : '클릭하여 접기'}
                     >
                       <div className="flex items-center gap-2">
                         {extraBusList.length > 0 && (
@@ -5413,7 +5514,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                         <div className="flex items-center gap-1.5">
                           <span className="px-1.5 py-0.5 rounded-md bg-orange-200 text-orange-900 text-[10px] font-black">!</span>
                           <h4 className="font-extrabold text-orange-950 text-xs">
-                            중차(증차) 필요 {terms.student} ({extraBusList.length}명)
+                            증차 필요 {terms.student} ({extraBusList.length}명)
                           </h4>
                         </div>
                       </div>
@@ -5427,7 +5528,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                     {!isExtraBusCollapsed && (
                       <div className="mt-2.5 pt-2 border-t border-orange-200 animate-fade-in">
                         {extraBusList.length === 0 ? (
-                          <p className="text-[11px] text-orange-800/80 font-medium py-1">현재 중차(증차)가 필요한 원아가 없습니다.</p>
+                          <p className="text-[11px] text-orange-800/80 font-medium py-1">현재 증차가 필요한 원아가 없습니다.</p>
                         ) : (
                           <div className="space-y-2">
                             <div className="flex items-center justify-between bg-orange-100/70 p-1.5 rounded-xl border border-orange-200 text-[11px]">
@@ -5444,7 +5545,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                                 type="button"
                                 onClick={handleConvertSelectedToNotRiding}
                                 className="px-2.5 py-1 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-[11px] rounded-lg shadow-xs transition-all flex items-center gap-1 cursor-pointer"
-                                title="선택한 중차(증차) 필요 원아를 미탑승(도보/자차)으로 일괄 전환합니다"
+                                title="선택한 증차 필요 원아를 미탑승(도보/자차)으로 일괄 전환합니다"
                               >
                                 <span>전원 미탑승으로 전환</span>
                               </button>
@@ -5455,6 +5556,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                                 const isChecked = selectedExtraBusStudentIds.size === 0 || selectedExtraBusStudentIds.has(st.id);
                                 const homonym = getHomonymInfo(st, students);
                                 const isHomonym = Boolean(homonym?.isHomonym);
+                                const exInfo = getStudentExtraBusInfo(st, buses, students, operationMode, selectedDay, academy, academyRadiusKm);
                                 return (
                                   <div 
                                     key={st.id} 
@@ -5692,6 +5794,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                               {oneTimeStudents.map(st => {
                                 const homonym = getHomonymInfo(st, students);
                                 const isHomonym = Boolean(homonym?.isHomonym);
+                                const exInfo = getStudentExtraBusInfo(st, buses, students, operationMode, selectedDay, academy, academyRadiusKm);
                                 return (
                                 <div key={st.id} className={`text-xs flex justify-between items-center p-2 rounded-xl shadow-2xs ${isHomonym ? 'bg-amber-50/70 border-2 border-amber-400 ring-1 ring-amber-300' : 'bg-rose-50 border border-rose-200'}`}>
                                   <div className="flex flex-col min-w-0 pr-1">
@@ -5728,6 +5831,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                               {regularStudents.map(st => {
                                 const homonym = getHomonymInfo(st, students);
                                 const isHomonym = Boolean(homonym?.isHomonym);
+                                const exInfo = getStudentExtraBusInfo(st, buses, students, operationMode, selectedDay, academy, academyRadiusKm);
                                 const bType = getStudentBoardingType(st);
                                 const dayKey = selectedDay !== 'ALL' ? selectedDay : null;
                                 const weekly = st.raw?.['요일별일정'] || st.raw?.weeklySchedules || st.weeklySchedules;
@@ -5854,6 +5958,20 @@ const parseKindergartenExcelSheet = (sheet) => {
                         주소필요
                       </span>
                     )}
+                    {(() => {
+                      const ex = getStudentExtraBusInfo(st, buses, students, operationMode, selectedDay, academy, academyRadiusKm);
+                      if (ex.needsExtraBus) {
+                        return (
+                          <span 
+                            className="text-[11px] bg-orange-100 text-orange-700 font-black px-1.5 py-0.5 rounded border border-orange-300 shrink-0"
+                            title={ex.reason || '증차 필요'}
+                          >
+                            증차 필요
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
                     {hasAllergy && (
                       <span 
                         className="text-sm text-amber-600 font-bold shrink-0 cursor-help" 
@@ -6222,6 +6340,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                     <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
                       {[
                         { id: 'ALL', label: '전체' },
+                        { id: 'EXTRA_BUS', label: '증차 필요' },
                         { id: 'CLASS', label: '반별' },
                         { id: 'AGE', label: '연령' },
                         { id: 'BUS', label: '차량' }
@@ -6258,8 +6377,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                     </div>
                   </div>
 
-                  {/* Group Accordion Controls (when not ALL) */}
-                  {studentFilterMode !== 'ALL' && (
+                  {/* Group Accordion Controls (when not ALL and not EXTRA_BUS) */}
+                  {studentFilterMode !== 'ALL' && studentFilterMode !== 'EXTRA_BUS' && (
                     <div className="flex justify-between items-center px-1 mb-1.5 shrink-0">
                       <span className="text-xs font-bold text-slate-500">
                         {studentFilterMode === 'CLASS' && '반별 분류'}
@@ -6278,8 +6397,14 @@ const parseKindergartenExcelSheet = (sheet) => {
 
                   {/* Students Content Area */}
                   <div className="flex-1 overflow-y-auto space-y-2 px-0.5 py-1">
-                    {studentFilterMode === 'ALL' ? (
-                      sortStudentsList(filteredStudents).map(st => renderCleanStudentCard(st, true))
+                    {studentFilterMode === 'ALL' || studentFilterMode === 'EXTRA_BUS' ? (
+                      filteredStudents.length === 0 ? (
+                        <div className="text-xs text-slate-400 text-center py-8 font-bold">
+                          {studentFilterMode === 'EXTRA_BUS' ? '현재 증차가 필요한 원아가 없습니다.' : '해당 조건의 원아가 없습니다.'}
+                        </div>
+                      ) : (
+                        sortStudentsList(filteredStudents).map(st => renderCleanStudentCard(st, true))
+                      )
                     ) : (
                       getGroupedStudents().map(group => {
                         const isCollapsed = Boolean(collapsedGroups[group.key]);
@@ -7996,88 +8121,17 @@ const parseKindergartenExcelSheet = (sheet) => {
             
             if (!showStudent || !displayLat || !displayLng) return null;
 
-            // 1. 당일 1회 탑승 희망 또는 당일 임시 탑승지 변경 원아 감지
-            const isOneTimeStudent = Boolean(
-              st.isOneTimeRide ||
-              st.oneTimeType ||
-              st.raw?.isTemporaryRide ||
-              st.raw?.rideType === 'TODAY_ONLY' ||
-              st.raw?.isTemporaryLocation
-            );
-
-            // 2. 학원 기준 운행 반경 및 버스 구역 예외 검사 (반경 밖 탑승 희망자 -> 구역 외 미탑승)
-            const sixKmCheck = checkSixKmRule(st, buses, academy, academyRadiusKm);
-            const isOutside6kmNotRiding = Boolean(sixKmCheck.isOutside6km && !st.isNotRiding && bType !== 'NONE' && !isOneTimeStudent);
-
-            // 3. 미탑승 원아 판별 (도보 등원, 자가 픽업, 6KM 반경 초과 구역 외 등 - 회색 표시)
-            const isPureNotRiding = Boolean((st.isNotRiding || bType === 'NONE' || isOutside6kmNotRiding) && !isOneTimeStudent);
-
-            // 4. 결재 승인 대기 여부 (결재 승인 대기중일 때만 지도에서 강조/대기 표시)
-            const isApprovalPending = Boolean(
-              (st.approvalStatus === 'PENDING' || st.raw?.approvalStatus === 'PENDING' || st.raw?.paymentStatus === 'PENDING') &&
-              st.approvalStatus !== 'APPROVED'
-            );
-
-            // 거리 계산 헬퍼 (Km 단위)
-            const calcDistKm = (lat1, lon1, lat2, lon2) => {
-              if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
-              const R = 6371;
-              const dLat = (Number(lat2) - Number(lat1)) * Math.PI / 180;
-              const dLon = (Number(lon2) - Number(lon1)) * Math.PI / 180;
-              const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                        Math.cos(Number(lat1) * Math.PI / 180) * Math.cos(Number(lat2) * Math.PI / 180) *
-                        Math.sin(dLon / 2) * Math.sin(dLon / 2);
-              return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-            };
-
-            // 5. 구역 내 포함 여부 및 증차/미배차 판별
-            // - 배정 차량이 있으면 해당 차량의 폴리곤 내부에 위치하는지 엄격히 검사
-            // - 구역 밖이거나, 배정 차량이 없거나, 정원(25명) 초과인 경우 '!' (증차 필요/미배차)로 표시
-            // - 구역 밖인 원아는 절대 차량 색상으로 구역 외부에 표시되지 않음!
-            const assignedBus = displayBusId ? buses.find(b => b.id === displayBusId) : null;
-            let isInsideAssignedZone = false;
-            if (assignedBus?.turfPolygon && !isNaN(displayLat) && !isNaN(displayLng)) {
-              try {
-                isInsideAssignedZone = turf.booleanPointInPolygon(turf.point([displayLng, displayLat]), assignedBus.turfPolygon);
-              } catch (_) {
-                isInsideAssignedZone = false;
-              }
-            }
-
-            const currentBusRiders = displayBusId
-              ? students.filter(s => {
-                  const sBType = getStudentBoardingType(s);
-                  if (sBType === 'NONE' || s.isNotRiding) return false;
-                  if (operationMode === 'MORNING') {
-                    if (sBType === 'AFTERNOON_ONLY') return false;
-                    return s.assignedBusId === displayBusId || s.assignedVehicle?.id === displayBusId;
-                  } else if (operationMode === 'AFTERNOON') {
-                    if (sBType === 'MORNING_ONLY') return false;
-                    const sDep = s.assignedDepartureBusId || s.assignedBusId;
-                    return sDep === displayBusId;
-                  }
-                  return (s.assignedBusId === displayBusId || s.assignedDepartureBusId === displayBusId || s.assignedVehicle?.id === displayBusId);
-                })
-              : [];
-            const isOverCapacity = currentBusRiders.length > (assignedBus?.capacity || 25);
-            const isUnassigned = !displayBusId;
-
-            let needsExtraBus = Boolean(st.needsExtraBus || st.raw?.needsExtraBus || st.raw?.['증차필요']);
-            if (!isPureNotRiding && !isApprovalPending) {
-              if (isOverCapacity) {
-                needsExtraBus = true;
-              } else if (isUnassigned || !isInsideAssignedZone) {
-                const hasAvailableNearbyBus = buses.some(b => {
-                  if (b.id === assignedBus?.id) return false;
-                  const riders = students.filter(s => !s.isNotRiding && (s.assignedBusId === b.id || s.assignedVehicle?.id === b.id));
-                  if (riders.length >= (b.capacity || 25)) return false;
-                  return calcDistToBusKm(displayLat, displayLng, b) <= 5.0;
-                });
-                if (!hasAvailableNearbyBus) {
-                  needsExtraBus = true;
-                }
-              }
-            }
+            // 증차 필요/원아 탑승 상태 헬퍼 (지도 마커 및 사이드바/원아관리 100% 동기화)
+            const extraBusInfo = getStudentExtraBusInfo(st, buses, students, operationMode, selectedDay, academy, academyRadiusKm);
+            const isOneTimeStudent = extraBusInfo.isOneTimeStudent;
+            const isOutside6kmNotRiding = extraBusInfo.isOutside6kmNotRiding;
+            const isPureNotRiding = extraBusInfo.isPureNotRiding;
+            const isApprovalPending = extraBusInfo.isApprovalPending;
+            const assignedBus = extraBusInfo.assignedBus;
+            const isInsideAssignedZone = extraBusInfo.isInsideAssignedZone;
+            const isOverCapacity = extraBusInfo.isOverCapacity;
+            const isUnassigned = extraBusInfo.isUnassigned;
+            const needsExtraBus = extraBusInfo.needsExtraBus;
 
             // 범례 항목 숨김 여부 필터링 (항목 토글 시 다시 누를 때까지 마커 비표시)
             if (!legendVisibility.extraBus && needsExtraBus) return null;
@@ -8190,8 +8244,8 @@ const parseKindergartenExcelSheet = (sheet) => {
                       결재 승인 대기
                     </span>
                   ) : needsExtraBus ? (
-                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-300">
-                      증차 필요
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-300" title={extraBusInfo?.reason || '증차 필요'}>
+                      증차 필요{extraBusInfo?.reason ? ` (${extraBusInfo.reason})` : ''}
                     </span>
                   ) : isOutside6kmNotRiding ? (
                     <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300">
