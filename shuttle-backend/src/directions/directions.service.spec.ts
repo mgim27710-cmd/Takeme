@@ -139,6 +139,46 @@ describe('DirectionsService', () => {
     await expect(service.getRoute(req)).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  describe('경유지가 네이버 한도(15개)를 넘을 때', () => {
+    /** 서로 20m 이상 떨어진 경유지 n개 (같은 점으로 합쳐지지 않게) */
+    const stops = (n: number) => Array.from({ length: n }, (_, i) => ({ lat: 37.395 + i * 0.001, lng: 127.11 }));
+    const naverOk = {
+      data: {
+        code: 0,
+        route: { trafast: [{ summary: { distance: 2000, duration: 300000 }, path: [[127.1099, 37.3944], [127.1086, 37.4024]], guide: [] }] },
+      },
+    };
+    const keys = (k: string) => (k.startsWith('NAVER') ? 'REAL_KEY' : 'KAKAO_KEY');
+
+    it('fast 모드여도 카카오를 먼저 쓰고 네이버는 부르지 않는다', async () => {
+      const http = { get: jest.fn().mockReturnValue(of(naverOk)), post: jest.fn().mockReturnValue(of(kakaoResponse('DISTANCE'))) };
+      const service = new DirectionsService(http as any, { get: jest.fn(keys) } as any);
+      const r = await service.getRoute({ ...req, mode: 'fast', waypoints: stops(16) });
+      expect(r.provider).toBe('kakao');
+      expect(http.post).toHaveBeenCalledTimes(1);
+      expect(http.get).not.toHaveBeenCalled();
+    });
+
+    it('경유지가 정확히 15개면 지금처럼 fast 모드는 네이버를 먼저 쓴다', async () => {
+      const http = { get: jest.fn().mockReturnValue(of(naverOk)), post: jest.fn() };
+      const service = new DirectionsService(http as any, { get: jest.fn(keys) } as any);
+      const r = await service.getRoute({ ...req, mode: 'fast', waypoints: stops(15) });
+      expect(r.provider).toBe('naver');
+      expect(http.post).not.toHaveBeenCalled();
+    });
+
+    it('카카오가 실패하면 네이버로 넘어간다', async () => {
+      const http = {
+        get: jest.fn().mockReturnValue(of(naverOk)),
+        post: jest.fn().mockImplementation(() => { throw new Error('카카오 오류'); }),
+      };
+      const service = new DirectionsService(http as any, { get: jest.fn(keys) } as any);
+      const r = await service.getRoute({ ...req, mode: 'fast', waypoints: stops(16) });
+      expect(http.post).toHaveBeenCalledTimes(1);
+      expect(r.provider).toBe('naver');
+    });
+  });
+
   it('경유지가 30개를 넘으면 거절한다', async () => {
     const { service } = setup();
     const many = Array.from({ length: 31 }, () => ({ lat: 37.5, lng: 127.0 }));
