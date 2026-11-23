@@ -8,7 +8,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
+import { Repository, Between, LessThanOrEqual, MoreThanOrEqual, In } from 'typeorm';
 import {
   ApprovalRequest,
   ApprovalStatus,
@@ -74,6 +74,15 @@ function mapToOverrideType(type: ChangeRequestType | string): OverrideType {
       return OverrideType.CHANGE_LOCATION;
   }
 }
+
+/** 셔틀 탑승·픽업 관련 신청: 알림을 담임교사가 아니라 차량교사가 받는다 */
+const SHUTTLE_REQUEST_TYPES = new Set<ChangeRequestType>([
+  ChangeRequestType.ONE_TIME_BOARDING,
+  ChangeRequestType.NO_SHUTTLE,
+  ChangeRequestType.CHANGE_LOCATION,
+  ChangeRequestType.PICKUP,
+  ChangeRequestType.INDIVIDUAL_DISMISSAL,
+]);
 
 @Injectable()
 export class ApprovalService {
@@ -236,7 +245,7 @@ export class ApprovalService {
   }) {
     const student = await this.studentRepo.findOne({
       where: { id: data.studentId },
-      relations: { academy: true, parentUser: true, assignedVehicle: true },
+      relations: { academy: true, parentUser: true, assignedVehicle: true, assignedDepartureVehicle: true },
     });
     if (!student) throw new NotFoundException('원아를 찾을 수 없습니다.');
 
@@ -348,14 +357,18 @@ export class ApprovalService {
 
     if (this.chatService && academyId) {
       const studentClass = getStudentClassName(student) || undefined;
+      // 셔틀 탑승·픽업 관련 신청(일회성 탑승, 셔틀 미이용, 위치 변경, 픽업, 개별하원)은
+      // 담임교사가 아니라 그 원아가 타는 차량의 차량교사가 받는다. 결석·지각은 지금처럼 담임교사.
+      const isShuttleRequest = SHUTTLE_REQUEST_TYPES.has(type);
       const whereConditions: any[] = [{ academy: { id: academyId }, role: UserRole.ACADEMY_ADMIN }];
-      if (studentClass) {
+      if (studentClass && !isShuttleRequest) {
         whereConditions.push({ academy: { id: academyId }, assignedClass: studentClass, role: UserRole.HOMEROOM_TEACHER });
       }
-      this.userRepo.find({
-        where: whereConditions,
-      }).then((users) => {
-        const ids = users.map((u) => u.id);
+      Promise.all([
+        this.userRepo.find({ where: whereConditions }),
+        isShuttleRequest ? this.getVehicleStaffIds([targetVehicle?.id, student.assignedVehicle?.id, student.assignedDepartureVehicle?.id]) : Promise.resolve([] as number[]),
+      ]).then(([users, vehicleStaffIds]) => {
+        const ids = Array.from(new Set([...users.map((u) => u.id), ...vehicleStaffIds]));
         if (ids.length > 0) {
           this.chatService?.sendSystemNotificationToUsers(
             ids,
@@ -373,6 +386,24 @@ export class ApprovalService {
       request: saved,
       candidateVehicles,
     };
+  }
+
+  /**
+   * 차량들의 알림 받을 직원 id: 차량교사. 차량교사가 없으면 그 차량 기사. (teacherOnly=true 면 차량교사만)
+   */
+  private async getVehicleStaffIds(vehicleIds: Array<number | undefined | null>, teacherOnly = false): Promise<number[]> {
+    const ids = Array.from(new Set(vehicleIds.filter((v): v is number => typeof v === 'number')));
+    if (ids.length === 0) return [];
+    const vehicles = await this.vehicleRepo.find({
+      where: { id: In(ids) },
+      relations: { teacherUser: true, driverUser: true },
+    });
+    const result = new Set<number>();
+    for (const v of vehicles) {
+      if (v.teacherUser?.id) result.add(v.teacherUser.id);
+      else if (!teacherOnly && v.driverUser?.id) result.add(v.driverUser.id);
+    }
+    return Array.from(result);
   }
 
   /**
@@ -638,13 +669,20 @@ export class ApprovalService {
         });
         await this.notificationRepo.save(vNoti);
 
-        if (this.chatService && driver) {
-          this.chatService.sendSystemNotificationToUser(
-            driver.id,
-            '운행 변동 안내',
-            `[운행 변동] ${student.adminDisplayName || student.name} (${targetDate} ${typeKr})`,
-            { type: 'change_request' }
-          ).catch(() => {});
+        if (this.chatService) {
+          // 기사와 차량교사 모두에게 (기사가 없거나 차량교사만 있어도 빠지지 않게)
+          const staffIds = new Set<number>();
+          if (driver) staffIds.add(driver.id);
+          const teacherIds = await this.getVehicleStaffIds([affectedVehicle.id], true);
+          teacherIds.forEach((id) => staffIds.add(id));
+          for (const staffId of staffIds) {
+            this.chatService.sendSystemNotificationToUser(
+              staffId,
+              '운행 변동 안내',
+              `[운행 변동] ${student.adminDisplayName || student.name} (${targetDate} ${typeKr})`,
+              { type: 'change_request' }
+            ).catch(() => {});
+          }
         }
       }
     }
