@@ -581,6 +581,49 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
     return '$when 아침 ${t.hour}시';
   }
 
+  // 사진 메시지(type IMAGE)는 말풍선 안에 사진으로 보여준다
+  Widget _bubbleContent(ChatMessageModel msg, Color textColor) {
+    final url = msg.imageUrl;
+    if (url == null || url.isEmpty) {
+      return Text(msg.text, style: TextStyle(color: textColor, fontSize: 14, height: 1.4));
+    }
+    return GestureDetector(
+      onTap: () => showDialog(
+        context: context,
+        builder: (ctx) => Dialog(
+          backgroundColor: Colors.black,
+          insetPadding: EdgeInsets.zero,
+          child: Stack(
+            children: [
+              InteractiveViewer(child: Center(child: Image.network(url, fit: BoxFit.contain))),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: () => Navigator.pop(ctx)),
+              ),
+            ],
+          ),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.network(
+          url,
+          width: 200,
+          fit: BoxFit.cover,
+          loadingBuilder: (c, child, progress) => progress == null
+              ? child
+              : const SizedBox(width: 200, height: 140, child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
+          errorBuilder: (c, e, s) => SizedBox(
+            width: 200,
+            height: 80,
+            child: Center(child: Text('사진을 불러오지 못했습니다', style: TextStyle(fontSize: 12, color: textColor))),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildMessageBubble(ChatMessageModel msg, bool isMe) {
     final timeStr = DateFormat('a h:mm', 'ko').format(msg.createdAt);
 
@@ -620,14 +663,7 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
                     bottomRight: Radius.circular(16),
                   ),
                 ),
-                child: Text(
-                  msg.text,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    height: 1.4,
-                  ),
-                ),
+                child: _bubbleContent(msg, Colors.white),
               ),
             ),
           ],
@@ -707,14 +743,7 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
                               ),
                             ],
                           ),
-                          child: Text(
-                            msg.text,
-                            style: const TextStyle(
-                              color: Color(0xFF1E293B),
-                              fontSize: 14,
-                              height: 1.4,
-                            ),
-                          ),
+                          child: _bubbleContent(msg, const Color(0xFF1E293B)),
                         ),
                       ),
                       const SizedBox(width: 6),

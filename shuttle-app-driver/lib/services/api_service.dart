@@ -836,10 +836,36 @@ class ApiService {
     return null;
   }
 
-  Future<Map<String, dynamic>?> sendChatMessage(int roomId, String text) async {
+  /// 대화방에 보낼 사진을 서버에 올리고 주소(url)를 돌려받는다. 실패하면 null.
+  Future<String?> uploadChatImage(String base64Data, String filename, String mimeType) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/upload');
+      final res = await postWithAuth(
+        url,
+        jsonEncode({'base64Data': base64Data, 'filename': filename, 'mimeType': mimeType}),
+      );
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        final data = _decodeBody(res);
+        if (data is Map && data['url'] is String) return data['url'] as String;
+      }
+    } catch (e) {
+      debugPrint('[ApiService] uploadChatImage error: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> sendChatMessage(int roomId, String text, {String? type, Map<String, dynamic>? payload}) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/chat/messages');
-      final res = await postWithAuth(url, jsonEncode({'roomId': roomId, 'text': text}));
+      final res = await postWithAuth(
+        url,
+        jsonEncode({
+          'roomId': roomId,
+          'text': text,
+          'type': ?type,
+          'payload': ?payload,
+        }),
+      );
       if (res.statusCode == 200 || res.statusCode == 201) {
         return _decodeBody(res) as Map<String, dynamic>;
       }

@@ -1,6 +1,8 @@
 import '../../widgets/load_error_view.dart';
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
@@ -231,6 +233,278 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
     );
   }
 
+  // ───────────── 대화창 '+' 메뉴: 휴가 신청 / 사진 보내기 ─────────────
+
+  bool _isUploadingPhoto = false;
+
+  void _showPlusMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _plusMenuItem(Icons.beach_access_rounded, '휴가 신청', const Color(0xFF2563EB), () {
+                Navigator.pop(ctx);
+                _showLeaveRequestSheet();
+              }),
+              _plusMenuItem(Icons.photo_library_rounded, '사진', const Color(0xFF10B981), () {
+                Navigator.pop(ctx);
+                _pickAndSendPhoto(ImageSource.gallery);
+              }),
+              _plusMenuItem(Icons.photo_camera_rounded, '카메라', const Color(0xFFF59E0B), () {
+                Navigator.pop(ctx);
+                _pickAndSendPhoto(ImageSource.camera);
+              }),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _plusMenuItem(IconData icon, String label, Color color, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(color: color.withValues(alpha: 0.12), shape: BoxShape.circle),
+              child: Icon(icon, color: color, size: 28),
+            ),
+            const SizedBox(height: 8),
+            Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF1E293B))),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 메시지를 서버에 보내고 화면 목록에 바로 넣는다. 성공하면 true
+  Future<bool> _sendRaw(String text, {String? type, Map<String, dynamic>? payload}) async {
+    final result = await ApiService().sendChatMessage(widget.roomId, text, type: type, payload: payload);
+    if (!mounted) return false;
+    if (result == null) return false;
+    setState(() {
+      final exists = _messages.any((m) => m['id'] == result['id']);
+      if (!exists) _messages.add(result);
+    });
+    _scrollToBottom();
+    return true;
+  }
+
+  Future<void> _pickAndSendPhoto(ImageSource source) async {
+    if (_isUploadingPhoto) return;
+    try {
+      final picked = await ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 80);
+      if (picked == null) return;
+      setState(() => _isUploadingPhoto = true);
+
+      final bytes = await picked.readAsBytes();
+      final name = picked.name.isNotEmpty ? picked.name : 'photo.jpg';
+      final lower = name.toLowerCase();
+      final mime = lower.endsWith('.png') ? 'image/png' : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
+      final url = await ApiService().uploadChatImage('data:$mime;base64,${base64Encode(bytes)}', name, mime);
+      if (url == null) {
+        if (mounted) _showSnack('사진을 올리지 못했습니다. 다시 시도해 주세요.');
+        return;
+      }
+      // 웹 메신저와 같은 형식(IMAGE + imageUrl)이라 웹·학부모·지도교사 앱에서도 사진으로 보인다
+      final ok = await _sendRaw(
+        '[사진] $name',
+        type: 'IMAGE',
+        payload: {'imageUrl': url, 'filename': name, 'fileSize': bytes.length},
+      );
+      if (!ok && mounted) _showSnack('사진 전송에 실패했습니다. 다시 시도해 주세요.');
+    } catch (e) {
+      if (mounted) _showSnack('사진을 보내지 못했습니다. 다시 시도해 주세요.');
+    } finally {
+      if (mounted) setState(() => _isUploadingPhoto = false);
+    }
+  }
+
+  void _showSnack(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(text), backgroundColor: const Color(0xFFEF4444)),
+    );
+  }
+
+  /// 휴가·연차 신청서: 웹 메신저와 같은 문구로 이 대화방에 메시지로 보낸다 (받는 사람이 확인)
+  void _showLeaveRequestSheet() {
+    final me = ApiService().currentUser;
+    final nameCtrl = TextEditingController(text: me?.name ?? '');
+    final reasonCtrl = TextEditingController(text: '개인 사유로 인한 정기 연차 사용');
+    final fmt = DateFormat('yyyy-MM-dd');
+    var leaveType = '연차 휴가';
+    var start = DateTime.now();
+    var end = DateTime.now();
+    var needSubstitute = true;
+    var sending = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Padding(
+          padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('휴가·연차 신청', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
+                const SizedBox(height: 4),
+                const Text('이 대화방으로 신청서가 전달됩니다.', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: '신청자', border: OutlineInputBorder(), isDense: true),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: leaveType,
+                  decoration: const InputDecoration(labelText: '구분', border: OutlineInputBorder(), isDense: true),
+                  items: const ['연차 휴가', '병가', '경조사 휴가', '기타']
+                      .map((v) => DropdownMenuItem(value: v, child: Text(v)))
+                      .toList(),
+                  onChanged: (v) => setSheet(() => leaveType = v ?? leaveType),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final range = await showDateRangePicker(
+                      context: ctx,
+                      firstDate: DateTime.now().subtract(const Duration(days: 30)),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                      initialDateRange: DateTimeRange(start: start, end: end),
+                    );
+                    if (range != null) setSheet(() { start = range.start; end = range.end; });
+                  },
+                  icon: const Icon(Icons.date_range_rounded),
+                  label: Text('기간: ${fmt.format(start)} ~ ${fmt.format(end)}'),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('대체 인력 배정 필요', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                  value: needSubstitute,
+                  onChanged: (v) => setSheet(() => needSubstitute = v),
+                ),
+                TextField(
+                  controller: reasonCtrl,
+                  maxLines: 2,
+                  decoration: const InputDecoration(labelText: '신청 사유', border: OutlineInputBorder(), isDense: true),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton(
+                    onPressed: sending
+                        ? null
+                        : () async {
+                            if (nameCtrl.text.trim().isEmpty) {
+                              _showSnack('신청자 성함을 입력해 주세요.');
+                              return;
+                            }
+                            setSheet(() => sending = true);
+                            final text = '[임직원 휴가·연차 신청서]\n'
+                                '신청자: ${nameCtrl.text.trim()} (차량기사)\n'
+                                '구분: $leaveType\n'
+                                '기간: ${fmt.format(start)} ~ ${fmt.format(end)}\n'
+                                '대체 인력 배정: ${needSubstitute ? '필요 (대체 기사/교사 배정 요청)' : '불필요'}\n'
+                                '신청 사유: ${reasonCtrl.text.trim().isEmpty ? '개인 사유' : reasonCtrl.text.trim()}\n\n'
+                                '원장님의 승인 결재를 부탁드립니다.';
+                            final ok = await _sendRaw(text);
+                            if (!ctx.mounted) return;
+                            if (ok) {
+                              Navigator.pop(ctx);
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('휴가 신청서를 보냈습니다.')));
+                              }
+                            } else {
+                              setSheet(() => sending = false);
+                              _showSnack('신청서를 보내지 못했습니다. 다시 시도해 주세요.');
+                            }
+                          },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2563EB),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: Text(sending ? '보내는 중...' : '신청서 보내기', style: const TextStyle(fontWeight: FontWeight.w800)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ───────────── 말풍선 안 내용: 사진이면 사진, 아니면 글자 ─────────────
+
+  String? _imageUrlOf(Map<String, dynamic> msg) {
+    if (msg['type'] != 'IMAGE') return null;
+    final p = msg['payload'];
+    if (p is Map && p['imageUrl'] is String && (p['imageUrl'] as String).isNotEmpty) return p['imageUrl'] as String;
+    return null;
+  }
+
+  Widget _bubbleContent(Map<String, dynamic> msg, String text, Color textColor) {
+    final url = _imageUrlOf(msg);
+    if (url == null) {
+      return Text(text, style: TextStyle(color: textColor, fontSize: 14, height: 1.4));
+    }
+    return GestureDetector(
+      onTap: () => showDialog(
+        context: context,
+        builder: (ctx) => Dialog(
+          backgroundColor: Colors.black,
+          insetPadding: EdgeInsets.zero,
+          child: Stack(
+            children: [
+              InteractiveViewer(child: Center(child: Image.network(url, fit: BoxFit.contain))),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: () => Navigator.pop(ctx)),
+              ),
+            ],
+          ),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.network(
+          url,
+          width: 200,
+          fit: BoxFit.cover,
+          loadingBuilder: (c, child, progress) => progress == null
+              ? child
+              : const SizedBox(width: 200, height: 140, child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
+          errorBuilder: (c, e, s) => SizedBox(
+            width: 200,
+            height: 80,
+            child: Center(child: Text('사진을 불러오지 못했습니다', style: TextStyle(fontSize: 12, color: textColor))),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildMessageItem(Map<String, dynamic> msg, bool showDate, String dateText) {
     final senderId = msg['sender']?['id'];
     final isMe = (_currentUserId != null && senderId == _currentUserId);
@@ -363,14 +637,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                             bottomRight: Radius.circular(16),
                           ),
                         ),
-                        child: Text(
-                          text,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            height: 1.4,
-                          ),
-                        ),
+                        child: _bubbleContent(msg, text, Colors.white),
                       ),
                     ),
                   ],
@@ -425,14 +692,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                                       bottomRight: Radius.circular(16),
                                     ),
                                   ),
-                                  child: Text(
-                                    text,
-                                    style: const TextStyle(
-                                      color: Color(0xFF1E293B),
-                                      fontSize: 14,
-                                      height: 1.4,
-                                    ),
-                                  ),
+                                  child: _bubbleContent(msg, text, const Color(0xFF1E293B)),
                                 ),
                               ),
                               const SizedBox(width: 6),
@@ -604,6 +864,20 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
+                    // '+' 버튼: 휴가 신청, 사진 보내기
+                    Container(
+                      width: 42,
+                      height: 42,
+                      margin: const EdgeInsets.only(right: 8),
+                      decoration: const BoxDecoration(color: Color(0xFFF1F5F9), shape: BoxShape.circle),
+                      child: IconButton(
+                        tooltip: '휴가 신청·사진',
+                        icon: _isUploadingPhoto
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.add_rounded, color: Color(0xFF475569), size: 24),
+                        onPressed: _isUploadingPhoto ? null : _showPlusMenu,
+                      ),
+                    ),
                     Expanded(
                       child: Container(
                         decoration: BoxDecoration(

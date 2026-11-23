@@ -21,6 +21,9 @@ class _NewChatDialogState extends State<NewChatDialog> {
   String? _errorMessage;
   String _searchQuery = '';
 
+  // 체크박스로 고른 대화 상대 (id → 사용자). 1명이면 1:1, 2명 이상이면 단체 대화방
+  final Map<int, Map<String, dynamic>> _selected = {};
+
   @override
   void initState() {
     super.initState();
@@ -87,20 +90,48 @@ class _NewChatDialogState extends State<NewChatDialog> {
     return '아직 승인된 계정이 없거나 대화 가능한 상대가 없습니다.';
   }
 
-  Future<void> _handleSelectUser(Map<String, dynamic> user) async {
-    if (_isCreating) return;
+  void _toggleUser(Map<String, dynamic> user) {
+    final id = user['id'];
+    if (id is! int) return;
+    setState(() {
+      if (_selected.containsKey(id)) {
+        _selected.remove(id);
+      } else {
+        _selected[id] = user;
+      }
+    });
+  }
+
+  /// 단체 대화방 이름: '김OO, 박OO 외 1명' (이름 두 명까지 보여줌)
+  String _autoGroupName(List<Map<String, dynamic>> members) {
+    final names = members.map((u) => u['name']?.toString() ?? '사용자').toList();
+    if (names.length <= 2) return names.join(', ');
+    return '${names.take(2).join(', ')} 외 ${names.length - 2}명';
+  }
+
+  /// 선택한 사람이 1명이면 1:1 대화, 2명 이상이면 단체 대화방을 만든다
+  Future<void> _startChat() async {
+    if (_isCreating || _selected.isEmpty) return;
     setState(() => _isCreating = true);
 
-    final targetId = user['id'] as int;
-    final targetName = user['name']?.toString() ?? '상대방';
-
-    final room = await ApiService().createChatRoom([targetId], name: targetName);
+    final members = _selected.values.toList();
+    final Map<String, dynamic>? room;
+    if (members.length == 1) {
+      final user = members.first;
+      room = await ApiService().createChatRoom([user['id'] as int], name: user['name']?.toString() ?? '상대방');
+    } else {
+      room = await ApiService().createChatRoom(
+        members.map((u) => u['id'] as int).toList(),
+        name: _autoGroupName(members),
+        type: 'GROUP',
+      );
+    }
     if (!mounted) return;
 
     setState(() => _isCreating = false);
 
     if (room != null) {
-      Navigator.pop(context, {'room': room, 'targetUser': user});
+      Navigator.pop(context, {'room': room, 'targetUser': members.length == 1 ? members.first : null});
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -170,8 +201,14 @@ class _NewChatDialogState extends State<NewChatDialog> {
               subtitle: subText.isNotEmpty
                   ? Text(subText, style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)))
                   : null,
-              trailing: const Icon(Icons.chat_bubble_outline, size: 18, color: Color(0xFF94A3B8)),
-              onTap: () => _handleSelectUser(u),
+              trailing: Checkbox(
+                value: _selected.containsKey(u['id']),
+                onChanged: (_) => _toggleUser(u),
+                activeColor: const Color(0xFF2563EB),
+              ),
+              selected: _selected.containsKey(u['id']),
+              selectedTileColor: const Color(0xFFEFF6FF),
+              onTap: () => _toggleUser(u),
             );
           },
         ),
@@ -199,6 +236,31 @@ class _NewChatDialogState extends State<NewChatDialog> {
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(color: const Color(0xFFF1F5F9), height: 1),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: SizedBox(
+            height: 50,
+            child: ElevatedButton.icon(
+              onPressed: (_selected.isEmpty || _isCreating) ? null : _startChat,
+              icon: Icon(_selected.length >= 2 ? Icons.groups_rounded : Icons.chat_bubble_rounded, color: Colors.white),
+              label: Text(
+                _selected.isEmpty
+                    ? '대화할 상대를 선택하세요'
+                    : (_selected.length == 1
+                        ? '${_selected.values.first['name'] ?? '상대방'}와 대화하기'
+                        : '${_selected.length}명과 그룹 채팅 시작'),
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2563EB),
+                disabledBackgroundColor: const Color(0xFFCBD5E1),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ),
         ),
       ),
       body: _isLoading
