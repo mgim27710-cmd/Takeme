@@ -7433,7 +7433,7 @@ const parseKindergartenExcelSheet = (sheet) => {
 
         {activeTab === 'log' && (
           <LogViewer 
-            buses={buses} 
+            buses={sortedBuses} 
             students={students}
             currentTab={logTab} 
             onTabChange={setLogTab}

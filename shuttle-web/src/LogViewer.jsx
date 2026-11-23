@@ -62,17 +62,23 @@ export default function LogViewer({
     };
   }, [activeAcadId]);
 
-  // Mode state: 'ALL' | 'EVENT_HOLIDAY' | 'ABSENCE_VARIABLE' | 'LOG'
+  // Mode state: 'ALL' | 'EVENT_HOLIDAY' | 'ABSENCE_VARIABLE' | 'LOG' | 'PAYMENT_APPROVAL'
   const [activeMode, setActiveMode] = useState(() => currentTab || 'ALL');
 
   useEffect(() => {
     if (currentTab && currentTab !== activeMode) {
       setActiveMode(currentTab);
+      if (currentTab === 'LOG' || currentTab === 'PAYMENT_APPROVAL') {
+        setCalendarFilter('SELECTED_DATE');
+      }
     }
   }, [currentTab]);
 
   const handleModeChange = (mode) => {
     setActiveMode(mode);
+    if (mode === 'LOG' || mode === 'PAYMENT_APPROVAL') {
+      setCalendarFilter('SELECTED_DATE');
+    }
     if (onTabChange) onTabChange(mode);
   };
 
@@ -84,7 +90,7 @@ export default function LogViewer({
   const [calendarFilter, setCalendarFilter] = useState('SELECTED_DATE');
 
   // Class Selection: Replace vehicle tabs with Class tabs ("지금 호차별로 되어 있는거 빼고 반별로 바꿔주고")
-  // "원장은 모든 일정 반별 말고 볼 수 있게 해줘" -> Director defaults to 'ALL' (전체 반)
+  // "원장은 모든 일정 반별 말고 볼 수 있게 해줘" -> Director defaults to 'ALL' (전체반)
   const classList = useMemo(() => {
     const set = new Set();
     if (Array.isArray(availableClasses) && availableClasses.length > 0) {
@@ -108,37 +114,59 @@ export default function LogViewer({
     return 'ALL'; // Director defaults to all classes
   });
 
-  // Bus selection for LOG mode & Approval Vehicle Filter
-  const [selectedBusId, setSelectedBusId] = useState(buses?.length > 0 ? buses[0].id : null);
-  useEffect(() => {
-    if ((!selectedBusId || !buses?.some(b => b.id === selectedBusId)) && buses?.length > 0) {
-      setSelectedBusId(buses[0].id);
-    }
-  }, [buses, selectedBusId]);
-
-  // 호차별 결재란 전용 상태 (호차 필터 & 조회 범위)
-  const [selectedVehicleFilter, setSelectedVehicleFilter] = useState('ALL');
-  const [approvalViewScope, setApprovalViewScope] = useState('SELECTED_DATE'); // 'SELECTED_DATE' | 'ALL_SUMMARY'
-
-  // 전체 호차 목록 계산 (buses 기반 + 결재 데이터에 존재하는 호차)
-  const vehicleList = useMemo(() => {
-    const set = new Set();
-    buses.forEach(b => {
-      const label = b.busNumber || (b.name ? `${b.name}호차` : `${b.id}호차`);
-      if (label) set.add(label);
+  // Sort buses numerically: 1호차, 2호차, ...
+  const sortedBuses = useMemo(() => {
+    return [...(buses || [])].sort((a, b) => {
+      const numA = parseInt(String(a.name || a.busNumber || '').replace(/[^0-9]/g, ''), 10) || 0;
+      const numB = parseInt(String(b.name || b.busNumber || '').replace(/[^0-9]/g, ''), 10) || 0;
+      if (numA !== numB) return numA - numB;
+      return String(a.name || '').localeCompare(String(b.name || ''));
     });
-    return Array.from(set);
   }, [buses]);
+
+  // Bus selection for LOG mode & Approval Vehicle Filter (기본 1호차 선택)
+  const [selectedBusId, setSelectedBusId] = useState(sortedBuses?.length > 0 ? sortedBuses[0].id : null);
+  useEffect(() => {
+    if ((!selectedBusId || !sortedBuses?.some(b => b.id === selectedBusId)) && sortedBuses?.length > 0) {
+      setSelectedBusId(sortedBuses[0].id);
+    }
+  }, [sortedBuses, selectedBusId]);
+
+  // 호차 표시명 표준화 헬퍼 (중복 "호차호차" 방지 및 1호차, 2호차 통일)
+  const formatBusLabel = useCallback((val) => {
+    if (!val) return '호차 미지정';
+    const str = String(val).trim();
+    if (str.includes('호차')) return str;
+    const num = str.replace(/[^0-9]/g, '');
+    return num ? `${num}호차` : `${str}호차`;
+  }, []);
 
   // 결재 건의 호차 번호/명칭 추출 헬퍼
   const getRideBusLabel = useCallback((ride) => {
-    if (ride.busNumber) return ride.busNumber;
+    if (ride.busNumber) return formatBusLabel(ride.busNumber);
     if (ride.vehicleId) {
-      const found = buses.find(b => String(b.id) === String(ride.vehicleId));
-      if (found) return found.busNumber || (found.name ? `${found.name}호차` : `${found.id}호차`);
+      const found = sortedBuses.find(b => String(b.id) === String(ride.vehicleId));
+      if (found) return formatBusLabel(found.busNumber || found.name || found.id);
     }
     return '호차 미지정';
-  }, [buses]);
+  }, [sortedBuses, formatBusLabel]);
+
+  // 호차별 결재란 전용 상태 (기본: 전체 승인 내역 몰아보기로 즉시 노출)
+  const [selectedVehicleFilter, setSelectedVehicleFilter] = useState('ALL');
+  const [approvalViewScope, setApprovalViewScope] = useState('ALL_SUMMARY'); // 'ALL_SUMMARY' | 'SELECTED_DATE'
+
+  // 전체 호차 목록 계산 (sortedBuses 기반 + 결재 데이터에 존재하는 호차, 1호차부터 순서대로 정렬)
+  const vehicleList = useMemo(() => {
+    const set = new Set();
+    sortedBuses.forEach(b => {
+      set.add(formatBusLabel(b.busNumber || b.name || b.id));
+    });
+    return Array.from(set).sort((a, b) => {
+      const numA = parseInt(a.replace(/[^0-9]/g, ''), 10) || 0;
+      const numB = parseInt(b.replace(/[^0-9]/g, ''), 10) || 0;
+      return numA - numB;
+    });
+  }, [sortedBuses, formatBusLabel]);
 
   // Integrated Calendar Data (Events, Holidays, Schedule Overrides/Absences)
   const [calendarHolidays, setCalendarHolidays] = useState([]);
@@ -263,7 +291,16 @@ export default function LogViewer({
         { headers: getAuthHeaders() }
       );
       if (res.ok) {
-        const data = await res.json();
+        const rawData = await res.json();
+        const data = (Array.isArray(rawData) ? rawData : []).map(d => {
+          let p = { ...d };
+          if (typeof d.payload === 'string') {
+            try { p = { ...p, ...JSON.parse(d.payload) }; } catch (_) {}
+          } else if (d.payload && typeof d.payload === 'object') {
+            p = { ...p, ...d.payload };
+          }
+          return p;
+        });
         setApprovedRides(data.filter(d => d.status === 'APPROVED') || []);
       }
     } catch (e) {
@@ -940,9 +977,9 @@ export default function LogViewer({
                   id="log-class-select"
                   value={selectedClass}
                   onChange={e => setSelectedClass(e.target.value)}
-                  className="appearance-none bg-white border border-slate-200 hover:border-blue-400 focus:border-blue-500 rounded-xl px-3 py-1.5 pr-8 text-xs font-bold text-slate-700 shadow-2xs outline-none cursor-pointer transition"
+                  className="appearance-none bg-white border border-slate-200 hover:border-blue-400 focus:border-blue-500 rounded-xl px-3 py-1.5 pr-8 text-xs font-bold text-slate-700 shadow-2xs outline-none cursor-pointer transition whitespace-nowrap"
                 >
-                  <option value="ALL">전체 반 (기관 전체)</option>
+                  <option value="ALL">전체반</option>
                   {classList.map(cName => (
                     <option key={cName} value={cName}>
                       {cName}
@@ -1024,11 +1061,11 @@ export default function LogViewer({
             </div>
           )}
 
-          {/* Vehicle Tabs when activeMode is LOG */}
+          {/* Vehicle Tabs when activeMode is LOG (1호차부터 순서대로 배치) */}
           {activeMode === 'LOG' && (
             <div className="flex items-center gap-1.5 overflow-x-auto pt-2.5 border-t border-slate-100 mt-2.5 scrollbar-hide">
               <span className="text-[11px] font-bold text-slate-400 shrink-0 mr-1">호차 선택:</span>
-              {buses.map(bus => (
+              {sortedBuses.map(bus => (
                 <button
                   key={bus.id}
                   type="button"
@@ -1055,8 +1092,8 @@ export default function LogViewer({
               <span className="text-xs font-bold text-slate-400">
                 ({['일', '월', '화', '수', '목', '금', '토'][selectedDate.getDay()]}요일)
               </span>
-              <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
-                {selectedClass === 'ALL' ? '전체 반' : selectedClass}
+              <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 whitespace-nowrap">
+                {selectedClass === 'ALL' ? '전체반' : selectedClass}
               </span>
               {calendarFilter !== 'SELECTED_DATE' && (
                 <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
@@ -1093,8 +1130,8 @@ export default function LogViewer({
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto p-5 space-y-6">
           
-          {/* PAYMENT_APPROVAL Mode Content (호차별 결재란 - 최종 승인 건만 호차별 특이사항/결재내역 몰아보기) */}
-          {calendarFilter === 'SELECTED_DATE' && activeMode === 'PAYMENT_APPROVAL' && (
+          {/* PAYMENT_APPROVAL Mode Content (호차별 결재함 - activeMode가 PAYMENT_APPROVAL일 때 항상 안정적으로 표시) */}
+          {activeMode === 'PAYMENT_APPROVAL' && (
             <div className="space-y-4">
               {/* 호차 선택 필터 & 조회 범위 제어 바 */}
               <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs space-y-3">
@@ -1268,8 +1305,8 @@ export default function LogViewer({
             </div>
           )}
 
-          {/* LOG Mode Content */}
-          {calendarFilter === 'SELECTED_DATE' && activeMode === 'LOG' && (
+          {/* LOG Mode Content (차량운행일지 - activeMode가 LOG일 때 항상 안정적으로 표시) */}
+          {activeMode === 'LOG' && (
             <div className="h-full">
               {isLoadingLogs ? (
                 <div className="flex flex-col items-center justify-center h-64 text-slate-400">
@@ -1865,7 +1902,7 @@ export default function LogViewer({
                   onChange={e => setNewEvent(p => ({ ...p, targetClass: e.target.value }))}
                   className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none bg-white"
                 >
-                  <option value="">유치원/학원 전체 대상 (전체 반)</option>
+                  <option value="">유치원/학원 전체 대상 (전체반)</option>
                   {classList.map(c => (
                     <option key={c} value={c}>{c} 대상</option>
                   ))}

@@ -1400,7 +1400,14 @@ export class ChatService implements OnModuleInit {
     const messages = await qb.orderBy('m.createdAt', 'DESC').getMany();
 
     return messages.map((m) => {
-      const payload = m.payload || {};
+      let payload = m.payload || {};
+      if (typeof payload === 'string') {
+        try {
+          payload = JSON.parse(payload);
+        } catch (_) {
+          payload = {};
+        }
+      }
       return {
         id: m.id,
         messageId: m.id,
