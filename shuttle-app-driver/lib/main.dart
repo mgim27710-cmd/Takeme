@@ -9,6 +9,7 @@ import 'screens/driver/driver_home_screen.dart';
 import 'widgets/nav_map_view.dart';
 import 'utils/network_helper.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'services/push_navigation.dart';
 import 'services/push_notification_service.dart';
 
 void main() async {
@@ -44,6 +45,7 @@ class TakeMeDriverApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: appNavigatorKey, // 푸시 알림을 눌렀을 때 화면 이동용
       title: 'TakeMe 기사',
       debugShowCheckedModeBanner: false,
       localizationsDelegates: const [

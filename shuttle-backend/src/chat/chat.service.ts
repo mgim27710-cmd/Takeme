@@ -421,7 +421,7 @@ export class ChatService implements OnModuleInit {
         receiverIds,
         title,
         body.length > 200 ? `${body.slice(0, 200)}…` : body,
-        { roomId, type: isNoticeRoom ? 'notice' : 'chat' },
+        { roomId, type: isNoticeRoom ? 'notice' : 'chat', isGroup: isGroup && !isNoticeRoom, memberCount: (room.members || []).length },
         isNoticeRoom ? 'notice' : 'chat',
       );
     } catch (err) {
