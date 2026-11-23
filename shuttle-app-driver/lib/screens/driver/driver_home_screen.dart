@@ -16,7 +16,9 @@ import '../login_screen.dart';
 import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
 import 'operation_log_screen.dart';
+import '../chat/chat_conversation_screen.dart';
 import '../chat/chat_room_list_screen.dart';
+import '../../services/pending_photo.dart';
 
 /// 기사 전용 화면 (팀 앱과 같은 크기·글꼴)
 /// - 1단계(운행 준비): 전체 지도 + 하단 준비 패널('경로 탐색' 버튼)
@@ -91,6 +93,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     _nav = DriverNavigator(_map)..init();
     _initEventSocket();
     _loadUnreadCount();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _recoverLostPhoto());
     SocketService().connect(ApiService().token); // 이미 연결돼 있으면 그대로 둔다 (리스너를 등록하려면 소켓이 먼저 필요)
     SocketService().onRoomUpdated((_) {
       if (mounted) _loadUnreadCount();
@@ -155,6 +158,27 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     _eventSocket!.on('notificationReceived', (_) {
       if (mounted) _loadUnreadCount();
     });
+  }
+
+  /// 카메라·갤러리를 여는 동안 앱이 종료됐다가 다시 켜진 경우: 보관된 사진을 찾아 원래 대화방으로 보내고 그 대화방을 연다
+  Future<void> _recoverLostPhoto() async {
+    final pending = await PendingPhoto.read();
+    if (pending == null) return;
+    final file = await PendingPhoto.lostFile();
+    await PendingPhoto.clear();
+    if (file == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(content: Text('찍은 사진을 보내는 중입니다...')));
+    final result = await ApiService().sendChatPhoto(pending.roomId, file);
+    if (!mounted) return;
+    messenger.hideCurrentSnackBar();
+    if (result == null) {
+      messenger.showSnackBar(const SnackBar(content: Text('사진을 보내지 못했습니다. 대화방에서 다시 보내 주세요.')));
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ChatConversationScreen(roomId: pending.roomId, title: pending.title)),
+    );
   }
 
   @override

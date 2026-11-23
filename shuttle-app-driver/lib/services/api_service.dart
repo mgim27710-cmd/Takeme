@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:image_picker/image_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -852,6 +853,28 @@ class ApiService {
       debugPrint('[ApiService] uploadChatImage error: $e');
     }
     return null;
+  }
+
+  /// 사진을 서버에 올리고 사진 메시지(IMAGE)로 보낸다. 성공하면 보낸 메시지, 실패하면 null
+  Future<Map<String, dynamic>?> sendChatPhoto(int roomId, XFile picked) async {
+    try {
+      final bytes = await picked.readAsBytes();
+      final name = picked.name.isNotEmpty ? picked.name : 'photo.jpg';
+      final lower = name.toLowerCase();
+      final mime = lower.endsWith('.png') ? 'image/png' : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
+      final url = await uploadChatImage('data:$mime;base64,${base64Encode(bytes)}', name, mime);
+      if (url == null) return null;
+      // 웹 메신저와 같은 형식(IMAGE + imageUrl)이라 웹·학부모·지도교사 앱에서도 사진으로 보인다
+      return await sendChatMessage(
+        roomId,
+        '[사진] $name',
+        type: 'IMAGE',
+        payload: {'imageUrl': url, 'filename': name, 'fileSize': bytes.length},
+      );
+    } catch (e) {
+      debugPrint('[ApiService] sendChatPhoto error: $e');
+      return null;
+    }
   }
 
   Future<Map<String, dynamic>?> sendChatMessage(int roomId, String text, {String? type, Map<String, dynamic>? payload}) async {

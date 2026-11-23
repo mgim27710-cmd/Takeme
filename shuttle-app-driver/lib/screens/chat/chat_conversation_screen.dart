@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import '../../services/api_service.dart';
+import '../../services/pending_photo.dart';
 import '../../services/socket_service.dart';
 
 class ChatConversationScreen extends StatefulWidget {
@@ -305,28 +306,29 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
 
   Future<void> _pickAndSendPhoto(ImageSource source) async {
     if (_isUploadingPhoto) return;
+    // 카메라·갤러리가 켜져 있는 동안 안드로이드가 이 앱을 종료할 수 있다.
+    // 어느 대화방인지 적어 두면, 앱이 다시 켜졌을 때 홈 화면이 사진을 찾아 이 대화방으로 보내고 대화방을 다시 열어 준다.
+    await PendingPhoto.save(widget.roomId, widget.title);
     try {
       final picked = await ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 80);
+      await PendingPhoto.clear(); // 앱이 그대로 살아 있었으니 복구는 필요 없다
       if (picked == null) return;
+      if (!mounted) return;
       setState(() => _isUploadingPhoto = true);
 
-      final bytes = await picked.readAsBytes();
-      final name = picked.name.isNotEmpty ? picked.name : 'photo.jpg';
-      final lower = name.toLowerCase();
-      final mime = lower.endsWith('.png') ? 'image/png' : (lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
-      final url = await ApiService().uploadChatImage('data:$mime;base64,${base64Encode(bytes)}', name, mime);
-      if (url == null) {
-        if (mounted) _showSnack('사진을 올리지 못했습니다. 다시 시도해 주세요.');
+      final result = await ApiService().sendChatPhoto(widget.roomId, picked);
+      if (!mounted) return;
+      if (result == null) {
+        _showSnack('사진을 보내지 못했습니다. 다시 시도해 주세요.');
         return;
       }
-      // 웹 메신저와 같은 형식(IMAGE + imageUrl)이라 웹·학부모·지도교사 앱에서도 사진으로 보인다
-      final ok = await _sendRaw(
-        '[사진] $name',
-        type: 'IMAGE',
-        payload: {'imageUrl': url, 'filename': name, 'fileSize': bytes.length},
-      );
-      if (!ok && mounted) _showSnack('사진 전송에 실패했습니다. 다시 시도해 주세요.');
+      setState(() {
+        final exists = _messages.any((m) => m['id'] == result['id']);
+        if (!exists) _messages.add(result);
+      });
+      _scrollToBottom();
     } catch (e) {
+      await PendingPhoto.clear();
       if (mounted) _showSnack('사진을 보내지 못했습니다. 다시 시도해 주세요.');
     } finally {
       if (mounted) setState(() => _isUploadingPhoto = false);
@@ -358,7 +360,16 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) => Padding(
-          padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+          // 키보드가 없을 때는 하단 시스템 버튼 바(뒤로가기·홈) 높이만큼, 있을 때는 키보드 높이만큼 비워 둔다
+          padding: EdgeInsets.fromLTRB(
+            20,
+            16,
+            20,
+            (MediaQuery.of(ctx).viewInsets.bottom > 0
+                    ? MediaQuery.of(ctx).viewInsets.bottom
+                    : MediaQuery.of(ctx).viewPadding.bottom) +
+                20,
+          ),
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
