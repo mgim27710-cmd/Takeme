@@ -43,8 +43,6 @@ class NavStop {
   bool passed = false;
   /// 들르지 않고 지나침(계획 순서와 다름). passed 도 true 다
   bool skipped = false;
-  /// 기사가 버튼으로 도착 처리함
-  bool manual = false;
   DateTime? arrivedAt;
   bool saidApproach = false;
   int pathIndex = 0;
@@ -257,53 +255,9 @@ class DriverNavigator extends ChangeNotifier {
   /// 계획 순서와 다르게 건너뛴 정류장 수
   int get skippedCount => activeStops.where((s) => s.skipped).length;
 
-  /// 정류장 도착·건너뜀·수동 정정 기록을 서버 운행 일지에 남긴다
+  /// 정류장 도착·건너뜀 기록을 서버 운행 일지에 남긴다
   void _logStopEvent(String type, String detail) {
     unawaited(_logSafetyEventToServer(type, detail));
-  }
-
-  /// 기사 수동 정정: 다음 정류장을 지금 도착 처리 (자동 판정이 안 될 때 운행이 막히지 않게)
-  void manualArriveNext() {
-    final s = nextStop;
-    if (s == null) return;
-    final idx = activeStops.indexOf(s);
-    s.passed = true;
-    s.manual = true;
-    s.arrivedAt = DateTime.now();
-    s.saidApproach = true;
-    if (idx >= 0) map.markStopPassed(idx);
-    _logStopEvent('STOP_MANUAL_ARRIVE', '${s.name} 정류장 수동 도착 처리');
-    final next = nextStop;
-    _speak(next != null ? '${s.name} 도착 처리했습니다. 다음은 ${next.name}입니다.' : '${s.name} 도착 처리했습니다. 유치원으로 이동합니다.');
-    _syncOverlay();
-    notifyListeners();
-  }
-
-  /// 기사 수동 정정: 마지막으로 도착(또는 건너뜀) 처리된 정류장을 다시 "남음"으로
-  void undoLastStop() {
-    final list = activeStops;
-    int idx = -1;
-    DateTime? latest;
-    for (var i = 0; i < list.length; i++) {
-      final s = list[i];
-      if (!s.passed) continue;
-      if (idx < 0 || (s.arrivedAt != null && (latest == null || !s.arrivedAt!.isBefore(latest)))) {
-        idx = i;
-        latest = s.arrivedAt;
-      }
-    }
-    if (idx < 0) return;
-    final s = list[idx];
-    s.passed = false;
-    s.skipped = false;
-    s.manual = false;
-    s.arrivedAt = null;
-    s.saidApproach = false;
-    map.markStopPending(idx);
-    _logStopEvent('STOP_MANUAL_UNDO', '${s.name} 정류장 도착 처리 취소');
-    _speak('${s.name} 정류장 도착 처리를 취소했습니다.');
-    _syncOverlay();
-    notifyListeners();
   }
 
   double get remainingM {
@@ -587,7 +541,6 @@ class DriverNavigator extends ChangeNotifier {
             final prev = prevByName[s.name];
             if (prev != null) {
               stop.skipped = prev.skipped;
-              stop.manual = prev.manual;
               stop.arrivedAt = prev.arrivedAt;
             }
             return stop;

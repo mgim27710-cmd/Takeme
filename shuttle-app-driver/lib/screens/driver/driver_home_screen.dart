@@ -1414,7 +1414,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
   /// 정류장 진행 패널 (하단 바 바로 위, 운전 중에도 읽히게 크게)
   /// - 다음 정류장 / 남은 정류장 수 / 방금 도착한 정류장
   /// - 정류장마다 도착(✓)·건너뜀(!)·남음(번호)을 색과 기호로 함께 표시
-  /// - 위치로 도착을 판정하고, 틀렸을 때는 정차 중에 [도착 처리]/[되돌리기]로 바로잡는다
+  /// - 도착은 위치(GPS)로 자동 판정한다 (기사가 직접 누르는 도착 처리는 없다)
   Widget _stopProgressPanel() {
     final list = _nav.activeStops;
     if (list.isEmpty) return const SizedBox.shrink();
@@ -1422,8 +1422,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     final current = _nav.currentStop;
     final remaining = _nav.remainingStopCount;
     final skipped = _nav.skippedCount;
-    final moving = _nav.isMovingFast;
-    final hasPassed = list.any((s) => s.passed);
 
     Widget dot(int i) {
       final s = list[i];
@@ -1495,7 +1493,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
           if (current != null) ...[
             const SizedBox(height: 4),
             Text(
-              '방금: ${current.name}${current.manual ? ' (직접 도착 처리)' : ''}',
+              '방금: ${current.name}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 15, color: _C.slate600, fontWeight: FontWeight.w600),
@@ -1526,46 +1524,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
             ),
           ],
           const SizedBox(height: 10),
-          // 수동 정정: 운전 중에는 막고, 정차했을 때만 누를 수 있다
-          Row(
-            children: [
-              Expanded(
-                flex: 3,
-                child: SizedBox(
-                  height: 56,
-                  child: ElevatedButton.icon(
-                    onPressed: (next == null || moving) ? null : _nav.manualArriveNext,
-                    icon: const Icon(Icons.where_to_vote, size: 24),
-                    label: Text(moving ? '정차 후 누르세요' : '도착 처리',
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _C.blue,
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: _C.slate300,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 2,
-                child: SizedBox(
-                  height: 56,
-                  child: OutlinedButton.icon(
-                    onPressed: (!hasPassed || moving) ? null : _nav.undoLastStop,
-                    icon: const Icon(Icons.undo, size: 22),
-                    label: const Text('되돌리기', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: _C.slate800,
-                      side: const BorderSide(color: _C.slate300, width: 1.5),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
         ],
       ),
     );

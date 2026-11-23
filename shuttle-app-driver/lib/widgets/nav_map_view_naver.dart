@@ -70,6 +70,22 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
   bool _isMapReady = false;
 
   bool _isSnappedToRoute = false;
+
+  // 경로 점(LatLng)과 누적거리 캐시: 경로가 바뀔 때만 새로 만든다 (매 프레임 만들면 화면이 끊긴다)
+  List<LatLng>? _routeCache;
+  List<double> _routeCum = const [];
+  Object? _routeSrc;
+
+  // 차량 위치를 '경로를 따라 간 거리(m)'로 계산한다: GPS 사이에도 항상 도로선 위에서 부드럽게 움직인다
+  double _sShown = 0.0; // 화면에 그리는 위치
+  double _sBase = 0.0; // 마지막 GPS 가 알려준 위치
+  double _speedBaseMps = 0.0;
+  DateTime _sBaseTime = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _sValid = false;
+  int _drawSeg = 0; // 지금 차량이 있는 경로 구간 번호 (경로선을 어디서부터 그릴지)
+  double? _lastPosLat;
+  double? _lastPosLng;
+
   DateTime? _lastGpsTime;
   double _correctionOffsetX = 0.0;
   double _correctionOffsetY = 0.0;
@@ -152,11 +168,26 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
     if (curPos != null) {
       final rawLatLng = LatLng(curPos.lat, curPos.lng);
       final primary = _getPrimaryRouteLatLngs();
-      final (snapped, _, _, isSnapped) = navigating
+      final (snapped, snapSeg, snapT, isSnapped) = navigating
           ? _snapToRouteDetail(rawLatLng, primary)
           : (rawLatLng, 0, 0.0, false);
       _targetPos = snapped;
       _isSnappedToRoute = isSnapped;
+
+      // 새 GPS 위치가 실제로 들어왔을 때만 '경로 위 거리' 기준값을 갱신한다
+      final posChanged = _lastPosLat != curPos.lat || _lastPosLng != curPos.lng;
+      if (!(navigating && isSnapped)) {
+        _sValid = false;
+      } else if (primary != null && _routeCum.length == primary.length && primary.length >= 2 && (posChanged || !_sValid)) {
+        final i = snapSeg.clamp(0, primary.length - 2);
+        _sBase = _routeCum[i] + snapT * (_routeCum[i + 1] - _routeCum[i]);
+        _speedBaseMps = speed / 3.6;
+        _sBaseTime = DateTime.now();
+        if (!_sValid || (_sBase - _sShown).abs() > 40.0) _sShown = _sBase; // 처음이거나 크게 어긋나면 바로 맞춤
+        _sValid = true;
+      }
+      _lastPosLat = curPos.lat;
+      _lastPosLng = curPos.lng;
 
       if (!_hasInitialLocation) {
         _hasInitialLocation = true;
@@ -215,35 +246,61 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
     _lastTick = elapsed;
     final clampedDt = dt.clamp(0.001, 0.1);
 
-    if (_isFollowing && _isNavigating) {
+    if (_isNavigating) {
+      // 차량 위치·방향 움직임은 지도를 손으로 움직이는 중에도 계속한다 (따라가기 여부와 상관없이).
       final speedMps = ((_impl.currentSpeedKmh ?? 0.0) / 3.6);
       final sinceGps = _lastGpsTime != null
           ? (DateTime.now().difference(_lastGpsTime!).inMilliseconds / 1000.0)
           : 0.0;
+      final route = _getPrimaryRouteLatLngs();
 
-      if (_isSnappedToRoute && sinceGps <= NavMapConfig.predictionMaxSeconds && speedMps > 0.5) {
-        _advanceAlongRoute(speedMps * clampedDt, _getPrimaryRouteLatLngs());
-      }
+      if (_isSnappedToRoute && _sValid && route != null && route.length >= 2 && _routeCum.length == route.length) {
+        // GPS 사이에는 속도만큼 앞으로 간 위치를 목표로 삼고, 화면 위치는 그쪽으로 부드럽게 따라간다.
+        // 항상 도로선(경로) 위의 점이라 커브에서 도로를 벗어나지 않고, 새 GPS 가 와도 위치가 튀지 않는다.
+        final ahead = math.min(DateTime.now().difference(_sBaseTime).inMilliseconds / 1000.0, NavMapConfig.predictionMaxSeconds);
+        final sTarget = (_sBase + _speedBaseMps * ahead).clamp(0.0, _routeCum.last);
+        if (sTarget >= _sShown) {
+          final dtReal = dt.clamp(0.001, 0.25);
+          _sShown += (sTarget - _sShown) * (1.0 - math.exp(-dtReal / 0.35));
+        }
+        final (p, seg, roadBearing) = _pointAtS(route, _sShown);
+        _animatedLat = p.latitude;
+        _animatedLng = p.longitude;
+        _drawSeg = seg;
+        _correctionRemainingSec = 0.0;
+        // 진행 방향도 도로선의 방향을 따라 연속으로 바뀌게 한다 (GPS 방향은 1초마다 계단식이라 지도가 1초마다 돈다)
+        if (speedMps >= NavMapConfig.stationarySpeedThreshold) {
+          _lastValidHeading = roadBearing;
+        }
+        _targetHeading = _shortestAngle(_animatedHeading, _lastValidHeading);
+      } else {
+        if (_isSnappedToRoute && sinceGps <= NavMapConfig.predictionMaxSeconds && speedMps > 0.5) {
+          _advanceAlongRoute(speedMps * clampedDt, route);
+        }
 
-      if (_correctionRemainingSec > 0.001) {
-        final stepFactor = (clampedDt / _correctionRemainingSec).clamp(0.0, 1.0);
-        _animatedLat += _correctionOffsetY * stepFactor;
-        _animatedLng += _correctionOffsetX * stepFactor;
-        _correctionOffsetY -= _correctionOffsetY * stepFactor;
-        _correctionOffsetX -= _correctionOffsetX * stepFactor;
-        _correctionRemainingSec -= clampedDt;
-      } else if (!_isSnappedToRoute) {
-        final posFactor = (clampedDt / 0.3).clamp(0.0, 1.0);
-        _animatedLat += (_targetPos.latitude - _animatedLat) * posFactor;
-        _animatedLng += (_targetPos.longitude - _animatedLng) * posFactor;
+        if (_correctionRemainingSec > 0.001) {
+          final stepFactor = (clampedDt / _correctionRemainingSec).clamp(0.0, 1.0);
+          _animatedLat += _correctionOffsetY * stepFactor;
+          _animatedLng += _correctionOffsetX * stepFactor;
+          _correctionOffsetY -= _correctionOffsetY * stepFactor;
+          _correctionOffsetX -= _correctionOffsetX * stepFactor;
+          _correctionRemainingSec -= clampedDt;
+        } else if (!_isSnappedToRoute) {
+          final posFactor = (clampedDt / 0.3).clamp(0.0, 1.0);
+          _animatedLat += (_targetPos.latitude - _animatedLat) * posFactor;
+          _animatedLng += (_targetPos.longitude - _animatedLng) * posFactor;
+        }
       }
 
       _animatedHeading += (_targetHeading - _animatedHeading) * (clampedDt / NavMapConfig.headingLerpDuration).clamp(0.0, 1.0);
-      _animatedZoom += (_targetZoom - _animatedZoom) * (clampedDt / NavMapConfig.zoomLerpDuration).clamp(0.0, 1.0);
-      _animatedYRatio += (_targetYRatio - _animatedYRatio) * (clampedDt / NavMapConfig.ratioLerpDuration).clamp(0.0, 1.0);
-
-      _applyCameraUpdate();
-    } else if (_isFollowing && !_isNavigating) {
+      // 화면(카메라)은 따라가기가 켜져 있을 때만 차량을 따라 움직인다.
+      // 사용자가 지도를 움직이는 중에는 화면을 그대로 두고, 현위치 버튼을 누르면 다시 따라간다.
+      if (_isFollowing) {
+        _animatedZoom += (_targetZoom - _animatedZoom) * (clampedDt / NavMapConfig.zoomLerpDuration).clamp(0.0, 1.0);
+        _animatedYRatio += (_targetYRatio - _animatedYRatio) * (clampedDt / NavMapConfig.ratioLerpDuration).clamp(0.0, 1.0);
+        _applyCameraUpdate();
+      }
+    } else if (_isFollowing) {
       final posFactor = (clampedDt / 0.3).clamp(0.0, 1.0);
       _animatedLat += (_targetPos.latitude - _animatedLat) * posFactor;
       _animatedLng += (_targetPos.longitude - _animatedLng) * posFactor;
@@ -253,7 +310,7 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
 
     _updateMeMarker();
     // 경로선/마커는 부하를 줄이기 위해 약 4Hz 로만 갱신
-    if (_isNavigating && DateTime.now().difference(_lastSync).inMilliseconds > 250) {
+    if (_isNavigating && DateTime.now().difference(_lastSync).inMilliseconds > 500) {
       _requestSync();
     }
   }
@@ -267,21 +324,39 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
     }
   }
 
+  // 마지막으로 지도에 실제 적용한 확대·회전·기준 높이
+  double? _lastCamZoom;
+  double? _lastCamBearing;
+  double? _lastCamYRatio;
+
+  static double _angleGap(double a, double b) => (((a - b + 540.0) % 360.0) - 180.0).abs();
+
   /// 카메라 이동 (애니메이션 없음, 이전 호출이 끝나기 전에는 건너뜀)
+  /// 확대·회전·기준 높이가 아주 조금(0.02배율·1도·0.5%) 바뀐 건 이전 값을 그대로 쓴다.
+  /// 위치는 매번 움직이지만, 확대·회전을 매 프레임 미세하게 바꾸면 지도 글자가 계속 깜빡거린다.
   Future<void> _moveCamera(LatLng? target, double? zoom, double? bearing, double yRatio) async {
     final map = _map;
     if (!_canUseMap || map == null || _cameraBusy) return;
+    var z = zoom;
+    var b = bearing;
+    var r = yRatio;
+    if (z != null && _lastCamZoom != null && (z - _lastCamZoom!).abs() < 0.02) z = _lastCamZoom;
+    if (b != null && _lastCamBearing != null && _angleGap(b, _lastCamBearing!) < 1.0) b = _lastCamBearing;
+    if (_lastCamYRatio != null && (r - _lastCamYRatio!).abs() < 0.005) r = _lastCamYRatio!;
     _cameraBusy = true;
     try {
       final update = NCameraUpdate.withParams(
         target: target == null ? null : NLatLng(target.latitude, target.longitude),
-        zoom: zoom,
-        bearing: bearing,
+        zoom: z,
+        bearing: b,
         tilt: 0,
       )
-        ..setPivot(NPoint(0.5, yRatio))
+        ..setPivot(NPoint(0.5, r))
         ..setAnimation(animation: NCameraAnimation.none, duration: Duration.zero);
       await map.updateCamera(update);
+      _lastCamZoom = z;
+      _lastCamBearing = b;
+      _lastCamYRatio = r;
     } catch (e) {
       debugPrint('[nav_map_naver] moveCamera error: $e');
     } finally {
@@ -334,8 +409,74 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
   }
 
   List<LatLng>? _getPrimaryRouteLatLngs() {
-    if (_impl.primaryRoute == null) return null;
-    return _impl.primaryRoute!.map((e) => LatLng(e.lat, e.lng)).toList();
+    final src = _impl.primaryRoute;
+    if (src == null) {
+      _routeCache = null;
+      _routeSrc = null;
+      _routeCum = const [];
+      _sValid = false;
+      return null;
+    }
+    if (!identical(src, _routeSrc) || _routeCache == null || _routeCache!.length != src.length) {
+      // 경로가 새로 바뀐 때만 변환한다 (예전에는 매 프레임 수천 개를 새로 만들어 화면이 끊겼다)
+      _routeSrc = src;
+      final list = src.map((e) => LatLng(e.lat, e.lng)).toList();
+      _routeCache = list;
+      _routeCum = _cumulativeMeters(list);
+      _sValid = false;
+      _drawSeg = 0;
+    }
+    return _routeCache;
+  }
+
+  static List<double> _cumulativeMeters(List<LatLng> pts) {
+    const rad = math.pi / 180.0;
+    const latScale = 111132.954;
+    final cum = List<double>.filled(pts.length, 0.0);
+    for (var i = 1; i < pts.length; i++) {
+      final lngScale = 111412.84 * math.cos(pts[i - 1].latitude * rad);
+      final dx = (pts[i].longitude - pts[i - 1].longitude) * lngScale;
+      final dy = (pts[i].latitude - pts[i - 1].latitude) * latScale;
+      cum[i] = cum[i - 1] + math.sqrt(dx * dx + dy * dy);
+    }
+    return cum;
+  }
+
+  /// 경로를 따라 s 미터 간 위치, 그 위치의 구간 번호, 앞쪽 약 15m 도로 방향
+  (LatLng, int, double) _pointAtS(List<LatLng> route, double s) {
+    final cum = _routeCum;
+    final last = route.length - 2;
+    var lo = 0;
+    var hi = last;
+    while (lo < hi) {
+      final mid = (lo + hi + 1) >> 1;
+      if (cum[mid] <= s) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    final a = route[lo];
+    final b = route[lo + 1];
+    final segLen = cum[lo + 1] - cum[lo];
+    final t = segLen < 1e-6 ? 0.0 : ((s - cum[lo]) / segLen).clamp(0.0, 1.0);
+    final p = LatLng(a.latitude + (b.latitude - a.latitude) * t, a.longitude + (b.longitude - a.longitude) * t);
+    // 앞쪽 15m 지점을 찾아 방향을 구한다 (꺾이는 곳에서 방향이 부드럽게 바뀌도록)
+    var j = lo + 1;
+    while (j < route.length - 1 && cum[j] < s + 15.0) {
+      j++;
+    }
+    final ahead = route[j];
+    final bearing = (ahead.latitude == p.latitude && ahead.longitude == p.longitude)
+        ? _bearingBetween(a, b)
+        : _bearingBetween(p, ahead);
+    return (p, lo, bearing);
+  }
+
+  /// 경로선을 어디서부터 그릴지: 차량이 있는 구간 번호
+  int _drawSegIndex(int routeLen) {
+    final i = (_isSnappedToRoute && _sValid) ? _drawSeg : _impl.routeProgressIndex;
+    return i.clamp(0, routeLen - 1);
   }
 
   List<LatLng>? _getAlternateRouteLatLngs() {
@@ -408,7 +549,7 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
     final pri = _getPrimaryRouteLatLngs();
     if (pri == null || pri.isEmpty) return const [];
     if (_isNavigating) {
-      final segIdx = _impl.routeProgressIndex.clamp(0, pri.length - 1);
+      final segIdx = _drawSegIndex(pri.length);
       // 차량이 경로(도로) 위에 있을 때만 현재 위치에서 경로를 이어 그린다.
       // 도로에서 벗어나 있으면 '차량 → 경로' 직선을 그리지 않고 도로 경로만 보여준다.
       final active = <LatLng>[];
@@ -555,7 +696,7 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
     if (pri == null || pri.length < 2) return specs;
 
     final activePoints = _getActiveRoutePoints();
-    final int currentSegIdx = _isNavigating ? _impl.routeProgressIndex.clamp(0, pri.length - 1) : 0;
+    final int currentSegIdx = _isNavigating ? _drawSegIndex(pri.length) : 0;
 
     // 같은 도로를 반대 방향으로 다시 지나는 구간(유턴/복귀) 검출
     final isOverlap = List<bool>.filled(math.max(0, activePoints.length - 1), false);
@@ -890,14 +1031,20 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
 
   // ───────────────────────── 빌드 ─────────────────────────
 
+  // 지도 처음 위치는 한 번만 정해서 고정한다.
+  // 차량 위치(_animatedLat/Lng)를 그대로 넣으면 GPS 가 움직일 때마다 지도 설정 묶음이 달라져서,
+  // 지도가 설정을 전부 다시 적용하며 지도 글씨가 계속 깜빡인다.
+  NCameraPosition? _initialCamera;
+
   @override
   Widget build(BuildContext context) {
+    _initialCamera ??= NCameraPosition(
+      target: NLatLng(_animatedLat, _animatedLng),
+      zoom: NavMapConfig.defaultOverviewZoom,
+    );
     return NaverMap(
       options: NaverMapViewOptions(
-        initialCameraPosition: NCameraPosition(
-          target: NLatLng(_animatedLat, _animatedLng),
-          zoom: NavMapConfig.defaultOverviewZoom,
-        ),
+        initialCameraPosition: _initialCamera!,
         mapType: NMapType.basic, // 일반 지도 (밝은 테마)
         nightModeEnable: _naverNightMode,
         liteModeEnable: false,
