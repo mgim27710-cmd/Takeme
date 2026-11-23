@@ -17,7 +17,7 @@ class HomeroomTeacherHomeScreen extends StatefulWidget {
   State<HomeroomTeacherHomeScreen> createState() => _HomeroomTeacherHomeScreenState();
 }
 
-class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
+class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> with WidgetsBindingObserver {
   int _selectedTabIndex = 0;
   late final PageController _pageController;
   bool _isRefreshing = false;
@@ -27,6 +27,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _pageController = PageController(initialPage: _selectedTabIndex);
     _loadUnreadCount();
     _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) => _loadUnreadCount());
@@ -37,10 +38,29 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> {
     SocketService().onRoomUpdated((_) {
       if (mounted) _loadUnreadCount();
     });
+    SocketService().onChangeRequestUpdated(_onRealtimeSignal);
+    SocketService().onStudentStatusChanged(_onRealtimeSignal);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadUnreadCount();
+      SocketService().connect(ApiService().token);
+    }
+  }
+
+  void _onRealtimeSignal(Map<String, dynamic> _) {
+    if (mounted) {
+      _loadUnreadCount();
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    SocketService().offChangeRequestUpdated(_onRealtimeSignal);
+    SocketService().offStudentStatusChanged(_onRealtimeSignal);
     _pageController.dispose();
     _notificationPollTimer?.cancel();
     super.dispose();

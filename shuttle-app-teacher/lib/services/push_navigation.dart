@@ -72,11 +72,21 @@ class PushNavigation {
       );
 
   static void _open(NavigatorState nav, Map<String, dynamic> data) {
-    final type = (data['type'] ?? '').toString();
-    final roomId = int.tryParse((data['roomId'] ?? '').toString());
-    final hasPost = (data['postId'] ?? '').toString().isNotEmpty;
+    debugPrint('[PushNavigation] _open called with data: $data');
+    final rawType = (data['type'] ?? '').toString();
+    final type = rawType.toLowerCase().trim();
+
+    // roomId 추출 (camelCase, snake_case, 중첩 객체 모두 대응)
+    int? roomId = int.tryParse((data['roomId'] ?? data['room_id'] ?? '').toString());
+    if (roomId == null && data['room'] is Map) {
+      roomId = int.tryParse((data['room']['id'] ?? '').toString());
+    }
+
+    final postId = (data['postId'] ?? data['post_id'] ?? '').toString();
+    final hasPost = postId.isNotEmpty;
     final title = ((data['title'] ?? '').toString().trim().isEmpty) ? '대화방' : (data['title']).toString().trim();
-    final isChat = type == 'chat' || type == 'notice';
+    final isChat = type == 'chat' || type == 'notice' || type == 'chat_message' || type == 'message';
+
     // 홈 위에 쌓여 있던 화면은 정리하고 이동한다 (알림을 여러 번 눌러도 화면이 계속 쌓이지 않게)
     nav.popUntil((r) => r.isFirst);
 
@@ -86,16 +96,23 @@ class PushNavigation {
       return;
     }
     // 알림장·게시판 새 글 → 학급 알림장 / 학급 게시물
-    if (hasPost) {
-      final cat = type == 'notice' ? 'NOTICE' : 'POST';
+    if (hasPost || type == 'post' || type == 'board') {
+      final cat = (type == 'notice' || type == 'post_notice') ? 'NOTICE' : 'POST';
       _push(nav, _scaffold(cat == 'NOTICE' ? '학급 알림장' : '학급 게시물', TeacherBoardView(initialCategory: cat)));
       return;
     }
-    // 운행 시작·종료 → 홈 화면
+    // 운행 시작·종료 → 홈 화면 (popUntil로 홈에 머무름)
     if (type == 'shuttle') return;
+
     // 채팅·공지사항 → 그 대화방 (그 밖의 알림은 TakeMe 알림방)
     if (roomId != null) {
       _push(nav, ChatConversationScreen(roomId: roomId, title: isChat ? title : 'TakeMe 알림', isSystem: !isChat));
+      return;
+    }
+
+    // 그 외 roomId가 없는 일반 공지/알림일 때 type이 notice인 경우 알림장으로 이동
+    if (type == 'notice') {
+      _push(nav, _scaffold('학급 알림장', const TeacherBoardView(initialCategory: 'NOTICE')));
     }
   }
 }

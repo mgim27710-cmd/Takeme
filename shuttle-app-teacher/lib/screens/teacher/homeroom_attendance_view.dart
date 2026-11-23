@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
+import '../../services/socket_service.dart';
 
 class HomeroomAttendanceView extends StatefulWidget {
   const HomeroomAttendanceView({super.key});
@@ -25,15 +27,40 @@ class _HomeroomAttendanceViewState extends State<HomeroomAttendanceView> with Au
   final Map<int, String> _statuses = {};
   // Local state: studentId -> memo
   final Map<int, TextEditingController> _memoControllers = {};
+  Timer? _debounceTimer;
+  bool _isEditingLocally = false;
 
   @override
   void initState() {
     super.initState();
     _loadAttendance();
+    _setupRealtimeListeners();
+  }
+
+  void _setupRealtimeListeners() {
+    SocketService().onChangeRequestUpdated(_handleRealtimeUpdate);
+    SocketService().onStudentStatusChanged(_handleRealtimeUpdate);
+    SocketService().onAttendanceSubmitted(_handleRealtimeUpdate);
+  }
+
+  void _handleRealtimeUpdate(Map<String, dynamic> _) {
+    // 사용자가 현재 화면에서 출결을 직접 수정/편집 중이면 덮어쓰지 않고 보호
+    if (_isEditingLocally) return;
+
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted && !_isEditingLocally) {
+        _loadAttendance(silent: true);
+      }
+    });
   }
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
+    SocketService().offChangeRequestUpdated(_handleRealtimeUpdate);
+    SocketService().offStudentStatusChanged(_handleRealtimeUpdate);
+    SocketService().offAttendanceSubmitted(_handleRealtimeUpdate);
     for (final controller in _memoControllers.values) {
       controller.dispose();
     }
@@ -80,6 +107,7 @@ class _HomeroomAttendanceViewState extends State<HomeroomAttendanceView> with Au
       _students = [];
     }
 
+    _isEditingLocally = false;
     setState(() => _isLoading = false);
   }
 
@@ -557,6 +585,7 @@ class _HomeroomAttendanceViewState extends State<HomeroomAttendanceView> with Au
       child: InkWell(
         onTap: () {
           setState(() {
+            _isEditingLocally = true;
             _statuses[studentId] = statusCode;
           });
         },

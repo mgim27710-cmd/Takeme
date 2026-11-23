@@ -99,17 +99,28 @@ class PushNotificationService {
         await registerTokenWithServer(token);
       }
 
+      Map<String, dynamic> extractData(RemoteMessage msg) {
+        final d = Map<String, dynamic>.from(msg.data);
+        if (!d.containsKey('title') && msg.notification?.title != null) {
+          d['title'] = msg.notification!.title;
+        }
+        if (!d.containsKey('body') && msg.notification?.body != null) {
+          d['body'] = msg.notification!.body;
+        }
+        return d;
+      }
+
       // 알림을 눌러 앱을 열었을 때 (백그라운드)
       FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
         debugPrint('[PushNotificationService] onMessageOpenedApp: ${message.data}');
-        PushNavigation.onTap(message.data);
+        PushNavigation.onTap(extractData(message));
       });
 
       // 앱이 꺼져 있다가 알림을 눌러 켜졌을 때
       FirebaseMessaging.instance.getInitialMessage().then((RemoteMessage? message) {
         if (message != null) {
           debugPrint('[PushNotificationService] getInitialMessage: ${message.data}');
-          PushNavigation.onTap(message.data, coldStart: true);
+          PushNavigation.onTap(extractData(message), coldStart: true);
         }
       });
     } catch (e) {
@@ -142,6 +153,8 @@ class PushNotificationService {
         importance: Importance.max,
         priority: Priority.high,
         playSound: true,
+        autoCancel: true,
+        visibility: NotificationVisibility.public,
       );
       const iosDetails = DarwinNotificationDetails();
       const details = NotificationDetails(android: androidDetails, iOS: iosDetails);

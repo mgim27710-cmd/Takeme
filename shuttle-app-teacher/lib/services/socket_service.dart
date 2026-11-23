@@ -23,6 +23,9 @@ class SocketService {
   final List<Function(Map<String, dynamic>)> _messagesReadCallbacks = [];
   final List<Function(Map<String, dynamic>)> _locationUpdatedCallbacks = [];
   final List<Function(Map<String, dynamic>)> _routePathUpdatedCallbacks = [];
+  final List<Function(Map<String, dynamic>)> _changeRequestCallbacks = [];
+  final List<Function(Map<String, dynamic>)> _studentStatusCallbacks = [];
+  final List<Function(Map<String, dynamic>)> _attendanceCallbacks = [];
 
   void connect(String? token) {
     // 토큰이 변경되었거나 소켓이 없을 경우 재연결
@@ -51,6 +54,7 @@ class SocketService {
 
     _socket!.onConnect((_) {
       debugPrint('[Socket] Connected: ${_socket!.id}');
+      joinAcademyRoom();
     });
 
     _socket!.onDisconnect((_) {
@@ -164,6 +168,42 @@ class SocketService {
       }
     });
 
+    // 7. changeRequest events (신규 신청, 승인/반려, 취소)
+    void handleRequestUpdate(dynamic data) {
+      debugPrint('[Socket] changeRequest event: $data');
+      final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      for (final cb in List.from(_changeRequestCallbacks)) {
+        try {
+          cb(map);
+        } catch (_) {}
+      }
+    }
+    _socket!.on('changeRequestCreated', handleRequestUpdate);
+    _socket!.on('changeRequestDecided', handleRequestUpdate);
+    _socket!.on('changeRequestCancelled', handleRequestUpdate);
+
+    // 8. studentStatusChanged (원아 출결/승하차 상태 변경)
+    _socket!.on('studentStatusChanged', (data) {
+      debugPrint('[Socket] studentStatusChanged: $data');
+      final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      for (final cb in List.from(_studentStatusCallbacks)) {
+        try {
+          cb(map);
+        } catch (_) {}
+      }
+    });
+
+    // 9. attendanceSubmitted (출석부 제출)
+    _socket!.on('attendanceSubmitted', (data) {
+      debugPrint('[Socket] attendanceSubmitted: $data');
+      final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      for (final cb in List.from(_attendanceCallbacks)) {
+        try {
+          cb(map);
+        } catch (_) {}
+      }
+    });
+
     _socket!.connect();
   }
 
@@ -252,6 +292,42 @@ class SocketService {
     _socket?.off(event);
   }
 
+  void joinAcademyRoom({int? academyId}) {
+    final payload = <String, dynamic>{};
+    if (academyId != null) payload['academyId'] = academyId;
+    _socket?.emit('joinAcademyRoom', payload);
+  }
+
+  void leaveAcademyRoom({int? academyId}) {
+    final payload = <String, dynamic>{};
+    if (academyId != null) payload['academyId'] = academyId;
+    _socket?.emit('leaveAcademyRoom', payload);
+  }
+
+  void onChangeRequestUpdated(Function(Map<String, dynamic> data) callback) {
+    _changeRequestCallbacks.add(callback);
+  }
+
+  void offChangeRequestUpdated(Function(Map<String, dynamic> data) callback) {
+    _changeRequestCallbacks.remove(callback);
+  }
+
+  void onStudentStatusChanged(Function(Map<String, dynamic> data) callback) {
+    _studentStatusCallbacks.add(callback);
+  }
+
+  void offStudentStatusChanged(Function(Map<String, dynamic> data) callback) {
+    _studentStatusCallbacks.remove(callback);
+  }
+
+  void onAttendanceSubmitted(Function(Map<String, dynamic> data) callback) {
+    _attendanceCallbacks.add(callback);
+  }
+
+  void offAttendanceSubmitted(Function(Map<String, dynamic> data) callback) {
+    _attendanceCallbacks.remove(callback);
+  }
+
   void disconnect() {
     activeChatRoomId = null;
     _notificationCallbacks.clear();
@@ -260,6 +336,9 @@ class SocketService {
     _messagesReadCallbacks.clear();
     _locationUpdatedCallbacks.clear();
     _routePathUpdatedCallbacks.clear();
+    _changeRequestCallbacks.clear();
+    _studentStatusCallbacks.clear();
+    _attendanceCallbacks.clear();
     _socket?.disconnect();
     _socket = null;
     _currentToken = null;

@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../services/api_service.dart';
+import '../../services/socket_service.dart';
 
 class HomeroomChangeRequestsView extends StatefulWidget {
   const HomeroomChangeRequestsView({super.key});
@@ -30,11 +32,35 @@ class _HomeroomChangeRequestsViewState extends State<HomeroomChangeRequestsView>
   List<Map<String, dynamic>> _requests = [];
   String _assignedClass = '';
   List<Map<String, dynamic>> _students = [];
+  Timer? _debounceTimer;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _setupRealtimeListeners();
+  }
+
+  void _setupRealtimeListeners() {
+    SocketService().onChangeRequestUpdated(_handleRealtimeUpdate);
+    SocketService().onStudentStatusChanged(_handleRealtimeUpdate);
+  }
+
+  void _handleRealtimeUpdate(Map<String, dynamic> _) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) {
+        _loadData(silent: true);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    SocketService().offChangeRequestUpdated(_handleRealtimeUpdate);
+    SocketService().offStudentStatusChanged(_handleRealtimeUpdate);
+    super.dispose();
   }
 
   Future<void> _loadData({bool silent = false}) async {
