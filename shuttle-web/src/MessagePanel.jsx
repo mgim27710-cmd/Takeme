@@ -379,41 +379,96 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     setIsStaffLeaveModalOpen(true);
   };
 
+  const [isDecidingLeave, setIsDecidingLeave] = useState(null);
+
   const handleStaffLeaveSubmit = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!staffLeaveForm.applicantName.trim()) {
       alert('신청자 성함을 입력해주세요.');
       return;
     }
+    if (!activeRoom?.id) {
+      alert('휴가 신청서를 전송할 대화방을 먼저 선택해주세요.');
+      return;
+    }
     setIsSubmittingLeave(true);
     try {
-      const summaryText = `[임직원 휴가·연차 신청서]\n신청자: ${staffLeaveForm.applicantName} (${staffLeaveForm.applicantRole})\n구분: ${staffLeaveForm.leaveType}\n기간: ${staffLeaveForm.startDate} ~ ${staffLeaveForm.endDate}\n대체 인력 배정: ${staffLeaveForm.needSubstitute ? '필요 (대체 기사/교사 배정 요청)' : '불필요'}\n신청 사유: ${staffLeaveForm.reason || '개인 사유'}\n\n원장님의 승인 결재를 부탁드립니다.`;
+      const res = await fetch(`${API_BASE_URL}/chat/leave-request`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          roomId: activeRoom.id,
+          applicantName: staffLeaveForm.applicantName,
+          applicantRole: staffLeaveForm.applicantRole,
+          leaveType: staffLeaveForm.leaveType,
+          startDate: staffLeaveForm.startDate,
+          endDate: staffLeaveForm.endDate,
+          needSubstitute: staffLeaveForm.needSubstitute,
+          reason: staffLeaveForm.reason,
+        }),
+      });
 
-      await handleSendMessage(summaryText);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || '휴가 신청 전송 실패');
+      }
 
-      try {
-        await fetch(`${API_BASE_URL}/approval/calendar/event`, {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({
-            type: 'STAFF_LEAVE',
-            title: `${staffLeaveForm.applicantName} (${staffLeaveForm.applicantRole}) ${staffLeaveForm.leaveType}`,
-            startDate: staffLeaveForm.startDate,
-            endDate: staffLeaveForm.endDate,
-            targetClass: staffLeaveForm.applicantRole,
-            reason: staffLeaveForm.reason,
-            academyId: targetAcademyId,
-          }),
+      // 로컬 메시지 목록에 즉시 반영
+      if (data && data.id) {
+        setMessages(prev => {
+          if (prev.some(m => m.id === data.id)) return prev;
+          return [...prev, data];
         });
-      } catch (_) {}
+      }
 
       setIsStaffLeaveModalOpen(false);
-      alert('원장님께 휴가·연차 신청서가 성공적으로 전송되었습니다.');
+      alert('원장님께 휴가·연차 결재 신청서가 성공적으로 전송되었습니다.\n(원장님의 결재 승인 대기 중)');
     } catch (err) {
       console.error(err);
-      alert('휴가 신청 전송 중 오류가 발생했습니다.');
+      alert(err.message || '휴가 신청 전송 중 오류가 발생했습니다.');
     } finally {
       setIsSubmittingLeave(false);
+    }
+  };
+
+  const handleDecideLeaveRequest = async (messageId, decision) => {
+    if (!messageId) return;
+    const actionText = decision === 'APPROVED' ? '휴가를 승인' : '휴가 신청을 반려';
+
+    let rejectionReason = '';
+    if (decision === 'REJECTED') {
+      const inputReason = window.prompt('반려 사유를 입력해주세요 (신청 교사에게 전달됩니다):', '원내 일정 조율 필요');
+      if (inputReason === null) return;
+      rejectionReason = inputReason.trim() || '원내 일정 조율 필요';
+    } else {
+      if (!window.confirm(`해당 임직원의 ${actionText}하시겠습니까?\n승인 시 직원 휴가 캘린더에 자동 반영됩니다.`)) {
+        return;
+      }
+    }
+
+    setIsDecidingLeave(messageId);
+    try {
+      const res = await fetch(`${API_BASE_URL}/chat/leave-request/${messageId}/decision`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          decision,
+          rejectionReason,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || '휴가 결재 처리 실패');
+      }
+
+      // 로컬 메시지 갱신
+      setMessages(prev => prev.map(m => (m.id === messageId ? { ...m, ...data } : m)));
+      alert(`휴가 신청이 성공적으로 ${decision === 'APPROVED' ? '승인' : '반려'}되었습니다.`);
+    } catch (err) {
+      console.error(err);
+      alert(err.message || '결재 처리 중 오류가 발생했습니다.');
+    } finally {
+      setIsDecidingLeave(null);
     }
   };
 
@@ -1020,7 +1075,15 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     setIsSubmittingAbsence(true);
 
     try {
-      // 1. 캘린더 및 출결 오버라이드 시스템에 등록
+      // 1. 캘린더 및 출결 오버라이드 시스템에 등록 (지각, 개별하원, 직접픽업 등 모든 변동사항 완벽 지원)
+      const overrideTypeMap = {
+        ABSENCE: 'ABSENCE',
+        LATENESS: 'LATENESS',
+        EXTENDED_CARE: 'INDIVIDUAL_DISMISSAL',
+        PARENT_PICKUP: 'PICKUP',
+      };
+      const overrideType = overrideTypeMap[absenceFormType] || 'ABSENCE';
+
       try {
         await fetch(`${API_BASE_URL}/approval/calendar/absence`, {
           method: 'POST',
@@ -1029,6 +1092,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
             studentId: Number(absenceStudentId),
             startDate: absenceStartDate,
             endDate: absenceEndDate,
+            overrideType,
             reason: `[${formTitle}] ${fullReason}`,
           }),
         });
@@ -2147,24 +2211,33 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     return true;
                   })
                   .map((msg) => {
-                  const isMine = msg.sender?.email === myUser.email || msg.sender?.id === myUser.id;
+                  const myIdNum = myUser?.id ? Number(myUser.id) : (myUser?.userId ? Number(myUser.userId) : null);
+                  const senderIdNum = msg.sender?.id ? Number(msg.sender.id) : null;
+                  const isMine =
+                    Boolean((myUser?.email && msg.sender?.email && msg.sender.email.toLowerCase() === myUser.email.toLowerCase()) ||
+                    (myIdNum !== null && senderIdNum !== null && myIdNum === senderIdNum));
                   const senderName = msg.sender?.name || msg.sender?.email || '알 수 없음';
                   const senderRole = msg.sender?.role;
                   const isNotificationRoom = isCurrentRoomNotificationSystem || activeRoom?.type === 'NOTIFICATION_SYSTEM';
                   const isPaymentRoom = isCurrentRoomPaymentSystem || activeRoom?.type === 'PAYMENT_SYSTEM';
                   const payload = msg.payload || {};
                   const isSystemAlert = Boolean(payload.isSystemAlert || msg.type === 'SYSTEM_ALERT' || isNotificationRoom);
-                  const isPaymentRequest = !isNotificationRoom && (msg.type === 'PAYMENT_REQUEST' || (isPaymentRoom && Boolean(payload.studentName && !isSystemAlert)));
+                  const isLeaveRequest = !isNotificationRoom && (msg.type === 'LEAVE_REQUEST' || payload.type === 'STAFF_LEAVE');
+                  const isPaymentRequest = !isNotificationRoom && !isLeaveRequest && (msg.type === 'PAYMENT_REQUEST' || (isPaymentRoom && Boolean(payload.studentName && !isSystemAlert)));
                   const isContest = Boolean(payload.isPublicContest || payload.requestType === 'CONTEST');
                   const isRequester =
                     isMine ||
-                    (payload.requesterEmail && myUser.email && payload.requesterEmail.toLowerCase() === myUser.email.toLowerCase()) ||
-                    (payload.requesterId && myUser.id && Number(payload.requesterId) === myUser.id);
+                    Boolean(payload.requesterEmail && myUser?.email && payload.requesterEmail.toLowerCase() === myUser.email.toLowerCase()) ||
+                    Boolean(payload.requesterId && myIdNum !== null && Number(payload.requesterId) === myIdNum);
+                  const isLeaveRequester =
+                    isMine ||
+                    Boolean(payload.applicantEmail && myUser?.email && payload.applicantEmail.toLowerCase() === myUser.email.toLowerCase()) ||
+                    Boolean(payload.applicantId && myIdNum !== null && Number(payload.applicantId) === myIdNum);
                   const isTargetTeacher =
-                    (payload.targetTeacherEmail && myUser.email && payload.targetTeacherEmail.toLowerCase() === myUser.email.toLowerCase()) ||
-                    (payload.targetTeacherId && myUser.id && Number(payload.targetTeacherId) === myUser.id) ||
-                    (payload.teacherEmail && myUser.email && payload.teacherEmail.toLowerCase() === myUser.email.toLowerCase());
-                  const isAdmin = myUser.role === 'ACADEMY_ADMIN' || myUser.role === 'SUPER_ADMIN';
+                    Boolean(payload.targetTeacherEmail && myUser?.email && payload.targetTeacherEmail.toLowerCase() === myUser.email.toLowerCase()) ||
+                    Boolean(payload.targetTeacherId && myIdNum !== null && Number(payload.targetTeacherId) === myIdNum) ||
+                    Boolean(payload.teacherEmail && myUser?.email && payload.teacherEmail.toLowerCase() === myUser.email.toLowerCase());
+                  const isAdmin = myUser?.role === 'ACADEMY_ADMIN' || myUser?.role === 'SUPER_ADMIN';
 
                   return (
                     <React.Fragment key={msg.id}>
@@ -2666,6 +2739,205 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                                 </div>
                               )}
                             </div>
+                          </div>
+                        </div>
+                      ) : isLeaveRequest ? (
+                        /* STAFF LEAVE APPROVAL REQUEST CARD */
+                        <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} my-2 animate-fade-in`}>
+                          {/* Sender Info Header */}
+                          <div className="flex items-center gap-1.5 mb-1 px-1">
+                            <span className="text-xs font-bold text-slate-800">{senderName}</span>
+                            {senderRole && getRoleBadge(senderRole)}
+                            <span className="text-[10px] text-slate-600 ml-1">
+                              {formatMessageTime(msg.createdAt)}
+                            </span>
+                          </div>
+
+                          <div className="flex items-end gap-1.5">
+                            {isMine && (
+                              <div className="flex flex-col items-end pb-1 select-none">
+                                {getUnreadNumber(msg) > 0 && (
+                                  <span className="text-[11px] font-black text-amber-500 leading-tight">
+                                    {getUnreadNumber(msg)}
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-slate-500 font-medium">
+                                  {formatMessageTime(msg.createdAt)}
+                                </span>
+                              </div>
+                            )}
+
+                            {/* Card Body */}
+                            <div className="bg-white border-2 border-emerald-300 rounded-2xl shadow-md overflow-hidden max-w-md w-full">
+                              {/* Card Header */}
+                              <div className="bg-gradient-to-r from-emerald-50 to-teal-50 p-3.5 border-b border-emerald-100 flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-black text-xs shadow-xs">
+                                    🌴
+                                  </div>
+                                  <div>
+                                    <h4 className="text-xs font-black text-emerald-950">
+                                      임직원 휴가·연차 결재 신청서
+                                    </h4>
+                                    <span className="text-[10px] text-emerald-700 font-medium">
+                                      원장선생님 전자결재
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Status Badge */}
+                                <div>
+                                  {payload.status === 'APPROVED' ? (
+                                    <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                      ✓ 승인 완료 (캘린더 반영)
+                                    </span>
+                                  ) : payload.status === 'REJECTED' ? (
+                                    <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
+                                      ✕ 결재 반려됨
+                                    </span>
+                                  ) : (
+                                    <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 animate-pulse">
+                                      원장 결재 대기중
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Card Content */}
+                              <div className="p-4 space-y-3">
+                                {/* 신청자 & 구분 */}
+                                <div className="grid grid-cols-2 gap-2 text-xs">
+                                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                                    <span className="text-[10px] font-bold text-slate-400 block">신청 임직원</span>
+                                    <span className="font-extrabold text-slate-800 text-sm">
+                                      {payload.applicantName || senderName}
+                                    </span>
+                                    <span className="text-[11px] text-emerald-700 block font-semibold">
+                                      {payload.applicantRole || '임직원'}
+                                    </span>
+                                  </div>
+                                  <div className="p-2.5 rounded-xl bg-emerald-50/60 border border-emerald-100">
+                                    <span className="text-[10px] font-bold text-emerald-600 block">휴가 구분</span>
+                                    <span className="font-extrabold text-emerald-950 text-sm block">
+                                      {payload.leaveType || '연차 휴가'}
+                                    </span>
+                                    <span className="text-[10px] text-emerald-700 block">
+                                      {payload.needSubstitute ? '대체 인력 배정 필요' : '대체 인력 불필요'}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* 기간 */}
+                                <div className="flex items-center gap-2 text-xs text-slate-700 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                                  <span className="text-slate-400 font-bold">휴가 기간:</span>
+                                  <span className="font-extrabold text-slate-900">
+                                    {payload.startDate} ~ {payload.endDate}
+                                  </span>
+                                </div>
+
+                                {/* 사유 */}
+                                <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                                  <div className="text-[10px] text-slate-400 font-bold mb-1">신청 사유</div>
+                                  <p className="text-xs font-bold text-slate-800 leading-relaxed">
+                                    "{payload.reason || '개인 사유'}"
+                                  </p>
+                                </div>
+
+                                {/* 결재 상태 및 버튼 영역 */}
+                                {payload.status === 'APPROVED' ? (
+                                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
+                                    <svg className="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                    <div>
+                                      <span>✓ 원장선생님 승인 완료 (휴가 캘린더 등록됨)</span>
+                                      {payload.decidedBy && (
+                                        <span className="block text-[10px] text-emerald-600 font-normal">
+                                          결재자: {payload.decidedBy} ({payload.decidedAt ? formatMessageTime(payload.decidedAt) : ''})
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ) : payload.status === 'REJECTED' ? (
+                                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold space-y-1">
+                                    <div className="flex items-center gap-1.5 text-rose-700 font-extrabold">
+                                      <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                                      </svg>
+                                      <span>휴가 신청이 반려되었습니다.</span>
+                                    </div>
+                                    {payload.rejectionReason && (
+                                      <p className="text-[11px] text-rose-900 bg-white/70 p-2 rounded-lg font-medium">
+                                        반려 사유: {payload.rejectionReason}
+                                      </p>
+                                    )}
+                                    {payload.decidedBy && (
+                                      <span className="block text-[10px] text-rose-500 font-normal">
+                                        처리자: {payload.decidedBy}
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : isLeaveRequester ? (
+                                  /* 신청자 본인(교사/기사): 자가 승인 금지 안내 배지만 노출! 버튼 없음! */
+                                  <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-center space-y-1">
+                                    <div className="flex items-center justify-center gap-1.5 text-xs font-black text-amber-900">
+                                      <svg className="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                      </svg>
+                                      <span>원장선생님 결재 대기 중</span>
+                                    </div>
+                                    <p className="text-[11px] text-amber-700 font-medium">
+                                      신청하신 휴가 신청서가 원장님께 접수되었습니다. 원장님의 승인 후 캘린더에 자동 반영됩니다.
+                                    </p>
+                                  </div>
+                                ) : isAdmin ? (
+                                  /* 오직 원장 및 관리자만 승인/반려 버튼 활성화! */
+                                  <div className="space-y-1.5 pt-1">
+                                    <div className="flex gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDecideLeaveRequest(msg.id, 'APPROVED')}
+                                        disabled={isDecidingLeave === msg.id}
+                                        className="flex-1 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                                      >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                        </svg>
+                                        <span>✓ 휴가 승인 (캘린더 자동반영)</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDecideLeaveRequest(msg.id, 'REJECTED')}
+                                        disabled={isDecidingLeave === msg.id}
+                                        className="py-2.5 px-3 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 border border-slate-200 active:scale-95 font-bold text-xs rounded-xl transition-all disabled:opacity-50"
+                                      >
+                                        ✕ 반려
+                                      </button>
+                                    </div>
+                                    <p className="text-[10px] text-center text-slate-400 font-medium">
+                                      원장선생님께서 승인하시면 직원 휴가 캘린더 및 대시보드에 즉시 반영됩니다.
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <div className="text-center py-2.5 px-3 bg-slate-100 rounded-xl text-xs text-slate-500 font-medium">
+                                    원장선생님 결재 대기 중입니다.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {!isMine && (
+                              <div className="flex flex-col items-start pb-1 select-none">
+                                {getUnreadNumber(msg) > 0 && (
+                                  <span className="text-[11px] font-black text-amber-500 leading-tight">
+                                    {getUnreadNumber(msg)}
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-slate-500 font-medium">
+                                  {formatMessageTime(msg.createdAt)}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       ) : (payload.isAbsenceForm || msg.type === 'ABSENCE_REQUEST') ? (

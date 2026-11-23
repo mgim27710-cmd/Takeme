@@ -191,7 +191,32 @@ export class ParentService {
     // 3. 통학 변경 신청 (ApprovalRequest) 단일 생성 및 기관 관리자 승인 절차 연동
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('사용자를 찾을 수 없습니다.');
-    const appType = overrideType === OverrideType.ABSENCE ? ChangeRequestType.ABSENCE : ChangeRequestType.CHANGE_LOCATION;
+
+    let appType: ChangeRequestType;
+    switch (overrideType) {
+      case OverrideType.ABSENCE:
+        appType = ChangeRequestType.ABSENCE;
+        break;
+      case OverrideType.LATENESS:
+        appType = ChangeRequestType.LATENESS;
+        break;
+      case OverrideType.PICKUP:
+        appType = ChangeRequestType.PICKUP;
+        break;
+      case OverrideType.INDIVIDUAL_DISMISSAL:
+        appType = ChangeRequestType.INDIVIDUAL_DISMISSAL;
+        break;
+      case OverrideType.NO_SHUTTLE:
+        appType = ChangeRequestType.NO_SHUTTLE;
+        break;
+      case OverrideType.ONE_TIME_BOARDING:
+        appType = ChangeRequestType.ONE_TIME_BOARDING;
+        break;
+      default:
+        appType = ChangeRequestType.CHANGE_LOCATION;
+        break;
+    }
+
     const reqRes = await this.approvalService.createRequest(user, {
       studentId: student.id,
       type: appType,

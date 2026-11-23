@@ -636,14 +636,31 @@ export default function TeacherDashboard({
       if (onRefreshData) onRefreshData();
     };
 
+    // 원생 상태 변동(결석, 지각, 하원방식 변경, 전자결재 승인 등) 발생 시 실시간 자동 리로드
+    const handleStudentStatusChanged = () => {
+      fetchHomeroomStatus();
+      fetchAttendance();
+      if (onRefreshData) onRefreshData();
+    };
+
     socket.on('chatMessage', handleChatMessage);
     socket.on('paymentDecision', handleChatMessage);
     socket.on('routeUpdated', handleRouteUpdated);
+    socket.on('changeRequestCreated', handleStudentStatusChanged);
+    socket.on('changeRequestDecided', handleStudentStatusChanged);
+    socket.on('studentStatusChanged', handleStudentStatusChanged);
+    socket.on('attendanceSubmitted', handleStudentStatusChanged);
+    socket.on('childBoardStatusChanged', handleStudentStatusChanged);
 
     return () => {
       socket.off('chatMessage', handleChatMessage);
       socket.off('paymentDecision', handleChatMessage);
       socket.off('routeUpdated', handleRouteUpdated);
+      socket.off('changeRequestCreated', handleStudentStatusChanged);
+      socket.off('changeRequestDecided', handleStudentStatusChanged);
+      socket.off('studentStatusChanged', handleStudentStatusChanged);
+      socket.off('attendanceSubmitted', handleStudentStatusChanged);
+      socket.off('childBoardStatusChanged', handleStudentStatusChanged);
     };
   }, [socket, onRefreshData]);
 

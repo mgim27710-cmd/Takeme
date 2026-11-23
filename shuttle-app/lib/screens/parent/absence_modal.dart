@@ -89,6 +89,14 @@ class _AbsenceModalState extends State<AbsenceModal> {
       _showMessage('결석 사유를 입력해주세요.');
       return;
     }
+    if (_overrideType == 'LATENESS' && reason.isEmpty) {
+      _showMessage('지각 사유 및 예상 시간을 입력해주세요 (예: 병원 진료 후 10시 등원).');
+      return;
+    }
+    if (_overrideType == 'PICKUP' && reason.isEmpty) {
+      _showMessage('직접 픽업 사유 및 시간을 입력해주세요 (예: 16시 개별 픽업).');
+      return;
+    }
     if (_overrideType == 'CHANGE_LOCATION' && reason.isEmpty) {
       _showMessage('정확한 도로명 주소를 입력해주세요.');
       return;
@@ -163,14 +171,21 @@ class _AbsenceModalState extends State<AbsenceModal> {
               const SizedBox(height: 18),
 
               // Mode Tabs
-              Row(
-                children: [
-                  _buildTab('ABSENCE', '결석 신청'),
-                  const SizedBox(width: 6),
-                  _buildTab('CHANGE_LOCATION', '탑승지 변경'),
-                  const SizedBox(width: 6),
-                  _buildTab('MESSAGE', '메시지 전송'),
-                ],
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _buildTab('ABSENCE', '결석 신청'),
+                    const SizedBox(width: 5),
+                    _buildTab('LATENESS', '등원 지각'),
+                    const SizedBox(width: 5),
+                    _buildTab('PICKUP', '직접 픽업/하원'),
+                    const SizedBox(width: 5),
+                    _buildTab('CHANGE_LOCATION', '탑승지 변경'),
+                    const SizedBox(width: 5),
+                    _buildTab('MESSAGE', '메시지 전송'),
+                  ],
+                ),
               ),
               const SizedBox(height: 18),
 
@@ -232,7 +247,11 @@ class _AbsenceModalState extends State<AbsenceModal> {
               Text(
                 _overrideType == 'ABSENCE'
                     ? '결석 사유'
-                    : (_overrideType == 'CHANGE_LOCATION' ? '변경할 탑승지 주소' : '전송할 메시지 내용'),
+                    : (_overrideType == 'LATENESS'
+                        ? '지각 사유 (도착 예정 시간)'
+                        : (_overrideType == 'PICKUP'
+                            ? '직접 픽업 사유 (픽업 예정 시간)'
+                            : (_overrideType == 'CHANGE_LOCATION' ? '변경할 탑승지 주소' : '전송할 메시지 내용'))),
                 style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF334155)),
               ),
               const SizedBox(height: 6),
@@ -242,9 +261,13 @@ class _AbsenceModalState extends State<AbsenceModal> {
                 decoration: InputDecoration(
                   hintText: _overrideType == 'ABSENCE'
                       ? '예: 감기 몸살로 인한 병결'
-                      : (_overrideType == 'CHANGE_LOCATION'
-                          ? '예: 서울시 강서구 마곡중앙로 33 정문 앞'
-                          : '선생님께 전달할 전달사항을 적어주세요.'),
+                      : (_overrideType == 'LATENESS'
+                          ? '예: 소아과 진료 후 10시까지 개별 등원합니다.'
+                          : (_overrideType == 'PICKUP'
+                              ? '예: 엄마가 16시에 원으로 직접 데리러 갑니다 (셔틀 미탑승)'
+                              : (_overrideType == 'CHANGE_LOCATION'
+                                  ? '예: 서울시 강서구 마곡중앙로 33 정문 앞'
+                                  : '선생님께 전달할 전달사항을 적어주세요.'))),
                   contentPadding: const EdgeInsets.all(12),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),

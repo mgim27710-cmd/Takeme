@@ -266,8 +266,11 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
    */
   broadcastChangeRequestCreated(academyId: number, data: any) {
     if (!this.server || !academyId) return;
-    // 신청 처리 화면(원장·데스크)에만 보낸다. 담임·차량 관계자는 채팅 개인 알림으로 따로 받는다.
+    // 관리자(원장·데스크) 및 교직원/교사 전체에게 실시간 알림 및 상태 변경 이벤트 전송
     this.server.to(academyAdminRoom(academyId)).emit('changeRequestCreated', data);
+    this.server.to(academyStaffRoom(academyId)).emit('changeRequestCreated', data);
+    this.server.to(academyStaffRoom(academyId)).emit('studentStatusChanged', data);
+    this.server.to(`academy_${academyId}`).emit('studentStatusChanged', data);
 
     const alertPayload = {
       id: data.id,
@@ -279,6 +282,20 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     };
     this.server.to(academyAdminRoom(academyId)).emit('directorAlert', alertPayload);
     this.server.to(SUPER_ADMIN_ROOM).emit('globalDirectorAlert', alertPayload);
+  }
+
+  /**
+   * Broadcast student status or attendance change directly to staff & vehicles
+   */
+  broadcastStudentStatusChanged(academyId: number, data: any) {
+    if (!this.server || !academyId) return;
+    this.server.to(academyStaffRoom(academyId)).emit('studentStatusChanged', data);
+    this.server.to(academyAdminRoom(academyId)).emit('studentStatusChanged', data);
+    this.server.to(`academy_${academyId}`).emit('studentStatusChanged', data);
+    if (data.vehicleId) {
+      this.server.to(`vehicle_${data.vehicleId}`).emit('studentStatusChanged', data);
+      this.server.to(`vehicle_${data.vehicleId}`).emit('routeNeedsRefresh', { vehicleId: data.vehicleId });
+    }
   }
 
   /**
@@ -297,6 +314,9 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     if (!this.server) return;
     if (data.academyId) {
       this.server.to(academyAdminRoom(data.academyId)).emit('changeRequestDecided', data.request);
+      this.server.to(academyStaffRoom(data.academyId)).emit('changeRequestDecided', data.request);
+      this.server.to(academyStaffRoom(data.academyId)).emit('studentStatusChanged', data.request);
+      this.server.to(`academy_${data.academyId}`).emit('studentStatusChanged', data.request);
 
       const studentName = data.request?.student?.adminDisplayName || data.request?.student?.name || '원아';
       const decisionKr = data.request?.decision === 'APPROVED' ? '승인' : '반려';

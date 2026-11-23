@@ -12,6 +12,7 @@ import { PickupPoint } from '../entities/pickup-point.entity';
 import { ParentMessage } from '../entities/parent-message.entity';
 import { Notification } from '../entities/notification.entity';
 import { UserDevice } from '../entities/user-device.entity';
+import { AcademyHoliday } from '../entities/academy-holiday.entity';
 import { ChatGateway } from './chat.gateway';
 import { RoutingService } from '../routing/routing.service';
 import { ApprovalService } from '../approval/approval.service';
@@ -42,6 +43,7 @@ export class ChatService implements OnModuleInit {
     @InjectRepository(ParentMessage) private parentMessageRepo: Repository<ParentMessage>,
     @InjectRepository(Notification) private notificationRepo: Repository<Notification>,
     @InjectRepository(UserDevice) private userDeviceRepo: Repository<UserDevice>,
+    @InjectRepository(AcademyHoliday) private holidayRepo: Repository<AcademyHoliday>,
     @Inject(forwardRef(() => ChatGateway))
     private readonly chatGateway: ChatGateway,
     @Inject(forwardRef(() => RoutingService))
@@ -1948,6 +1950,189 @@ export class ChatService implements OnModuleInit {
     }
 
     return message;
+  }
+
+  async createLeaveRequest(
+    data: {
+      roomId: number;
+      applicantName: string;
+      applicantRole: string;
+      leaveType: string;
+      startDate: string;
+      endDate: string;
+      needSubstitute: boolean;
+      reason: string;
+    },
+    requesterEmail: string,
+  ) {
+    if (!requesterEmail) throw new BadRequestException('신청자 정보가 필요합니다.');
+    const requester = await this.userRepo.findOne({ where: { email: requesterEmail } });
+    if (!requester) throw new BadRequestException('신청자 계정을 찾을 수 없습니다.');
+
+    if (requester.role === UserRole.PARENT || requester.role === UserRole.STUDENT) {
+      throw new ForbiddenException('임직원만 휴가·연차를 신청할 수 있습니다.');
+    }
+
+    const room = await this.roomRepo.findOne({
+      where: { id: Number(data.roomId) },
+      relations: { members: { user: true } },
+    });
+    if (!room) throw new BadRequestException('채팅방을 찾을 수 없습니다.');
+
+    const summaryText = `[임직원 휴가·연차 신청서]\n신청자: ${data.applicantName} (${data.applicantRole})\n구분: ${data.leaveType}\n기간: ${data.startDate} ~ ${data.endDate}\n대체 인력 배정: ${data.needSubstitute ? '필요 (대체 기사/교사 배정 요청)' : '불필요'}\n신청 사유: ${data.reason || '개인 사유'}\n\n원장님의 승인 결재를 부탁드립니다.`;
+
+    const payload = {
+      type: 'STAFF_LEAVE',
+      applicantName: data.applicantName,
+      applicantRole: data.applicantRole,
+      applicantEmail: requester.email,
+      applicantId: requester.id,
+      leaveType: data.leaveType || '연차 휴가',
+      startDate: data.startDate,
+      endDate: data.endDate,
+      needSubstitute: Boolean(data.needSubstitute),
+      reason: data.reason || '개인 사유',
+      status: 'PENDING',
+      requestedAt: new Date(),
+    };
+
+    const message = this.messageRepo.create({
+      room,
+      sender: requester,
+      text: summaryText,
+      type: 'LEAVE_REQUEST',
+      payload,
+      readBy: [requester.id],
+    });
+
+    const saved = await this.messageRepo.save(message);
+    await this.roomRepo.update(room.id, { updatedAt: new Date() });
+
+    // 원장(관리자)들에게 개인 시스템 알림 발송
+    try {
+      const adminIds = await this.getAcademyAdminIds(room.academyId || requester.academyId || null);
+      const targetAdminIds = adminIds.filter(id => id !== requester.id);
+      if (targetAdminIds.length > 0) {
+        await this.sendSystemNotificationToUsers(
+          targetAdminIds,
+          '휴가 결재 요청',
+          `[휴가 결재 요청] ${data.applicantName}(${data.applicantRole})님이 ${data.leaveType} (${data.startDate}~${data.endDate}) 승인을 요청하였습니다.`,
+          {
+            type: 'leave_request',
+            metadata: { type: 'leave_request', messageId: saved.id, roomId: room.id },
+          },
+        );
+      }
+    } catch (e) {
+      console.warn('[createLeaveRequest] notification error:', e);
+    }
+
+    const fullMessage = await this.messageRepo.findOne({
+      where: { id: saved.id },
+      relations: { sender: true },
+    });
+
+    if (fullMessage) {
+      await this.broadcastToRoom(room.id, fullMessage);
+    }
+
+    return fullMessage;
+  }
+
+  async decideLeaveRequest(
+    messageId: number,
+    decision: 'APPROVED' | 'REJECTED',
+    decidedByEmail: string,
+    rejectionReason?: string,
+  ) {
+    if (!decidedByEmail) throw new BadRequestException('승인자 정보가 필요합니다.');
+    const decider = await this.userRepo.findOne({ where: { email: decidedByEmail } });
+    if (!decider) throw new BadRequestException('승인자 계정을 찾을 수 없습니다.');
+
+    // 오직 원장 및 관리자만 승인/반려 가능
+    const isAdmin = decider.role === UserRole.ACADEMY_ADMIN || decider.role === UserRole.SUPER_ADMIN;
+    if (!isAdmin) {
+      throw new ForbiddenException('원장 및 기관 관리자만 휴가 신청을 결재할 수 있습니다.');
+    }
+
+    const message = await this.messageRepo.findOne({
+      where: { id: Number(messageId) },
+      relations: { room: true, sender: true },
+    });
+    if (!message || (message.type !== 'LEAVE_REQUEST' && message.payload?.type !== 'STAFF_LEAVE')) {
+      throw new BadRequestException('휴가 결재 신청 메시지를 찾을 수 없습니다.');
+    }
+
+    const payload = message.payload || {};
+
+    // 자가 승인 금지: 신청자 본인이 결재 불가
+    if (message.sender?.id === decider.id || (payload.applicantId && Number(payload.applicantId) === decider.id)) {
+      throw new ForbiddenException('본인이 신청한 휴가는 직접 결재할 수 없습니다. 원장님만 결재 가능합니다.');
+    }
+
+    // 이미 처리된 건 확인
+    if (payload.status && payload.status !== 'PENDING') {
+      throw new BadRequestException(`이미 ${payload.status === 'APPROVED' ? '승인' : '반려'} 처리된 휴가 신청 건입니다.`);
+    }
+
+    payload.status = decision;
+    payload.decidedBy = decider.name || decider.email;
+    payload.decidedAt = new Date();
+    if (decision === 'REJECTED' && rejectionReason) {
+      payload.rejectionReason = rejectionReason;
+    }
+
+    message.payload = payload;
+    await this.messageRepo.save(message);
+
+    // 승인 시 캘린더 등록 (STAFF_LEAVE)
+    if (decision === 'APPROVED') {
+      try {
+        const academyId = message.room?.academyId || decider.academyId;
+        const academy = academyId ? await this.academyRepo.findOne({ where: { id: academyId } }) : null;
+        const holiday = this.holidayRepo.create({
+          type: 'STAFF_LEAVE' as any,
+          title: `${payload.applicantName} (${payload.applicantRole}) ${payload.leaveType}`,
+          startDate: payload.startDate,
+          endDate: payload.endDate,
+          targetClass: payload.applicantRole,
+          reason: payload.reason || `${payload.applicantName} 휴가`,
+          academy: academy || undefined,
+        });
+        await this.holidayRepo.save(holiday);
+      } catch (calErr) {
+        console.warn('[decideLeaveRequest] calendar save error:', calErr);
+      }
+    }
+
+    // 신청자에게 결과 알림
+    try {
+      const applicantId = payload.applicantId || message.sender?.id;
+      if (applicantId) {
+        const notiTitle = decision === 'APPROVED' ? '휴가 승인 완료' : '휴가 반려 안내';
+        const notiBody = decision === 'APPROVED'
+          ? `[휴가 승인] 원장선생님께서 ${payload.applicantName}님의 ${payload.leaveType} (${payload.startDate}~${payload.endDate}) 신청을 승인하셨습니다.`
+          : `[휴가 반려] 원장선생님께서 ${payload.applicantName}님의 ${payload.leaveType} 신청을 반려하셨습니다.${rejectionReason ? ` (사유: ${rejectionReason})` : ''}`;
+
+        await this.sendSystemNotificationToUser(applicantId, notiTitle, notiBody, {
+          type: 'leave_decision',
+          metadata: { type: 'leave_decision', messageId: message.id, decision },
+        });
+      }
+    } catch (notiErr) {
+      console.warn('[decideLeaveRequest] noti error:', notiErr);
+    }
+
+    const fullMessage = await this.messageRepo.findOne({
+      where: { id: message.id },
+      relations: { sender: true },
+    });
+
+    if (fullMessage) {
+      await this.broadcastToRoom(message.room.id, fullMessage);
+    }
+
+    return fullMessage;
   }
 
   async reRequestPayment(

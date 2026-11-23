@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApprovalService } from './approval.service';
 import { ApprovalStatus } from '../entities/approval-request.entity';
+import { OverrideType } from '../entities/schedule-override.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CalendarEventType } from '../entities/academy-holiday.entity';
 
@@ -153,7 +154,7 @@ export class ApprovalController {
   }
 
   /**
-   * 캘린더 원아 결석 신청 (학부모, 담임교사, 관리자)
+   * 캘린더 원아 결석 및 통학 변동 신청 (학부모, 담임교사, 관리자)
    */
   @UseGuards(JwtAuthGuard)
   @Post('calendar/absence')
@@ -163,6 +164,7 @@ export class ApprovalController {
       studentId: number;
       startDate: string;
       endDate: string;
+      overrideType?: OverrideType;
       reason?: string;
     },
   ) {

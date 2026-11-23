@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TakeMe 서비스 구현 환경 (Service Architecture)</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+    }
+    body {
+      background-color: #F8FAFC;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .canvas-container {
+      width: 1280px;
+      height: 720px;
+      background: #FFFFFF;
+      border-radius: 24px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+      padding: 28px 36px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+      border: 1px solid #E2E8F0;
+    }
+    
+    /* Header */
+    .slide-header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+    .logo-badge {
+      background: #F97316;
+      color: white;
+      font-weight: 800;
+      font-size: 14px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      margin-right: 12px;
+      letter-spacing: -0.3px;
+    }
+    .title-area h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #0F172A;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .title-area h1 span.dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      background: #F97316;
+      border-radius: 50%;
+    }
+    .title-area p {
+      font-size: 12px;
+      color: #64748B;
+      font-weight: 500;
+      margin-top: 2px;
+    }
+
+    /* Main Grid */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 290px 48px 350px 48px 320px;
+      flex: 1;
+      align-items: stretch;
+    }
+
+    /* Left: Frontend Apps */
+    .col-card {
+      background: #F8FAFC;
+      border: 1.5px solid #E2E8F0;
+      border-radius: 18px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .col-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #E2E8F0;
+    }
+    .col-header-icon {
+      width: 24px;
+      height: 24px;
+    }
+    .col-header-text {
+      font-size: 15px;
+      font-weight: 700;
+      color: #1E293B;
+    }
+    
+    .role-list {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      flex: 1;
+    }
+    .role-item {
+      background: #FFFFFF;
+      border: 1px solid #E2E8F0;
+      border-radius: 12px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+      transition: transform 0.15s ease;
+    }
+    .role-icon-box {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+    .role-info {
+      display: flex;
+      flex-direction: column;
+    }
+    .role-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #0F172A;
+    }
+    .role-desc {
+      font-size: 11px;
+      color: #64748B;
+      font-weight: 500;
+      margin-top: 1px;
+    }
+
+    /* Web Admin Card (Special) */
+    .admin-web-card {
+      background: linear-gradient(135deg, #EFF6FF 0%, #FFFFFF 100%);
+      border: 1.5px solid #BFDBFE;
+    }
+
+    /* Connector Columns */
+    .connector-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    .arrow-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      background: #FFFFFF;
+      border: 1px solid #E2E8F0;
+      padding: 10px 4px;
+      border-radius: 12px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+    }
+    .arrow-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #475569;
+      writing-mode: vertical-lr;
+      letter-spacing: 1px;
+    }
+    .arrow-svg {
+      width: 20px;
+      height: 20px;
+      color: #2563EB;
+    }
+
+    /* Center: Backend */
+    .center-col {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .gateway-card {
+      background: #FFFFFF;
+      border: 1.5px solid #CBD5E1;
+      border-radius: 14px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.03);
+    }
+    .gateway-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .gateway-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #1E293B;
+    }
+    .gateway-sub {
+      font-size: 10px;
+      color: #059669;
+      font-weight: 600;
+      background: #ECFDF5;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .backend-core-card {
+      background: #F8FAFC;
+      border: 1.5px solid #E2E8F0;
+      border-radius: 18px;
+      padding: 14px 16px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .module-list {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 7px;
+      flex: 1;
+    }
+    .module-item {
+      background: #FFFFFF;
+      border: 1px solid #E2E8F0;
+      border-radius: 10px;
+      padding: 7px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+    }
+    .module-icon {
+      font-size: 18px;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+    }
+    .module-texts {
+      display: flex;
+      flex-direction: column;
+    }
+    .module-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: #1E293B;
+    }
+    .module-detail {
+      font-size: 10px;
+      color: #64748B;
+      font-weight: 500;
+    }
+
+    /* Right: DB & External APIs */
+    .right-col {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .db-card, .api-card {
+      background: #F8FAFC;
+      border: 1.5px solid #E2E8F0;
+      border-radius: 18px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+    }
+    .db-card {
+      flex: 0.9;
+    }
+    .api-card {
+      flex: 1.1;
+    }
+    .sub-item {
+      background: #FFFFFF;
+      border: 1px solid #E2E8F0;
+      border-radius: 10px;
+      padding: 7px 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 6px;
+    }
+
+    /* Bottom Footer Protocol Bar */
+    .bottom-bar {
+      margin-top: 12px;
+      background: #F1F5F9;
+      border-radius: 12px;
+      padding: 8px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: #475569;
+      font-weight: 600;
+      border: 1px solid #E2E8F0;
+    }
+    .protocol-tag {
+      background: #3B82F6;
+      color: white;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      margin-right: 6px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="canvas-container">
+    <!-- Header -->
+    <div class="slide-header">
+      <div class="logo-badge">TakeMe</div>
+      <div class="title-area">
+        <h1>03. 구현 사항 — 서비스 구현 환경 <span class="dot"></span></h1>
+        <p>크로스 플랫폼 모바일 앱(Flutter) · 반응형 관제 웹(React) · 실시간 백엔드 코어(NestJS) 아키텍처</p>
+      </div>
+    </div>
+
+    <!-- Main Grid -->
+    <div class="main-grid">
+      
+      <!-- 1. Left: 5 Roles Client -->
+      <div class="col-card">
+        <div class="col-header">
+          <svg class="col-header-icon" viewBox="0 0 24 24" fill="#02569B">
+            <path d="M14.314 0L2.3 12 6.87 16.57 21.186 2.257z M14.314 11.23l-4.57 4.57 4.57 4.57 6.872-6.87z"/>
+          </svg>
+          <span class="col-header-text">5개 역할 앱 & 관리자 웹</span>
+        </div>
+
+        <div class="role-list">
+          <!-- 기사 -->
+          <div class="role-item">
+            <div class="role-icon-box" style="background: #E0F2FE;">👨‍✈️</div>
+            <div class="role-info">
+              <span class="role-title">기사 모바일 앱</span>
+              <span class="role-desc">실시간 GPS 전송 & 내비게이션</span>
+            </div>
+          </div>
+
+          <!-- 차량교사 -->
+          <div class="role-item">
+            <div class="role-icon-box" style="background: #FEF3C7;">📋</div>
+            <div class="role-info">
+              <span class="role-title">차량교사 앱</span>
+              <span class="role-desc">탑승/하차 인원 체크 & 안심알림</span>
+            </div>
+          </div>
+
+          <!-- 담임교사 -->
+          <div class="role-item">
+            <div class="role-info" style="display:flex; flex-direction:row; align-items:center; gap:12px;">
+              <div class="role-icon-box" style="background: #FCE7F3;">👩‍🏫</div>
+              <div class="role-info">
+                <span class="role-title">담임교사 앱</span>
+                <span class="role-desc">출결 체크 & 원아 변동 실시간 확인</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 학부모 -->
+          <div class="role-item">
+            <div class="role-icon-box" style="background: #DCFCE7;">👨‍👩‍👧</div>
+            <div class="role-info">
+              <span class="role-title">학부모 모바일 앱</span>
+              <span class="role-desc">셔틀 실시간 위치 & 통학 간편 변경</span>
+            </div>
+          </div>
+
+          <!-- 기관 관리자 웹 -->
+          <div class="role-item admin-web-card">
+            <div class="role-icon-box" style="background: #DBEAFE;">💻</div>
+            <div class="role-info">
+              <span class="role-title">기관 관리자 웹 (React)</span>
+              <span class="role-desc">노선 편성 · 전자결재 · 관제 대시보드</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Connector 1 -->
+      <div class="connector-col">
+        <div class="arrow-box">
+          <svg class="arrow-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+          </svg>
+          <span class="arrow-label">HTTPS / WSS</span>
+        </div>
+      </div>
+
+      <!-- 2. Center: AWS & NestJS Backend -->
+      <div class="center-col">
+        <!-- Top Gateway -->
+        <div class="gateway-card">
+          <div class="gateway-left">
+            <span style="font-size: 20px;">🛡️</span>
+            <div>
+              <div class="gateway-title">AWS EC2 & NGINX</div>
+              <div style="font-size: 10px; color: #64748B;">보안 리버스 프록시 / SSL 분배</div>
+            </div>
+          </div>
+          <span class="gateway-sub">HTTPS / WSS 암호화</span>
+        </div>
+
+        <!-- Backend Core -->
+        <div class="backend-core-card">
+          <div class="col-header" style="margin-bottom: 8px;">
+            <span style="font-size: 18px;">⚙️</span>
+            <span class="col-header-text">NestJS 백엔드 코어</span>
+            <span style="margin-left: auto; font-size: 11px; color: #EA580C; font-weight: 700; background: #FFEDD5; padding: 2px 8px; border-radius: 6px;">TypeScript</span>
+          </div>
+
+          <div class="module-list">
+            <!-- 보안 및 인증 -->
+            <div class="module-item">
+              <div class="module-icon" style="background: #FEF3C7;">🔒</div>
+              <div class="module-texts">
+                <span class="module-name">보안 및 다중 인증</span>
+                <span class="module-detail">JWT + IP 바인딩, Google OTP (2FA), RBAC</span>
+              </div>
+            </div>
+
+            <!-- 운행 GPS -->
+            <div class="module-item">
+              <div class="module-icon" style="background: #FEE2E2;">📍</div>
+              <div class="module-texts">
+                <span class="module-name">실시간 운행 GPS 엔진</span>
+                <span class="module-detail">초저지연 위치 브로커 (Redis 캐싱 & Socket.IO)</span>
+              </div>
+            </div>
+
+            <!-- 전자결재 -->
+            <div class="module-item">
+              <div class="module-icon" style="background: #E0E7FF;">📑</div>
+              <div class="module-texts">
+                <span class="module-name">통학 변경 전자결재</span>
+                <span class="module-detail">결석·지각·픽업 즉시 승인 및 실시간 반영</span>
+              </div>
+            </div>
+
+            <!-- 캘린더 출석 -->
+            <div class="module-item">
+              <div class="module-icon" style="background: #DCFCE7;">📅</div>
+              <div class="module-texts">
+                <span class="module-name">캘린더 및 출석 관리</span>
+                <span class="module-detail">학사일정·휴업일 연동 스마트 출석부</span>
+              </div>
+            </div>
+
+            <!-- 원아 서류 배차 -->
+            <div class="module-item">
+              <div class="module-icon" style="background: #F3E8FF;">👶</div>
+              <div class="module-texts">
+                <span class="module-name">원아 정보 & 자동 배차</span>
+                <span class="module-detail">원아 서류 일괄 업로드 및 정류장 최적 배차</span>
+              </div>
+            </div>
+
+            <!-- 메신저 알림 -->
+            <div class="module-item">
+              <div class="module-icon" style="background: #FEF9C3;">💬</div>
+              <div class="module-texts">
+                <span class="module-name">원내 메신저 & 실시간 알림</span>
+                <span class="module-detail">1:1 소통, 사진 전송, 도착 예정 안내 푸시</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Connector 2 -->
+      <div class="connector-col">
+        <div class="arrow-box">
+          <svg class="arrow-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+          </svg>
+          <span class="arrow-label">Query / API</span>
+        </div>
+      </div>
+
+      <!-- 3. Right: DB & External API -->
+      <div class="right-col">
+        
+        <!-- 데이터베이스 -->
+        <div class="db-card">
+          <div class="col-header" style="margin-bottom: 4px; padding-bottom: 6px;">
+            <span style="font-size: 16px;">🗄️</span>
+            <span class="col-header-text">데이터베이스 계층</span>
+          </div>
+          
+          <div class="sub-item">
+            <div style="font-size: 20px;">🐘</div>
+            <div>
+              <div style="font-size: 12px; font-weight: 700; color: #0F172A;">AWS RDS PostgreSQL 16</div>
+              <div style="font-size: 10px; color: #64748B;">PostGIS 공간 좌표 DB & 회원·출결 데이터</div>
+            </div>
+          </div>
+
+          <div class="sub-item">
+            <div style="font-size: 20px;">⚡</div>
+            <div>
+              <div style="font-size: 12px; font-weight: 700; color: #0F172A;">Redis 7 (In-Memory)</div>
+              <div style="font-size: 10px; color: #64748B;">실시간 셔틀 GPS 고속 캐싱 & 세션 관리</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 외부 지도 & 클라우드 스토리지 API -->
+        <div class="api-card">
+          <div class="col-header" style="margin-bottom: 4px; padding-bottom: 6px;">
+            <span style="font-size: 16px;">🗺️</span>
+            <span class="col-header-text">외부 연동 API & 스토리지</span>
+          </div>
+
+          <div class="sub-item">
+            <div style="font-size: 20px;">🟡</div>
+            <div>
+              <div style="font-size: 12px; font-weight: 700; color: #0F172A;">카카오 모빌리티 API</div>
+              <div style="font-size: 10px; color: #64748B;">실시간 교통 반영 최적 셔틀 경로 탐색</div>
+            </div>
+          </div>
+
+          <div class="sub-item">
+            <div style="font-size: 20px;">🌐</div>
+            <div>
+              <div style="font-size: 12px; font-weight: 700; color: #0F172A;">지오코딩 & 네이버/TMap</div>
+              <div style="font-size: 10px; color: #64748B;">정확한 주소-좌표 변환 & 고정밀 지도 뷰어</div>
+            </div>
+          </div>
+
+          <div class="sub-item">
+            <div style="font-size: 20px;">📦</div>
+            <div>
+              <div style="font-size: 12px; font-weight: 700; color: #0F172A;">Amazon S3 (Cloud Storage)</div>
+              <div style="font-size: 10px; color: #64748B;">원아 프로필 사진 및 안전 점검 서류 보관</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- Bottom Protocol Bar -->
+    <div class="bottom-bar">
+      <div>
+        <span class="protocol-tag">REST API</span> 정형 데이터 CRUD & 전자결재 트랜잭션
+        <span class="protocol-tag" style="background: #10B981; margin-left: 12px;">WebSocket</span> 0.2초 초저지연 버스 위치 & 원아 변동 자동 동기화
+      </div>
+      <div>
+        <span style="color: #64748B;">연동 대상:</span> <strong>관리자 · 기사 · 교사 · 학부모</strong> (실시간 상호작용)
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

@@ -1051,13 +1051,15 @@ export class ApprovalService {
   }
 
   /**
-   * 캘린더 원아 결석 등록 (학부모, 담임교사, 관리자)
-   * 학부모=자녀 결석일 설정
+   * 캘린더 원아 결석 및 통학 변동 신청 (학부모, 담임교사, 관리자)
+   * 관리자/담임교사=원아 결석/지각/픽업 설정
+   * 학부모=자녀 결석/지각/픽업 설정
    */
   async createCalendarAbsence(callingUser: User, data: {
     studentId: number;
     startDate: string;
     endDate: string;
+    overrideType?: OverrideType;
     reason?: string;
   }) {
     const student = await this.studentRepo.findOne({
@@ -1072,26 +1074,37 @@ export class ApprovalService {
         student.studentUser?.id === callingUser.id ||
         (student.phone && student.phone === callingUser.phone);
       if (!isMyChild) {
-        throw new ForbiddenException('본인의 자녀에 대해서만 결석을 신청할 수 있습니다.');
+        throw new ForbiddenException('본인의 자녀에 대해서만 통학 변동을 신청할 수 있습니다.');
       }
     }
+
+    const ovType = data.overrideType || OverrideType.ABSENCE;
+    const typeLabelMap: Record<string, string> = {
+      [OverrideType.ABSENCE]: '결석',
+      [OverrideType.LATENESS]: '지각',
+      [OverrideType.PICKUP]: '직접 픽업',
+      [OverrideType.INDIVIDUAL_DISMISSAL]: '개별 하원',
+      [OverrideType.NO_SHUTTLE]: '셔틀 미이용',
+      [OverrideType.ONE_TIME_BOARDING]: '일회성 탑승',
+    };
+    const typeLabel = typeLabelMap[ovType] || '출결 변동';
 
     const override = this.overrideRepo.create({
       student,
       startDate: data.startDate,
       endDate: data.endDate,
-      overrideType: OverrideType.ABSENCE,
-      reason: data.reason || '결석 신청',
+      overrideType: ovType,
+      reason: data.reason || `${typeLabel} 신청`,
     });
 
     const saved = await this.overrideRepo.save(override);
 
     try {
       const dateText = data.startDate === data.endDate ? data.startDate : `${data.startDate} ~ ${data.endDate}`;
-      const notiTitle = '원아 결석 신청 안내';
-      const notiContent = `[결석 신청] ${student.name} (${student.className || '반 미배정'}) - ${dateText}${data.reason ? ` (${data.reason})` : ''}`;
+      const notiTitle = `원아 ${typeLabel} 신청 안내`;
+      const notiContent = `[${typeLabel} 신청] ${student.name} (${student.className || '반 미배정'}) - ${dateText}${data.reason ? ` (${data.reason})` : ''}`;
 
-      // 결석 신청: 공지사항 채널이 아니라 그 원아의 학부모·담임·차량 지도교사/기사에게만 개인 알림
+      // 신청 알림: 학부모·담임·차량 지도교사/기사에게 개인 알림
       await this.chatService?.notifyStudentRelated(
         student.id,
         notiTitle,
@@ -1099,7 +1112,7 @@ export class ApprovalService {
         ['PARENT', 'HOMEROOM', 'VEHICLE'],
         {
           type: 'change_request',
-          metadata: { type: 'change_request', studentId: student.id, startDate: data.startDate, endDate: data.endDate },
+          metadata: { type: 'change_request', studentId: student.id, startDate: data.startDate, endDate: data.endDate, overrideType: ovType },
         },
       );
     } catch (notiErr) {

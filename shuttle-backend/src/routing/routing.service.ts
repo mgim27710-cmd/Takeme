@@ -1434,12 +1434,17 @@ export class RoutingService {
 
       const override = overrideMap.get(st.id);
       const isOneTimeBoarding = Boolean(override && override.overrideType === OverrideType.ONE_TIME_BOARDING);
-      const isNotRiding = isOneTimeBoarding ? false : Boolean(st.isNotRiding || (override && override.overrideType === OverrideType.ABSENCE) || parsedRaw['미탑승'] || parsedRaw['차량미탑승']);
+      const isAbsence = Boolean(override && override.overrideType === OverrideType.ABSENCE);
+      const isLateness = Boolean(override && override.overrideType === OverrideType.LATENESS);
+      const isPickup = Boolean(override && (override.overrideType === OverrideType.PICKUP || override.overrideType === OverrideType.INDIVIDUAL_DISMISSAL));
+      const isNoShuttle = Boolean(override && override.overrideType === OverrideType.NO_SHUTTLE);
+
+      const isNotRiding = isOneTimeBoarding ? false : Boolean(st.isNotRiding || isAbsence || isNoShuttle || parsedRaw['미탑승'] || parsedRaw['차량미탑승']);
       const needsAddress = !isNotRiding && (!st.address || st.latitude === null || st.latitude === undefined || isNaN(st.latitude) || !st.longitude || isNaN(st.longitude) || !!parsedRaw['주소입력필요']);
 
       const isOneTimeRide = Boolean(
         isOneTimeBoarding ||
-        (override && (override.overrideType === OverrideType.CHANGE_LOCATION || override.overrideType === OverrideType.PICKUP)) ||
+        (override && (override.overrideType === OverrideType.CHANGE_LOCATION || override.overrideType === OverrideType.PICKUP || override.overrideType === OverrideType.LATENESS || override.overrideType === OverrideType.INDIVIDUAL_DISMISSAL)) ||
         parsedRaw.isTemporaryRide ||
         parsedRaw.rideType === 'TODAY_ONLY' ||
         parsedRaw.isTemporaryLocation ||
@@ -1468,6 +1473,11 @@ export class RoutingService {
         isNotRiding,
         boardingType: parsedRaw['탑승구분'] || (isNotRiding ? 'NONE' : (st.assignedDepartureVehicle && !st.assignedVehicle ? 'AFTERNOON_ONLY' : (!st.assignedDepartureVehicle && st.assignedVehicle ? 'MORNING_ONLY' : 'BOTH'))),
         isOneTimeRide,
+        overrideType: override?.overrideType || null,
+        overrideReason: override?.reason || null,
+        isLateness,
+        isPickup,
+        isAbsence,
         oneTimeType: override?.overrideType || (parsedRaw.isTemporaryLocation ? 'CHANGE_LOCATION' : (isOneTimeBoarding ? 'ONE_TIME_BOARDING' : null)),
         addressNeedsInput: needsAddress,
         assignedBusId: effectiveBusId,

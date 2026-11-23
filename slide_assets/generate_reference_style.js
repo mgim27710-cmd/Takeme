@@ -6,30 +6,30 @@ const { Resvg } = require('../scratch_pptx/node_modules/@resvg/resvg-js');
 const width = 1600;
 const height = 900;
 
-// 공식 SVG 로고 (크기 정규화 및 겹침 제로 설계)
+// 공식 SVG 로고 (크기 정규화 및 심플 벡터)
 const LOGOS = {
-  // 1. NestJS (48 x 48)
+  // NestJS
   nestjs: `
     <g transform="scale(2)">
       <path d="M12 0c-.3 0-.5 0-.8.1L1.5 2.9A2.5 2.5 0 0 0 0 5.3v13.4a2.5 2.5 0 0 0 1.5 2.4l9.7 2.8c.5.2 1.1.2 1.6 0l9.7-2.8a2.5 2.5 0 0 0 1.5-2.4V5.3a2.5 2.5 0 0 0-1.5-2.4L12.8.1c-.3-.1-.5-.1-.8-.1z" fill="#E0234E"/>
       <path d="M19 12c-1.5 3-4.5 5-7.5 5-4 0-6.5-3-6.5-7 0-3 2-5 4.5-5 2 0 3.5 1 4.5 3l-2.5 1.5c-.5-1-1-1.5-2-1.5-1.5 0-2.5 1.5-2.5 3.5 0 2.5 1.5 4 4 4 1.8 0 3.2-1 4.2-2.8L19 12z" fill="#FFFFFF"/>
     </g>
   `,
-  // 2. PostgreSQL (50 x 50)
+  // PostgreSQL
   postgresql: `
-    <g transform="scale(0.25)">
+    <g transform="scale(0.24)">
       <rect width="200" height="200" rx="30" fill="#336791"/>
       <path d="M100 25c-35 0-55 20-55 45 0 18 10 32 25 38v22c0 22 15 45 40 45s40-23 40-45v-22c15-6 25-20 25-38 0-25-20-45-55-45zm-15 35c8 0 15 7 15 15s-7 15-15 15-15-7-15-15 7-15 15-15zm45 70c0 12-8 25-20 25s-20-13-20-25v-18h40v18zm0-30h-40v-8c8-2 15-7 20-14 5 7 12 12 20 14v8zm15-25c-8 0-15-7-15-15s7-15 15-15 15 7 15 15-7 15-15 15z" fill="#FFFFFF"/>
     </g>
   `,
-  // 3. Redis (48 x 48)
+  // Redis
   redis: `
     <g transform="scale(2)">
       <rect width="24" height="24" rx="5" fill="#DC382D"/>
       <path d="M12 4l7 3.5v9L12 20l-7-3.5v-9L12 4zm0 2.2L7.5 8.5 12 10.7l4.5-2.2L12 6.2zm-5 4v5.3l5 2.5v-5.3l-5-2.5zm10 0l-4 2v5.3l4-2v-5.3z" fill="#FFFFFF"/>
     </g>
   `,
-  // 4. Socket.IO (48 x 48)
+  // Socket.IO
   socketio: `
     <g transform="scale(2)">
       <circle cx="12" cy="12" r="11" fill="#010101"/>
@@ -37,7 +37,14 @@ const LOGOS = {
       <path d="M13.5 4.5L7 13.5h5l-1.5 6 6.5-9h-5l1.5-6z" fill="#FFFFFF"/>
     </g>
   `,
-  // 5. AWS EC2 (공식 주황색 EC2 서버 로고, 48 x 48)
+  // Nginx
+  nginx: `
+    <g transform="scale(2)">
+      <rect width="24" height="24" rx="5" fill="#009639"/>
+      <path d="M6 19V5l12 14V5" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </g>
+  `,
+  // AWS EC2
   ec2: `
     <g transform="scale(2)">
       <rect width="24" height="24" rx="5" fill="#EA580C"/>
@@ -57,23 +64,9 @@ const LOGOS = {
       <line x1="16" y1="20" x2="16" y2="23" stroke="#FFFFFF" stroke-width="1.8"/>
     </g>
   `,
-  // 6. Node.js (50 x 50)
-  nodejs: `
-    <g transform="scale(1.0)">
-      <path d="M25 5L5 17v24l20 12 20-12V17L25 5z" fill="#339933"/>
-      <path d="M25 15c-5.5 0-9 3-9 9v6c0 6 3.5 9 9 9s9-3 9-9v-6c0-6-3.5-9-9-9zm0 20c-2.5 0-4-1.5-4-4v-6c0-2.5 1.5-4 4-4s4 1.5 4 4v6c0 2.5-1.5 4-4 4z" fill="#FFFFFF"/>
-    </g>
-  `,
-  // 7. TypeScript (50 x 50)
-  typescript: `
-    <g transform="scale(0.28)">
-      <rect width="180" height="180" rx="25" fill="#3178C6"/>
-      <path d="M40 70h60v20H75v60H55V90H40V70zm65 55c5 10 15 15 25 15 12 0 18-6 18-14 0-20-35-15-35-40 0-15 12-26 30-26 12 0 22 5 28 14l-12 12c-4-6-10-9-16-9-7 0-12 4-12 9 0 18 35 12 35 39 0 16-12 28-34 28-15 0-27-6-33-16l16-12z" fill="#FFFFFF"/>
-    </g>
-  `,
-  // 8. Amazon S3 (60 x 70)
+  // Amazon S3
   s3: `
-    <g transform="scale(0.42)">
+    <g transform="scale(0.32)">
       <path d="M80 15L20 45l60 30 60-30-60-30z" fill="#E05243"/>
       <path d="M20 45v60l60 30V75L20 45z" fill="#C73E31"/>
       <path d="M140 45v60l-60 30V75l60-30z" fill="#A82F24"/>
@@ -81,9 +74,9 @@ const LOGOS = {
       <path d="M110 80v35l-30 15V95l30-15z" fill="#C73E31"/>
     </g>
   `,
-  // 9. React.js (65 x 65 아톰 로고)
+  // React
   react: `
-    <g transform="scale(2.2)">
+    <g transform="scale(1.8)">
       <circle cx="16" cy="16" r="3" fill="#00D8FF"/>
       <g stroke="#00D8FF" stroke-width="1.3" fill="none">
         <ellipse cx="16" cy="16" rx="14" ry="5.5"/>
@@ -92,50 +85,27 @@ const LOGOS = {
       </g>
     </g>
   `,
-  // 10. Vite (공식 번개 로고)
-  vite: `
-    <g transform="scale(1.2)">
-      <path d="M39.6 4.4L20.8 40.5a1.2 1.2 0 0 1-2.1.1L2.4 8.7a1.2 1.2 0 0 1 1-1.8h35.2a1.2 1.2 0 0 1 1 1.7v-.2z" fill="#41D1FF"/>
-      <path d="M29.5 4.3L19.8 40.6a1.2 1.2 0 0 1-2.2 0L9.5 22.8l20-18.5z" fill="#BD34FE"/>
-      <path d="M21.5 7.5l-9.8 8.8 6.5.6-4.2 8.5 10.5-8.8-6.2-.6 3.2-8.5z" fill="#FFD026"/>
-    </g>
-  `,
-  // 11. Flutter (공식 파란 셰브론)
+  // Flutter
   flutter: `
-    <g transform="scale(0.32)">
+    <g transform="scale(0.35)">
       <path d="M125 0L0 125l38 38L201 0h-76z" fill="#47C5FB"/>
       <path d="M125 120L46 198l38 38 40-40 77-76h-76z" fill="#00569E"/>
       <path d="M125 197l-40 40 40 40h76l-76-80z" fill="#02569B"/>
       <path d="M125 197l-38 38 38 38 38-38-38-38z" fill="#0175C2"/>
     </g>
   `,
-  // 12. Tailwind CSS (48 x 48)
-  tailwind: `
-    <g transform="scale(2.0)">
-      <path d="M12 4.8c-3.2 0-5.2 1.6-6 4.8 1.2-1.6 2.6-2.2 4.2-1.8.9.2 1.6.9 2.3 1.6C13.7 10.6 15 12 18 12c3.2 0 5.2-1.6 6-4.8-1.2 1.6-2.6 2.2-4.2 1.8-.9-.2-1.6-.9-2.3-1.6C16.3 6.2 15 4.8 12 4.8zm-6 7.2c-3.2 0-5.2 1.6-6 4.8 1.2-1.6 2.6-2.2 4.2-1.8.9.2 1.6.9 2.3 1.6 1.2 1.2 2.5 2.6 5.5 2.6 3.2 0 5.2-1.6 6-4.8-1.2 1.6-2.6 2.2-4.2 1.8-.9-.2-1.6-.9-2.3-1.6-1.2-1.2-2.5-2.6-5.5-2.6z" fill="#06B6D4"/>
+  // TMap
+  tmap: `
+    <g transform="scale(1.0)">
+      <rect width="48" height="48" rx="12" fill="#E22634"/>
+      <text x="24" y="33" font-family="'Arial Black', sans-serif" font-size="24" font-weight="900" fill="#FFFFFF" text-anchor="middle">T</text>
     </g>
   `,
-  // 13. GitHub (50 x 50)
-  github: `
-    <g transform="scale(0.28)">
-      <path d="M90 0C40.3 0 0 40.3 0 90c0 39.8 25.8 73.5 61.6 85.4 4.5.8 6.1-2 6.1-4.3 0-2.1-.1-9.3-.1-17-22.6 4.1-28.7-5.5-30.5-10.6-1-2.6-5.4-10.6-9.2-12.7-3.1-1.7-7.6-5.9 0-6 7-.1 12 6.5 13.7 9.1 8 13.6 20.9 9.8 26.1 7.4 1-6 3.2-9.8 5.7-12.1-20-2.3-41-10-41-44.5 0-9.8 3.5-17.9 9.2-24.2-.9-2.3-4-11.4.9-23.8 0 0 7.6-2.4 24.8 9.2 7.2-2 14.9-3 22.5-3s15.3 1 22.5 3c17.2-11.7 24.8-9.2 24.8-9.2 4.9 12.4 1.8 21.5.9 23.8 5.7 6.3 9.2 14.3 9.2 24.2 0 34.6-21.1 42.1-41.2 44.4 3.3 2.8 6.2 8.3 6.2 16.8 0 12.2-.1 22-.1 25 0 2.4 1.6 5.2 6.2 4.3C154.2 163.4 180 129.7 180 90c0-49.7-40.3-90-90-90z" fill="#181717"/>
-    </g>
-  `,
-  // 14. Git (50 x 50)
-  git: `
-    <g transform="scale(0.35)">
-      <path d="M125 15l45 45c5 5 5 13 0 18l-45 45c-5 5-13 5-18 0l-45-45c-5-5-5-13 0-18l45-45c5-5 13-5 18 0z" fill="#F05032"/>
-      <circle cx="100" cy="55" r="9" fill="#FFFFFF"/>
-      <circle cx="135" cy="90" r="9" fill="#FFFFFF"/>
-      <circle cx="100" cy="100" r="9" fill="#FFFFFF"/>
-      <path d="M100 55v45m0-20l35 10" stroke="#FFFFFF" stroke-width="6" fill="none"/>
-    </g>
-  `,
-  // 15. Users (50 x 50)
-  user: `
-    <g transform="scale(0.32)">
-      <circle cx="90" cy="50" r="40" fill="#1E293B"/>
-      <path d="M20 170c0-38 31-70 70-70s70 32 70 70v10H20v-10z" fill="#1E293B"/>
+  // Kakao
+  kakao: `
+    <g transform="scale(1.0)">
+      <rect width="48" height="48" rx="12" fill="#FEE500"/>
+      <path d="M24 11c-7.8 0-14 5-14 11.2 0 4 2.6 7.5 6.6 9.5l-1.6 6c-.2.7.5 1.2 1.1.8l7.2-4.8c.2 0 .5.1.7.1 7.8 0 14-5 14-11.2S31.8 11 24 11z" fill="#191919"/>
     </g>
   `
 };
@@ -143,15 +113,24 @@ const LOGOS = {
 const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <marker id="arrowOrange" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto">
-      <path d="M0,0 L0,6 L8,3 z" fill="#EA580C" />
+    <!-- 주황색 화살표 촉 -->
+    <marker id="arrowRight" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M0,1 L0,7 L7,4 z" fill="#EA580C" />
+    </marker>
+    <marker id="arrowLeft" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto">
+      <path d="M7,1 L7,7 L0,4 z" fill="#EA580C" />
+    </marker>
+    <marker id="arrowDown" markerWidth="8" markerHeight="8" refX="4" refY="6" orient="auto">
+      <path d="M1,0 L7,0 L4,7 z" fill="#EA580C" />
     </marker>
   </defs>
 
-  <!-- 순백색 바탕 -->
+  <!-- 순백색 배경 (#FFFFFF) -->
   <rect width="100%" height="100%" fill="#FFFFFF" />
 
-  <!-- 상단 타이틀 영역 -->
+  <!-- ============================================================== -->
+  <!-- 상단 타이틀 헤더 영역 (심플 & 미니멀) -->
+  <!-- ============================================================== -->
   <g transform="translate(60, 45)">
     <rect x="0" y="0" width="60" height="26" rx="4" fill="#EA580C" />
     <text x="30" y="18" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11" font-weight="900" fill="#FFFFFF" text-anchor="middle">
@@ -159,246 +138,419 @@ const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
     </text>
 
     <text x="75" y="19" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="20" font-weight="900" fill="#0F172A">
-      03. 구현 사항 — 서비스 구현 환경
+      03. 구현 사항 — 서비스 시스템 아키텍처
     </text>
-    <circle cx="430" cy="13" r="4" fill="#EA580C" />
-    <line x1="435" y1="13" x2="1480" y2="13" stroke="#FDBA74" stroke-width="2.5" />
+    <circle cx="445" cy="13" r="4" fill="#EA580C" />
+    <line x1="450" y1="13" x2="1520" y2="13" stroke="#FDBA74" stroke-width="2.5" />
 
     <text x="75" y="52" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="17" font-weight="bold" fill="#334155">
-      -  개발 환경 (Development Environment)
+      - 전체 시스템 구조도 (System Architecture)
     </text>
   </g>
 
-  <!-- ============================================================== -->
-  <!-- [좌측] Front — End 박스 (요청에 따라 위치 반전 적용!) -->
-  <!-- ============================================================== -->
-  <g transform="translate(60, 140)">
-    <text x="415" y="-12" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="24" font-weight="900" fill="#0F172A" text-anchor="middle">
+  <!-- ========================================================================= -->
+  <!-- 1. [좌측] Front — End (React 웹 & Flutter 앱 단순화) -->
+  <!-- ========================================================================= -->
+  <g transform="translate(60, 135)">
+    <text x="180" y="-12" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="22" font-weight="900" fill="#0F172A" text-anchor="middle">
       Front — End
     </text>
 
-    <!-- 메인 오렌지 둥근 박스 (830 x 460) -->
-    <rect width="830" height="460" rx="28" fill="#FFFFFF" stroke="#EA580C" stroke-width="3" />
+    <!-- 외곽 둥근 주황 박스 (360 x 695) -->
+    <rect width="360" height="695" rx="28" fill="#FFFFFF" stroke="#EA580C" stroke-width="3" />
 
-    <!-- 내부 왼쪽: 중첩된 둥근 박스 (React, Vite, Flutter, Tailwind, TMap/Kakao) -->
-    <g transform="translate(25, 25)">
-      <rect width="560" height="410" rx="22" fill="#FFFFFF" stroke="#EA580C" stroke-width="2" />
+    <!-- 1-1. 상단: 관리자 관제 웹 (React) -->
+    <g transform="translate(25, 30)">
+      <rect width="310" height="220" rx="20" fill="#FFFBF7" stroke="#FDBA74" stroke-width="1.8" />
+      
+      <g transform="translate(130, 25)">${LOGOS.react}</g>
+      
+      <text x="155" y="110" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="19" font-weight="900" fill="#0F172A" text-anchor="middle">
+        React.js
+      </text>
+      <text x="155" y="134" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="13.5" font-weight="bold" fill="#EA580C" text-anchor="middle">
+        기관 관리자 종합 관제 웹
+      </text>
+      <text x="155" y="156" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12" fill="#64748B" text-anchor="middle">
+        전 차량 관제 · 원생 배차 · 출결/수납 관리
+      </text>
 
-      <!-- 1. React.js (상단 메인) -->
-      <g transform="translate(280, 25)">
-        <g transform="translate(-32, 0)">${LOGOS.react}</g>
-        <text x="0" y="85" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="20" font-weight="900" fill="#0F172A" text-anchor="middle">
-          React.js
-        </text>
-        <text x="0" y="106" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#0284C7" text-anchor="middle">
-          (관리자 종합 관제 웹)
-        </text>
-      </g>
-
-      <!-- 2. Vite (좌측) -->
-      <g transform="translate(95, 175)">
-        <g transform="translate(-24, 0)">${LOGOS.vite}</g>
-        <text x="0" y="70" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
-          Vite
-        </text>
-        <text x="0" y="90" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#8B5CF6" text-anchor="middle">
-          Fast Build Tool
-        </text>
-      </g>
-
-      <!-- 3. Flutter (중앙: 4대 앱) -->
-      <g transform="translate(280, 175)">
-        <g transform="translate(-25, 0)">${LOGOS.flutter}</g>
-        <text x="0" y="70" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
-          Flutter 3.x
-        </text>
-        <text x="0" y="90" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#0284C7" text-anchor="middle">
-          기사/교사/학부모 앱
-        </text>
-      </g>
-
-      <!-- 4. Tailwind CSS (우측) -->
-      <g transform="translate(465, 175)">
-        <g transform="translate(-24, 0)">${LOGOS.tailwind}</g>
-        <text x="0" y="70" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
-          Tailwind CSS
-        </text>
-        <text x="0" y="90" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#06B6D4" text-anchor="middle">
-          Utility-First UI
-        </text>
-      </g>
-
-      <!-- 하단: TMap & Kakao SDK 뱃지 -->
-      <g transform="translate(205, 335)">
-        <rect width="150" height="34" rx="17" fill="#EFF6FF" stroke="#BFDBFE" stroke-width="1.2" />
-        <text x="75" y="22" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" font-weight="bold" fill="#1D4ED8" text-anchor="middle">
-          🗺️ TMap &amp; Kakao SDK
+      <g transform="translate(70, 175)">
+        <rect width="170" height="28" rx="14" fill="#EFF6FF" />
+        <text x="85" y="19" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" font-weight="bold" fill="#1D4ED8" text-anchor="middle">
+          Vite + Tailwind CSS
         </text>
       </g>
     </g>
 
-    <!-- 내부 오른쪽: Amazon S3 -->
-    <g transform="translate(675, 150)">
-      <g transform="translate(5, 0)">${LOGOS.s3}</g>
-      <text x="40" y="105" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="19" font-weight="900" fill="#0F172A" text-anchor="middle">
-        Amazon S3
+    <!-- 1-2. 하단: 4대 전용 모바일 앱 (Flutter) -->
+    <g transform="translate(25, 275)">
+      <rect width="310" height="390" rx="20" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.8" />
+      
+      <g transform="translate(133, 22)">${LOGOS.flutter}</g>
+      
+      <text x="155" y="105" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="19" font-weight="900" fill="#0F172A" text-anchor="middle">
+        Flutter 3.x
       </text>
-      <text x="40" y="128" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#64748B" text-anchor="middle">
-        (사진·서식 스토리지)
+      <text x="155" y="128" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="13.5" font-weight="bold" fill="#0284C7" text-anchor="middle">
+        4대 역할별 전용 모바일 앱
       </text>
+
+      <!-- 4개 역할 칩 (초간결 단순화) -->
+      <g transform="translate(20, 150)">
+        <!-- 기사 -->
+        <g transform="translate(0, 0)">
+          <rect width="270" height="48" rx="12" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.2" />
+          <text x="20" y="31" font-size="18">🧢</text>
+          <text x="50" y="30" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="14" font-weight="900" fill="#0F172A">
+            기사 전용 앱
+          </text>
+          <text x="250" y="30" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12" fill="#64748B" text-anchor="end">
+            TMap 네비 · GPS 전송
+          </text>
+        </g>
+
+        <!-- 차량교사 -->
+        <g transform="translate(0, 56)">
+          <rect width="270" height="48" rx="12" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.2" />
+          <text x="20" y="31" font-size="18">📋</text>
+          <text x="50" y="30" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="14" font-weight="900" fill="#0F172A">
+            인솔교사 앱
+          </text>
+          <text x="250" y="30" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12" fill="#64748B" text-anchor="end">
+            탑승 인원 NFC/QR 체크
+          </text>
+        </g>
+
+        <!-- 담임교사 -->
+        <g transform="translate(0, 112)">
+          <rect width="270" height="48" rx="12" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.2" />
+          <text x="20" y="31" font-size="18">👩‍🏫</text>
+          <text x="50" y="30" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="14" font-weight="900" fill="#0F172A">
+            담임교사 앱
+          </text>
+          <text x="250" y="30" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12" fill="#64748B" text-anchor="end">
+            반별 원아 출결 동기화
+          </text>
+        </g>
+
+        <!-- 학부모 -->
+        <g transform="translate(0, 168)">
+          <rect width="270" height="48" rx="12" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.2" />
+          <text x="20" y="31" font-size="18">👨‍👩‍👧</text>
+          <text x="50" y="30" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="14" font-weight="900" fill="#0F172A">
+            학부모 전용 앱
+          </text>
+          <text x="250" y="30" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12" fill="#64748B" text-anchor="end">
+            실시간 셔틀 위치 · 도착 알림
+          </text>
+        </g>
+      </g>
     </g>
   </g>
 
-  <!-- ============================================================== -->
-  <!-- [중앙 연결] Front-End <-> Back-End 양방향 꺾임 화살표 -->
-  <!-- ============================================================== -->
+  <!-- ========================================================================= -->
+  <!-- [통신 화살표] Client <-> Nginx / Backend -->
+  <!-- ========================================================================= -->
   <g fill="none" stroke="#EA580C" stroke-width="2.5">
-    <path d="M 890 320 L 980 320 L 980 370 L 1060 370" marker-end="url(#arrowOrange)" />
-    <path d="M 1060 430 L 980 430 L 980 480 L 890 480" marker-end="url(#arrowOrange)" />
+    <path d="M 420 225 L 530 225" marker-start="url(#arrowLeft)" marker-end="url(#arrowRight)" />
+    <path d="M 420 540 L 530 540" marker-start="url(#arrowLeft)" marker-end="url(#arrowRight)" />
   </g>
-  <text x="980" y="305" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" font-weight="bold" fill="#EA580C" text-anchor="middle">
-    REST API
-  </text>
-  <text x="980" y="505" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" font-weight="bold" fill="#EA580C" text-anchor="middle">
-    WebSocket
-  </text>
+  <g transform="translate(475, 205)">
+    <rect x="-42" y="-12" width="84" height="24" rx="12" fill="#FFFFFF" stroke="#EA580C" stroke-width="1.2" />
+    <text x="0" y="4.5" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11" font-weight="bold" fill="#EA580C" text-anchor="middle">
+      HTTPS ↔
+    </text>
+  </g>
+  <g transform="translate(475, 520)">
+    <rect x="-48" y="-12" width="96" height="24" rx="12" fill="#FFFFFF" stroke="#EA580C" stroke-width="1.2" />
+    <text x="0" y="4.5" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11" font-weight="bold" fill="#EA580C" text-anchor="middle">
+      WebSocket ↔
+    </text>
+  </g>
 
-  <!-- ============================================================== -->
-  <!-- [우측] Back — End 박스 (요청에 따라 위치 반전 및 AWS EC2 추가!) -->
-  <!-- ============================================================== -->
-  <g transform="translate(1070, 140)">
-    <text x="235" y="-12" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="24" font-weight="900" fill="#0F172A" text-anchor="middle">
-      Back — End
+  <!-- ========================================================================= -->
+  <!-- 2. [중앙] Server Layer (Nginx & NestJS 코어 단순화) -->
+  <!-- ========================================================================= -->
+  <!-- 2-1. 중앙 상단: AWS EC2 & NGINX 게이트웨이 -->
+  <g transform="translate(530, 135)">
+    <rect width="520" height="120" rx="22" fill="#FFFFFF" stroke="#EA580C" stroke-width="2.5" />
+    
+    <g transform="translate(25, 20)">${LOGOS.ec2}</g>
+    <g transform="translate(85, 20)">${LOGOS.nginx}</g>
+    
+    <text x="145" y="38" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="18" font-weight="900" fill="#0F172A">
+      AWS EC2 &amp; NGINX
+    </text>
+    <text x="145" y="58" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#64748B">
+      리버스 프록시 (Reverse Proxy) · SSL/HTTPS 보안 암호화
     </text>
 
-    <!-- 메인 오렌지 둥근 박스 (470 x 640) -->
-    <rect width="470" height="640" rx="28" fill="#FFFFFF" stroke="#EA580C" stroke-width="3" />
+    <!-- 간결한 3대 핵심 역할 배지 -->
+    <g transform="translate(25, 75)">
+      <rect width="145" height="30" rx="8" fill="#F0FDF4" />
+      <text x="72" y="19" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" font-weight="bold" fill="#166534" text-anchor="middle">
+        🛡️ SSL (HTTPS) 암호화
+      </text>
 
-    <!-- 1. NestJS Core Server -->
-    <g transform="translate(35, 30)">
+      <rect x="160" width="150" height="30" rx="8" fill="#EFF6FF" />
+      <text x="235" y="19" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" font-weight="bold" fill="#1E40AF" text-anchor="middle">
+        ⚡ WSS 웹소켓 포워딩
+      </text>
+
+      <rect x="325" width="145" height="30" rx="8" fill="#FFF7ED" />
+      <text x="397" y="19" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" font-weight="bold" fill="#C2410C" text-anchor="middle">
+        🌐 React 웹 호스팅
+      </text>
+    </g>
+  </g>
+
+  <!-- Nginx -> 백엔드 하향 화살표 -->
+  <path d="M 790 255 L 790 285" stroke="#EA580C" stroke-width="2.5" fill="none" marker-end="url(#arrowDown)" />
+
+  <!-- 2-2. 중앙 메인: Back — End Core (NestJS 핵심 기능 6개 칩 그리드) -->
+  <g transform="translate(530, 295)">
+    <text x="260" y="-10" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="22" font-weight="900" fill="#0F172A" text-anchor="middle">
+      Back — End Core
+    </text>
+
+    <!-- 메인 오렌지 둥근 박스 (520 x 535) -->
+    <rect width="520" height="535" rx="28" fill="#FFFFFF" stroke="#EA580C" stroke-width="3" />
+
+    <!-- 상단 헤더: NestJS + Socket.IO -->
+    <g transform="translate(25, 20)">
       <g transform="translate(0, 0)">${LOGOS.nestjs}</g>
-      <text x="75" y="24" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="17" font-weight="900" fill="#0F172A">
-        NestJS Core Server
+      <g transform="translate(58, 0)">${LOGOS.socketio}</g>
+      <text x="120" y="24" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="18" font-weight="900" fill="#0F172A">
+        NestJS Server &amp; Socket.IO
       </text>
-      <text x="75" y="44" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#64748B">
-        RESTful API &amp; 비즈니스 로직
-      </text>
-    </g>
-
-    <!-- 2. PostgreSQL 16 (PostGIS) -->
-    <g transform="translate(35, 120)">
-      <g transform="translate(0, 0)">${LOGOS.postgresql}</g>
-      <text x="75" y="24" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="17" font-weight="900" fill="#0F172A">
-        PostgreSQL 16
-      </text>
-      <text x="75" y="44" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#64748B">
-        PostGIS 공간 데이터 &amp; 원생 DB
+      <text x="120" y="44" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#64748B">
+        RESTful API 및 실시간 양방향 관제 브로커
       </text>
     </g>
 
-    <!-- 3. Redis 7 -->
-    <g transform="translate(35, 210)">
-      <g transform="translate(0, 0)">${LOGOS.redis}</g>
-      <text x="75" y="24" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="17" font-weight="900" fill="#0F172A">
+    <!-- 6대 핵심 비즈니스 로직 (2열 3행 단순 카드 그리드) -->
+    <g transform="translate(25, 85)">
+      <!-- 1. 보안/인증 -->
+      <g transform="translate(0, 0)">
+        <rect width="225" height="95" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+        <text x="20" y="38" font-size="24">🔐</text>
+        <text x="56" y="34" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="15" font-weight="900" fill="#0F172A">
+          보안 및 인증
+        </text>
+        <text x="20" y="65" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#64748B">
+          JWT 토큰 · OTP 인증
+        </text>
+        <text x="20" y="82" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#64748B">
+          5단계 RBAC 역할 권한
+        </text>
+      </g>
+
+      <!-- 2. 실시간 GPS -->
+      <g transform="translate(245, 0)">
+        <rect width="225" height="95" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+        <text x="20" y="38" font-size="24">📍</text>
+        <text x="56" y="34" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="15" font-weight="900" fill="#0F172A">
+          실시간 GPS 관제
+        </text>
+        <text x="20" y="65" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#64748B">
+          0.2초 초저지연 브로드캐스트
+        </text>
+        <text x="20" y="82" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#64748B">
+          실시간 버스 좌표 스트림
+        </text>
+      </g>
+
+      <!-- 3. 결제 자동 반영 -->
+      <g transform="translate(0, 110)">
+        <rect width="225" height="95" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+        <text x="20" y="38" font-size="24">💳</text>
+        <text x="56" y="34" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="15" font-weight="900" fill="#0F172A">
+          원비 수납 &amp; 결제
+        </text>
+        <text x="20" y="65" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#64748B">
+          셔틀 이용료 자동 정산
+        </text>
+        <text x="20" y="82" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#64748B">
+          모바일 영수증 즉시 발송
+        </text>
+      </g>
+
+      <!-- 4. 출결 캘린더 -->
+      <g transform="translate(245, 110)">
+        <rect width="225" height="95" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+        <text x="20" y="38" font-size="24">📅</text>
+        <text x="56" y="34" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="15" font-weight="900" fill="#0F172A">
+          스마트 출결 관리
+        </text>
+        <text x="20" y="65" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#64748B">
+          승하차 실시간 기록
+        </text>
+        <text x="20" y="82" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#64748B">
+          휴원·출석부 자동 동기화
+        </text>
+      </g>
+
+      <!-- 5. 원아 배차 & 서류 -->
+      <g transform="translate(0, 220)">
+        <rect width="225" height="95" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+        <text x="20" y="38" font-size="24">📁</text>
+        <text x="56" y="34" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="15" font-weight="900" fill="#0F172A">
+          노선 배차 &amp; 서류
+        </text>
+        <text x="20" y="65" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#64748B">
+          정류장 매칭 자동 배차
+        </text>
+        <text x="20" y="82" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#64748B">
+          안전 점검표 전자 문서화
+        </text>
+      </g>
+
+      <!-- 6. 스마트 푸시 알림 -->
+      <g transform="translate(245, 220)">
+        <rect width="225" height="95" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+        <text x="20" y="38" font-size="24">🔔</text>
+        <text x="56" y="34" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="15" font-weight="900" fill="#0F172A">
+          스마트 푸시 알림
+        </text>
+        <text x="20" y="65" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#64748B">
+          도착 3분 전 자동 안내
+        </text>
+        <text x="20" y="82" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11.5" fill="#64748B">
+          승하차 및 긴급 공지 전송
+        </text>
+      </g>
+    </g>
+
+    <!-- 하단 기반 기술 태그 -->
+    <g transform="translate(130, 435)">
+      <rect width="260" height="38" rx="19" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1" />
+      <text x="130" y="24" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="13" font-weight="bold" fill="#0F172A" text-anchor="middle">
+        Node.js  |  TypeScript  |  TypeORM
+      </text>
+    </g>
+  </g>
+
+  <!-- ========================================================================= -->
+  <!-- [통신 화살표] Backend <-> Database / External API -->
+  <!-- ========================================================================= -->
+  <g fill="none" stroke="#EA580C" stroke-width="2.5">
+    <!-- 상단 DB 연결선 -->
+    <path d="M 1050 200 L 1140 200" marker-start="url(#arrowLeft)" marker-end="url(#arrowRight)" />
+    <!-- 하단 외부 API 연결선 -->
+    <path d="M 1050 620 L 1140 620" marker-start="url(#arrowLeft)" marker-end="url(#arrowRight)" />
+  </g>
+  <g transform="translate(1095, 180)">
+    <rect x="-35" y="-12" width="70" height="24" rx="12" fill="#FFFFFF" stroke="#EA580C" stroke-width="1.2" />
+    <text x="0" y="4.5" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11" font-weight="bold" fill="#EA580C" text-anchor="middle">
+      TCP / IP
+    </text>
+  </g>
+  <g transform="translate(1095, 600)">
+    <rect x="-38" y="-12" width="76" height="24" rx="12" fill="#FFFFFF" stroke="#EA580C" stroke-width="1.2" />
+    <text x="0" y="4.5" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="11" font-weight="bold" fill="#EA580C" text-anchor="middle">
+      REST API
+    </text>
+  </g>
+
+  <!-- ========================================================================= -->
+  <!-- 3. [우측] Data Layer & External Map APIs (단순화) -->
+  <!-- ========================================================================= -->
+  <!-- 3-1. 우측 상단: Database & Storage (간결한 3단 카드) -->
+  <g transform="translate(1140, 135)">
+    <text x="200" y="-12" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="22" font-weight="900" fill="#0F172A" text-anchor="middle">
+      Database &amp; Storage
+    </text>
+
+    <!-- 외곽 둥근 주황 박스 (400 x 310) -->
+    <rect width="400" height="310" rx="28" fill="#FFFFFF" stroke="#EA580C" stroke-width="3" />
+
+    <!-- 1. PostgreSQL -->
+    <g transform="translate(20, 22)">
+      <rect width="360" height="76" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <g transform="translate(16, 14)">${LOGOS.postgresql}</g>
+      <text x="75" y="32" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A">
+        PostgreSQL 16 &amp; PostGIS
+      </text>
+      <text x="75" y="54" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12" fill="#64748B">
+        원생·차량·노선 DB &amp; 지리 공간 데이터
+      </text>
+    </g>
+
+    <!-- 2. Redis -->
+    <g transform="translate(20, 114)">
+      <rect width="360" height="76" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <g transform="translate(16, 14)">${LOGOS.redis}</g>
+      <text x="75" y="32" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A">
         Redis 7 (In-Memory)
       </text>
-      <text x="75" y="44" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#64748B">
-        실시간 버스 GPS 좌표 캐시
+      <text x="75" y="54" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12" fill="#64748B">
+        실시간 셔틀 GPS 좌표 초고속 캐시
       </text>
     </g>
 
-    <!-- 4. Socket.IO -->
-    <g transform="translate(35, 300)">
-      <g transform="translate(0, 0)">${LOGOS.socketio}</g>
-      <text x="75" y="24" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="17" font-weight="900" fill="#0F172A">
-        Socket.IO
+    <!-- 3. Amazon S3 -->
+    <g transform="translate(20, 206)">
+      <rect width="360" height="76" rx="14" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <g transform="translate(16, 14)">${LOGOS.s3}</g>
+      <text x="75" y="32" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A">
+        Amazon S3 (Cloud Storage)
       </text>
-      <text x="75" y="44" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#64748B">
-        0.2초 초저지연 WebSocket 브로커
-      </text>
-    </g>
-
-    <!-- 5. AWS EC2 (실제 서버 배포 호스팅 인프라 반영!) -->
-    <g transform="translate(35, 390)">
-      <g transform="translate(0, 0)">${LOGOS.ec2}</g>
-      <text x="75" y="24" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="17" font-weight="900" fill="#0F172A">
-        AWS EC2 (Linux Server)
-      </text>
-      <text x="75" y="44" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#64748B">
-        클라우드 인스턴스 &amp; Nginx 호스팅
-      </text>
-    </g>
-
-    <!-- 중간 구분선 -->
-    <line x1="25" y1="480" x2="445" y2="480" stroke="#EA580C" stroke-width="2" />
-
-    <!-- 하단 런타임 & 언어 (Node.js & TypeScript) -->
-    <g transform="translate(100, 510)">
-      ${LOGOS.nodejs}
-      <text x="25" y="75" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="15" font-weight="bold" fill="#0F172A" text-anchor="middle">
-        Node.js
-      </text>
-    </g>
-
-    <g transform="translate(310, 510)">
-      ${LOGOS.typescript}
-      <text x="25" y="75" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="15" font-weight="bold" fill="#0F172A" text-anchor="middle">
-        TypeScript
+      <text x="75" y="54" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12" fill="#64748B">
+        원아 프로필 사진 &amp; 안전 점검 서류 보관
       </text>
     </g>
   </g>
 
-  <!-- ============================================================== -->
-  <!-- 하단 영역 : Users (좌측 Front-End 아래) & GitHub/Git (우측) -->
-  <!-- ============================================================== -->
-  <!-- 1. Front-End 아래 -> 굵은 오렌지 하향 화살표 -> Users (사용자) -->
-  <g transform="translate(320, 610)">
-    <path d="M 30 50 L 15 30 H 25 V 0 H 35 V 30 H 45 Z" fill="#EA580C" />
+  <!-- 3-2. 우측 하단: External Map & SDK (간결한 2단 카드) -->
+  <g transform="translate(1140, 475)">
+    <text x="200" y="-12" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="22" font-weight="900" fill="#0F172A" text-anchor="middle">
+      External Map &amp; SDK
+    </text>
 
-    <!-- User 실루엣 -->
-    <g transform="translate(0, 65)">
-      ${LOGOS.user}
-      <text x="30" y="80" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
-        Users
+    <!-- 외곽 둥근 주황 박스 (400 x 355) -->
+    <rect width="400" height="355" rx="28" fill="#FFFFFF" stroke="#EA580C" stroke-width="3" />
+
+    <!-- 1. TMap API -->
+    <g transform="translate(20, 30)">
+      <rect width="360" height="95" rx="16" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <g transform="translate(16, 23)">${LOGOS.tmap}</g>
+      <text x="78" y="42" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="17" font-weight="900" fill="#0F172A">
+        SK TMap 모빌리티 API
       </text>
-      <text x="30" y="100" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12" fill="#64748B" text-anchor="middle">
-        (관리자·기사·교사·학부모)
-      </text>
-    </g>
-  </g>
-
-  <!-- 2. Amazon S3 / 인프라 아래 -> 굵은 오렌지 양방향 화살표 -> GitHub & Git -->
-  <g transform="translate(680, 610)">
-    <path d="M 30 0 L 15 15 H 25 V 45 H 15 L 30 60 L 45 45 H 35 V 15 H 45 Z" fill="#EA580C" />
-
-    <!-- GitHub -->
-    <g transform="translate(5, 75)">
-      ${LOGOS.github}
-      <text x="25" y="72" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
-        GitHub
+      <text x="78" y="66" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#E22634" font-weight="bold">
+        실시간 교통 반영 경로 안내 &amp; ETA 산출
       </text>
     </g>
 
-    <!-- 양방향 수평 화살표 -->
-    <g transform="translate(95, 100)">
-      <path d="M 0 8 L 10 0 V 5 H 30 V 0 L 40 8 L 30 16 V 11 H 10 V 16 Z" fill="#EA580C" />
+    <!-- 2. Kakao Local API -->
+    <g transform="translate(20, 145)">
+      <rect width="360" height="95" rx="16" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="1.2" />
+      <g transform="translate(16, 23)">${LOGOS.kakao}</g>
+      <text x="78" y="42" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="17" font-weight="900" fill="#0F172A">
+        카카오 로컬 &amp; 지도 SDK
+      </text>
+      <text x="78" y="66" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" fill="#B45309" font-weight="bold">
+        주소 ↔ 좌표 지오코딩 및 웹 지도 시각화
+      </text>
     </g>
 
-    <!-- Git -->
-    <g transform="translate(165, 75)">
-      ${LOGOS.git}
-      <text x="25" y="72" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="16" font-weight="900" fill="#0F172A" text-anchor="middle">
-        Git
+    <!-- 요약 칩 -->
+    <g transform="translate(45, 265)">
+      <rect width="310" height="55" rx="14" fill="#FFF7ED" stroke="#FED7AA" stroke-width="1" />
+      <text x="155" y="33" font-family="'Malgun Gothic', 'Arial', sans-serif" font-size="12.5" font-weight="bold" fill="#C2410C" text-anchor="middle">
+        🗺️ 기사 네비게이션 &amp; 실시간 관제 맵 연동
       </text>
     </g>
   </g>
 
 </svg>`;
 
-// 파일 저장 경로
+// 파일 저장 경로 (깃 푸시 절대 하지 않음!)
 const outputSvgPath = path.resolve(__dirname, 'clean_system_architecture.svg');
 const outputPngPath = path.resolve(__dirname, 'clean_system_architecture.png');
 const downloadsPngPath = 'C:/Users/favid/Downloads/Takeme_개발환경_구조도.png';
+const detailedPngPath = 'C:/Users/favid/Downloads/Takeme_시스템_구조도_상세.png';
 
 fs.writeFileSync(outputSvgPath, svgContent, 'utf-8');
 
@@ -416,8 +568,8 @@ try {
 
   fs.writeFileSync(outputPngPath, pngBuffer);
   fs.writeFileSync(downloadsPngPath, pngBuffer);
-  fs.writeFileSync('C:/Users/favid/Downloads/Takeme_단순_시스템구조도.png', pngBuffer);
-  console.log('좌우 반전 및 AWS EC2 추가 완성 PNG 저장 성공:', downloadsPngPath);
+  fs.writeFileSync(detailedPngPath, pngBuffer);
+  console.log('글씨를 대폭 줄이고 단순화한 시스템 구조도 PNG 저장 성공!');
 } catch (e) {
   console.error('PNG 변환 에러:', e);
 }

@@ -1557,12 +1557,16 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   };
 
   // Sort students list based on current sort criterion: 이름순, 나이순, 반 순서
-  // 변동사항(당일 1회 탑승, 결석, 픽업, 셔틀 대기 등)이 있는 원아는 최상단에 우선 정렬
+  // 변동사항(당일 1회 탑승, 결석, 픽업, 지각, 셔틀 대기 등)이 있는 원아는 최상단에 우선 정렬
   const sortStudentsList = useCallback((list) => {
     return [...list].sort((a, b) => {
       const aHasChange = Boolean(
         a.isOneTimeRide || 
         a.oneTimeType || 
+        a.overrideType ||
+        a.isLateness ||
+        a.isPickup ||
+        a.isAbsence ||
         a.boardStatus === 'ABSENT' || 
         a.boardStatus === 'SELF_PICKUP' || 
         (a.isNotRiding && (a.boardStatus === 'WAITING' || a.boardStatus === 'BOARDED')) ||
@@ -1572,6 +1576,10 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       const bHasChange = Boolean(
         b.isOneTimeRide || 
         b.oneTimeType || 
+        b.overrideType ||
+        b.isLateness ||
+        b.isPickup ||
+        b.isAbsence ||
         b.boardStatus === 'ABSENT' || 
         b.boardStatus === 'SELF_PICKUP' || 
         (b.isNotRiding && (b.boardStatus === 'WAITING' || b.boardStatus === 'BOARDED')) ||
@@ -8155,6 +8163,22 @@ const parseKindergartenExcelSheet = (sheet) => {
                     <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-300">
                       당일 1회 탑승
                     </span>
+                  ) : (st.isAbsence || st.overrideType === 'ABSENCE') ? (
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
+                      결석
+                    </span>
+                  ) : (st.isLateness || st.overrideType === 'LATENESS') ? (
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                      등원 지각
+                    </span>
+                  ) : (st.isPickup || st.overrideType === 'PICKUP') ? (
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300">
+                      직접 픽업
+                    </span>
+                  ) : st.overrideType === 'INDIVIDUAL_DISMISSAL' ? (
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-300">
+                      개별 하원
+                    </span>
                   ) : null}
                 </div>
                 <div className="text-sm text-slate-700 mb-2">{st.raw?.['유치원명'] || st.raw?.['학교명']} {st.raw?.['반명'] ? `(${st.raw?.['반명']})` : ''} {st.raw?.['하원구분'] ? `[${st.raw?.['하원구분']}]` : ''}</div>
@@ -8204,6 +8228,34 @@ const parseKindergartenExcelSheet = (sheet) => {
                   <div className="bg-rose-50 text-rose-700 border border-rose-200 text-xs font-black p-2 rounded-lg mb-2 flex items-center justify-center gap-1.5 shadow-2xs">
                     <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
                     <span>[당일 1회 탑승] 미탑승 원아 셔틀 신청 / 당일 임시 위치</span>
+                  </div>
+                )}
+
+                {(st.isAbsence || st.overrideType === 'ABSENCE') && (
+                  <div className="bg-rose-50 text-rose-800 border border-rose-200 text-xs font-black p-2 rounded-lg mb-2 flex items-center justify-center gap-1.5 shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
+                    <span>[결석] 원아 결석 신청 완료 {st.overrideReason ? `(${st.overrideReason})` : ''}</span>
+                  </div>
+                )}
+
+                {(st.isLateness || st.overrideType === 'LATENESS') && (
+                  <div className="bg-amber-50 text-amber-800 border border-amber-200 text-xs font-black p-2 rounded-lg mb-2 flex items-center justify-center gap-1.5 shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                    <span>[등원 지각] 병원/개인 사유 개별 등원 {st.overrideReason ? `(${st.overrideReason})` : ''}</span>
+                  </div>
+                )}
+
+                {(st.isPickup || st.overrideType === 'PICKUP') && (
+                  <div className="bg-blue-50 text-blue-800 border border-blue-200 text-xs font-black p-2 rounded-lg mb-2 flex items-center justify-center gap-1.5 shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                    <span>[직접 픽업] 보호자 직접 하원 픽업 (셔틀 미탑승) {st.overrideReason ? `(${st.overrideReason})` : ''}</span>
+                  </div>
+                )}
+
+                {(st.overrideType === 'INDIVIDUAL_DISMISSAL') && (
+                  <div className="bg-purple-50 text-purple-800 border border-purple-200 text-xs font-black p-2 rounded-lg mb-2 flex items-center justify-center gap-1.5 shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></span>
+                    <span>[개별 하원/연장보육] 셔틀 미탑승 {st.overrideReason ? `(${st.overrideReason})` : ''}</span>
                   </div>
                 )}
 

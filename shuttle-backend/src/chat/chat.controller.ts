@@ -197,4 +197,32 @@ export class ChatController {
   ) {
     return this.chatService.pushParentNotification(Number(id), user.email);
   }
+
+  @Post('leave-request')
+  async createLeaveRequest(
+    @AuthUser() user: JwtPayload,
+    @Body() body: {
+      roomId: number;
+      applicantName: string;
+      applicantRole: string;
+      leaveType: string;
+      startDate: string;
+      endDate: string;
+      needSubstitute: boolean;
+      reason: string;
+    },
+  ) {
+    return this.chatService.createLeaveRequest(body, user.email);
+  }
+
+  @Post('leave-request/:id/decision')
+  async decideLeaveRequest(
+    @AuthUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body('decision') decision: 'APPROVED' | 'REJECTED' | 'APPROVE' | 'REJECT',
+    @Body('rejectionReason') rejectionReason?: string,
+  ) {
+    const normalizedDecision: 'APPROVED' | 'REJECTED' = (decision === 'APPROVE' || decision === 'APPROVED') ? 'APPROVED' : 'REJECTED';
+    return this.chatService.decideLeaveRequest(Number(id), normalizedDecision, user.email, rejectionReason);
+  }
 }

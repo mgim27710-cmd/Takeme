@@ -16,3 +16,4 @@ scratch/
 *.apk
 release_apks/
 /*.js
+.archify/
