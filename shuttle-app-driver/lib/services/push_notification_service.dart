@@ -6,6 +6,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import '../config.dart';
 import 'api_service.dart';
+import 'push_navigation.dart';
 
 /// 앱이 꺼져 있거나 백그라운드일 때 받은 푸시. 반드시 최상위 함수여야 한다.
 @pragma('vm:entry-point')
@@ -43,6 +44,7 @@ class PushNotificationService {
         initSettings,
         onDidReceiveNotificationResponse: (response) {
           debugPrint('[LocalNoti] Clicked notification: ${response.payload}');
+          PushNavigation.onPayload(response.payload);
         },
       );
 
@@ -96,6 +98,20 @@ class PushNotificationService {
         debugPrint('[PushNotificationService] Initial FCM Token: $token');
         await registerTokenWithServer(token);
       }
+
+      // 알림을 눌러 앱을 열었을 때 (백그라운드)
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        debugPrint('[PushNotificationService] onMessageOpenedApp: ${message.data}');
+        PushNavigation.onTap(message.data);
+      });
+
+      // 앱이 꺼져 있다가 알림을 눌러 켜졌을 때
+      FirebaseMessaging.instance.getInitialMessage().then((RemoteMessage? message) {
+        if (message != null) {
+          debugPrint('[PushNotificationService] getInitialMessage: ${message.data}');
+          PushNavigation.onTap(message.data, coldStart: true);
+        }
+      });
     } catch (e) {
       debugPrint('[PushNotificationService] Initialize error: $e');
     }

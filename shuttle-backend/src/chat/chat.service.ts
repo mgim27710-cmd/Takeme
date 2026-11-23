@@ -17,7 +17,7 @@ import { ChatGateway } from './chat.gateway';
 import { RoutingService } from '../routing/routing.service';
 import { ApprovalService } from '../approval/approval.service';
 import { formatTeacherName } from '../utils/teacher.util';
-import { getStudentClassName, isSameClass } from '../utils/school.util';
+import { getStudentClassName, isSameClass, kstDateString } from '../utils/school.util';
 import { isNotificationEnabled } from '../utils/notification.util';
 import { sendSnsPushNotification } from '../utils/sns.util';
 
@@ -1589,7 +1589,7 @@ export class ChatService implements OnModuleInit {
       longitude: data.longitude ? Number(data.longitude) : (studentObj?.longitude || vehicle?.academy?.longitude || 127.123),
       locationType: (data as any).locationType || 'PIN',
       rideType,
-      requestDate: data.requestDate || new Date().toISOString().split('T')[0],
+      requestDate: data.requestDate || kstDateString(),
       note: data.note || (rideType === 'TODAY_ONLY' ? '오늘 하루 하원 셔틀 탑승 희망 (익일 자동 픽업 원복)' : '정규 셔틀 탑승 및 구역 편입 희망'),
       status: 'PENDING',
     };
@@ -1783,7 +1783,7 @@ export class ChatService implements OnModuleInit {
       }
 
       const isTodayOnly = (payload.rideType || 'TODAY_ONLY') === 'TODAY_ONLY';
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = kstDateString();
 
       let rawObj = student.raw;
       if (typeof rawObj === 'string') {

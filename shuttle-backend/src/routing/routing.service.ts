@@ -3136,8 +3136,10 @@ export class RoutingService {
     const logs = [];
 
     // 1. Get OperationLogs for the date and vehicle
-    const opLog = await this.operationLogRepository.findOne({
+    // 한국 날짜로 저장하게 되면서 같은 날 등원·하원 운행 일지가 함께 있을 수 있으니 모두 가져와 합친다
+    const opLogs = await this.operationLogRepository.find({
       where: { dateString: date, vehicle: { id: vehicleId } },
+      order: { id: 'ASC' },
     });
 
     const toSafeIsoString = (val: any) => {
@@ -3146,7 +3148,7 @@ export class RoutingService {
       return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
     };
 
-    if (opLog) {
+    for (const opLog of opLogs) {
       if (opLog.startTime) {
         logs.push({
           time: toSafeIsoString(opLog.startTime),

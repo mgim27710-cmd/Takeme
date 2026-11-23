@@ -7,6 +7,7 @@ import 'screens/staff/staff_dashboard_screen.dart';
 import 'screens/teacher/homeroom_teacher_home_screen.dart';
 import 'utils/network_helper.dart';
 import 'services/push_notification_service.dart';
+import 'services/push_navigation.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'widgets/naver_route_map.dart';
 
@@ -29,6 +30,7 @@ class TakeMeTeacherApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: appNavigatorKey,
       title: 'TakeMe 교사',
       debugShowCheckedModeBanner: false,
       localizationsDelegates: const [

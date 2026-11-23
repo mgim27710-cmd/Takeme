@@ -8,6 +8,7 @@ import 'utils/network_helper.dart';
 import 'services/local_push.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'services/push_notification_service.dart';
+import 'services/push_navigation.dart';
 import 'widgets/naver_route_map.dart';
 
 void main() async {
@@ -31,6 +32,7 @@ class TakeMeParentApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: appNavigatorKey,
       title: 'TakeMe 학부모',
       debugShowCheckedModeBanner: false,
       localizationsDelegates: const [

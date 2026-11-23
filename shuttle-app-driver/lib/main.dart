@@ -9,6 +9,7 @@ import 'screens/driver/driver_home_screen.dart';
 import 'widgets/nav_map_view.dart';
 import 'utils/network_helper.dart';
 import 'services/push_notification_service.dart';
+import 'services/push_navigation.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 void main() async {
@@ -44,6 +45,7 @@ class TakeMeDriverApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: appNavigatorKey,
       title: 'TakeMe 기사',
       debugShowCheckedModeBanner: false,
       localizationsDelegates: const [

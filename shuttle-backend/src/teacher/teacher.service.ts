@@ -36,6 +36,21 @@ function guardianFields(s: Student) {
   };
 }
 
+/**
+ * 그날 승인된 위치 변경·일회성 탑승의 주소·좌표를 학생 객체에 '임시 값'으로 붙인다.
+ * 학생의 실제 칼럼(address, latitude, longitude)은 바꾸지 않는다. (바꾼 채로 저장되면 그날 한 번만 쓸 위치가 영구로 남는다)
+ */
+function applyOverrideLocation(s: Student, o: ScheduleOverride) {
+  if (o.newAddress) (s as any).overrideAddress = o.newAddress;
+  if (o.latitude != null && o.longitude != null) {
+    (s as any).overrideLatitude = Number(o.latitude);
+    (s as any).overrideLongitude = Number(o.longitude);
+  }
+}
+const effectiveAddress = (s: Student) => ((s as any).overrideAddress as string | undefined) || s.address;
+const effectiveLatitude = (s: Student) => ((s as any).overrideLatitude as number | undefined) ?? s.latitude;
+const effectiveLongitude = (s: Student) => ((s as any).overrideLongitude as number | undefined) ?? s.longitude;
+
 @Injectable()
 export class TeacherService {
   constructor(
@@ -61,7 +76,7 @@ export class TeacherService {
 
   private async isTodayHoliday(academyId?: number | null): Promise<boolean> {
     if (!academyId) return false;
-    const today = new Date().toISOString().split('T')[0];
+    const today = kstDateString();
     const holiday = await this.academyHolidayRepository.findOne({
       where: {
         academy: { id: academyId },
@@ -74,7 +89,7 @@ export class TeacherService {
   }
 
   private async getActiveOverridesForToday(): Promise<ScheduleOverride[]> {
-    const today = new Date().toISOString().split('T')[0];
+    const today = kstDateString();
     return this.scheduleOverrideRepository.find({
       where: {
         startDate: LessThanOrEqual(today),
@@ -140,7 +155,7 @@ export class TeacherService {
           if (override.newVehicleId && override.newVehicleId !== vehicleId) {
             return null; // moved to another vehicle
           }
-          if (override.newAddress) s.address = override.newAddress;
+          applyOverrideLocation(s, override);
           if (override.targetTime && s.raw) {
             s.raw = { ...s.raw, '예상탑승시간': override.targetTime };
           }
@@ -171,7 +186,7 @@ export class TeacherService {
       (s as any).isOverride = true;
       (s as any).isOneTimeBoarding = override?.overrideType === OverrideType.ONE_TIME_BOARDING;
       (s as any).overrideType = override?.overrideType;
-      if (override?.newAddress) s.address = override.newAddress;
+      if (override) applyOverrideLocation(s, override);
       if (override?.targetTime && s.raw) {
         s.raw = { ...s.raw, '예상탑승시간': override.targetTime };
       }
@@ -298,9 +313,9 @@ export class TeacherService {
         return {
           id: s.id,
           name: s.adminDisplayName || s.name,
-          address: s.address,
-          latitude: s.latitude,
-          longitude: s.longitude,
+          address: effectiveAddress(s),
+          latitude: effectiveLatitude(s),
+          longitude: effectiveLongitude(s),
           boarded: s.boardStatus === 'BOARDED',
           absent: s.boardStatus === 'ABSENT',
           dropped: s.boardStatus === 'DROPPED',
@@ -327,9 +342,9 @@ export class TeacherService {
         return {
           id: s.id,
           name: s.adminDisplayName || s.name,
-          address: s.address,
-          latitude: s.latitude,
-          longitude: s.longitude,
+          address: effectiveAddress(s),
+          latitude: effectiveLatitude(s),
+          longitude: effectiveLongitude(s),
           boarded: s.boardStatus === 'BOARDED',
           absent: s.boardStatus === 'ABSENT',
           dropped: s.boardStatus === 'DROPPED',
@@ -370,7 +385,7 @@ export class TeacherService {
 
     // Convert to route stops
     let stops = students
-      .filter(s => s.boardStatus === 'WAITING' && s.latitude && s.longitude)
+      .filter(s => s.boardStatus === 'WAITING' && effectiveLatitude(s) && effectiveLongitude(s))
       .map(s => {
         const raw = s.raw || {};
         const weekly = raw['요일별일정'] || raw.weeklySchedules;
@@ -378,7 +393,8 @@ export class TeacherService {
 
         const mornStop = daySched?.inLocation || s.boardingLocation || raw['등원지'] || raw['탑승지'] || s.address;
         const aftStop = daySched?.outLocation || s.dropoffLocation || raw['하차지'] || raw['하원지'] || s.address;
-        const stopAddress = (!isMorning && aftStop) ? aftStop : mornStop;
+        // 그날 승인된 위치 변경·일회성 탑승 주소가 있으면 그 주소가 가장 먼저
+        const stopAddress = (s as any).overrideAddress || ((!isMorning && aftStop) ? aftStop : mornStop);
 
         const defaultTime = isMorning ? '08:30' : '17:00';
         const expectedTime = isMorning
@@ -393,8 +409,8 @@ export class TeacherService {
           name: isOneTime ? `[일일] ${studentDisplayName}` : studentDisplayName,
           rawName: studentDisplayName,
           address: stopAddress,
-          latitude: parseFloat(s.latitude as any),
-          longitude: parseFloat(s.longitude as any),
+          latitude: parseFloat(effectiveLatitude(s) as any),
+          longitude: parseFloat(effectiveLongitude(s) as any),
           expectedTime,
           isOneTimeBoarding: isOneTime,
           isOneTime: isOneTime,
@@ -906,7 +922,7 @@ export class TeacherService {
     if (!vehicle) throw new BadRequestException('Assigned vehicle not found');
 
     const isMemoryOperating = this.locationGateway?.operatingVehicles?.get(vehicle.id) === true;
-    const dateString = new Date().toISOString().split('T')[0];
+    const dateString = kstDateString();
     const latestLog = await this.operationLogRepository.findOne({
       where: { vehicle: { id: vehicle.id }, dateString },
       order: { id: 'DESC' }
@@ -1000,7 +1016,7 @@ export class TeacherService {
     }
 
     const isMemoryOperating = this.locationGateway?.operatingVehicles?.get(vehicle.id) === true;
-    const dateString = new Date().toISOString().split('T')[0];
+    const dateString = kstDateString();
     const latestLog = await this.operationLogRepository.findOne({
       where: { vehicle: { id: vehicle.id }, dateString },
       order: { id: 'DESC' }
@@ -1077,7 +1093,7 @@ export class TeacherService {
       }
 
       // Create new OperationLog
-      const dateString = new Date().toISOString().split('T')[0];
+      const dateString = kstDateString();
       const log = this.operationLogRepository.create({
         vehicle,
         dateString,
@@ -1225,7 +1241,7 @@ export class TeacherService {
       }
 
       // Update the most recent OperationLog for today
-      const dateString = new Date().toISOString().split('T')[0];
+      const dateString = kstDateString();
       const latestLog = await this.operationLogRepository.findOne({
         where: { vehicle: { id: vehicle.id }, dateString },
         order: { id: 'DESC' }
@@ -1365,7 +1381,7 @@ export class TeacherService {
   }
 
   private async appendBoardingLog(vehicleId: number, studentId: number | null, studentName: string, method: string) {
-    const dateString = new Date().toISOString().split('T')[0];
+    const dateString = kstDateString();
     let latestLog = await this.operationLogRepository.findOne({
       where: { vehicle: { id: vehicleId }, dateString },
       order: { id: 'DESC' }
@@ -2153,7 +2169,7 @@ export class TeacherService {
     const student = await this.studentRepository.findOne({ where: { id: studentId } });
     if (!student) throw new NotFoundException('원아를 찾을 수 없습니다.');
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = kstDateString();
     const override = this.scheduleOverrideRepository.create({
       student,
       startDate: today,
