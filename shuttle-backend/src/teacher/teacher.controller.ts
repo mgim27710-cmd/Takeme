@@ -244,6 +244,15 @@ export class TeacherController {
     return this.teacherService.readMessage(email, messageId);
   }
 
+  @Get('academy/attendance-today')
+  async getAcademyAttendanceToday(
+    @Query('academyId') academyId: string,
+    @Query('date') date?: string,
+  ) {
+    if (!academyId) throw new BadRequestException('academyId가 필요합니다.');
+    return this.teacherService.getAcademyAttendanceToday(Number(academyId), date);
+  }
+
   @Get('homeroom/shuttle-status')
   async getHomeroomShuttleStatus(@AuthEmail() email: string) {
     if (!email) throw new BadRequestException('이메일이 필요합니다.');

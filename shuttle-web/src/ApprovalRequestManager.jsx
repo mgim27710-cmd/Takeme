@@ -65,13 +65,18 @@ export default function ApprovalRequestManager({
     const handleDecided = data => {
       loadRequests();
     };
+    const handleCancelled = () => {
+      loadRequests();
+    };
 
     socket.on('changeRequestCreated', handleCreated);
     socket.on('changeRequestDecided', handleDecided);
+    socket.on('changeRequestCancelled', handleCancelled);
 
     return () => {
       socket.off('changeRequestCreated', handleCreated);
       socket.off('changeRequestDecided', handleDecided);
+      socket.off('changeRequestCancelled', handleCancelled);
     };
   }, [socket]);
 

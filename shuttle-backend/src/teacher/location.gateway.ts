@@ -359,6 +359,16 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
 
   /**
+   * 당일 탑승 신청 취소 시 원장 웹 및 교직원 방에 실시간 통보
+   */
+  broadcastChangeRequestCancelled(academyId: number, data: { studentId: number; studentName?: string; requestId?: number }) {
+    if (!this.server || !academyId) return;
+    this.server.to(`academy_${academyId}`).emit('changeRequestCancelled', data);
+    this.server.to(academyStaffRoom(academyId)).emit('changeRequestCancelled', data);
+    this.broadcastRouteUpdated(academyId);
+  }
+
+  /**
    * 새 사진 업로드 알림 (기관 소켓 방 academy_{id})
    */
   broadcastMediaUploaded(academyId: number, mediaAsset: any) {

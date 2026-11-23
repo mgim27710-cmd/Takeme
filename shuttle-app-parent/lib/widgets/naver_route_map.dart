@@ -234,7 +234,7 @@ class NaverRouteMapState extends State<NaverRouteMap> {
         final icon = await _image(
           's_${s.isMine}_${s.label}',
           _StopBadge(label: s.label, mine: s.isMine),
-          s.isMine ? const Size(130, 34) : const Size(30, 30),
+          s.isMine ? const Size(36, 36) : const Size(30, 30),
         );
         if (!mounted) return;
         final m = NMarker(id: 'stop_$i', position: NLatLng(s.lat, s.lng), icon: icon, anchor: NPoint.relativeCenter);
@@ -372,25 +372,15 @@ class _StopBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     if (mine) {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        width: 36,
+        height: 36,
+        alignment: Alignment.center,
         decoration: BoxDecoration(
           color: const Color(0xFF7C3AED),
-          borderRadius: BorderRadius.circular(17),
-          border: Border.all(color: Colors.white, width: 2),
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 2.5),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.star_rounded, color: Colors.white, size: 16),
-            const SizedBox(width: 2),
-            Flexible(
-              child: Text(label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w900)),
-            ),
-          ],
-        ),
+        child: const Icon(Icons.star_rounded, color: Colors.amber, size: 24),
       );
     }
     return Container(

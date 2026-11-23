@@ -560,7 +560,7 @@ export class ApprovalService {
   async cancelTodayBoarding(callingUser: User, studentId: number) {
     const student = await this.studentRepo.findOne({
       where: { id: studentId },
-      relations: { parentUser: true, assignedVehicle: true },
+      relations: { parentUser: true, assignedVehicle: true, academy: true },
     });
     if (!student) throw new NotFoundException('원아를 찾을 수 없습니다.');
 
@@ -591,6 +591,54 @@ export class ApprovalService {
       startDate: todayStr,
       overrideType: OverrideType.ONE_TIME_BOARDING,
     });
+
+    // Student raw 임시 탑승 메타데이터 및 상태 완전 롤백
+    let rawObj: any = {};
+    try {
+      rawObj = typeof student.raw === 'string' ? JSON.parse(student.raw) : (student.raw || {});
+    } catch (_) {}
+
+    rawObj.isTemporaryRide = false;
+    delete rawObj.temporaryRideDate;
+    delete rawObj.rideType;
+    delete rawObj.isTemporaryLocation;
+    delete rawObj.tempRide;
+
+    if (rawObj.originalIsNotRiding !== undefined) {
+      student.isNotRiding = Boolean(rawObj.originalIsNotRiding);
+      delete rawObj.originalIsNotRiding;
+    } else {
+      student.isNotRiding = true;
+    }
+
+    if (rawObj.originalBoardingLocation !== undefined) {
+      student.boardingLocation = rawObj.originalBoardingLocation;
+      delete rawObj.originalBoardingLocation;
+    }
+
+    if (student.isNotRiding) {
+      student.assignedVehicle = null;
+      student.boardStatus = 'SELF_PICKUP';
+      await this.studentRepo.query(
+        `UPDATE student_schedules SET "assignedVehicleId" = NULL WHERE "studentId" = $1`,
+        [student.id],
+      ).catch(() => {});
+    }
+
+    if (student.approvalStatus === 'PENDING') {
+      student.approvalStatus = 'NONE';
+    }
+
+    student.raw = rawObj;
+    await this.studentRepo.save(student);
+
+    const academyId = student.academy?.id || callingUser.academyId;
+    if (academyId && this.locationGateway) {
+      this.locationGateway.broadcastChangeRequestCancelled(academyId, {
+        studentId: student.id,
+        studentName: student.adminDisplayName || student.name,
+      });
+    }
 
     return {
       success: true,

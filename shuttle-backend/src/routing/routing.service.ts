@@ -1445,10 +1445,9 @@ export class RoutingService {
       const isOneTimeRide = Boolean(
         isOneTimeBoarding ||
         (override && (override.overrideType === OverrideType.CHANGE_LOCATION || override.overrideType === OverrideType.PICKUP || override.overrideType === OverrideType.LATENESS || override.overrideType === OverrideType.INDIVIDUAL_DISMISSAL)) ||
-        parsedRaw.isTemporaryRide ||
-        parsedRaw.rideType === 'TODAY_ONLY' ||
-        parsedRaw.isTemporaryLocation ||
-        (st.isNotRiding && (st.boardStatus === 'WAITING' || st.boardStatus === 'BOARDED'))
+        (parsedRaw.isTemporaryRide && (!parsedRaw.temporaryRideDate || parsedRaw.temporaryRideDate === todayStr)) ||
+        (parsedRaw.rideType === 'TODAY_ONLY' && (!parsedRaw.temporaryRideDate || parsedRaw.temporaryRideDate === todayStr)) ||
+        parsedRaw.isTemporaryLocation
       );
 
       const effectiveBusId = (isOneTimeBoarding && override?.newVehicleId)

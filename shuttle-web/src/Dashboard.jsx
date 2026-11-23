@@ -1857,11 +1857,48 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       }
     });
 
+    socket.on('changeRequestCancelled', (data) => {
+      setPendingApprovalCount(prev => Math.max(0, prev - 1));
+      const studentName = data?.studentName || '원아';
+      handleIncomingDirectorAlert({
+        id: data?.requestId || Date.now(),
+        category: 'SHUTTLE_REQUEST',
+        title: `[신청 취소] ${studentName} 탑승 신청 취소`,
+        message: `${studentName} 원아의 당일 탑승 신청이 취소되었습니다.`,
+        timestamp: new Date().toISOString(),
+        data,
+      });
+      if (data?.studentId) {
+        setStudents(prev => prev.map(s => {
+          if (s.id !== data.studentId) return s;
+          const updatedRaw = { ...(s.raw || {}) };
+          delete updatedRaw.isTemporaryRide;
+          delete updatedRaw.rideType;
+          delete updatedRaw.temporaryRideDate;
+          delete updatedRaw.tempRide;
+          return {
+            ...s,
+            isOneTimeRide: false,
+            oneTimeType: null,
+            isNotRiding: updatedRaw.originalIsNotRiding !== undefined ? updatedRaw.originalIsNotRiding : true,
+            approvalStatus: 'NONE',
+            raw: updatedRaw,
+          };
+        }));
+      }
+      loadInitialState();
+    });
+    socket.on('routeUpdated', () => {
+      loadInitialState();
+    });
+
     return () => {
       socket.off('directorAlert', handleIncomingDirectorAlert);
       socket.off('globalDirectorAlert', handleIncomingDirectorAlert);
       socket.off('changeRequestCreated');
       socket.off('changeRequestDecided');
+      socket.off('changeRequestCancelled');
+      socket.off('routeUpdated');
       socket.disconnect();
       socketRef.current = null;
     };

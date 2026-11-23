@@ -17,6 +17,7 @@ import {
   getStaffNotifications,
 } from './documentStorage';
 import { openPrintDocument } from './pdfDocumentGenerator';
+import { API_BASE_URL } from '../config';
 
 const CATEGORIES = [
   { id: 'all', label: '전체 서류' },
@@ -68,8 +69,38 @@ export default function DocumentManager({
   const [showStaffNotiModal, setShowStaffNotiModal] = useState(false);
   const [staffNotiRoleFilter, setStaffNotiRoleFilter] = useState('all'); // 'all' | 'driver' | 'teacher'
 
-  // Sub Navigation Tabs: 'templates' (법정 서식 자동 발급) | 'expiry' (만료일 신호등 현황) | 'documents' (등록 서류 보관함)
+  // Sub Navigation Tabs: 'templates' (법정 서식 자동 발급) | 'expiry' (만료일 신호등 현황) | 'documents' (등록 서류 보관함) | 'attendance' (원아 출결서류)
   const [activeSubTab, setActiveSubTab] = useState('templates');
+
+  // 원아 출결서류 (실시간 반별 탑승·하차·출석 현황)
+  const [attendances, setAttendances] = useState([]);
+  const [attendanceDate, setAttendanceDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [attendanceClassFilter, setAttendanceClassFilter] = useState('ALL');
+  const [attendanceSearchKeyword, setAttendanceSearchKeyword] = useState('');
+  const [isLoadingAttendance, setIsLoadingAttendance] = useState(false);
+
+  const loadAttendance = async (dateArg) => {
+    const targetDate = dateArg || attendanceDate;
+    const targetAcademyId = academyId || currentUser?.academyId || 1;
+    setIsLoadingAttendance(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/teacher/academy/attendance-today?academyId=${targetAcademyId}&date=${targetDate}`);
+      if (res.ok) {
+        const data = await res.json();
+        setAttendances(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      console.warn('출결 기록 조회 실패:', err);
+    } finally {
+      setIsLoadingAttendance(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSubTab === 'attendance') {
+      loadAttendance(attendanceDate);
+    }
+  }, [activeSubTab, attendanceDate, academyId]);
 
   // Form states for upload modal
   const [uploadFile, setUploadFile] = useState(null);
@@ -561,6 +592,19 @@ export default function DocumentManager({
             <span className="bg-slate-200/80 text-slate-700 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
               {documents.length}
             </span>
+          </button>
+          <button
+            onClick={() => setActiveSubTab('attendance')}
+            className={`py-2 px-4 text-xs font-extrabold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+              activeSubTab === 'attendance'
+                ? 'bg-white text-blue-600 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+            </svg>
+            <span>원아 출결서류</span>
           </button>
         </div>
       </div>
@@ -1254,6 +1298,379 @@ export default function DocumentManager({
         )}
           </div>
         )}
+
+        {/* TAB 4: Student Attendance & Location Document Section (원아 출결서류) */}
+        {activeSubTab === 'attendance' && (() => {
+          // 1. Map attendances by studentId
+          const attMap = new Map();
+          attendances.forEach(a => {
+            if (a.studentId) attMap.set(Number(a.studentId), a);
+          });
+
+          // 2. Filter students by search and class
+          const filteredStudents = students.filter(st => {
+            const stName = st.name || '';
+            const stClass = st.className || st.raw?.['반명'] || st.raw?.['반'] || '기본반';
+            if (attendanceClassFilter !== 'ALL' && stClass !== attendanceClassFilter) return false;
+            if (attendanceSearchKeyword.trim()) {
+              const q = attendanceSearchKeyword.trim().toLowerCase();
+              return stName.toLowerCase().includes(q) || stClass.toLowerCase().includes(q) || (st.boardingLocation || '').toLowerCase().includes(q);
+            }
+            return true;
+          });
+
+          // 3. Extract unique classes
+          const allClasses = [...new Set(students.map(s => s.className || s.raw?.['반명'] || s.raw?.['반'] || '기본반'))].filter(Boolean);
+          const activeClasses = [...new Set(filteredStudents.map(s => s.className || s.raw?.['반명'] || s.raw?.['반'] || '기본반'))].filter(Boolean);
+
+          // 4. Calculate overall stats
+          let totalBoarded = 0;
+          let totalDropped = 0;
+          let totalAttended = 0;
+          let totalAbsent = 0;
+
+          students.forEach(st => {
+            const isBoarded = st.boardStatus === 'BOARDED' || st.boardStatus === 'DROPPED';
+            const isDropped = st.boardStatus === 'DROPPED';
+            const att = attMap.get(st.id);
+            const isAttended = att?.status === 'PRESENT' || st.raw?.attendanceStatus === 'PRESENT';
+            const isAbs = att?.status === 'ABSENT' || st.boardStatus === 'ABSENT';
+
+            if (isBoarded) totalBoarded++;
+            if (isDropped) totalDropped++;
+            if (isAttended) totalAttended++;
+            if (isAbs) totalAbsent++;
+          });
+
+          // Helper to get location estimation
+          const getEstimatedLocation = (st, att) => {
+            const isAttended = att?.status === 'PRESENT' || st.raw?.attendanceStatus === 'PRESENT';
+            const isAbs = att?.status === 'ABSENT' || st.boardStatus === 'ABSENT';
+            const isBoarded = st.boardStatus === 'BOARDED';
+            const isDropped = st.boardStatus === 'DROPPED';
+            const isSelfPickup = Boolean(st.isNotRiding || st.boardStatus === 'SELF_PICKUP');
+
+            if (isAbs) {
+              return { label: '결석 (가정 요양)', color: 'bg-rose-50 text-rose-700 border-rose-200' };
+            }
+            if (isAttended) {
+              return { label: '원내 출석 (교실 활동)', color: 'bg-emerald-50 text-emerald-800 border-emerald-300' };
+            }
+            if (isDropped) {
+              return { label: '원 도착 완료 (입실 중)', color: 'bg-cyan-50 text-cyan-800 border-cyan-300' };
+            }
+            if (isBoarded) {
+              return { label: '셔틀 이동 중 (차량 탑승)', color: 'bg-indigo-50 text-indigo-800 border-indigo-300 animate-pulse' };
+            }
+            if (isSelfPickup) {
+              return { label: '보호자 직접 등하원', color: 'bg-purple-50 text-purple-800 border-purple-200' };
+            }
+            return { label: '등원 대기 (탑승지 대기)', color: 'bg-amber-50 text-amber-800 border-amber-300' };
+          };
+
+          return (
+            <div className="space-y-6 animate-in fade-in">
+              {/* Header Card */}
+              <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+                <div>
+                  <h2 className="text-xl font-extrabold text-slate-800 tracking-tight flex items-center gap-2.5">
+                    <span className="w-2.5 h-6 bg-blue-600 rounded-full inline-block"></span>
+                    원아 실시간 출결 및 위치 현황표
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1 font-medium">
+                    차량교사의 셔틀 [탑승] 및 [하차] 기록과 담임교사의 [출석] 확인 결과를 통합하여 원아의 현재 위치를 실시간 예상합니다.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* 날짜 선택 */}
+                  <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
+                    <span className="font-extrabold text-slate-600">기준 일자</span>
+                    <input
+                      type="date"
+                      value={attendanceDate}
+                      onChange={(e) => setAttendanceDate(e.target.value)}
+                      className="bg-white px-2 py-1 rounded-lg border border-slate-200 font-bold text-slate-800 outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setAttendanceDate(new Date().toISOString().split('T')[0])}
+                      className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg transition-colors cursor-pointer"
+                    >
+                      오늘
+                    </button>
+                  </div>
+
+                  {/* 새로고침 */}
+                  <button
+                    type="button"
+                    onClick={() => loadAttendance(attendanceDate)}
+                    disabled={isLoadingAttendance}
+                    className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-black shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <span>{isLoadingAttendance ? '동기화 중...' : '새로고침'}</span>
+                  </button>
+
+                  {/* 인쇄 */}
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                    </svg>
+                    <span>서류 출력</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 통계 요약 카드 5종 */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+                  <div className="text-[11px] font-bold text-slate-500">전체 원아</div>
+                  <div className="text-xl font-black text-slate-900 mt-1">{students.length}명</div>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+                  <div className="text-[11px] font-bold text-emerald-600 flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    <span>차량 탑승 완료</span>
+                  </div>
+                  <div className="text-xl font-black text-emerald-700 mt-1">{totalBoarded}명</div>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+                  <div className="text-[11px] font-bold text-cyan-600 flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-cyan-500"></span>
+                    <span>차량 하차 완료</span>
+                  </div>
+                  <div className="text-xl font-black text-cyan-700 mt-1">{totalDropped}명</div>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+                  <div className="text-[11px] font-bold text-teal-600 flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-teal-500"></span>
+                    <span>원내 출석 완료</span>
+                  </div>
+                  <div className="text-xl font-black text-teal-700 mt-1">{totalAttended}명</div>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+                  <div className="text-[11px] font-bold text-rose-600 flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                    <span>결석 / 미등원</span>
+                  </div>
+                  <div className="text-xl font-black text-rose-700 mt-1">{totalAbsent}명</div>
+                </div>
+              </div>
+
+              {/* 검색 및 필터 바 */}
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-600">반별 필터:</span>
+                  <select
+                    value={attendanceClassFilter}
+                    onChange={(e) => setAttendanceClassFilter(e.target.value)}
+                    className="text-xs font-bold bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 outline-none cursor-pointer focus:border-blue-500"
+                  >
+                    <option value="ALL">전체 반 보기 ({allClasses.length}개 반)</option>
+                    {allClasses.map(cls => (
+                      <option key={cls} value={cls}>{cls}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="relative min-w-[220px]">
+                  <input
+                    type="text"
+                    placeholder="원아명, 탑승지 검색..."
+                    value={attendanceSearchKeyword}
+                    onChange={(e) => setAttendanceSearchKeyword(e.target.value)}
+                    className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 font-semibold"
+                  />
+                  <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  {attendanceSearchKeyword && (
+                    <button
+                      type="button"
+                      onClick={() => setAttendanceSearchKeyword('')}
+                      className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 반별 셀 (Cards Grouped by Class) */}
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                {activeClasses.map((className) => {
+                  const classStudents = filteredStudents.filter(s => (s.className || s.raw?.['반명'] || s.raw?.['반'] || '기본반') === className);
+                  if (classStudents.length === 0) return null;
+
+                  const classBoarded = classStudents.filter(s => s.boardStatus === 'BOARDED' || s.boardStatus === 'DROPPED').length;
+                  const classDropped = classStudents.filter(s => s.boardStatus === 'DROPPED').length;
+                  const classAttended = classStudents.filter(s => {
+                    const att = attMap.get(s.id);
+                    return att?.status === 'PRESENT' || s.raw?.attendanceStatus === 'PRESENT';
+                  }).length;
+
+                  return (
+                    <div
+                      key={className}
+                      className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden flex flex-col transition-all hover:shadow-md"
+                    >
+                      {/* 반 셀 헤더 */}
+                      <div className="px-5 py-3.5 bg-gradient-to-r from-slate-50 via-blue-50/30 to-indigo-50/20 border-b border-slate-200 flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <span className="w-3 h-3 rounded-full bg-blue-600"></span>
+                          <h3 className="font-black text-sm text-slate-900">{className}</h3>
+                          <span className="text-[11px] font-bold text-slate-500">총 {classStudents.length}명</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
+                          <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-md border border-emerald-200">
+                            탑승 {classBoarded}/{classStudents.length}
+                          </span>
+                          <span className="bg-cyan-50 text-cyan-700 px-2 py-0.5 rounded-md border border-cyan-200">
+                            하차 {classDropped}/{classStudents.length}
+                          </span>
+                          <span className="bg-teal-50 text-teal-700 px-2 py-0.5 rounded-md border border-teal-200">
+                            출석 {classAttended}/{classStudents.length}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* 명단 테이블 (왼쪽부터 탑승, 하차, 출석, 예상위치) */}
+                      <div className="overflow-x-auto flex-1">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-50/80 text-slate-600 font-extrabold border-b border-slate-100">
+                            <tr>
+                              <th className="py-2.5 px-3.5 whitespace-nowrap">원아명</th>
+                              <th className="py-2.5 px-3 whitespace-nowrap text-center">탑승 (차량)</th>
+                              <th className="py-2.5 px-3 whitespace-nowrap text-center">하차 (차량)</th>
+                              <th className="py-2.5 px-3 whitespace-nowrap text-center">출석 (담임)</th>
+                              <th className="py-2.5 px-3.5 whitespace-nowrap">현재 예상 위치</th>
+                              <th className="py-2.5 px-3 whitespace-nowrap">정차지/노선</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 font-medium">
+                            {classStudents.map((st) => {
+                              const att = attMap.get(st.id);
+                              const isBoarded = st.boardStatus === 'BOARDED' || st.boardStatus === 'DROPPED';
+                              const isDropped = st.boardStatus === 'DROPPED';
+                              const isAttended = att?.status === 'PRESENT' || st.raw?.attendanceStatus === 'PRESENT';
+                              const isAbs = att?.status === 'ABSENT' || st.boardStatus === 'ABSENT';
+                              const isSelfPickup = Boolean(st.isNotRiding || st.boardStatus === 'SELF_PICKUP');
+                              const est = getEstimatedLocation(st, att);
+
+                              return (
+                                <tr key={st.id} className="hover:bg-slate-50/60 transition-colors">
+                                  {/* 원아명 */}
+                                  <td className="py-2.5 px-3.5 font-bold text-slate-800 whitespace-nowrap">
+                                    <div className="flex items-center gap-1.5">
+                                      <span>{st.name}</span>
+                                      {st.gender && (
+                                        <span className="text-[10px] text-slate-400">({st.gender})</span>
+                                      )}
+                                    </div>
+                                  </td>
+
+                                  {/* 탑승 (차량교사) */}
+                                  <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                    {isSelfPickup ? (
+                                      <span className="inline-block px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-100 text-slate-600 border border-slate-200">
+                                        직접등원
+                                      </span>
+                                    ) : isAbs ? (
+                                      <span className="inline-block px-2 py-0.5 text-[10px] font-black rounded-md bg-rose-100 text-rose-700 border border-rose-200">
+                                        미탑승(결석)
+                                      </span>
+                                    ) : isBoarded ? (
+                                      <span className="inline-block px-2 py-0.5 text-[10px] font-black rounded-md bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                        ✓ 탑승완료
+                                      </span>
+                                    ) : (
+                                      <span className="inline-block px-2 py-0.5 text-[10px] font-bold rounded-md bg-amber-50 text-amber-700 border border-amber-200">
+                                        탑승대기
+                                      </span>
+                                    )}
+                                  </td>
+
+                                  {/* 하차 (차량교사) */}
+                                  <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                    {isSelfPickup ? (
+                                      <span className="inline-block px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-100 text-slate-600 border border-slate-200">
+                                        -
+                                      </span>
+                                    ) : isAbs ? (
+                                      <span className="inline-block px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                                        -
+                                      </span>
+                                    ) : isDropped ? (
+                                      <span className="inline-block px-2 py-0.5 text-[10px] font-black rounded-md bg-cyan-100 text-cyan-800 border border-cyan-300">
+                                        ✓ 하차완료
+                                      </span>
+                                    ) : isBoarded ? (
+                                      <span className="inline-block px-2 py-0.5 text-[10px] font-black rounded-md bg-indigo-100 text-indigo-800 border border-indigo-200 animate-pulse">
+                                        이동중
+                                      </span>
+                                    ) : (
+                                      <span className="inline-block px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                                        대기
+                                      </span>
+                                    )}
+                                  </td>
+
+                                  {/* 출석 (담임교사) */}
+                                  <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                    {isAttended ? (
+                                      <span className="inline-block px-2 py-0.5 text-[10px] font-black rounded-md bg-teal-100 text-teal-800 border border-teal-300">
+                                        ✓ 출석완료
+                                      </span>
+                                    ) : isAbs ? (
+                                      <span className="inline-block px-2 py-0.5 text-[10px] font-black rounded-md bg-rose-100 text-rose-700 border border-rose-200">
+                                        결석
+                                      </span>
+                                    ) : att?.status === 'LATE' ? (
+                                      <span className="inline-block px-2 py-0.5 text-[10px] font-black rounded-md bg-purple-100 text-purple-800 border border-purple-200">
+                                        지각
+                                      </span>
+                                    ) : (
+                                      <span className="inline-block px-2 py-0.5 text-[10px] font-bold rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                                        미입력
+                                      </span>
+                                    )}
+                                  </td>
+
+                                  {/* 현재 예상 위치 */}
+                                  <td className="py-2.5 px-3.5 whitespace-nowrap">
+                                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-black border ${est.color}`}>
+                                      <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
+                                      <span>{est.label}</span>
+                                    </span>
+                                  </td>
+
+                                  {/* 정차지 / 노선 */}
+                                  <td className="py-2.5 px-3 text-slate-500 text-[11px] truncate max-w-[150px]">
+                                    {st.boardingLocation || st.address || '미지정'}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {activeClasses.length === 0 && (
+                <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
+                  <p className="text-sm font-bold text-slate-600">검색 조건에 맞는 원아가 없습니다.</p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
 

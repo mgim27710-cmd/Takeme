@@ -330,6 +330,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     requestDate: new Date().toISOString().split('T')[0],
     note: '학부모 상담 후 신규 탑승지 지정 및 결재 승인 요청',
   });
+  const [paymentStudentSearch, setPaymentStudentSearch] = useState('');
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [isDeciding, setIsDeciding] = useState(null);
   const [isPushingParent, setIsPushingParent] = useState(null);
@@ -4386,20 +4387,87 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                       </div>
                     </div>
 
-                    {paymentForm.studentSelectMode === 'DROPDOWN' ? (
-                      <select
-                        value={paymentForm.selectedStudentId}
-                        onChange={(e) => handleStudentSelect(e.target.value)}
-                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      >
-                        <option value="">-- 원생을 선택하세요 --</option>
-                        {(paymentContext.students || []).map((st) => (
-                          <option key={st.id} value={st.id}>
-                            {st.name} ({st.assignedBusNumber ? `${st.assignedBusNumber}` : '미배정'}) - {st.boardingLocation || st.address || '주소 미등록'}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
+                    {paymentForm.studentSelectMode === 'DROPDOWN' ? (() => {
+                      const allStudents = paymentContext.students || [];
+                      const filtered = allStudents.filter((st) => {
+                        if (!paymentStudentSearch.trim()) return true;
+                        const q = paymentStudentSearch.trim().toLowerCase();
+                        const nameMatch = (st.name || '').toLowerCase().includes(q);
+                        const classMatch = (st.className || st.raw?.['반명'] || '').toLowerCase().includes(q);
+                        const busMatch = (st.assignedBusNumber || '').toLowerCase().includes(q);
+                        const addrMatch = (st.boardingLocation || st.address || '').toLowerCase().includes(q);
+                        return nameMatch || classMatch || busMatch || addrMatch;
+                      });
+                      return (
+                        <div className="space-y-2">
+                          {/* 원아 검색 입력창 */}
+                          <div className="relative">
+                            <input
+                              type="text"
+                              placeholder="원아명 검색 (예: 안하진, 햇살반, 1호차)..."
+                              value={paymentStudentSearch}
+                              onChange={(e) => setPaymentStudentSearch(e.target.value)}
+                              className="w-full pl-8 pr-7 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-white transition"
+                            />
+                            <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                            {paymentStudentSearch && (
+                              <button
+                                type="button"
+                                onClick={() => setPaymentStudentSearch('')}
+                                className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </div>
+
+                          {/* 검색어 입력 시 빠른 선택 칩 (상위 최대 5명) */}
+                          {paymentStudentSearch.trim() && filtered.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 p-2 bg-indigo-50/60 rounded-xl border border-indigo-100 max-h-24 overflow-y-auto">
+                              {filtered.slice(0, 8).map((st) => (
+                                <button
+                                  key={st.id}
+                                  type="button"
+                                  onClick={() => {
+                                    handleStudentSelect(st.id);
+                                    setPaymentStudentSearch('');
+                                  }}
+                                  className={`text-[11px] font-bold px-2 py-1 rounded-lg border transition-all cursor-pointer flex items-center gap-1 ${
+                                    String(paymentForm.selectedStudentId) === String(st.id)
+                                      ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
+                                      : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-400 hover:text-indigo-600'
+                                  }`}
+                                >
+                                  <span>{st.name}</span>
+                                  {st.className && <span className="text-[10px] opacity-75">({st.className}반)</span>}
+                                  {st.assignedBusNumber && <span className="text-[10px] text-indigo-500">· {st.assignedBusNumber}</span>}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* 원아 선택 드롭다운 */}
+                          <select
+                            value={paymentForm.selectedStudentId}
+                            onChange={(e) => handleStudentSelect(e.target.value)}
+                            className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          >
+                            <option value="">
+                              {paymentStudentSearch
+                                ? `-- 검색된 원아 (${filtered.length}명) 중 선택 --`
+                                : '-- 원생을 선택하세요 --'}
+                            </option>
+                            {filtered.map((st) => (
+                              <option key={st.id} value={st.id}>
+                                {st.name} {st.className ? `[${st.className}반]` : ''} ({st.assignedBusNumber ? `${st.assignedBusNumber}` : '미배정'}) - {st.boardingLocation || st.address || '주소 미등록'}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })() : (
                       <input
                         type="text"
                         placeholder="신규 원생 이름 입력 (예: 김민수)"

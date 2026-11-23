@@ -1800,6 +1800,29 @@ export class TeacherService implements OnModuleInit {
     };
   }
 
+  /**
+   * 원장 웹 전용: 유치원 전체 원아의 당일 담임교사 출결 기록 조회 (원아 출결서류 탭용)
+   */
+  async getAcademyAttendanceToday(academyId: number, date?: string) {
+    const targetDate = (date && isValidDateString(date)) ? date : kstDateString();
+    const records = await this.attendanceRepository.find({
+      where: {
+        student: { academy: { id: academyId } },
+        date: targetDate,
+      },
+      relations: { student: true, recordedBy: true },
+    });
+    return records.map(r => ({
+      id: r.id,
+      studentId: r.student?.id,
+      status: r.status,
+      date: r.date,
+      recordedByName: r.recordedByName || (r.recordedBy?.name ? formatTeacherName(r.recordedBy.name) : '담임선생님'),
+      memo: r.memo,
+      updatedAt: r.updatedAt,
+    }));
+  }
+
   async submitHomeroomAttendance(email: string, payload: {
     date: string;
     attendances: Array<{ studentId: number; status: AttendanceStatus; memo?: string }>;

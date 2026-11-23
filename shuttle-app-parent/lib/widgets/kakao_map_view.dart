@@ -378,18 +378,18 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           box-shadow: 0 4px 10px rgba(239,68,68,0.5);
         }
 
-        /* 우리 아이 정류장 배지 마커 */
+        /* 우리 아이 정류장 배지 마커 (별 아이콘 단독) */
         .child-point-dot {
           display: inline-flex;
           align-items: center;
           justify-content: center;
           background-color: #7c3aed;
-          color: white;
-          font-size: 11px;
-          font-weight: 800;
-          padding: 3px 8px;
-          border-radius: 14px;
-          white-space: nowrap;
+          color: #fbbf24;
+          font-size: 16px;
+          line-height: 1;
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
           box-shadow: 0 0 0 3px rgba(124,58,237,0.35), 0 3px 8px rgba(0,0,0,0.3);
           border: 2px solid white;
         }
@@ -633,9 +633,9 @@ class _KakaoMapViewState extends State<KakaoMapView> {
               myChildLatLng = [s.lat, s.lng];
               var badgeIcon = L.divIcon({
                 className: '',
-                html: '<div class="child-point-dot">★ ' + childLabel + '</div>',
-                iconSize: [110, 28],
-                iconAnchor: [55, 14]
+                html: '<div class="child-point-dot">★</div>',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
               });
               var m = L.marker([s.lat, s.lng], { icon: badgeIcon, zIndexOffset: 1200 })
                 .bindPopup('<b>📍 우리 아이 ' + childLabel + '</b><br/>' + (s.address || s.name || '')).addTo(dataLayer);
@@ -658,9 +658,9 @@ class _KakaoMapViewState extends State<KakaoMapView> {
             myChildLatLng = [childLatArg, childLngArg];
             var badgeIcon = L.divIcon({
               className: '',
-              html: '<div class="child-point-dot">★ ' + childLabel + '</div>',
-              iconSize: [110, 28],
-              iconAnchor: [55, 14]
+              html: '<div class="child-point-dot">★</div>',
+              iconSize: [32, 32],
+              iconAnchor: [16, 16]
             });
             var m = L.marker([childLatArg, childLngArg], { icon: badgeIcon, zIndexOffset: 1200 })
               .bindPopup('<b>📍 우리 아이 ' + childLabel + '</b>').addTo(dataLayer);
