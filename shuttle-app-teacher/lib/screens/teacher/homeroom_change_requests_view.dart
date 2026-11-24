@@ -789,8 +789,9 @@ class _ProxyRequestBottomSheetState extends State<_ProxyRequestBottomSheet> {
 
     if (res['success'] == true) {
       widget.onSuccess();
+      final messenger = ScaffoldMessenger.of(context);
       Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         const SnackBar(content: Text('대리 신청이 정상 등록되었습니다.'), backgroundColor: Color(0xFF10B981)),
       );
     } else {

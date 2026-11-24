@@ -318,6 +318,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             setDlgState(() => isBusy = true);
                             final res = await ApiService().verifySelfUnlockCode(email, code);
                             setDlgState(() => isBusy = false);
+                            if (!ctx.mounted) return;
                             if (res['success'] == true) {
                               Navigator.pop(ctx);
                               if (mounted) {

@@ -329,7 +329,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 activeTrackColor: const Color(0xFF93C5FD),
-                activeColor: const Color(0xFF2563EB),
+                activeThumbColor: const Color(0xFF2563EB),
                 title: const Text('전체', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF0F172A))),
                 subtitle: const Text('모든 알림을 수신합니다', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
                 value: _notiAll,
@@ -339,7 +339,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 activeTrackColor: subEnabled ? const Color(0xFF93C5FD) : const Color(0xFFE2E8F0),
-                activeColor: subEnabled ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
+                activeThumbColor: subEnabled ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
                 title: Text(
                   '통학 변동 신청',
                   style: TextStyle(
@@ -362,7 +362,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 activeTrackColor: subEnabled ? const Color(0xFF93C5FD) : const Color(0xFFE2E8F0),
-                activeColor: subEnabled ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
+                activeThumbColor: subEnabled ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
                 title: Text(
                   '메시지',
                   style: TextStyle(
@@ -385,7 +385,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 activeTrackColor: subEnabled ? const Color(0xFF93C5FD) : const Color(0xFFE2E8F0),
-                activeColor: subEnabled ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
+                activeThumbColor: subEnabled ? const Color(0xFF2563EB) : const Color(0xFF94A3B8),
                 title: Text(
                   '공지',
                   style: TextStyle(

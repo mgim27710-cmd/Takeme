@@ -113,6 +113,7 @@ class _HomeroomAttendanceViewState extends State<HomeroomAttendanceView> with Au
 
   void _markAllPresent() {
     setState(() {
+      _isEditingLocally = true;
       for (final s in _students) {
         final id = s['studentId'] as int;
         _statuses[id] = 'PRESENT';
@@ -189,6 +190,7 @@ class _HomeroomAttendanceViewState extends State<HomeroomAttendanceView> with Au
     );
 
     if (picked != null && picked != _selectedDate) {
+      _isEditingLocally = false;
       setState(() => _selectedDate = picked);
       _loadAttendance();
     }
@@ -478,6 +480,9 @@ class _HomeroomAttendanceViewState extends State<HomeroomAttendanceView> with Au
                                     const SizedBox(height: 8),
                                     TextField(
                                       controller: memoCtrl,
+                                      onChanged: (_) {
+                                        _isEditingLocally = true;
+                                      },
                                       style: const TextStyle(fontSize: 12),
                                       decoration: InputDecoration(
                                         isDense: true,

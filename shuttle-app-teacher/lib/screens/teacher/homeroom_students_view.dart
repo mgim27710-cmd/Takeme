@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../models/student_model.dart';
 import '../../services/api_service.dart';
+import '../../services/socket_service.dart';
 
 class HomeroomStudentsView extends StatefulWidget {
   const HomeroomStudentsView({super.key});
@@ -16,6 +18,7 @@ class _HomeroomStudentsViewState extends State<HomeroomStudentsView> with Automa
   String _searchQuery = '';
   String _filterStatus = 'ALL'; // 'ALL' | 'WAITING' | 'BOARDED' | 'ABSENT'
   final TextEditingController _memoController = TextEditingController();
+  Timer? _debounceTimer;
 
   @override
   bool get wantKeepAlive => true;
@@ -24,10 +27,28 @@ class _HomeroomStudentsViewState extends State<HomeroomStudentsView> with Automa
   void initState() {
     super.initState();
     _loadStudents();
+    _setupRealtimeListeners();
+  }
+
+  void _setupRealtimeListeners() {
+    SocketService().onStudentStatusChanged(_handleRealtimeUpdate);
+    SocketService().onChangeRequestUpdated(_handleRealtimeUpdate);
+  }
+
+  void _handleRealtimeUpdate(Map<String, dynamic> _) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) {
+        _loadStudents(silent: true);
+      }
+    });
   }
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
+    SocketService().offStudentStatusChanged(_handleRealtimeUpdate);
+    SocketService().offChangeRequestUpdated(_handleRealtimeUpdate);
     _memoController.dispose();
     super.dispose();
   }
@@ -161,136 +182,153 @@ class _HomeroomStudentsViewState extends State<HomeroomStudentsView> with Automa
 
     final filteredList = _students.filterByQueryAndStatus(_searchQuery, _filterStatus);
 
-    return RefreshIndicator(
-      onRefresh: _loadStudents,
-      color: const Color(0xFF2563EB),
-      child: Column(
-        children: [
-          // 1. Class Statistics Summary Header
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-            color: Colors.white,
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    _buildStatCard('우리 반 원아', '$totalCount명', const Color(0xFF2563EB), const Color(0xFFEFF6FF)),
-                    const SizedBox(width: 8),
-                    _buildStatCard('탑승 완료', '$boardedCount명', const Color(0xFF16A34A), const Color(0xFFDCFCE7)),
-                    const SizedBox(width: 8),
-                    _buildStatCard('대기 중', '$waitingCount명', const Color(0xFFD97706), const Color(0xFFFEF3C7)),
-                    const SizedBox(width: 8),
-                    _buildStatCard('결석/미탑승', '$absentCount명', const Color(0xFFDC2626), const Color(0xFFFEE2E2)),
-                  ],
+    return Column(
+      children: [
+        // 1. Class Statistics Summary Header
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+          color: Colors.white,
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  _buildStatCard('우리 반 원아', '$totalCount명', const Color(0xFF2563EB), const Color(0xFFEFF6FF)),
+                  const SizedBox(width: 8),
+                  _buildStatCard('탑승 완료', '$boardedCount명', const Color(0xFF16A34A), const Color(0xFFDCFCE7)),
+                  const SizedBox(width: 8),
+                  _buildStatCard('대기 중', '$waitingCount명', const Color(0xFFD97706), const Color(0xFFFEF3C7)),
+                  const SizedBox(width: 8),
+                  _buildStatCard('결석/미탑승', '$absentCount명', const Color(0xFFDC2626), const Color(0xFFFEE2E2)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // Search Input
+              Container(
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                const SizedBox(height: 12),
-                // Search Input
-                Container(
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: TextField(
-                    onChanged: (val) => setState(() => _searchQuery = val.trim()),
-                    decoration: const InputDecoration(
-                      hintText: '원아 이름 검색...',
-                      hintStyle: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
-                      prefixIcon: Icon(Icons.search, size: 20, color: Color(0xFF64748B)),
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(vertical: 10),
-                    ),
+                child: TextField(
+                  onChanged: (val) => setState(() => _searchQuery = val.trim()),
+                  decoration: const InputDecoration(
+                    hintText: '원아 이름 검색...',
+                    hintStyle: TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+                    prefixIcon: Icon(Icons.search, size: 20, color: Color(0xFF64748B)),
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.symmetric(vertical: 10),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
+        ),
 
-          // 2. Status Filter Tabs
-          Container(
-            height: 44,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            color: Colors.white,
-            child: Row(
-              children: [
-                _buildFilterChip('전체 ($totalCount)', 'ALL'),
-                const SizedBox(width: 6),
-                _buildFilterChip('대기 ($waitingCount)', 'WAITING'),
-                const SizedBox(width: 6),
-                _buildFilterChip('탑승완료 ($boardedCount)', 'BOARDED'),
-                const SizedBox(width: 6),
-                _buildFilterChip('결석 ($absentCount)', 'ABSENT'),
-              ],
-            ),
+        // 2. Status Filter Tabs
+        Container(
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          color: Colors.white,
+          child: Row(
+            children: [
+              _buildFilterChip('전체 ($totalCount)', 'ALL'),
+              const SizedBox(width: 6),
+              _buildFilterChip('대기 ($waitingCount)', 'WAITING'),
+              const SizedBox(width: 6),
+              _buildFilterChip('탑승완료 ($boardedCount)', 'BOARDED'),
+              const SizedBox(width: 6),
+              _buildFilterChip('결석 ($absentCount)', 'ABSENT'),
+            ],
           ),
-          const Divider(height: 1, color: Color(0xFFE2E8F0)),
+        ),
+        const Divider(height: 1, color: Color(0xFFE2E8F0)),
 
-          // 3. Student Card List
-          Expanded(
+        // 3. Student Card List
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _loadStudents,
+            color: const Color(0xFF2563EB),
             child: _loadError != null
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.cloud_off_rounded, size: 48, color: Color(0xFFCBD5E1)),
-                          const SizedBox(height: 12),
-                          const Text(
-                            '원아 명단을 불러오지 못했습니다.',
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+                ? LayoutBuilder(
+                    builder: (context, constraints) => SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.cloud_off_rounded, size: 48, color: Color(0xFFCBD5E1)),
+                                const SizedBox(height: 12),
+                                const Text(
+                                  '원아 명단을 불러오지 못했습니다.',
+                                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  _loadError!,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                                ),
+                                const SizedBox(height: 14),
+                                OutlinedButton.icon(
+                                  onPressed: _loadStudents,
+                                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                                  label: const Text('다시 시도'),
+                                ),
+                              ],
+                            ),
                           ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _loadError!,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
-                          ),
-                          const SizedBox(height: 14),
-                          OutlinedButton.icon(
-                            onPressed: _loadStudents,
-                            icon: const Icon(Icons.refresh_rounded, size: 18),
-                            label: const Text('다시 시도'),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   )
                 : filteredList.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.sentiment_dissatisfied, size: 48, color: Color(0xFFCBD5E1)),
-                        const SizedBox(height: 12),
-                        Text(
-                          _students.isEmpty
-                              ? '배정된 학급에 등록된 원아가 없습니다.'
-                              : '검색 조건과 일치하는 원아가 없습니다.',
-                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
-                        ),
-                        if (_students.isEmpty) ...[
-                          const SizedBox(height: 6),
-                          const Text(
-                            '관리자 웹 [학급 관리] 메뉴에서 반 배정을 완료해주세요.',
-                            style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                    ? LayoutBuilder(
+                        builder: (context, constraints) => SingleChildScrollView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                            child: Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.sentiment_dissatisfied, size: 48, color: Color(0xFFCBD5E1)),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    _students.isEmpty
+                                        ? '배정된 학급에 등록된 원아가 없습니다.'
+                                        : '검색 조건과 일치하는 원아가 없습니다.',
+                                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+                                  ),
+                                  if (_students.isEmpty) ...[
+                                    const SizedBox(height: 6),
+                                    const Text(
+                                      '관리자 웹 [학급 관리] 메뉴에서 반 배정을 완료해주세요.',
+                                      style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
                           ),
-                        ],
-                      ],
-                    ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: filteredList.length,
-                    separatorBuilder: (context, index) => const SizedBox(height: 12),
-                    itemBuilder: (ctx, idx) {
-                      final student = filteredList[idx];
-                      return _buildStudentCard(student);
-                    },
-                  ),
+                        ),
+                      )
+                    : ListView.separated(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.all(16),
+                        itemCount: filteredList.length,
+                        separatorBuilder: (context, index) => const SizedBox(height: 12),
+                        itemBuilder: (ctx, idx) {
+                          final student = filteredList[idx];
+                          return _buildStudentCard(student);
+                        },
+                      ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
