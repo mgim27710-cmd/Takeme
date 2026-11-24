@@ -856,7 +856,7 @@ export class AuthService {
         }
         await this.studentRepository.save(student);
       }
-    } else if (user.role === UserRole.DRIVER || user.role === UserRole.TEACHER) {
+    } else if (user.role === UserRole.DRIVER || user.role === UserRole.TEACHER || user.role === UserRole.SHUTTLE_TEACHER) {
       const vehicle = await this.vehicleRepository.findOne({ 
         where: user.role === UserRole.DRIVER ? { driverUser: { id: user.id } } : { teacherUser: { id: user.id } } 
       });
@@ -865,7 +865,7 @@ export class AuthService {
           vehicle.driverUser = null as any;
           vehicle.driverApprovalStatus = 'UNREGISTERED';
         }
-        if (user.role === UserRole.TEACHER) {
+        if (user.role === UserRole.TEACHER || user.role === UserRole.SHUTTLE_TEACHER) {
           vehicle.teacherUser = null as any;
           vehicle.teacherApprovalStatus = 'UNREGISTERED';
         }

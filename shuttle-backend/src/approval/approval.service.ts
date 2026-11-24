@@ -340,7 +340,9 @@ export class ApprovalService {
 
     const targetDate = data.targetDate && isValidDateString(data.targetDate) ? data.targetDate : kstDateString();
     const type = data.type || ChangeRequestType.CHANGE_LOCATION;
-    const direction = data.direction || RequestDirection.ALL;
+    let direction = data.direction || RequestDirection.ALL;
+    if (direction === 'BOARDING' || direction === 'GOTO') direction = RequestDirection.MORNING;
+    else if (direction === 'ALIGHTING' || direction === 'GOHOME') direction = RequestDirection.AFTERNOON;
     const reason = (data.reason || data.message || '').trim();
 
     let newAddress = data.newAddress || data.address || undefined;
@@ -572,6 +574,7 @@ export class ApprovalService {
       ...r,
       typeKr: typeToKorean(r.type),
       studentName: r.student?.adminDisplayName || r.student?.name,
+      targetAddress: r.newAddress || r.address || undefined,
     }));
   }
 
@@ -619,6 +622,7 @@ export class ApprovalService {
         ...r,
         typeKr: typeToKorean(r.type),
         studentName: r.student?.adminDisplayName || r.student?.name,
+        targetAddress: r.newAddress || r.address || undefined,
       })),
     };
   }
@@ -671,6 +675,7 @@ export class ApprovalService {
         studentName: r.student?.adminDisplayName || r.student?.name,
         studentClass: r.student ? getStudentClassName(r.student) : '',
         candidateVehicles: candidates,
+        targetAddress: r.newAddress || r.address || undefined,
       });
     }
 
@@ -796,7 +801,7 @@ export class ApprovalService {
     decision: ApprovalStatus,
     rejectionReason?: string,
   ) {
-    const allowed = [UserRole.ACADEMY_ADMIN, UserRole.SUPER_ADMIN, UserRole.DESK_STAFF, UserRole.SHUTTLE_TEACHER, UserRole.TEACHER];
+    const allowed = [UserRole.ACADEMY_ADMIN, UserRole.SUPER_ADMIN, UserRole.DESK_STAFF, UserRole.SHUTTLE_TEACHER, UserRole.TEACHER, UserRole.HOMEROOM_TEACHER];
     if (!allowed.includes(callingUser.role as UserRole)) {
       throw new ForbiddenException('담당 교직원 또는 기관 관리자만 신청을 처리할 수 있습니다.');
     }

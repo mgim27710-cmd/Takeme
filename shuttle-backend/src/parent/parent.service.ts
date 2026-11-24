@@ -482,7 +482,7 @@ export class ParentService {
       return { routePoints: [], stops: [], academy: null, myChildStop: null, academyPickupPoints: [] };
     }
 
-    const isGohome = direction?.toUpperCase() === 'GOHOME';
+    const isGohome = direction?.toUpperCase() === 'GOHOME' || direction?.toUpperCase() === 'AFTERNOON' || direction?.toUpperCase() === 'ALIGHTING';
 
     // Get all students assigned to this vehicle (소속 유치원 일치 보장)
     const allStudents = await this.studentRepository.find({

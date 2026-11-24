@@ -219,7 +219,7 @@ class _MyRequestsScreenState extends State<MyRequestsScreen> {
                                 if (item['direction'] != null && item['direction'] != 'ALL') ...[
                                   const SizedBox(width: 8),
                                   Text(
-                                    item['direction'] == 'BOARDING' ? '(등원만)' : '(하원만)',
+                                    (item['direction'] == 'BOARDING' || item['direction'] == 'MORNING' || item['direction'] == 'GOTO') ? '(등원만)' : '(하원만)',
                                     style: const TextStyle(fontSize: 12, color: Color(0xFF2563EB), fontWeight: FontWeight.bold),
                                   ),
                                 ],
@@ -240,7 +240,8 @@ class _MyRequestsScreenState extends State<MyRequestsScreen> {
                               ),
                             ],
 
-                            if (item['targetAddress'] != null && (item['targetAddress'] as String).isNotEmpty) ...[
+                            final targetAddr = (item['targetAddress'] ?? item['newAddress'] ?? item['address'])?.toString();
+                            if (targetAddr != null && targetAddr.isNotEmpty) ...[
                               const SizedBox(height: 4),
                               Row(
                                 children: [
@@ -248,7 +249,7 @@ class _MyRequestsScreenState extends State<MyRequestsScreen> {
                                   const SizedBox(width: 6),
                                   Expanded(
                                     child: Text(
-                                      '변경 장소: ${item['targetAddress']}',
+                                      '변경 장소: $targetAddr',
                                       style: const TextStyle(fontSize: 13, color: Color(0xFF475569)),
                                     ),
                                   ),

@@ -98,12 +98,12 @@ export class RoutingController {
   }
 
   @Post('approve-staff')
-  async approveStaff(@Body() body: { vehicleId: number, role: 'DRIVER' | 'TEACHER' }) {
+  async approveStaff(@Body() body: { vehicleId: number, role: 'DRIVER' | 'TEACHER' | 'SHUTTLE_TEACHER' }) {
     return this.routingService.approveStaff(body.vehicleId, body.role);
   }
 
   @Post('revoke-staff')
-  async revokeStaff(@Body() body: { vehicleId: number, role: 'DRIVER' | 'TEACHER' }) {
+  async revokeStaff(@Body() body: { vehicleId: number, role: 'DRIVER' | 'TEACHER' | 'SHUTTLE_TEACHER' }) {
     return this.routingService.revokeStaff(body.vehicleId, body.role);
   }
 

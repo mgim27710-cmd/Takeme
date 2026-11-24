@@ -1529,7 +1529,8 @@ export class RoutingService {
         : st.assignedVehicle;
 
       const dailyBoardingLocation = pendingReq?.newAddress || override?.newAddress || st.boardingLocation || '';
-      const dailyDropoffLocation = pendingReq ? (pendingReq.direction === 'MORNING' ? '유치원' : (pendingReq.newAddress || st.dropoffLocation || '')) : (st.dropoffLocation || parsedRaw['하차지'] || parsedRaw['하원지'] || '');
+      const isMorningReq = pendingReq && (pendingReq.direction === 'MORNING' || pendingReq.direction === 'BOARDING' || pendingReq.direction === 'GOTO');
+      const dailyDropoffLocation = pendingReq ? (isMorningReq ? '유치원' : (pendingReq.newAddress || st.dropoffLocation || '')) : (st.dropoffLocation || parsedRaw['하차지'] || parsedRaw['하원지'] || '');
       const studentLat = pendingReq?.newLatitude ? Number(pendingReq.newLatitude) : ((override && override.latitude) ? Number(override.latitude) : st.latitude);
       const studentLng = pendingReq?.newLongitude ? Number(pendingReq.newLongitude) : ((override && override.longitude) ? Number(override.longitude) : st.longitude);
 
@@ -1687,12 +1688,12 @@ export class RoutingService {
     return { success: true };
   }
 
-  async approveStaff(vehicleId: number, role: 'DRIVER' | 'TEACHER') {
+  async approveStaff(vehicleId: number, role: 'DRIVER' | 'TEACHER' | 'SHUTTLE_TEACHER') {
     const vehicle = await this.vehicleRepository.findOne({ where: { id: vehicleId } });
     if (!vehicle) throw new BadRequestException('차량을 찾을 수 없습니다.');
     
     if (role === 'DRIVER') vehicle.driverApprovalStatus = 'APPROVED';
-    if (role === 'TEACHER') vehicle.teacherApprovalStatus = 'APPROVED';
+    if (role === 'TEACHER' || role === 'SHUTTLE_TEACHER') vehicle.teacherApprovalStatus = 'APPROVED';
     
     await this.vehicleRepository.save(vehicle);
 
@@ -1706,7 +1707,7 @@ export class RoutingService {
     return { success: true };
   }
 
-  async revokeStaff(vehicleId: number, role: 'DRIVER' | 'TEACHER') {
+  async revokeStaff(vehicleId: number, role: 'DRIVER' | 'TEACHER' | 'SHUTTLE_TEACHER') {
     const vehicle = await this.vehicleRepository.findOne({ where: { id: vehicleId }, relations: { driverUser: true, teacherUser: true } });
     if (!vehicle) throw new BadRequestException('차량을 찾을 수 없습니다.');
     
@@ -1716,7 +1717,7 @@ export class RoutingService {
       userToDelete = vehicle.driverUser;
       vehicle.driverUser = null as any;
       vehicle.driverApprovalStatus = 'UNREGISTERED';
-    } else if (role === 'TEACHER') {
+    } else if (role === 'TEACHER' || role === 'SHUTTLE_TEACHER') {
       userToDelete = vehicle.teacherUser;
       vehicle.teacherUser = null as any;
       vehicle.teacherApprovalStatus = 'UNREGISTERED';
@@ -1739,7 +1740,9 @@ export class RoutingService {
   }
 
   async revokeTeacher(teacherId: number) {
-    const teacher = await this.userRepository.findOne({ where: { id: teacherId, role: UserRole.TEACHER } });
+    const teacher = await this.userRepository.findOne({
+      where: { id: teacherId, role: In([UserRole.TEACHER, UserRole.SHUTTLE_TEACHER, UserRole.HOMEROOM_TEACHER]) },
+    });
     if (!teacher) throw new BadRequestException('교사를 찾을 수 없습니다.');
 
     // If teacher is associated with any vehicle as teacherUser, unlink
@@ -2328,10 +2331,17 @@ export class RoutingService {
       }
       const isNotRiding = Boolean(st.isNotRiding || (rawObj && (rawObj['미탑승'] || rawObj['차량미탑승'])));
       const dropLocation = st.dropoffLocation || (rawObj && (rawObj['하차지'] || rawObj['하원지'])) || '';
+      const cName = String(st.className || (rawObj && (rawObj['반명'] || rawObj['반'] || rawObj['학급'] || rawObj['className'])) || '').trim();
+      if (rawObj) {
+        rawObj['반명'] = cName;
+        rawObj['반'] = cName;
+        rawObj['className'] = cName;
+      }
 
       return this.studentRepository.create({
         name: st.name,
         adminDisplayName,
+        className: cName,
         address: sAddr,
         boardingLocation: hasCoords ? (st.boardingLocation || sAddr) : '',
         dropoffLocation: dropLocation,
@@ -2800,10 +2810,17 @@ export class RoutingService {
     }
     const isNotRiding = Boolean(studentData.isNotRiding || raw['미탑승'] || raw['차량미탑승']);
     const dropoffLocation = studentData.dropoffLocation || studentData.outLocation || raw['하차지'] || raw['하원지'] || '';
+    const cName = String(studentData.className || (raw && (raw['반명'] || raw['반'] || raw['학급'] || raw['className'])) || '').trim();
+    if (raw) {
+      raw['반명'] = cName;
+      raw['반'] = cName;
+      raw['className'] = cName;
+    }
 
     const student = this.studentRepository.create({
       name: studentData.name,
       adminDisplayName,
+      className: cName,
       address: studentData.address,
       boardingLocation: studentData.inLocation || studentData.boardingLocation || studentData.address,
       dropoffLocation,

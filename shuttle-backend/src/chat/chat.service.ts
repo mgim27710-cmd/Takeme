@@ -2219,18 +2219,45 @@ export class ChatService implements OnModuleInit {
         });
       }
 
-      // 2. 지정된 roomId가 없으면, 신청자와 차량교사(또는 원장) 간의 1:1 대화방 탐색 또는 생성
+      // 2. 지정된 roomId가 없으면, 신청자와 담당교사(차량교사/담임교사/원장) 간의 1:1 대화방 탐색 또는 생성
       if (!room) {
-        let recipientUserId: number | null = targetVehicle?.teacherUser?.id || null;
-        if (!recipientUserId && targetVehicle?.id) {
+        let recipientUserId: number | null = null;
+        const isHomeroomType = approval.type === ChangeRequestType.ABSENCE || approval.type === ChangeRequestType.LATENESS;
+
+        if (isHomeroomType) {
+          const studentClass = getStudentClassName(approval.student);
+          if (studentClass) {
+            const hrTeacher = await this.userRepo.findOne({
+              where: {
+                academyId: callingUser.academyId || approval.academy?.id,
+                role: UserRole.HOMEROOM_TEACHER,
+                assignedClass: studentClass,
+              },
+            });
+            recipientUserId = hrTeacher?.id || null;
+          }
+        }
+
+        if (!recipientUserId) {
+          recipientUserId = targetVehicle?.teacherUser?.id || null;
+          if (!recipientUserId && targetVehicle?.id) {
+            const v = await this.vehicleRepo.findOne({
+              where: { id: targetVehicle.id },
+              relations: { teacherUser: true },
+            });
+            recipientUserId = v?.teacherUser?.id || null;
+          }
+        }
+
+        if (!recipientUserId && approval.student?.assignedVehicle?.id) {
           const v = await this.vehicleRepo.findOne({
-            where: { id: targetVehicle.id },
+            where: { id: approval.student.assignedVehicle.id },
             relations: { teacherUser: true },
           });
           recipientUserId = v?.teacherUser?.id || null;
         }
 
-        // 신청자 본인이 차량교사이거나 차량교사가 없으면 원장/관리자로 지정
+        // 신청자 본인이거나 수신자가 없으면 원장/관리자로 지정
         if (!recipientUserId || recipientUserId === callingUser.id) {
           const admin = await this.userRepo.findOne({
             where: {
@@ -2339,19 +2366,30 @@ export class ChatService implements OnModuleInit {
       });
       const normDecision: 'APPROVED' | 'REJECTED' = String(decision).toUpperCase().includes('APPROV') ? 'APPROVED' : 'REJECTED';
       const targetMsg = messages.find((m) => {
-        const p = m.payload;
+        let p = m.payload;
+        if (typeof p === 'string') {
+          try { p = JSON.parse(p); } catch (_) {}
+        }
         return p && (Number(p.requestId) === Number(requestId) || Number(p.approvalRequestId) === Number(requestId));
       });
       if (targetMsg) {
+        let currentPayload = targetMsg.payload;
+        if (typeof currentPayload === 'string') {
+          try { currentPayload = JSON.parse(currentPayload); } catch (_) {}
+        }
         targetMsg.payload = {
-          ...targetMsg.payload,
+          ...currentPayload,
           status: normDecision,
           decidedBy: deciderName,
           decidedAt: new Date().toISOString(),
         };
         await this.messageRepo.save(targetMsg);
         if (targetMsg.room?.id) {
-          await this.broadcastToRoom(targetMsg.room.id, targetMsg);
+          const resMsg = {
+            ...targetMsg,
+            roomId: targetMsg.room.id,
+          };
+          await this.broadcastToRoom(targetMsg.room.id, resMsg);
         }
       }
     } catch (err) {

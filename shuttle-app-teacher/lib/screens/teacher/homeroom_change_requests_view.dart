@@ -521,7 +521,7 @@ class _HomeroomChangeRequestsViewState extends State<HomeroomChangeRequestsView>
     final typeKr = r['typeKr']?.toString() ?? r['type']?.toString() ?? '통학 변동';
     final reason = r['reason']?.toString() ?? '';
     final targetTime = r['targetTime']?.toString();
-    final newAddress = r['targetAddress']?.toString();
+    final newAddress = (r['targetAddress'] ?? r['newAddress'] ?? r['address'])?.toString();
     final rejectionReason = r['rejectionReason']?.toString();
     final typeColor = _getTypeColor(type);
     final typeIcon = _getTypeIcon(type);

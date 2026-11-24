@@ -387,9 +387,8 @@ export class TeacherService implements OnModuleInit {
       // 담당 학급이 지정되어 있으면 해당 반 학생 우선 필터링, 없으면 전체 반 학생 반환
       const classStudents = assignedClass
         ? allStudents.filter(s => {
-            const rawObj = typeof s.raw === 'string' ? JSON.parse(s.raw || '{}') : (s.raw || {});
-            const sClass = (rawObj['반명'] || rawObj['반'] || '').toString().trim();
-            return sClass === assignedClass || !sClass;
+            const sClass = (s.className || getStudentClassName(s) || '').trim();
+            return isSameClass(sClass, assignedClass) || !sClass;
           })
         : allStudents;
 
@@ -410,9 +409,11 @@ export class TeacherService implements OnModuleInit {
           teacherMemo: s.teacherMemo,
           runNumber: s.runNumber || 1,
           isOverride: false,
-          className: rawObj['반명'] || rawObj['반'] || user.assignedClass || '우리반',
+          className: s.className || getStudentClassName(s) || user.assignedClass || '우리반',
           parentPhone: rawObj['부모연락처'] || rawObj['보호자연락처'] || rawObj['연락처'] || '',
-          assignedVehicleName: s.assignedVehicle ? (s.assignedVehicle.busNumber || (s.assignedVehicle as any).plateNumber || '차량') : '차량 미배정'
+          assignedVehicleName: s.assignedVehicle ? (s.assignedVehicle.busNumber || (s.assignedVehicle as any).plateNumber || '차량') : '차량 미배정',
+          vehicleName: s.assignedVehicle ? (s.assignedVehicle.busNumber || (s.assignedVehicle as any).plateNumber || '차량') : '차량 미배정',
+          vehicle: s.assignedVehicle ? (s.assignedVehicle.busNumber || (s.assignedVehicle as any).plateNumber || '차량') : '차량 미배정'
         };
       });
     }
@@ -446,6 +447,10 @@ export class TeacherService implements OnModuleInit {
           // 주보호자·비상연락망(보호자2)·학부모 전달사항 (원아 정보에 저장된 값)
           ...guardianFields(s),
           gender: s.gender || null,
+          vehicleName: vehicle.busNumber,
+          assignedVehicleName: vehicle.busNumber,
+          vehicle: vehicle.busNumber,
+          className: s.className || getStudentClassName(s) || '',
         };
       });
   }
@@ -1739,6 +1744,9 @@ export class TeacherService implements OnModuleInit {
         id: s.id,
         name: s.adminDisplayName || s.name,
         vehicle: vehicleName,
+        vehicleName,
+        assignedVehicleName: vehicleName,
+        className: s.className || getStudentClassName(s) || assignedClass || '',
         status,
         statusText,
         boarded: status === 'BOARDED',
