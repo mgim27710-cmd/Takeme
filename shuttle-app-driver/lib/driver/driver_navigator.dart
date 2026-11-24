@@ -12,6 +12,7 @@ import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import '../widgets/nav_map_view.dart';
 import 'geo.dart';
+import 'stop_order.dart';
 
 /// 경로 모드. 서버 /directions 가 카카오 길찾기에 실제로 보내는 기준:
 /// - safe: priority=RECOMMEND + avoid=[uturn]  (큰 길·간선도로 추천 경로 + 유턴 회피)
@@ -122,15 +123,6 @@ class _RouteInput {
   _RouteInput(this.waypoints, this.destination);
 }
 
-/// 공공데이터포털 어린이 보호구역 주요 지점 + 유치원/정류장 반경 보호구역
-const List<(String, GeoPoint)> _publicSchoolZones = [
-  ('안산 중앙어린이보호구역', GeoPoint(37.3195, 126.8360)),
-  ('고잔초등학교 어린이보호구역', GeoPoint(37.3238, 126.8282)),
-  ('송산초등학교 어린이보호구역', GeoPoint(37.7435, 127.0965)),
-  ('민락어린이보호구역', GeoPoint(37.7478, 127.1021)),
-  ('삼현초등학교 어린이보호구역', GeoPoint(37.7392, 127.1088)),
-];
-
 /// 기사 앱의 운행·내비게이션 상태
 class DriverNavigator extends ChangeNotifier {
   DriverNavigator(this.map) {
@@ -192,8 +184,6 @@ class DriverNavigator extends ChangeNotifier {
   int speedKmh = 0;
   int _prevSpeedKmh = 0;
   DateTime _prevSpeedAt = DateTime.now();
-  bool inSchoolZone = false;
-  String? schoolZoneName;
   bool isOverspeeding = false;
   DateTime _lastOverspeedAlert = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastSuddenStopAlert = DateTime.fromMillisecondsSinceEpoch(0);
@@ -203,9 +193,6 @@ class DriverNavigator extends ChangeNotifier {
 
   /// 시속 5km 이상 주행 중인지 여부 (주행 중 조작 잠금 기준)
   bool get isMovingFast => driving && speedKmh >= 5;
-
-  /// 현재 도로 제한 속도 (어린이 보호구역: 30km/h, 일반 도로: 50km/h)
-  int get speedLimitKmh => inSchoolZone ? 30 : 50;
 
   // ── 위치 ──
   GeoPoint? position;
@@ -524,6 +511,7 @@ class DriverNavigator extends ChangeNotifier {
         }
         final passedNames = stops.where((s) => s.passed).map((s) => s.name).toSet();
         final prevByName = {for (final s in stops) s.name: s};
+        final prevList = List<NavStop>.from(stops);
         final approachedNames = stops.where((s) => s.saidApproach).map((s) => s.name).toSet();
         stops
           ..clear()
@@ -545,6 +533,8 @@ class DriverNavigator extends ChangeNotifier {
             }
             return stop;
           }));
+        // 운행 중이면 정해 둔 순서는 그대로 두고, 새 정류장만 가장 덜 돌아가는 자리에 끼워 넣는다
+        if (driving && !testMode) _keepOrderAndInsertNew(prevList);
       }
       loadError = null;
       notifyListeners();
@@ -783,6 +773,57 @@ class DriverNavigator extends ChangeNotifier {
 
   // ───────────── 경로 계산 ─────────────
 
+  /// 운행 전: 차의 현재 위치(없으면 유치원)에서 출발해 유치원으로 돌아오는 가장 짧은 순서로 남은 정류장을 다시 정한다.
+  /// (서버 순서는 '유치원에서 가까운 순'이라 차 위치를 몰라서, 차가 반대편에 있으면 크게 돌아가는 경로가 나온다)
+  void _optimizeStopOrder() {
+    if (driving || academy == null) return;
+    final passed = stops.where((s) => s.passed).toList();
+    final rest = stops.where((s) => !s.passed).toList();
+    if (rest.length < 2) return;
+    final order = bestOrder([for (final s in rest) s.point], start: position ?? academy, end: academy);
+    var changed = false;
+    for (var i = 0; i < order.length; i++) {
+      if (order[i] != i) changed = true;
+    }
+    if (!changed) return;
+    debugPrint('[nav] 정류장 순서 정리: ${rest.map((s) => s.name).join(' → ')} ⇒ ${order.map((i) => rest[i].name).join(' → ')}');
+    stops
+      ..clear()
+      ..addAll(passed)
+      ..addAll(order.map((i) => rest[i]));
+  }
+
+  /// 운행 중 서버에서 목록을 다시 받았을 때: 이전에 정한 순서를 유지하고 새 정류장(또는 위치가 크게 바뀐 정류장)만
+  /// 현재 위치 기준으로 돌아가는 거리가 가장 적은 자리에 끼워 넣는다. 지나친 정류장은 그대로 앞에 둔다.
+  void _keepOrderAndInsertNew(List<NavStop> prev) {
+    final fresh = List<NavStop>.from(stops);
+    final prevIndex = {for (var i = 0; i < prev.length; i++) prev[i].name: i};
+    bool isKnown(NavStop s) {
+      final i = prevIndex[s.name];
+      return i != null && distanceM(prev[i].point, s.point) < 30;
+    }
+
+    final known = fresh.where(isKnown).toList()
+      ..sort((a, b) => prevIndex[a.name]!.compareTo(prevIndex[b.name]!));
+    final added = fresh.where((s) => !isKnown(s)).toList();
+    final passed = known.where((s) => s.passed).toList();
+    final seq = known.where((s) => !s.passed).toList();
+    final start = position ?? academy;
+    for (final s in added) {
+      if (s.passed) {
+        passed.add(s);
+        continue;
+      }
+      final idx = cheapestInsertIndex([for (final x in seq) x.point], s.point, start: start, end: academy);
+      seq.insert(idx, s);
+      debugPrint('[nav] 새 정류장 ${s.name}: ${idx + 1}번째로 끼워 넣음 (${seq.map((x) => x.name).join(' → ')})');
+    }
+    stops
+      ..clear()
+      ..addAll(passed)
+      ..addAll(seq);
+  }
+
   _RouteInput? _inputFor(List<NavStop> list) {
     final remaining = list.where((s) => !s.passed).toList();
     if (academy != null) return _RouteInput(remaining, academy!);
@@ -795,6 +836,13 @@ class DriverNavigator extends ChangeNotifier {
     if (input.waypoints.isNotEmpty && distanceM(origin, input.destination) < 25) {
       effectiveOrigin = GeoPoint(origin.lat + 0.0002, origin.lng + 0.0002);
     }
+    // 경로가 돌아갈 때 원인(출발점·정류장 순서)을 찾기 위해 서버로 보내는 좌표를 기록에 남긴다
+    final shifted = effectiveOrigin.lat != origin.lat || effectiveOrigin.lng != origin.lng;
+    debugPrint('[nav] 요청 ${m.key}: 출발 ${origin.lat},${origin.lng}'
+        '${shifted ? ' (출발=도착이라 ${effectiveOrigin.lat},${effectiveOrigin.lng} 로 옮겨 보냄)' : ''}'
+        ' / 도착 ${input.destination.lat},${input.destination.lng}'
+        ' / 경유지 ${input.waypoints.length}개: '
+        '${[for (var i = 0; i < input.waypoints.length; i++) '${i + 1}.${input.waypoints[i].name}(${input.waypoints[i].point.lat},${input.waypoints[i].point.lng})'].join(' → ')}');
     final raw = await _post('/directions/', {
       'origin': effectiveOrigin.toJson(),
       'destination': input.destination.toJson(),
@@ -857,6 +905,7 @@ class DriverNavigator extends ChangeNotifier {
   /// 운행 전: 안전·빠른 경로를 같은 출발지·경유지·도착지로 동시에 계산
   Future<void> previewRoutes() async {
     if (driving) return;
+    _optimizeStopOrder();
     final input = _inputFor(stops);
     final origin = position ?? academy;
     if (input == null || origin == null) {
@@ -1210,8 +1259,6 @@ class DriverNavigator extends ChangeNotifier {
     rerouting = false;
     routeWarning = null;
     speedKmh = 0;
-    inSchoolZone = false;
-    schoolZoneName = null;
     isOverspeeding = false;
     departSignalBanner = null;
     _departBannerTimer?.cancel();
@@ -1278,54 +1325,16 @@ class DriverNavigator extends ChangeNotifier {
     _prevSpeedAt = now;
     speedKmh = newSpeed;
 
-    // 2) 어린이 보호구역 진입 감지 (유치원 반경 300m, 정류장 반경 180m, 공공데이터 어린이보호구역 반경 300m)
-    String? detectedZone;
-    if (academy != null && distanceM(p, academy!) <= 300) {
-      detectedZone = '유치원 앞 어린이 보호구역';
-    }
-    if (detectedZone == null) {
-      for (final (zName, zPt) in _publicSchoolZones) {
-        if (distanceM(p, zPt) <= 300) {
-          detectedZone = zName;
-          break;
-        }
-      }
-    }
-    if (detectedZone == null) {
-      for (final s in activeStops) {
-        if (!s.passed && distanceM(p, s.point) <= 180) {
-          detectedZone = '${s.name} 승하차 보호구역';
-          break;
-        }
-      }
-    }
-
-    final wasInZone = inSchoolZone;
-    inSchoolZone = detectedZone != null;
-    schoolZoneName = detectedZone;
-
-    if (driving && !wasInZone && inSchoolZone) {
-      _speak('어린이 보호구역에 진입했습니다. 시속 30킬로미터 이하로 서행하세요.');
-    }
-
-    // 3) 과속 감지 (어린이 보호구역 30km/h 초과, 일반도로 80km/h 초과)
-    final limit = inSchoolZone ? 30 : 80;
+    // 2) 과속 감지 (일반도로 80km/h 초과)
+    const limit = 80;
     isOverspeeding = driving && speedKmh > limit;
     if (isOverspeeding && now.difference(_lastOverspeedAlert).inSeconds > 25) {
       _lastOverspeedAlert = now;
-      if (inSchoolZone) {
-        _speak('어린이 보호구역 제한속도 시속 30킬로미터를 초과했습니다. 감속해 주세요.');
-        unawaited(_logSafetyEventToServer(
-          'OVERSPEED_SCHOOL_ZONE',
-          '안전운전 기록: 어린이 보호구역 과속 (${speedKmh}km/h, 제한 30km/h)',
-        ));
-      } else {
-        _speak('과속입니다. 규정 속도를 준수해 주세요.');
-        unawaited(_logSafetyEventToServer(
-          'OVERSPEED',
-          '안전운전 기록: 과속 감지 (${speedKmh}km/h)',
-        ));
-      }
+      _speak('과속입니다. 규정 속도를 준수해 주세요.');
+      unawaited(_logSafetyEventToServer(
+        'OVERSPEED',
+        '안전운전 기록: 과속 감지 (${speedKmh}km/h)',
+      ));
     }
   }
 

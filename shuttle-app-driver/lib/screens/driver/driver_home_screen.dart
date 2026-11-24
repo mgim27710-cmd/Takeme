@@ -27,7 +27,7 @@ import '../../services/pending_photo.dart';
 ///   · 시속 5km 이상 주행 중 조작 잠금 & 화면 켜짐 유지
 ///   · 차량선생님 "출발하셔도 됩니다" 신호 수신 배너·음성
 ///   · 정차 지점 메모 음성·화면 안내
-///   · 현재 속도 크게 표시 & 어린이 보호구역(30km/h) 경고 + 급정거·과속 자동 일지 기록
+///   · 현재 속도 크게 표시 + 급정거·과속 자동 일지 기록
 ///   · 길게 눌러 작동하는 SOS 긴급 버튼
 ///   · 운행 종료 시 "차량 내부 확인 완료" 체크 필수
 class DriverHomeScreen extends StatefulWidget {
@@ -685,7 +685,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
               if (_nav.driving) ...[
                 // 좌측 상단: 티맵 스타일 파란색+하얀색 회전 안내 표지판
                 Positioned(left: 0, top: 0, child: _turnHeader()),
-                // 좌측 중단(표지판 아래): 티맵 스타일 제한속도 원형 표지판 + 현재 속도(km/h) 크게 표시
+                // 좌측 중단(표지판 아래): 현재 속도(km/h) 크게 표시
                 Positioned(left: 12, top: 146, child: _speedAndSafetyCluster()),
                 // 우측 상단: 길게 눌러 작동하는 SOS 긴급 버튼
                 Positioned(right: 12, top: 12, child: _sosLongPressButton()),
@@ -796,50 +796,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     );
   }
 
-  /// 티맵 스타일 좌측 속도계 + 어린이 보호구역 경고 표지판
+  /// 티맵 스타일 좌측 현재 속도(km/h) 표시
   Widget _speedAndSafetyCluster() {
-    final limit = _nav.speedLimitKmh;
     final over = _nav.isOverspeeding;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 제한속도 표지판: 실제 도로 제한속도 정보가 없으므로 어린이 보호구역(30)일 때만 표시
-        if (_nav.inSchoolZone)
-        Container(
-          width: 58,
-          height: 58,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: over ? _C.red : Colors.white,
-            border: Border.all(color: _C.red, width: 6),
-            boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 6, offset: Offset(0, 2))],
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            '$limit',
-            style: TextStyle(
-              fontSize: 23,
-              fontWeight: FontWeight.w900,
-              color: over ? Colors.white : _C.slate800,
-              height: 1.0,
-            ),
-          ),
-        ),
-        if (_nav.inSchoolZone)
-          Container(
-            margin: const EdgeInsets.only(top: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-            decoration: BoxDecoration(
-              color: over ? _C.red : const Color(0xFFF59E0B),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: const Text(
-              '보호구역',
-              style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900),
-            ),
-          ),
-        const SizedBox(height: 4),
         // 현재 속도 크게 표시 (티맵 스타일)
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
