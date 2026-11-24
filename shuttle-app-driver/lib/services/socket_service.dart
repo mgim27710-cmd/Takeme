@@ -36,6 +36,7 @@ class SocketService {
 
     _attachRoomUpdated();
     _socket!.off('connect');
+    _attachRoomUpdated();
     _socket!.onConnect((_) {
       debugPrint('Socket connected: ${_socket!.id}');
       if (_joinedVehicleId != null) {
@@ -267,7 +268,8 @@ class SocketService {
     });
   }
 
-  /// 대화방 변경(새 메시지·읽음 처리) 알림을 받을 화면들
+  /// 대화방 변경(새 메시지·읽음 처리) 알림을 받을 화면들. 화면마다 key 를 다르게 주면
+  /// 홈 화면 배지와 대화방 목록이 함께 받는다 (예전에는 나중에 등록한 화면만 받았다)
   final Map<String, Function(Map<String, dynamic> data)> _roomUpdatedListeners = {};
 
   void onRoomUpdated(Function(Map<String, dynamic> data) callback, {String key = 'default'}) {

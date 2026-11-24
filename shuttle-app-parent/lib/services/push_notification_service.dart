@@ -9,6 +9,8 @@ import 'api_service.dart';
 import 'push_navigation.dart';
 
 /// 앱이 꺼져 있거나 백그라운드일 때 받은 푸시. 반드시 최상위 함수여야 한다.
+/// 서버가 notification(제목·내용)을 함께 보내므로 알림창 표시는 안드로이드가 직접 한다
+/// (여기서 또 띄우면 두 번 뜬다).
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
@@ -44,6 +46,7 @@ class PushNotificationService {
         initSettings,
         onDidReceiveNotificationResponse: (response) {
           debugPrint('[LocalNoti] Clicked notification: ${response.payload}');
+          // 앱이 켜져 있을 때 뜬 알림 배너를 눌렀을 때 → 관련 화면으로 이동
           PushNavigation.onPayload(response.payload);
         },
       );
@@ -88,6 +91,16 @@ class PushNotificationService {
           payload: jsonEncode(message.data),
         );
       });
+
+      // 알림창의 알림을 눌러 앱이 백그라운드에서 열렸을 때 → 관련 화면으로 이동
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        PushNavigation.onTap(Map<String, dynamic>.from(message.data));
+      });
+      // 앱이 꺼져 있다가 알림을 눌러 켜졌을 때 → 앱이 준비되면 관련 화면으로 이동
+      final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+      if (initialMessage != null) {
+        PushNavigation.onTap(Map<String, dynamic>.from(initialMessage.data), coldStart: true);
+      }
 
       // Token refresh listener
       FirebaseMessaging.instance.onTokenRefresh.listen((token) {

@@ -72,6 +72,9 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     LocalPush.instance.requestPermission();
     _loadAllData();
     _loadUnreadCount();
+    SocketService().onRoomUpdated((_) {
+      if (mounted) _loadUnreadCount();
+    }, key: 'home');
     WidgetsBinding.instance.addPostFrameCallback((_) => _ensureChildInfo());
     _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
@@ -290,7 +293,7 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                 LocalPush.instance.show(
                   dedupeKey: 'opstart_${vid ?? routeVehicleId}_${_pushDay()}',
                   title: '🚌 통학버스 운행 시작',
-                  body: '${bus.isEmpty ? '버스' : bus}가 운행을 시작했어요. 앱에서 버스 위치를 볼 수 있어요.',
+                  body: '기사님이 ${bus.isEmpty ? '버스' : bus} 운행을 시작했어요. 앱에서 버스 위치를 볼 수 있어요.',
                   within: const Duration(hours: 2),
                 );
               }

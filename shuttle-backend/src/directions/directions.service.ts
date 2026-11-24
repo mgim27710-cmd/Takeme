@@ -8,6 +8,9 @@ const NAVER_DIRECTIONS_15_URL = 'https://naveropenapi.apigw.ntruss.com/map-direc
 const NAVER_DIRECTIONS_5_URL = 'https://naveropenapi.apigw.ntruss.com/map-direction/v1/driving';
 const KAKAO_WAYPOINTS_URL = 'https://apis-navi.kakaomobility.com/v1/waypoints/directions';
 
+/** 네이버 Directions 15 가 받을 수 있는 경유지 최대 개수. 이보다 많으면 카카오를 먼저 쓴다 */
+const NAVER_MAX_WAYPOINTS = 15;
+
 /** 안내 타입 중 회전이 아닌 것 (출발지 100, 목적지 101, 경유지 1000) */
 const NON_TURN_GUIDE_TYPES = new Set([100, 101, 1000]);
 
@@ -103,9 +106,26 @@ export class DirectionsService {
       return null;
     };
 
-    // 1. 네이버 길찾기 우선 (안전 경로 traoptimal, 빠른 경로 trafast)
-    const naverResult = await tryNaver();
-    if (naverResult) return naverResult;
+    // 5단계: 안전 경로는 카카오(추천 + 유턴 회피) 우선 시도 후 실패 시 네이버,
+    // 빠른 경로는 네이버(최단시간 trafast) 우선 시도 후 실패 시 카카오
+    // 경유지가 네이버 한도(15개)를 넘으면 모드와 상관없이 카카오 우선 (네이버는 거절하므로)
+    if (mode === 'safe' || waypoints.length > NAVER_MAX_WAYPOINTS) {
+      if (kakaoApiKey && typeof this.http?.post === 'function') {
+        try {
+          return await this.fetchKakaoRoute(origin, destination, waypoints, mode, kakaoApiKey);
+        } catch (kakaoErr: any) {
+          this.logger.warn(`[directions] Kakao 길찾기 호출 실패: ${kakaoErr?.message}`);
+          const naverResult = await tryNaver();
+          if (naverResult) return naverResult;
+          throw kakaoErr;
+        }
+      }
+      const naverResult = await tryNaver();
+      if (naverResult) return naverResult;
+    } else {
+      const naverResult = await tryNaver();
+      if (naverResult) return naverResult;
+    }
 
     // 2. 네이버 키가 없거나 실패하면(경유지 15개 초과 등) 카카오 길찾기
     if (kakaoApiKey && typeof this.http?.post === 'function') {

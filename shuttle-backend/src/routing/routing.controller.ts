@@ -638,7 +638,6 @@ export class RoutingController {
     return this.routingService.deleteDocument(id);
   }
 
-  @SetMetadata('isPublic', true)
   @Get('legal-expiry')
   async getLegalExpiries(
     @Query('academyId') academyId?: string,
@@ -647,7 +646,6 @@ export class RoutingController {
     return this.routingService.getLegalExpiries(academyId ? Number(academyId) : undefined, educationLevel);
   }
 
-  @SetMetadata('isPublic', true)
   @Post('legal-expiry')
   async saveLegalExpiry(
     @Body() body: any,

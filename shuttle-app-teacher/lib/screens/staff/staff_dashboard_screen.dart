@@ -55,7 +55,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     });
     SocketService().onRoomUpdated((_) {
       if (mounted) _loadUnreadCount();
-    });
+    }, key: 'home');
     _initChangeListeners();
   }
 
@@ -96,6 +96,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
 
   Future<void> _loadUnreadCount() async {
     try {
+      // 알림은 모두 TakeMe 알림 방으로 오므로 대화방 안 읽은 수(TakeMe 알림 포함)만 센다
       final chatCount = await ApiService().getChatTotalUnreadCount();
       if (mounted) {
         setState(() {

@@ -78,6 +78,11 @@ export class ChatService implements OnModuleInit {
         return this.sendSystemNotification(academyId, category as any, title, content, extra);
       }
     );
+    // 게시판 알림장·공지가 올라오면 RoutingService 가 이 함수로 휴대폰 푸시를 보낸다
+    this.routingService.registerPushHandler(
+      (userIds: number[], title: string, body: string, data?: Record<string, any>, settingType?: any) =>
+        this.pushToUsers(userIds, title, body, data, settingType),
+    );
     this.routingService.registerStudentNotificationHandler(
       (studentId: number, title: string, content: string, roles: any[], options?: any) => {
         return this.notifyStudentRelated(studentId, title, content, roles as any, options);
@@ -271,31 +276,9 @@ export class ChatService implements OnModuleInit {
       if (m.room?.id) {
         await this.roomRepo.update(m.room.id, { updatedAt: new Date() });
         await this.broadcastToRoom(m.room.id, m);
+        // 방해금지 시간이 끝나 전달되는 메시지도 이때 휴대폰 푸시를 보낸다
+        await this.pushChatMessage(m.room.id, m.sender, m.text, m.type);
 
-        // 방해금지 해제된 메시지 수신자들에게 푸시 발송
-        try {
-          const roomWithMembers = await this.roomRepo.findOne({
-            where: { id: m.room.id },
-            relations: { members: { user: true } },
-          });
-          const senderName = m.sender?.name || m.sender?.email || '학부모';
-          const isDirect = roomWithMembers?.type === ChatRoomType.DIRECT || (roomWithMembers?.members || []).length <= 2;
-          const pushTitle = isDirect ? senderName : `${roomWithMembers?.name || '대화방'} (${senderName})`;
-          const pushBody = (m.text || '').trim() || '새 메시지가 도착했습니다.';
-          for (const member of roomWithMembers?.members || []) {
-            if (member.user && member.user.id !== m.sender?.id) {
-              await this.sendPushToUser(member.user.id, pushTitle, pushBody, {
-                roomId: m.room.id,
-                type: 'CHAT_MESSAGE',
-                senderId: m.sender?.id,
-                senderName,
-                messageId: m.id,
-              });
-            }
-          }
-        } catch (e) {
-          console.warn('[ChatService] Push error in releaseDeferredMessages:', e);
-        }
       }
     }
     return due.length;
@@ -403,8 +386,8 @@ export class ChatService implements OnModuleInit {
       });
     }
 
-    // AWS SNS 모바일 푸시 알림 발송
-    await this.sendPushToUser(userId, title, message, {
+    // 휴대폰 푸시 (앱이 꺼져 있어도 알림창에 뜬다). 알림 설정은 위에서 이미 확인했다
+    await this.pushToUsers([userId], title, message, {
       roomId: room.id,
       type: options?.type || 'SYSTEM',
       ...(options?.metadata || {}),
@@ -422,23 +405,66 @@ export class ChatService implements OnModuleInit {
     message: string,
     data?: Record<string, any>,
   ) {
-    try {
-      const trimmedMsg = (message || '').trim();
-      if (!trimmedMsg) return; // 내용이 없는 빈 푸시는 발송하지 않음
-      const user = await this.userRepo.findOne({ where: { id: userId } });
-      if (!user) return;
-      const devices = await this.userDeviceRepo.find({ where: { userId } });
-      const endpoints = new Set<string>();
-      if (user.snsEndpointArn) endpoints.add(user.snsEndpointArn);
-      for (const d of devices) {
-        if (d.endpointArn) endpoints.add(d.endpointArn);
-      }
+    await this.pushToUsers([userId], title, message, data);
+  }
 
-      for (const ep of endpoints) {
-        await sendSnsPushNotification(ep, title, trimmedMsg, data);
+  /**
+   * 휴대폰 푸시만 보낸다 (AWS SNS → FCM). TakeMe 알림 방 메시지는 만들지 않는다.
+   * settingType 을 주면 그 알림을 끈 사용자는 뺀다. 실패해도 예외를 던지지 않는다.
+   */
+  async pushToUsers(
+    userIds: number[],
+    title: string,
+    body: string,
+    data?: Record<string, any>,
+    settingType?: Parameters<typeof isNotificationEnabled>[1],
+  ) {
+    const ids = Array.from(new Set((userIds || []).filter(Boolean)));
+    if (ids.length === 0) return;
+    try {
+      const users = await this.userRepo.find({ where: { id: In(ids) } });
+      const devices = await this.userDeviceRepo.find({ where: { userId: In(ids) } });
+      for (const u of users) {
+        if (settingType && !isNotificationEnabled(u, settingType)) continue;
+        const endpoints = new Set<string>();
+        if (u.snsEndpointArn) endpoints.add(u.snsEndpointArn);
+        for (const d of devices) {
+          if (d.userId === u.id && d.endpointArn) endpoints.add(d.endpointArn);
+        }
+        for (const ep of endpoints) {
+          await sendSnsPushNotification(ep, title, body, data);
+        }
       }
     } catch (snsErr) {
-      console.warn(`[SNS] Failed to send push to user ${userId}:`, snsErr);
+      console.warn(`[SNS] Failed to send push to users ${ids.join(',')}:`, snsErr);
+    }
+  }
+
+  /** 대화 메시지 푸시: 보낸 사람을 뺀 방 참여자에게 */
+  private async pushChatMessage(roomId: number, sender: User | null | undefined, text: string, type?: string) {
+    try {
+      const room = await this.roomRepo.findOne({ where: { id: roomId }, relations: { members: { user: true } } });
+      if (!room) return;
+      const receiverIds = (room.members || [])
+        .map(m => m.user?.id)
+        .filter((id): id is number => typeof id === 'number' && id !== sender?.id);
+      if (receiverIds.length === 0) return;
+
+      const isNoticeRoom = room.type === ChatRoomType.NOTIFICATION_SYSTEM;
+      const isGroup = room.type === ChatRoomType.GROUP || (room.members || []).length > 2;
+      const senderName = sender?.name || '알림';
+      const content = type && type !== 'TEXT' && !(text || '').trim() ? '새 메시지가 도착했습니다.' : (text || '').trim();
+      const title = isNoticeRoom ? (room.name || ACADEMY_NOTI_ROOM_NAME) : (isGroup ? (room.name || '그룹 채팅') : senderName);
+      const body = isGroup && !isNoticeRoom ? `${senderName}: ${content}` : content;
+      await this.pushToUsers(
+        receiverIds,
+        title,
+        body.length > 200 ? `${body.slice(0, 200)}…` : body,
+        { roomId, type: isNoticeRoom ? 'notice' : 'chat', isGroup: isGroup && !isNoticeRoom, memberCount: (room.members || []).length },
+        isNoticeRoom ? 'notice' : 'chat',
+      );
+    } catch (err) {
+      console.warn('[ChatService] pushChatMessage error:', err);
     }
   }
 
@@ -638,6 +664,8 @@ export class ChatService implements OnModuleInit {
       await this.roomRepo.update(notiRoom.id, { updatedAt: new Date() });
 
       this.chatGateway.broadcastMessageToRoom(notiRoom.id, saved, (notiRoom.members || []).map(m => m.user?.id).filter(Boolean) as number[]);
+      // 기관 공지: 공지사항 채널 참여자(학부모·교사·기사)에게 휴대폰 푸시
+      void this.pushChatMessage(notiRoom.id, senderUser, `[${title}] ${content}`);
       this.chatGateway.server?.to(`chat_${notiRoom.id}`).emit('roomUpdated', { roomId: notiRoom.id });
       if (academyId) this.chatGateway.server?.to(`academy_${academyId}`).emit('roomUpdated', { roomId: notiRoom.id });
 
@@ -1078,7 +1106,7 @@ export class ChatService implements OnModuleInit {
     });
     if (!room) return { success: false, count: 0 };
 
-    // Postgres 는 따옴표 없는 m.roomId 를 m.roomid 로 바꿔 컬럼을 못 찾는다 -> 관계(join)로 조회한다
+    // Postgres 는 따옴표 없는 m.roomId 를 m.roomid 로 바꿔 컬럼을 못 찾는다 → 관계(join)로 조회한다
     const unreadMessages = await this.messageRepo
       .createQueryBuilder('m')
       .leftJoin('m.room', 'room')
@@ -1097,6 +1125,13 @@ export class ChatService implements OnModuleInit {
         toSave.push(m);
         updatedIds.push(m.id);
       }
+    }
+    if (toSave.length > 0) {
+      await this.messageRepo.save(toSave);
+      await this.memberRepo.update(
+        { room: { id: roomId }, user: { id: userId } },
+        { lastReadAt: new Date() },
+      ).catch(() => {});
     }
 
     if (toSave.length > 0) {
@@ -1268,6 +1303,9 @@ export class ChatService implements OnModuleInit {
       this.chatGateway.broadcastMessageToRoom(roomId, payloadMessage, memberIds);
     }
     if (deliverAt) return fullMessage;
+
+    // 휴대폰 푸시: 받는 사람 앱이 꺼져 있거나 백그라운드여도 알림이 뜨게 (응답을 늦추지 않게 기다리지 않는다)
+    void this.pushChatMessage(roomId, user, text, type);
 
     // [교사/기사 앱 수신함 즉시 동기화]
     // 관리자(원장님) 또는 다른 사용자가 메시지를 보냈을 때,
@@ -1675,7 +1713,7 @@ export class ChatService implements OnModuleInit {
       longitude: data.longitude ? Number(data.longitude) : (studentObj?.longitude || vehicle?.academy?.longitude || 127.123),
       locationType: (data as any).locationType || 'PIN',
       rideType,
-      requestDate: targetRequestDate,
+      requestDate: targetRequestDate || data.requestDate || kstDateString(),
       note: data.note || (rideType === 'TODAY_ONLY' ? '오늘 하루 하원 셔틀 탑승 희망 (익일 자동 픽업 원복)' : '정규 셔틀 탑승 및 구역 편입 희망'),
       status: 'PENDING',
       requestId: undefined as number | undefined,

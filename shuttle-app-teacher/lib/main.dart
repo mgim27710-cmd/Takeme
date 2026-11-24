@@ -6,9 +6,9 @@ import 'screens/login_screen.dart';
 import 'screens/staff/staff_dashboard_screen.dart';
 import 'screens/teacher/homeroom_teacher_home_screen.dart';
 import 'utils/network_helper.dart';
-import 'services/push_notification_service.dart';
-import 'services/push_navigation.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'services/push_navigation.dart';
+import 'services/push_notification_service.dart';
 import 'widgets/naver_route_map.dart';
 
 void main() async {
@@ -30,7 +30,7 @@ class TakeMeTeacherApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      navigatorKey: appNavigatorKey,
+      navigatorKey: appNavigatorKey, // 푸시 알림을 눌렀을 때 화면 이동용
       title: 'TakeMe 교사',
       debugShowCheckedModeBanner: false,
       localizationsDelegates: const [

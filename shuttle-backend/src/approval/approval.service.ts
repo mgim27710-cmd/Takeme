@@ -907,17 +907,16 @@ export class ApprovalService {
           // 기사와 차량교사 모두에게 (기사가 없거나 차량교사만 있어도 빠지지 않게)
           const staffIds = new Set<number>();
           if (driver) staffIds.add(driver.id);
-          this.getVehicleStaffIds([affectedVehicle.id], true).then((teacherIds) => {
-            teacherIds.forEach((id) => staffIds.add(id));
-            for (const staffId of staffIds) {
-              this.chatService?.sendSystemNotificationToUser(
-                staffId,
-                '운행 변동 안내',
-                `[운행 변동] ${student.adminDisplayName || student.name} (${targetDate} ${typeKr})`,
-                { type: 'change_request' }
-              ).catch(() => {});
-            }
-          }).catch(() => {});
+          const teacherIds = await this.getVehicleStaffIds([affectedVehicle.id], true);
+          teacherIds.forEach((id) => staffIds.add(id));
+          for (const staffId of staffIds) {
+            this.chatService?.sendSystemNotificationToUser(
+              staffId,
+              '운행 변동 안내',
+              `[운행 변동] ${student.adminDisplayName || student.name} (${targetDate} ${typeKr})`,
+              { type: 'change_request' }
+            ).catch(() => {});
+          }
         }
       }
     }

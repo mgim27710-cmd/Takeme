@@ -58,7 +58,6 @@ class PushNavigation {
   static void _push(NavigatorState nav, Widget screen) {
     nav.push(MaterialPageRoute(builder: (_) => screen));
   }
-
   static void _open(NavigatorState nav, Map<String, dynamic> data) {
     final type = (data['type'] ?? '').toString();
     final roomId = int.tryParse((data['roomId'] ?? '').toString());

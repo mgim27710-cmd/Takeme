@@ -37,7 +37,7 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
     _loadRooms();
     SocketService().onRoomUpdated((_) {
       if (mounted) _loadRooms(showLoading: false);
-    });
+    }, key: 'list');
   }
 
   /// userInitiated: 사용자가 직접 새로고침(당겨서 새로고침/다시 시도)한 경우

@@ -43,7 +43,7 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> with AutomaticK
     _loadRooms();
     SocketService().onRoomUpdated((_) {
       if (mounted) _loadRooms(showLoading: false);
-    });
+    }, key: 'list');
     SocketService().onNotificationReceived((_) {
       if (mounted) _loadRooms(showLoading: false);
     });

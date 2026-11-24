@@ -114,6 +114,12 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
     return int.tryParse(v.toString()) ?? 0;
   }
 
+  bool get _isNotificationRoom =>
+      widget.isSystem ||
+      widget.title == 'TakeMe 알림' ||
+      widget.room?['type'] == 'NOTIFICATION_SYSTEM' ||
+      widget.room?['name'] == 'TakeMe 알림';
+
   /// userInitiated: 사용자가 직접 새로고침/다시 시도한 경우
   Future<void> _loadMessages({bool userInitiated = false, bool silent = false}) async {
     if (!silent && _messages.isEmpty && mounted) {
@@ -137,6 +143,10 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
         }
         // 메시지를 실제로 불러왔을 때만 읽음 처리 (못 본 메시지를 읽은 것으로 처리하지 않는다)
         ApiService().markChatRoomAsRead(widget.roomId);
+        // TakeMe 알림 방을 열면 홈 배지에 함께 잡히는 교사 알림(운행·신청 알림)도 읽음으로 저장한다
+        if (_isNotificationRoom) {
+          ApiService().markAllTeacherNotificationsRead().catchError((_) => false);
+        }
       }
     } catch (e) {
       if (!mounted || silent) return;
