@@ -283,26 +283,65 @@ export default function LogViewer({
     }
   }, [selectedClass, searchKeyword, getAuthHeaders]);
 
-  // Fetch Approved Rides (일회성 셔틀 탑승 승인 내역)
+  // Fetch Approved Rides (1:1 상담 결재 건 + 학부모 통학 변동 신청 승인 내역 통합)
   const fetchApprovedRides = useCallback(async () => {
     try {
-      const res = await fetch(
+      const p1 = fetch(
         `${API_BASE_URL}/chat/payment/requests${activeAcadId ? `?academyId=${activeAcadId}` : ''}`,
         { headers: getAuthHeaders() }
-      );
-      if (res.ok) {
-        const rawData = await res.json();
-        const data = (Array.isArray(rawData) ? rawData : []).map(d => {
-          let p = { ...d };
-          if (typeof d.payload === 'string') {
-            try { p = { ...p, ...JSON.parse(d.payload) }; } catch (_) {}
-          } else if (d.payload && typeof d.payload === 'object') {
-            p = { ...p, ...d.payload };
-          }
-          return p;
-        });
-        setApprovedRides(data.filter(d => d.status === 'APPROVED') || []);
-      }
+      ).then(r => r.ok ? r.json() : []).catch(() => []);
+
+      const p2 = fetch(
+        `${API_BASE_URL}/approval/admin`,
+        { headers: getAuthHeaders() }
+      ).then(r => r.ok ? r.json() : []).catch(() => []);
+
+      const [rawData1, rawData2] = await Promise.all([p1, p2]);
+
+      const data1 = (Array.isArray(rawData1) ? rawData1 : []).map(d => {
+        let p = { ...d };
+        if (typeof d.payload === 'string') {
+          try { p = { ...p, ...JSON.parse(d.payload) }; } catch (_) {}
+        } else if (d.payload && typeof d.payload === 'object') {
+          p = { ...p, ...d.payload };
+        }
+        return p;
+      });
+
+      const typeMap = {
+        ABSENCE: '결석 신청',
+        ONE_TIME_BOARDING: '당일 하루 탑승',
+        PICKUP: '보호자 직접 픽업',
+        INDIVIDUAL_DISMISSAL: '개별 하원 (셔틀 미탑승)',
+        CHANGE_LOCATION: '탑승지/정류장 변경',
+      };
+
+      const data2 = (Array.isArray(rawData2) ? rawData2 : []).map(r => {
+        const stName = r.student?.adminDisplayName || r.student?.name || r.studentName || '원아';
+        const busNum = r.targetVehicle?.busNumber || r.student?.assignedVehicle?.busNumber || '';
+        const vId = r.targetVehicle?.id || r.student?.assignedVehicle?.id;
+        return {
+          id: `appr-${r.id}`,
+          originalId: r.id,
+          isApprovalRequestEntity: true,
+          status: r.status,
+          studentName: stName,
+          busNumber: busNum,
+          vehicleId: vId,
+          type: r.type,
+          typeKr: typeMap[r.type] || r.type || '통학 변동',
+          reason: r.reason,
+          rejectionReason: r.rejectionReason,
+          decidedAt: r.processedAt,
+          decidedBy: r.processedBy?.name || '관리자',
+          rideDate: r.targetDate || r.startDate || (r.createdAt && r.createdAt.split('T')[0]),
+          createdAt: r.createdAt,
+          boardingLocation: r.newAddress || r.address || r.student?.boardingLocation,
+        };
+      });
+
+      const combined = [...data1, ...data2];
+      setApprovedRides(combined.filter(d => d.status === 'APPROVED') || []);
     } catch (e) {
       // ignore
     }

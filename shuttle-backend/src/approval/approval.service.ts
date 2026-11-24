@@ -26,6 +26,7 @@ import { AcademyHoliday, CalendarEventType } from '../entities/academy-holiday.e
 import { StudentSchedule } from '../entities/student-schedule.entity';
 import { LocationGateway } from '../teacher/location.gateway';
 import { ChatService } from '../chat/chat.service';
+import { RoutingService } from '../routing/routing.service';
 import {
   getStudentClassName,
   isSameClass,
@@ -34,7 +35,7 @@ import {
 } from '../utils/school.util';
 import { isNotificationEnabled } from '../utils/notification.util';
 
-function typeToKorean(type: ChangeRequestType | string): string {
+export function typeToKorean(type: ChangeRequestType | string): string {
   switch (type) {
     case ChangeRequestType.ABSENCE:
       return '결석';
@@ -112,7 +113,78 @@ export class ApprovalService {
     @Inject(forwardRef(() => ChatService))
     @Optional()
     private readonly chatService?: ChatService,
+    @Inject(forwardRef(() => RoutingService))
+    @Optional()
+    private readonly routingService?: RoutingService,
   ) {}
+
+  private isPointInPolygon(point: [number, number], vs: [number, number][]): boolean {
+    const x = point[0], y = point[1];
+    let inside = false;
+    for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+      const xi = vs[i][0], yi = vs[i][1];
+      const xj = vs[j][0], yj = vs[j][1];
+      const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  private getDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  /**
+   * 탑승 좌표(lat, lng)를 기준으로 가장 적합한 차량을 자동 판별:
+   * 1순위: 해당 좌표가 차량의 운행 구역(polygonCoordinates) 내부에 속하는 차량
+   * 2순위: 구역 경계선/중심점과 가장 가까운 차량
+   */
+  async findBestVehicleForPoint(academyId: number, lat: number, lng: number): Promise<Vehicle | null> {
+    const vehicles = await this.vehicleRepo.find({
+      where: { academy: { id: academyId } },
+      relations: { teacherUser: true, driverUser: true },
+      order: { busNumber: 'ASC' },
+    });
+    if (vehicles.length === 0) return null;
+
+    // 1. Polygon containment
+    for (const v of vehicles) {
+      let pts: [number, number][] = [];
+      try {
+        pts = typeof v.polygonCoordinates === 'string' ? JSON.parse(v.polygonCoordinates) : (v.polygonCoordinates || []);
+      } catch (_) {}
+      if (Array.isArray(pts) && pts.length >= 3 && this.isPointInPolygon([lat, lng], pts)) {
+        return v;
+      }
+    }
+
+    // 2. Minimum distance to vehicle polygon/points
+    let minDistance = Infinity;
+    let closestVehicle: Vehicle = vehicles[0];
+    for (const v of vehicles) {
+      let pts: [number, number][] = [];
+      try {
+        pts = typeof v.polygonCoordinates === 'string' ? JSON.parse(v.polygonCoordinates) : (v.polygonCoordinates || []);
+      } catch (_) {}
+      if (Array.isArray(pts) && pts.length > 0) {
+        for (const pt of pts) {
+          const dist = this.getDistanceKm(lat, lng, pt[0], pt[1]);
+          if (dist < minDistance) {
+            minDistance = dist;
+            closestVehicle = v;
+          }
+        }
+      }
+    }
+    return closestVehicle;
+  }
 
   private static systemNotificationHandler: ((
     academyId: number | null,
@@ -242,6 +314,7 @@ export class ApprovalService {
     address?: string;
     latitude?: number;
     longitude?: number;
+    roomId?: number;
   }) {
     const student = await this.studentRepo.findOne({
       where: { id: data.studentId },
@@ -270,25 +343,68 @@ export class ApprovalService {
     const direction = data.direction || RequestDirection.ALL;
     const reason = (data.reason || data.message || '').trim();
 
-    const newAddress = data.newAddress || data.address || undefined;
-    const newLatitude = data.newLatitude ?? data.latitude ?? undefined;
-    const newLongitude = data.newLongitude ?? data.longitude ?? undefined;
+    let newAddress = data.newAddress || data.address || undefined;
+    let newLatitude = data.newLatitude ?? data.latitude ?? undefined;
+    let newLongitude = data.newLongitude ?? data.longitude ?? undefined;
+
+    // 일일 탑승 또는 위치 변경 신청 시 좌표가 없으면 도로명 주소 지오코딩 수행
+    if ((!newLatitude || !newLongitude) && (newAddress || student.address)) {
+      const targetAddr = newAddress || student.address;
+      if (this.routingService && targetAddr) {
+        try {
+          const geo = await this.routingService.geocodeAddress(targetAddr);
+          if (geo && geo.lat && geo.lng) {
+            newLatitude = geo.lat;
+            newLongitude = geo.lng;
+          }
+        } catch (_) {}
+      }
+    }
+
+    if ((!newLatitude || !newLongitude) && student.latitude && student.longitude) {
+      newLatitude = student.latitude;
+      newLongitude = student.longitude;
+    }
+
+    if (!newAddress && (type === ChangeRequestType.ONE_TIME_BOARDING || type === ChangeRequestType.CHANGE_LOCATION)) {
+      newAddress = student.boardingLocation || student.address || undefined;
+    }
 
     let targetVehicle: Vehicle | null = null;
     let isCapacityExceeded = false;
     let candidateVehicles: any[] = [];
 
-    // 일회성 탑승 또는 차량 변경인 경우 정원 검사
-    const targetVehicleId = data.targetVehicleId || (type === ChangeRequestType.ONE_TIME_BOARDING ? student.assignedVehicle?.id : undefined);
-    if (targetVehicleId) {
-      targetVehicle = await this.vehicleRepo.findOne({ where: { id: targetVehicleId } });
-      if (targetVehicle) {
-        const currentCount = await this.getVehiclePassengerCount(targetVehicle.id, targetDate);
-        const capacity = targetVehicle.capacity || 25;
-        if (currentCount >= capacity) {
-          isCapacityExceeded = true;
-          candidateVehicles = await this.getVehicleCapacityCandidates(academyId, targetDate, targetVehicle.id);
+    // 1) 명시적 targetVehicleId가 지정된 경우
+    let targetVehicleId = data.targetVehicleId;
+
+    // 2) 미지정 시, 일일 탑승(ONE_TIME_BOARDING) 또는 위치 변경(CHANGE_LOCATION) 또는 학생 미배정 시 해당 좌표 근처 구역 차량 자동 탐색
+    if (!targetVehicleId && (type === ChangeRequestType.ONE_TIME_BOARDING || type === ChangeRequestType.CHANGE_LOCATION || !student.assignedVehicle)) {
+      if (newLatitude && newLongitude && academyId) {
+        targetVehicle = await this.findBestVehicleForPoint(academyId, Number(newLatitude), Number(newLongitude));
+        if (targetVehicle) {
+          targetVehicleId = targetVehicle.id;
         }
+      }
+    }
+
+    // 3) 그래도 없으면 기존 배정 차량 사용
+    if (!targetVehicleId && student.assignedVehicle?.id) {
+      targetVehicleId = student.assignedVehicle.id;
+    }
+
+    if (targetVehicleId && !targetVehicle) {
+      targetVehicle = await this.vehicleRepo.findOne({
+        where: { id: targetVehicleId },
+        relations: { teacherUser: true, driverUser: true },
+      });
+    }
+
+    if (targetVehicle) {
+      const currentCount = await this.getVehiclePassengerCount(targetVehicle.id, targetDate);
+      const capacity = targetVehicle.capacity || 25;
+      if (currentCount >= capacity) {
+        isCapacityExceeded = true;
+        candidateVehicles = await this.getVehicleCapacityCandidates(academyId, targetDate, targetVehicle.id);
       }
     }
 
@@ -327,7 +443,7 @@ export class ApprovalService {
       type: 'APPROVAL_REQUEST',
       approvalRequest: saved,
       academy: academy || undefined,
-      message: `[신규 신청] ${student.adminDisplayName || student.name} 원아의 ${typeKr} 신청이 접수되었습니다. (적용일: ${targetDate})`,
+      message: `[신규 신청] ${student.adminDisplayName || student.name} 원아의 ${typeKr} 신청이 접수되었습니다. (적용일: ${targetDate}${targetVehicle ? `, 배정차량: ${targetVehicle.busNumber}` : ''})`,
     });
     await this.notificationRepo.save(noti);
 
@@ -342,17 +458,42 @@ export class ApprovalService {
       { type: 'change_request', excludeUserIds: [callingUser?.id].filter(Boolean) as number[] },
     );
 
-    // 소켓 브로드캐스트 (해당 유치원 관리자 방)
+    // 소켓 브로드캐스트 (해당 유치원 관리자 방, 교직원 방, 배정 차량 방)
     if (this.locationGateway) {
       this.locationGateway.broadcastChangeRequestCreated(academyId, {
         id: saved.id,
         type: saved.type,
         typeKr,
+        studentId: student.id,
         studentName: student.adminDisplayName || student.name,
         targetDate,
+        direction,
         isCapacityExceeded,
         candidateVehicles,
+        vehicleId: targetVehicle?.id,
+        targetVehicleId: targetVehicle?.id,
+        busNumber: targetVehicle?.busNumber,
+        newAddress,
+        newLatitude,
+        newLongitude,
+        latitude: newLatitude,
+        longitude: newLongitude,
       });
+    }
+
+    // 대화방(지정된 채팅방 또는 1:1 대화방)에 결재 카드 메시지 등록 및 실시간 브로드캐스트
+    let chatMessage: any = null;
+    if (this.chatService) {
+      try {
+        chatMessage = await this.chatService.postApprovalRequestToChat(
+          saved,
+          callingUser,
+          targetVehicle,
+          data.roomId ? Number(data.roomId) : undefined,
+        );
+      } catch (chatErr) {
+        console.error('[ApprovalService] postApprovalRequestToChat error:', chatErr);
+      }
     }
 
     if (this.chatService && academyId) {
@@ -373,8 +514,8 @@ export class ApprovalService {
           this.chatService?.sendSystemNotificationToUsers(
             ids,
             '통학 변동 신청 접수',
-            `[신규 신청] ${student.adminDisplayName || student.name} 원아의 ${typeKr} 신청이 접수되었습니다. (적용일: ${targetDate})`,
-            { type: 'change_request' }
+            `[신규 신청] ${student.adminDisplayName || student.name} 원아의 ${typeKr} 신청이 접수되었습니다. (적용일: ${targetDate}${targetVehicle ? `, 배정차량: ${targetVehicle.busNumber}` : ''})`,
+            { type: 'change_request', metadata: { requestId: saved.id, vehicleId: targetVehicle?.id } }
           ).catch(() => {});
         }
       }).catch(() => {});
@@ -382,8 +523,9 @@ export class ApprovalService {
 
     return {
       success: true,
-      message: `${typeKr} 신청이 성공적으로 접수되었습니다. 기관 관리자의 승인 후 최종 반영됩니다.`,
+      message: `${typeKr} 신청이 성공적으로 접수되었습니다. 담당 차량선생님의 승인 후 최종 반영됩니다.`,
       request: saved,
+      chatMessage,
       candidateVehicles,
     };
   }
@@ -637,6 +779,8 @@ export class ApprovalService {
       this.locationGateway.broadcastChangeRequestCancelled(academyId, {
         studentId: student.id,
         studentName: student.adminDisplayName || student.name,
+        boardStatus: student.boardStatus || 'SELF_PICKUP',
+        isNotRiding: student.isNotRiding,
       });
     }
 
@@ -652,9 +796,9 @@ export class ApprovalService {
     decision: ApprovalStatus,
     rejectionReason?: string,
   ) {
-    const allowed = [UserRole.ACADEMY_ADMIN, UserRole.SUPER_ADMIN, UserRole.DESK_STAFF];
+    const allowed = [UserRole.ACADEMY_ADMIN, UserRole.SUPER_ADMIN, UserRole.DESK_STAFF, UserRole.SHUTTLE_TEACHER, UserRole.TEACHER];
     if (!allowed.includes(callingUser.role as UserRole)) {
-      throw new ForbiddenException('기관 관리자 또는 데스크 직원만 신청을 처리할 수 있습니다.');
+      throw new ForbiddenException('담당 교직원 또는 기관 관리자만 신청을 처리할 수 있습니다.');
     }
 
     const req = await this.approvalRepo.findOne({
@@ -797,6 +941,15 @@ export class ApprovalService {
           targetDate,
         },
       });
+    }
+
+    // 대화방 내 결재 카드 상태 실시간 동기화
+    if (this.chatService) {
+      try {
+        await this.chatService.syncPaymentRequestDecision(req.id, decision, callingUser.name || callingUser.email);
+      } catch (chatErr) {
+        console.warn('[ApprovalService] syncPaymentRequestDecision error:', chatErr);
+      }
     }
 
     return {

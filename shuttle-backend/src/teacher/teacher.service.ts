@@ -9,6 +9,7 @@ import { User, UserRole } from '../entities/user.entity';
 import { ParentMessage } from '../entities/parent-message.entity';
 import { OperationLog } from '../entities/operation-log.entity';
 import { ScheduleOverride, OverrideType } from '../entities/schedule-override.entity';
+import { ApprovalRequest, ApprovalStatus, ChangeRequestType } from '../entities/approval-request.entity';
 import { AcademyHoliday } from '../entities/academy-holiday.entity';
 import { PickupPoint } from '../entities/pickup-point.entity';
 import { ChatMessage } from '../entities/chat-message.entity';
@@ -67,6 +68,7 @@ export class TeacherService implements OnModuleInit {
     @InjectRepository(AttendanceSubmission) private submissionRepository: Repository<AttendanceSubmission>,
     private readonly locationGateway: LocationGateway,
     @Optional() @InjectRepository(PickupPoint) private pickupPointRepository?: Repository<PickupPoint>,
+    @Optional() @InjectRepository(ApprovalRequest) private approvalRequestRepository?: Repository<ApprovalRequest>,
     @Optional() @InjectRepository(ChatMessage) private chatMessageRepository?: Repository<ChatMessage>,
     @Optional() @InjectRepository(ChatRoomMember) private chatRoomMemberRepository?: Repository<ChatRoomMember>,
     @Inject(forwardRef(() => ChatService))
@@ -117,13 +119,69 @@ export class TeacherService implements OnModuleInit {
 
   private async getActiveOverridesForToday(): Promise<ScheduleOverride[]> {
     const today = kstDateString();
-    return this.scheduleOverrideRepository.find({
+    const overrides = await this.scheduleOverrideRepository.find({
       where: {
         startDate: LessThanOrEqual(today),
         endDate: MoreThanOrEqual(today),
       },
       relations: { student: true }
     });
+
+    if (this.approvalRequestRepository) {
+      try {
+        const approvedReqs = await this.approvalRequestRepository.find({
+          where: {
+            status: ApprovalStatus.APPROVED,
+          },
+          relations: { student: true, targetVehicle: true }
+        });
+
+        for (const req of approvedReqs) {
+          const tDate = req.targetDate
+            ? (typeof req.targetDate === 'string' ? req.targetDate.split('T')[0] : (req.targetDate as any).toISOString?.().split('T')[0])
+            : null;
+          const sDate = req.startDate
+            ? (typeof req.startDate === 'string' ? req.startDate.split('T')[0] : (req.startDate as any).toISOString?.().split('T')[0])
+            : null;
+          const eDate = req.endDate
+            ? (typeof req.endDate === 'string' ? req.endDate.split('T')[0] : (req.endDate as any).toISOString?.().split('T')[0])
+            : (tDate || sDate);
+          const effectiveDate = tDate || sDate || today;
+
+          // 오늘 날짜에 유효하거나, 당일 일회성 탑승 건인 경우 포함
+          if (effectiveDate && effectiveDate <= today && (!eDate || eDate >= today)) {
+            let oType = OverrideType.ONE_TIME_BOARDING;
+            if (req.type === ChangeRequestType.CHANGE_LOCATION) oType = OverrideType.CHANGE_LOCATION;
+            else if (req.type === ChangeRequestType.ABSENCE) oType = OverrideType.ABSENCE;
+            else if (req.type === ChangeRequestType.PICKUP || req.type === ChangeRequestType.INDIVIDUAL_DISMISSAL) oType = OverrideType.PICKUP;
+            else if (req.type === ChangeRequestType.NO_SHUTTLE) oType = OverrideType.NO_SHUTTLE;
+
+            const exists = overrides.some(o => o.student?.id === req.student?.id && o.overrideType === oType);
+            if (!exists && req.student) {
+              const mockOverride = new ScheduleOverride();
+              mockOverride.id = -req.id;
+              mockOverride.student = req.student;
+              mockOverride.startDate = effectiveDate;
+              mockOverride.endDate = eDate || effectiveDate;
+              mockOverride.overrideType = oType;
+              mockOverride.direction = req.direction || 'ALL';
+              mockOverride.targetTime = req.targetTime || '';
+              mockOverride.reason = req.reason || '';
+              mockOverride.newAddress = req.newAddress || req.address || '';
+              mockOverride.latitude = req.newLatitude ?? req.latitude;
+              mockOverride.longitude = req.newLongitude ?? req.longitude;
+              mockOverride.newVehicleId = req.targetVehicle?.id;
+              mockOverride.approvalRequest = req;
+              overrides.push(mockOverride);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching approved requests in getActiveOverridesForToday:', err);
+      }
+    }
+
+    return overrides;
   }
 
   private async getTodayStudentsForVehicle(vehicleId: number, mode?: string): Promise<Student[]> {

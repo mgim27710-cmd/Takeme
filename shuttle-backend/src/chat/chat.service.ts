@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ForbiddenException, forwardRef, Inject, OnModuleInit } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, forwardRef, Inject, OnModuleInit, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, LessThanOrEqual } from 'typeorm';
 import { ChatRoom, ChatRoomType } from '../entities/chat-room.entity';
@@ -13,9 +13,12 @@ import { ParentMessage } from '../entities/parent-message.entity';
 import { Notification } from '../entities/notification.entity';
 import { UserDevice } from '../entities/user-device.entity';
 import { AcademyHoliday } from '../entities/academy-holiday.entity';
+import { ApprovalRequest, ApprovalStatus, ChangeRequestType, RequestDirection } from '../entities/approval-request.entity';
+import { ScheduleOverride, OverrideType } from '../entities/schedule-override.entity';
+import { LocationGateway } from '../teacher/location.gateway';
 import { ChatGateway } from './chat.gateway';
 import { RoutingService } from '../routing/routing.service';
-import { ApprovalService } from '../approval/approval.service';
+import { ApprovalService, typeToKorean } from '../approval/approval.service';
 import { formatTeacherName } from '../utils/teacher.util';
 import { getStudentClassName, isSameClass, kstDateString } from '../utils/school.util';
 import { isNotificationEnabled } from '../utils/notification.util';
@@ -60,10 +63,15 @@ export class ChatService implements OnModuleInit {
     @InjectRepository(Notification) private notificationRepo: Repository<Notification>,
     @InjectRepository(UserDevice) private userDeviceRepo: Repository<UserDevice>,
     @InjectRepository(AcademyHoliday) private holidayRepo: Repository<AcademyHoliday>,
+    @InjectRepository(ApprovalRequest) private approvalRepo: Repository<ApprovalRequest>,
+    @InjectRepository(ScheduleOverride) private overrideRepo: Repository<ScheduleOverride>,
     @Inject(forwardRef(() => ChatGateway))
     private readonly chatGateway: ChatGateway,
     @Inject(forwardRef(() => RoutingService))
     private readonly routingService: RoutingService,
+    @Inject(forwardRef(() => LocationGateway))
+    @Optional()
+    private readonly locationGateway?: LocationGateway,
   ) {
     this.routingService.registerSystemNotificationHandler(
       (academyId: number | null, category: string, title: string, content: string, extra?: any) => {
@@ -1244,7 +1252,7 @@ export class ChatService implements OnModuleInit {
 
     const fullMessage = await this.messageRepo.findOne({
       where: { id: saved.id },
-      relations: { sender: true },
+      relations: { sender: true, room: true },
     });
 
     if (fullMessage) {
@@ -1441,8 +1449,9 @@ export class ChatService implements OnModuleInit {
       studentId?: number;
       studentName?: string;
       vehicleId?: number;
+      busNumber?: string;
       rideType?: 'TODAY_ONLY' | 'REGULAR';
-      boardingLocation: string;
+      boardingLocation?: string;
       address?: string;
       latitude?: number;
       longitude?: number;
@@ -1454,11 +1463,6 @@ export class ChatService implements OnModuleInit {
     if (!requesterEmail) throw new BadRequestException('신청자 정보가 필요합니다.');
     const requester = await this.userRepo.findOne({ where: { email: requesterEmail } });
     if (!requester) throw new BadRequestException('신청자 계정을 찾을 수 없습니다.');
-
-    // 학부모는 결재 신청 불가
-    if (requester.role === UserRole.PARENT) {
-      throw new ForbiddenException('학부모 계정은 결재 신청 기능을 이용할 수 없습니다.');
-    }
 
     let vehicle: Vehicle | null = null;
     if (data.vehicleId) {
@@ -1480,6 +1484,43 @@ export class ChatService implements OnModuleInit {
         where: { academy: { id: requester.academyId } },
         relations: { teacherUser: true, driverUser: true, academy: true },
       });
+    }
+
+    if (!vehicle && data.busNumber) {
+      const trimmedBus = String(data.busNumber).trim();
+      const candidates = await this.vehicleRepo.find({
+        where: requester.academyId ? { academy: { id: requester.academyId } } : {},
+        relations: { teacherUser: true, driverUser: true, academy: true },
+      });
+      vehicle =
+        candidates.find(
+          (v) =>
+            v.busNumber === trimmedBus ||
+            (v.busNumber && v.busNumber.includes(trimmedBus)) ||
+            trimmedBus.includes(v.busNumber || ''),
+        ) || null;
+    }
+
+    if (!vehicle && data.studentId) {
+      const st = await this.studentRepo.findOne({
+        where: { id: Number(data.studentId) },
+        relations: {
+          assignedDepartureVehicle: { teacherUser: true, driverUser: true, academy: true },
+          assignedVehicle: { teacherUser: true, driverUser: true, academy: true },
+        },
+      });
+      vehicle = st?.assignedDepartureVehicle || st?.assignedVehicle || null;
+    }
+
+    if (!vehicle) {
+      const targetAcademyId = requester.academyId;
+      if (targetAcademyId) {
+        vehicle = await this.vehicleRepo.findOne({
+          where: { academy: { id: targetAcademyId } },
+          relations: { teacherUser: true, driverUser: true, academy: true },
+          order: { id: 'ASC' },
+        });
+      }
     }
 
     if (!vehicle) {
@@ -1530,8 +1571,9 @@ export class ChatService implements OnModuleInit {
     }
 
     const resolvedStudentId = data.studentId ? Number(data.studentId) : studentObj?.id;
+    const targetRequestDate = data.requestDate || kstDateString();
     if (resolvedStudentId) {
-      // Check if an active payment request already exists for this student (중복 신청 방지 원아 락)
+      // Check if an active payment request already exists for this student on the same date by someone else
       const recentRequests = await this.messageRepo.find({
         where: { type: 'PAYMENT_REQUEST' },
         order: { id: 'DESC' },
@@ -1545,6 +1587,8 @@ export class ChatService implements OnModuleInit {
         return (
           p &&
           String(p.studentId) === String(resolvedStudentId) &&
+          p.requestDate === targetRequestDate &&
+          p.requesterId && Number(p.requesterId) !== requester.id &&
           ['PENDING', 'RE_REQUESTED'].includes(p.status)
         );
       });
@@ -1572,7 +1616,7 @@ export class ChatService implements OnModuleInit {
       });
     }
 
-    if (!targetRoom && vehicle?.teacherUser?.id) {
+    if (!targetRoom && vehicle?.teacherUser?.id && vehicle.teacherUser.id !== requester.id) {
       targetRoom = (await this.createRoomByEmail(
         undefined,
         'DIRECT',
@@ -1631,10 +1675,36 @@ export class ChatService implements OnModuleInit {
       longitude: data.longitude ? Number(data.longitude) : (studentObj?.longitude || vehicle?.academy?.longitude || 127.123),
       locationType: (data as any).locationType || 'PIN',
       rideType,
-      requestDate: data.requestDate || kstDateString(),
+      requestDate: targetRequestDate,
       note: data.note || (rideType === 'TODAY_ONLY' ? '오늘 하루 하원 셔틀 탑승 희망 (익일 자동 픽업 원복)' : '정규 셔틀 탑승 및 구역 편입 희망'),
       status: 'PENDING',
+      requestId: undefined as number | undefined,
+      approvalRequestId: undefined as number | undefined,
     };
+
+    // approval_requests 테이블 동기화 생성
+    try {
+      const approvalReq = this.approvalRepo.create({
+        type: rideType === 'TODAY_ONLY' ? ChangeRequestType.ONE_TIME_BOARDING : ChangeRequestType.CHANGE_LOCATION,
+        requester,
+        requesterRole: requester.role,
+        student: (studentObj || undefined) as any,
+        targetDate: payload.requestDate,
+        direction: RequestDirection.AFTERNOON,
+        newAddress: payload.address || payload.boardingLocation,
+        newLatitude: payload.latitude,
+        newLongitude: payload.longitude,
+        targetVehicle: vehicle,
+        status: ApprovalStatus.PENDING,
+        reason: payload.note,
+        academy: vehicle?.academy || (requester.academyId ? ({ id: requester.academyId } as any) : undefined),
+      } as any) as unknown as ApprovalRequest;
+      const savedApproval = (await this.approvalRepo.save(approvalReq as any)) as unknown as ApprovalRequest;
+      payload.requestId = savedApproval.id;
+      payload.approvalRequestId = savedApproval.id;
+    } catch (appErr) {
+      console.warn('[ChatService] approval_requests 동기화 생성 경고:', appErr);
+    }
 
     const requestMsgText = rideType === 'TODAY_ONLY'
       ? `[당일 1회 탑승 신청] ${studentName} 원아 - ${vehicle.busNumber} 하원 탑승 요청 (내일 자동 원복)`
@@ -1690,11 +1760,16 @@ export class ChatService implements OnModuleInit {
 
     const fullMessage = await this.messageRepo.findOne({
       where: { id: saved.id },
-      relations: { sender: true },
+      relations: { sender: true, room: true },
     });
 
     if (fullMessage) {
-      await this.broadcastToRoom(targetRoom.id, fullMessage);
+      const resMsg = {
+        ...fullMessage,
+        roomId: targetRoom.id,
+      };
+      await this.broadcastToRoom(targetRoom.id, resMsg);
+      return resMsg as any;
     }
 
     return fullMessage;
@@ -1761,14 +1836,17 @@ export class ChatService implements OnModuleInit {
       );
     }
 
-    // 3. 1:1 결재 시 상대방(지정된 차량선생님 또는 관리자)만 결재 가능
+    // 3. 1:1 결재 시 상대방(지정된 차량선생님 또는 관리자) 또는 해당 유치원 교직원 결재 가능
     const isAdmin = decider.role === UserRole.ACADEMY_ADMIN || decider.role === UserRole.SUPER_ADMIN;
     const isDesignatedTeacher =
       (payload.targetTeacherId && Number(payload.targetTeacherId) === decider.id) ||
       (payload.targetTeacherEmail && payload.targetTeacherEmail.toLowerCase() === decider.email.toLowerCase()) ||
       (payload.teacherEmail && payload.teacherEmail.toLowerCase() === decider.email.toLowerCase());
+    const isSameAcademyStaff =
+      decider.role !== UserRole.STUDENT &&
+      (!message.room?.academyId || !decider.academyId || message.room.academyId === decider.academyId);
 
-    if (!isDesignatedTeacher && !isAdmin) {
+    if (!isDesignatedTeacher && !isAdmin && !isSameAcademyStaff) {
       throw new ForbiddenException('해당 1:1 결재 건은 지정된 담당 차량선생님 또는 원장님만 결재할 수 있습니다.');
     }
 
@@ -1962,6 +2040,72 @@ export class ChatService implements OnModuleInit {
         }).catch(() => {});
       }
 
+      // approval_requests 상태 동기화
+      if (payload.requestId) {
+        await this.approvalRepo.update(
+          { id: Number(payload.requestId) },
+          {
+            status: ApprovalStatus.APPROVED,
+            processedBy: decider,
+            processedAt: new Date(),
+          },
+        ).catch(() => {});
+      }
+
+      // 5-1. ScheduleOverride 생성 및 동기화 (기사/교사 앱 당일 명단 및 지도 정류장 자동 반영)
+      try {
+        const reqDate = payload.requestDate || (payload.requestId ? (await this.approvalRepo.findOne({ where: { id: Number(payload.requestId) } }))?.targetDate : null) || todayStr;
+        const targetDateStr = typeof reqDate === 'string' ? reqDate.split('T')[0] : (reqDate instanceof Date ? reqDate.toISOString().split('T')[0] : todayStr);
+
+        let overrideType = OverrideType.ONE_TIME_BOARDING;
+        if (payload.changeType === 'CHANGE_LOCATION' || payload.type === 'CHANGE_LOCATION') {
+          overrideType = OverrideType.CHANGE_LOCATION;
+        } else if (payload.changeType === 'ABSENCE' || payload.type === 'ABSENCE') {
+          overrideType = OverrideType.ABSENCE;
+        } else if (payload.changeType === 'PICKUP' || payload.type === 'PICKUP' || payload.changeType === 'INDIVIDUAL_DISMISSAL') {
+          overrideType = OverrideType.PICKUP;
+        }
+
+        const override = this.overrideRepo.create({
+          student: savedStudent,
+          startDate: targetDateStr,
+          endDate: targetDateStr,
+          overrideType,
+          direction: payload.direction || 'ALL',
+          targetTime: payload.targetTime || undefined,
+          reason: payload.note || payload.reason || undefined,
+          newAddress: finalAddress,
+          latitude: finalLat || undefined,
+          longitude: finalLng || undefined,
+          newVehicleId: vehicle.id,
+          approvalRequest: payload.requestId ? ({ id: Number(payload.requestId) } as any) : undefined,
+        });
+        await this.overrideRepo.save(override);
+
+        // 5-2. 차량 기사 및 교사 소켓 룸으로 실시간 노선 갱신 신호 브로드캐스트
+        if (this.locationGateway && targetAcadId) {
+          this.locationGateway.broadcastChangeRequestDecided({
+            academyId: targetAcadId,
+            vehicleId: vehicle.id,
+            parentUserId: message.sender?.id,
+            request: {
+              id: payload.requestId || message.id,
+              studentId: savedStudent.id,
+              studentName: payload.studentName || savedStudent.name,
+              status: 'APPROVED',
+              decision: 'APPROVED',
+              type: overrideType,
+              targetDate: targetDateStr,
+              newVehicleId: vehicle.id,
+              busNumber: vehicle.busNumber,
+              boardingLocation: finalBoardingLocation,
+            },
+          });
+        }
+      } catch (err) {
+        console.error('ScheduleOverride sync error in decidePaymentRequest:', err);
+      }
+
       // 6. Automatically push notification to parent
       try {
         await this.pushParentNotification(message.id, decider.email);
@@ -1975,6 +2119,19 @@ export class ChatService implements OnModuleInit {
       payload.decidedAt = new Date().toISOString();
       message.payload = payload;
       await this.messageRepo.save(message);
+
+      // approval_requests 상태 동기화
+      if (payload.requestId) {
+        await this.approvalRepo.update(
+          { id: Number(payload.requestId) },
+          {
+            status: ApprovalStatus.REJECTED,
+            processedBy: decider,
+            processedAt: new Date(),
+            rejectionReason: `차량선생님 반려 (${decider.name || decider.email})`,
+          },
+        ).catch(() => {});
+      }
 
       const rejectMsg = this.messageRepo.create({
         room: message.room,
@@ -2003,6 +2160,165 @@ export class ChatService implements OnModuleInit {
     }
 
     return message;
+  }
+
+  /**
+   * 통학 변동/일일 탑승 결재 신청서를 관련 대화방(학부모-차량교사/원장)의 카드 메시지로 자동 연동 등록 및 브로드캐스트
+   */
+  async postApprovalRequestToChat(
+    approval: ApprovalRequest,
+    callingUser: User,
+    targetVehicle?: Vehicle | null,
+    targetRoomId?: number | null,
+  ): Promise<ChatMessage | null> {
+    try {
+      // 1. 대화방 결정: 클라이언트에서 넘겨준 roomId가 있으면 우선 사용
+      let room: ChatRoom | null = null;
+      if (targetRoomId) {
+        room = await this.roomRepo.findOne({
+          where: { id: Number(targetRoomId) },
+          relations: { members: { user: true } },
+        });
+      }
+
+      // 2. 지정된 roomId가 없으면, 신청자와 차량교사(또는 원장) 간의 1:1 대화방 탐색 또는 생성
+      if (!room) {
+        let recipientUserId: number | null = targetVehicle?.teacherUser?.id || null;
+        if (!recipientUserId && targetVehicle?.id) {
+          const v = await this.vehicleRepo.findOne({
+            where: { id: targetVehicle.id },
+            relations: { teacherUser: true },
+          });
+          recipientUserId = v?.teacherUser?.id || null;
+        }
+
+        // 신청자 본인이 차량교사이거나 차량교사가 없으면 원장/관리자로 지정
+        if (!recipientUserId || recipientUserId === callingUser.id) {
+          const admin = await this.userRepo.findOne({
+            where: {
+              academyId: callingUser.academyId || approval.academy?.id,
+              role: In([UserRole.ACADEMY_ADMIN, UserRole.SUPER_ADMIN]),
+            },
+          });
+          if (admin && admin.id !== callingUser.id) {
+            recipientUserId = admin.id;
+          }
+        }
+
+        if (recipientUserId && recipientUserId !== callingUser.id) {
+          room = (await this.createRoomByEmail(
+            undefined,
+            'DIRECT',
+            [callingUser.id, recipientUserId],
+            callingUser.email,
+          )) as ChatRoom;
+        }
+      }
+
+      if (!room) {
+        console.warn('[ChatService] postApprovalRequestToChat: 적절한 대화방을 찾지 못함');
+        return null;
+      }
+
+      const typeKr = typeToKorean(approval.type);
+      const studentName = approval.student?.adminDisplayName || approval.student?.name || '원아';
+      const busNumber = targetVehicle?.busNumber || approval.targetVehicle?.busNumber || '지정차량';
+      const boardingLocation = approval.newAddress || approval.targetTime || '지정 탑승지';
+
+      const payload = {
+        requestId: approval.id,
+        approvalRequestId: approval.id,
+        studentId: approval.student?.id,
+        studentName,
+        className: getStudentClassName(approval.student) || '',
+        parentName: callingUser.name || approval.student?.parentUser?.name || '',
+        parentPhone: callingUser.phone || approval.student?.parentUser?.phone || '',
+        vehicleId: targetVehicle?.id || approval.targetVehicle?.id,
+        busNumber,
+        teacherName: targetVehicle?.teacherUser?.name || targetVehicle?.teacherName || '담당 차량선생님',
+        driverName: targetVehicle?.driverUser?.name || targetVehicle?.driverName || '기사님',
+        requesterId: callingUser.id,
+        requesterEmail: callingUser.email,
+        requesterName: callingUser.name || callingUser.email,
+        requesterRole: callingUser.role,
+        boardingLocation,
+        address: approval.newAddress || boardingLocation,
+        latitude: approval.newLatitude || approval.student?.latitude || 37.842,
+        longitude: approval.newLongitude || approval.student?.longitude || 127.123,
+        requestDate: approval.targetDate || approval.startDate || kstDateString(),
+        note: approval.reason || `${typeKr} 신청 (${busNumber})`,
+        status: 'PENDING',
+        type: 'change_request',
+        changeType: approval.type,
+        direction: approval.direction,
+      };
+
+      const summaryText = `[${typeKr} 결재 신청]\n원아: ${studentName}\n배정차량: ${busNumber}\n탑승/하차지: ${boardingLocation}\n신청일: ${payload.requestDate}\n사유: ${payload.note}\n\n결재 승인을 부탁드립니다.`;
+
+      const message = this.messageRepo.create({
+        room,
+        sender: callingUser,
+        text: summaryText,
+        type: 'PAYMENT_REQUEST',
+        payload,
+        readBy: [callingUser.id],
+      });
+
+      const saved = await this.messageRepo.save(message);
+      await this.roomRepo.update(room.id, { updatedAt: new Date() });
+
+      const fullMessage = await this.messageRepo.findOne({
+        where: { id: saved.id },
+        relations: { sender: true, room: true },
+      });
+
+      if (fullMessage) {
+        const resMsg = {
+          ...fullMessage,
+          roomId: room.id,
+        };
+        await this.broadcastToRoom(room.id, resMsg);
+        return resMsg as any;
+      }
+
+      return fullMessage;
+    } catch (err) {
+      console.error('[ChatService] postApprovalRequestToChat 오류:', err);
+      return null;
+    }
+  }
+
+  /**
+   * ApprovalService 결재 처리 시 대화방 내 카드 상태 동기화
+   */
+  async syncPaymentRequestDecision(requestId: number, decision: 'APPROVED' | 'REJECTED' | ApprovalStatus, deciderName: string) {
+    try {
+      const messages = await this.messageRepo.find({
+        where: { type: 'PAYMENT_REQUEST' },
+        order: { id: 'DESC' },
+        take: 100,
+        relations: { room: true },
+      });
+      const normDecision: 'APPROVED' | 'REJECTED' = String(decision).toUpperCase().includes('APPROV') ? 'APPROVED' : 'REJECTED';
+      const targetMsg = messages.find((m) => {
+        const p = m.payload;
+        return p && (Number(p.requestId) === Number(requestId) || Number(p.approvalRequestId) === Number(requestId));
+      });
+      if (targetMsg) {
+        targetMsg.payload = {
+          ...targetMsg.payload,
+          status: normDecision,
+          decidedBy: deciderName,
+          decidedAt: new Date().toISOString(),
+        };
+        await this.messageRepo.save(targetMsg);
+        if (targetMsg.room?.id) {
+          await this.broadcastToRoom(targetMsg.room.id, targetMsg);
+        }
+      }
+    } catch (err) {
+      console.warn('[ChatService] syncPaymentRequestDecision error:', err);
+    }
   }
 
   async createLeaveRequest(
@@ -2082,7 +2398,7 @@ export class ChatService implements OnModuleInit {
 
     const fullMessage = await this.messageRepo.findOne({
       where: { id: saved.id },
-      relations: { sender: true },
+      relations: { sender: true, room: true },
     });
 
     if (fullMessage) {

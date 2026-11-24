@@ -14,6 +14,7 @@ import { AcademyHoliday } from '../entities/academy-holiday.entity';
 import { StudentSchedule } from '../entities/student-schedule.entity';
 import { TeacherModule } from '../teacher/teacher.module';
 import { ChatModule } from '../chat/chat.module';
+import { RoutingModule } from '../routing/routing.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { ChatModule } from '../chat/chat.module';
     ]),
     forwardRef(() => TeacherModule),
     forwardRef(() => ChatModule),
+    forwardRef(() => RoutingModule),
   ],
   controllers: [ApprovalController],
   providers: [ApprovalService],

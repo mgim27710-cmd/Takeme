@@ -1503,9 +1503,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     setIsSubmittingPayment(true);
 
     try {
-      // 결재는 관리자-교사 간에만 이루어지므로 상대방이 교사인 경우에만 현재 방 유지, 학부모 방일 경우 교사 전용 방으로 라우팅
-      const isCurrentRoomWithTeacher = !isChatWithParent && activeOtherUser?.role === 'TEACHER';
-      const targetRoomId = isCurrentRoomWithTeacher ? activeRoom?.id : undefined;
+      // 현재 열려있는 대화방이 있으면 해당 방으로 우선 전송
+      const targetRoomId = activeRoom?.id ? Number(activeRoom.id) : undefined;
 
       const res = await fetch(`${API_BASE_URL}/chat/payment-request`, {
         method: 'POST',
@@ -3225,53 +3224,45 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         <span>셔틀 탑승 결재 요청</span>
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => handleOpenAbsenceModal('ABSENCE')}
-                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-rose-50 text-rose-950 font-bold text-xs flex items-center gap-2 transition"
-                    >
-                      <span className="w-6 h-6 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center text-xs font-black">결</span>
-                      <div>
-                        <div className="font-bold text-slate-800">원아 결석계 (결석원)</div>
-                        <div className="text-[10px] text-slate-400 font-normal">사유 선택형 결재 서식</div>
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenAbsenceModal('LATENESS')}
-                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-amber-50 text-amber-950 font-bold text-xs flex items-center gap-2 transition"
-                    >
-                      <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center text-xs font-black">지</span>
-                      <div>
-                        <div className="font-bold text-slate-800">등원 지각 알림서</div>
-                        <div className="text-[10px] text-slate-400 font-normal">시간 및 병원 사유 선택</div>
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenAbsenceModal('EXTENDED_CARE')}
-                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-purple-50 text-purple-950 font-bold text-xs flex items-center gap-2 transition"
-                    >
-                      <span className="w-6 h-6 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center text-xs font-black">연</span>
-                      <div>
-                        <div className="font-bold text-slate-800">연장 보육 / 개별 하원 신청</div>
-                        <div className="text-[10px] text-slate-400 font-normal">직접 픽업 및 연장 보육</div>
-                      </div>
-                    </button>
-
-                    {/* 임직원 휴가·연차 신청 (원장에게 휴가 결재 신청) */}
-                    {!isParent && (
-                      <button
-                        type="button"
-                        onClick={handleOpenStaffLeaveModal}
-                        className="w-full text-left px-3 py-2 rounded-xl hover:bg-emerald-50 text-emerald-950 font-bold text-xs flex items-center gap-2 transition"
-                      >
-                        <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-black">휴</span>
-                        <div>
-                          <div className="font-bold text-slate-800">임직원 휴가·연차 신청</div>
-                          <div className="text-[10px] text-slate-400 font-normal">원장님께 휴가 결재 신청</div>
-                        </div>
-                      </button>
+                    {/* 원장(기관 관리자)에게는 원아 결석계, 지각 알림서, 연차 신청서 숨김 처리 */}
+                    {!(myUser?.role === 'ACADEMY_ADMIN' || myUser?.role === 'SUPER_ADMIN') && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenAbsenceModal('ABSENCE')}
+                          className="w-full text-left px-3 py-2 rounded-xl hover:bg-rose-50 text-rose-950 font-bold text-xs flex items-center gap-2 transition"
+                        >
+                          <span className="w-6 h-6 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center text-xs font-black">결</span>
+                          <div>
+                            <div className="font-bold text-slate-800">원아 결석계 (결석원)</div>
+                            <div className="text-[10px] text-slate-400 font-normal">사유 선택형 결재 서식</div>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenAbsenceModal('LATENESS')}
+                          className="w-full text-left px-3 py-2 rounded-xl hover:bg-amber-50 text-amber-950 font-bold text-xs flex items-center gap-2 transition"
+                        >
+                          <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center text-xs font-black">지</span>
+                          <div>
+                            <div className="font-bold text-slate-800">등원 지각 알림서</div>
+                            <div className="text-[10px] text-slate-400 font-normal">시간 및 병원 사유 선택</div>
+                          </div>
+                        </button>
+                        {!isParent && (
+                          <button
+                            type="button"
+                            onClick={handleOpenStaffLeaveModal}
+                            className="w-full text-left px-3 py-2 rounded-xl hover:bg-emerald-50 text-emerald-950 font-bold text-xs flex items-center gap-2 transition"
+                          >
+                            <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-black">휴</span>
+                            <div>
+                              <div className="font-bold text-slate-800">임직원 휴가·연차 신청</div>
+                              <div className="text-[10px] text-slate-400 font-normal">원장님께 휴가 결재 신청</div>
+                            </div>
+                          </button>
+                        )}
+                      </>
                     )}
 
                     {/* Tools & Media Section */}

@@ -1957,11 +1957,27 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     socket.on('globalDirectorAlert', handleIncomingDirectorAlert);
     socket.on('changeRequestCreated', (data) => {
       setPendingApprovalCount(prev => prev + 1);
+      const stId = Number(data?.studentId);
+      if (stId) {
+        setStudents(prev => prev.map(s => s.id === stId ? {
+          ...s,
+          approvalStatus: 'PENDING',
+          isOneTimeRide: data.type === 'ONE_TIME_BOARDING' ? true : s.isOneTimeRide,
+          oneTimeType: data.type,
+          dailyBoardingLocation: data.newAddress || data.address || s.boardingLocation,
+          dailyDropoffLocation: data.direction === 'MORNING' ? (s.dropoffLocation || '유치원') : (data.newAddress || data.address || s.dropoffLocation),
+          lat: (data.newLatitude || data.latitude) ? Number(data.newLatitude || data.latitude) : s.lat,
+          lng: (data.newLongitude || data.longitude) ? Number(data.newLongitude || data.longitude) : s.lng,
+          assignedBusId: data.targetVehicleId || data.vehicleId || s.assignedBusId,
+          isNotRiding: data.type === 'ONE_TIME_BOARDING' ? false : s.isNotRiding,
+          raw: { ...(s.raw || {}), approvalStatus: 'PENDING', isPendingApproval: true }
+        } : s));
+      }
       handleIncomingDirectorAlert({
         id: data.id,
         category: data.type === 'ABSENCE' ? 'ABSENT' : data.type === 'ONE_TIME_BOARDING' ? 'SHUTTLE_REQUEST' : (data.type === 'PICKUP' || data.type === 'INDIVIDUAL_DISMISSAL') ? 'PICKUP' : 'GENERAL',
         title: `[신청 접수] ${data.studentName} ${data.typeKr || '통학 변동'} 신청`,
-        message: `${data.studentName} 원아의 ${data.typeKr || '통학 변동'} 신청이 접수되었습니다. (적용일: ${data.targetDate})`,
+        message: `${data.studentName} 원아의 ${data.typeKr || '통학 변동'} 신청이 접수되었습니다. (적용일: ${data.targetDate}${data.busNumber ? `, 배정차량: ${data.busNumber}` : ''})`,
         timestamp: new Date().toISOString(),
         data,
       });
@@ -1983,6 +1999,21 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         setStudents(prev => prev.map(s => s.id === stId ? { ...s, approvalStatus: req.decision, raw: { ...(s.raw || {}), approvalStatus: req.decision } } : s));
         setHighlightedStudentId(prev => prev === stId ? null : prev);
       }
+    });
+
+    socket.on('childBoardStatusChanged', (data) => {
+      const stId = Number(data?.studentId);
+      if (stId && data?.boardStatus) {
+        setStudents(prev => prev.map(s => s.id === stId ? {
+          ...s,
+          boardStatus: data.boardStatus,
+          raw: { ...(s.raw || {}), boardStatus: data.boardStatus }
+        } : s));
+      }
+    });
+
+    socket.on('attendanceSubmitted', () => {
+      loadInitialState();
     });
 
     socket.on('changeRequestCancelled', (data) => {
@@ -2009,6 +2040,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
             isOneTimeRide: false,
             oneTimeType: null,
             isNotRiding: updatedRaw.originalIsNotRiding !== undefined ? updatedRaw.originalIsNotRiding : true,
+            boardStatus: data?.boardStatus || 'SELF_PICKUP',
             approvalStatus: 'NONE',
             raw: updatedRaw,
           };
@@ -2026,6 +2058,8 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       socket.off('changeRequestCreated');
       socket.off('changeRequestDecided');
       socket.off('changeRequestCancelled');
+      socket.off('childBoardStatusChanged');
+      socket.off('attendanceSubmitted');
       socket.off('routeUpdated');
       socket.disconnect();
       socketRef.current = null;
@@ -8137,11 +8171,9 @@ const parseKindergartenExcelSheet = (sheet) => {
               ? NOT_RIDING_COLOR
               : isOneTimeStudent 
               ? ONE_TIME_COLOR 
-              : (displayBusId && isInsideAssignedZone)
+              : displayBusId
               ? (assignedBus?.color || '#64748b') 
-              : isUnassigned
-              ? '#64748b'
-              : EXTRA_BUS_COLOR;
+              : '#64748b';
 
             const homonym = getHomonymInfo(st, students);
             const isHomonym = Boolean(homonym?.isHomonym);
@@ -8161,11 +8193,11 @@ const parseKindergartenExcelSheet = (sheet) => {
               html: isApprovalPending ? `
                 <div style="position: relative; display: flex; flex-direction: column; align-items: center; z-index: 1000;">
                   <div style="position: absolute; top: -30px; background: #d97706; color: white; padding: 2.5px 8px; border-radius: 9999px; font-size: 11px; font-weight: 900; white-space: nowrap; box-shadow: 0 4px 12px rgba(217,119,6,0.5); border: 2px solid #fde68a; animation: bounce 1s infinite;">
-                    ★ ${st.name} (결재 대기)
+                    ★ ${st.name} (일일 결재 대기)
                   </div>
                   <div style="position: absolute; width: 42px; height: 42px; border-radius: 50%; background: #f59e0b; opacity: 0.35; animation: ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;"></div>
-                  <div style="position: relative; background: #f59e0b; width: 26px; height: 26px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 14px rgba(245,158,11,0.8); display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: 900;">
-                    대기
+                  <div style="position: relative; background: #f59e0b; width: 28px; height: 28px; border-radius: 50%; border: 3px solid white; box-shadow: 0 4px 14px rgba(245,158,11,0.8); display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: 900;">
+                    일일
                   </div>
                 </div>
               ` : isHighlighted ? `
@@ -8189,12 +8221,12 @@ const parseKindergartenExcelSheet = (sheet) => {
                 <div style="background-color: ${NOT_RIDING_COLOR}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.35);" title="${isOutside6kmNotRiding ? '구역 외 미탑승 원아' : '미탑승 원아'}"></div>
               ` : isOneTimeStudent ? `
                 <div style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 900;">
-                  <div style="position: absolute; top: -16px; background: #f59e0b; color: white; padding: 1px 4px; border-radius: 4px; font-size: 9px; font-weight: 900; white-space: nowrap; box-shadow: 0 2px 5px rgba(245,158,11,0.5); border: 1px solid #fde047;">
-                    일일
+                  <div style="position: absolute; top: -18px; background: #e11d48; color: white; padding: 1.5px 6px; border-radius: 6px; font-size: 10px; font-weight: 900; white-space: nowrap; box-shadow: 0 2px 6px rgba(225,29,72,0.5); border: 1px solid #fecdd3;">
+                    ★ 일일 탑승지
                   </div>
                   <div style="position: relative; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;">
-                    <span style="position: absolute; inset: -2px; border-radius: 50%; background: #8b5cf6; opacity: 0.45; animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
-                    <div style="position: relative; background: linear-gradient(135deg, #8b5cf6, #6d28d9); width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid #fde047; box-shadow: 0 3px 8px rgba(124,58,237,0.7); display: flex; align-items: center; justify-content: center; color: #fde047; font-size: 11px; font-weight: 900; line-height: 1;">
+                    <span style="position: absolute; inset: -2px; border-radius: 50%; background: #e11d48; opacity: 0.45; animation: ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
+                    <div style="position: relative; background: linear-gradient(135deg, #e11d48, #be123c); width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid #fde047; box-shadow: 0 3px 8px rgba(225,29,72,0.7); display: flex; align-items: center; justify-content: center; color: #fde047; font-size: 11px; font-weight: 900; line-height: 1;">
                       ★
                     </div>
                   </div>
@@ -8304,10 +8336,23 @@ const parseKindergartenExcelSheet = (sheet) => {
                   </div>
                 )}
 
-                {isOneTimeStudent && (
-                  <div className="bg-rose-50 text-rose-700 border border-rose-200 text-xs font-black p-2 rounded-lg mb-2 flex items-center justify-center gap-1.5 shadow-2xs">
-                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
-                    <span>[당일 1회 탑승] 미탑승 원아 셔틀 신청 / 당일 임시 위치</span>
+                {(isOneTimeStudent || isApprovalPending || st.isOneTimeRide || st.dailyBoardingLocation) && (
+                  <div className="bg-amber-50 text-amber-950 border-2 border-amber-400 text-xs font-bold p-2.5 rounded-xl mb-2 shadow-2xs">
+                    <div className="flex items-center gap-1.5 font-black text-amber-900 mb-1">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                      <span>[일일 통학 정보] {isApprovalPending ? '결재 승인 대기' : '당일 탑승 확정'}</span>
+                    </div>
+                    <div className="text-slate-800">
+                      <b>일일 탑승지:</b> <span className="text-blue-700 font-extrabold">{st.dailyBoardingLocation || st.boardingLocation || st.newAddress || st.address || '유치원/원내'}</span>
+                    </div>
+                    <div className="text-slate-800 mt-1">
+                      <b>일일 하차지:</b> <span className="text-emerald-700 font-extrabold">{st.dailyDropoffLocation || st.dropoffLocation || (operationMode === 'AFTERNOON' ? (st.dailyBoardingLocation || st.boardingLocation) : '유치원/원내')}</span>
+                    </div>
+                    {displayBusId && (
+                      <div className="text-amber-800 text-[11px] font-semibold mt-1">
+                        <b>배정 차량:</b> {buses.find(b => b.id === displayBusId)?.name || `${displayBusId}호차`}
+                      </div>
+                    )}
                   </div>
                 )}
 

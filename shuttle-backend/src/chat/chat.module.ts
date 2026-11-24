@@ -15,8 +15,11 @@ import { ParentMessage } from '../entities/parent-message.entity';
 import { Notification } from '../entities/notification.entity';
 import { UserDevice } from '../entities/user-device.entity';
 import { AcademyHoliday } from '../entities/academy-holiday.entity';
+import { ApprovalRequest } from '../entities/approval-request.entity';
+import { ScheduleOverride } from '../entities/schedule-override.entity';
 import { RoutingModule } from '../routing/routing.module';
 import { ApprovalModule } from '../approval/approval.module';
+import { TeacherModule } from '../teacher/teacher.module';
 
 @Module({
   imports: [
@@ -33,9 +36,12 @@ import { ApprovalModule } from '../approval/approval.module';
       Notification,
       UserDevice,
       AcademyHoliday,
+      ApprovalRequest,
+      ScheduleOverride,
     ]),
     forwardRef(() => RoutingModule),
     forwardRef(() => ApprovalModule),
+    forwardRef(() => TeacherModule),
   ],
   controllers: [ChatController],
   providers: [ChatService, ChatGateway],

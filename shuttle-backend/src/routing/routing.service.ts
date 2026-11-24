@@ -1408,6 +1408,11 @@ export class RoutingService {
     }
     if (expiredStudents.length > 0) {
       await this.studentRepository.save(expiredStudents).catch(err => console.error('Failed to rollback expired temporary rides:', err));
+      const expiredIds = expiredStudents.map(s => s.id);
+      await this.studentRepository.query(
+        `UPDATE student_schedules SET "assignedVehicleId" = NULL WHERE "studentId" = ANY($1::int[])`,
+        [expiredIds]
+      ).catch(() => {});
     }
 
     // Query active overrides for today (일회성 탑승 및 당일 탑승지 변경 조회)
@@ -1423,6 +1428,22 @@ export class RoutingService {
       if (ov.student?.id) overrideMap.set(ov.student.id, ov);
     }
 
+    // Query pending approval requests for today
+    const studentIds = dbStudents.map(s => s.id);
+    const pendingApprovals: any[] = studentIds.length > 0 ? await this.studentRepository.query(`
+      SELECT ar.id, ar."studentId", ar.type, ar."targetDate", ar.direction, ar."newAddress", ar."newLatitude", ar."newLongitude",
+             ar."targetVehicleId", v."busNumber" as "busNumber"
+      FROM approval_requests ar
+      LEFT JOIN vehicles v ON ar."targetVehicleId" = v.id
+      WHERE ar."studentId" = ANY($1::int[])
+        AND ar.status = 'PENDING'
+        AND ar."targetDate" = $2
+    `, [studentIds, todayStr]).catch(() => []) : [];
+    const pendingMap = new Map<number, any>();
+    for (const p of pendingApprovals) {
+      if (p.studentId) pendingMap.set(Number(p.studentId), p);
+    }
+
     let formattedStudents = dbStudents.map(st => {
       let parsedRaw: any = {};
       try {
@@ -1433,29 +1454,36 @@ export class RoutingService {
       }
 
       const override = overrideMap.get(st.id);
-      const isOneTimeBoarding = Boolean(override && override.overrideType === OverrideType.ONE_TIME_BOARDING);
-      const isAbsence = Boolean(override && override.overrideType === OverrideType.ABSENCE);
-      const isLateness = Boolean(override && override.overrideType === OverrideType.LATENESS);
-      const isPickup = Boolean(override && (override.overrideType === OverrideType.PICKUP || override.overrideType === OverrideType.INDIVIDUAL_DISMISSAL));
-      const isNoShuttle = Boolean(override && override.overrideType === OverrideType.NO_SHUTTLE);
+      const pendingReq = pendingMap.get(st.id);
+      const isOneTimeBoarding = Boolean((override && override.overrideType === OverrideType.ONE_TIME_BOARDING) || (pendingReq && pendingReq.type === 'ONE_TIME_BOARDING'));
+      const isAbsence = Boolean((override && override.overrideType === OverrideType.ABSENCE) || (pendingReq && pendingReq.type === 'ABSENCE'));
+      const isLateness = Boolean((override && override.overrideType === OverrideType.LATENESS) || (pendingReq && pendingReq.type === 'LATENESS'));
+      const isPickup = Boolean((override && (override.overrideType === OverrideType.PICKUP || override.overrideType === OverrideType.INDIVIDUAL_DISMISSAL)) || (pendingReq && (pendingReq.type === 'PICKUP' || pendingReq.type === 'INDIVIDUAL_DISMISSAL')));
+      const isNoShuttle = Boolean((override && override.overrideType === OverrideType.NO_SHUTTLE) || (pendingReq && pendingReq.type === 'NO_SHUTTLE'));
 
       const isNotRiding = isOneTimeBoarding ? false : Boolean(st.isNotRiding || isAbsence || isNoShuttle || parsedRaw['미탑승'] || parsedRaw['차량미탑승']);
       const needsAddress = !isNotRiding && (!st.address || st.latitude === null || st.latitude === undefined || isNaN(st.latitude) || !st.longitude || isNaN(st.longitude) || !!parsedRaw['주소입력필요']);
 
       const isOneTimeRide = Boolean(
         isOneTimeBoarding ||
+        pendingReq ||
         (override && (override.overrideType === OverrideType.CHANGE_LOCATION || override.overrideType === OverrideType.PICKUP || override.overrideType === OverrideType.LATENESS || override.overrideType === OverrideType.INDIVIDUAL_DISMISSAL)) ||
         (parsedRaw.isTemporaryRide && (!parsedRaw.temporaryRideDate || parsedRaw.temporaryRideDate === todayStr)) ||
         (parsedRaw.rideType === 'TODAY_ONLY' && (!parsedRaw.temporaryRideDate || parsedRaw.temporaryRideDate === todayStr)) ||
         parsedRaw.isTemporaryLocation
       );
 
-      const effectiveBusId = (isOneTimeBoarding && override?.newVehicleId)
-        ? override.newVehicleId
+      const effectiveBusId = (isOneTimeBoarding && (pendingReq?.targetVehicleId || override?.newVehicleId))
+        ? (pendingReq?.targetVehicleId || override?.newVehicleId)
         : (st.assignedVehicle ? st.assignedVehicle.id : null);
       const effectiveVehicle = effectiveBusId
         ? vehicles.find(v => v.id === effectiveBusId)
         : st.assignedVehicle;
+
+      const dailyBoardingLocation = pendingReq?.newAddress || override?.newAddress || st.boardingLocation || '';
+      const dailyDropoffLocation = pendingReq ? (pendingReq.direction === 'MORNING' ? '유치원' : (pendingReq.newAddress || st.dropoffLocation || '')) : (st.dropoffLocation || parsedRaw['하차지'] || parsedRaw['하원지'] || '');
+      const studentLat = pendingReq?.newLatitude ? Number(pendingReq.newLatitude) : ((override && override.latitude) ? Number(override.latitude) : st.latitude);
+      const studentLng = pendingReq?.newLongitude ? Number(pendingReq.newLongitude) : ((override && override.longitude) ? Number(override.longitude) : st.longitude);
 
       return {
         id: st.id,
@@ -1465,26 +1493,31 @@ export class RoutingService {
         birthDate: st.birthDate || parsedRaw['생년월일'] || parsedRaw['생일'] || '',
         className: st.className || getStudentClassName(st),
         address: st.address || '',
-        boardingLocation: (override && override.newAddress) ? override.newAddress : (st.boardingLocation || ''),
-        dropoffLocation: st.dropoffLocation || parsedRaw['하차지'] || parsedRaw['하원지'] || '',
-        lat: (override && override.latitude) ? Number(override.latitude) : st.latitude,
-        lng: (override && override.longitude) ? Number(override.longitude) : st.longitude,
+        boardingLocation: dailyBoardingLocation,
+        dropoffLocation: dailyDropoffLocation,
+        dailyBoardingLocation,
+        dailyDropoffLocation,
+        lat: studentLat,
+        lng: studentLng,
         isNotRiding,
         boardingType: parsedRaw['탑승구분'] || (isNotRiding ? 'NONE' : (st.assignedDepartureVehicle && !st.assignedVehicle ? 'AFTERNOON_ONLY' : (!st.assignedDepartureVehicle && st.assignedVehicle ? 'MORNING_ONLY' : 'BOTH'))),
         isOneTimeRide,
-        overrideType: override?.overrideType || null,
+        overrideType: override?.overrideType || (pendingReq ? pendingReq.type : null),
         overrideReason: override?.reason || null,
         isLateness,
         isPickup,
         isAbsence,
-        oneTimeType: override?.overrideType || (parsedRaw.isTemporaryLocation ? 'CHANGE_LOCATION' : (isOneTimeBoarding ? 'ONE_TIME_BOARDING' : null)),
+        oneTimeType: override?.overrideType || (pendingReq ? pendingReq.type : (parsedRaw.isTemporaryLocation ? 'CHANGE_LOCATION' : (isOneTimeBoarding ? 'ONE_TIME_BOARDING' : null))),
         addressNeedsInput: needsAddress,
         assignedBusId: effectiveBusId,
         assignedDepartureBusId: st.assignedDepartureVehicle ? st.assignedDepartureVehicle.id : (isOneTimeBoarding ? effectiveBusId : null),
-        assignedDepartureBusName: effectiveVehicle ? effectiveVehicle.busNumber : (parsedRaw['하원차량'] || ''),
+        assignedDepartureBusName: st.assignedDepartureVehicle ? st.assignedDepartureVehicle.busNumber : (isOneTimeBoarding && effectiveVehicle ? effectiveVehicle.busNumber : (parsedRaw['하원차량'] || '')),
         color: effectiveVehicle ? (effectiveVehicle.colorHex || '#64748b') : '#64748b',
         allergies: st.allergies || parsedRaw['알레르기'] || parsedRaw['알러지'] || '',
-        raw: parsedRaw,
+        raw: {
+          ...parsedRaw,
+          ...(pendingReq ? { approvalStatus: 'PENDING', isPendingApproval: true, pendingRequest: pendingReq } : {})
+        },
         parentPhone: st.phone || st.parentUser?.phone || parsedRaw['부모연락처'] || parsedRaw['연락처'] || parsedRaw['보호자연락처'] || parsedRaw['보호자 연락처'] || parsedRaw['전화번호'] || parsedRaw['학부모전화번호'] || '',
         parentName: st.parentUser?.name || parsedRaw['보호자 성함'] || parsedRaw['학부모 성함'] || parsedRaw['학부모명'] || '',
         schedules: st.schedules,
@@ -1492,7 +1525,7 @@ export class RoutingService {
         studentUserId: st.studentUser?.id || null,
         parentUserId: st.parentUser?.id || null,
         isLocked: !!(st.parentUser?.isLocked || st.studentUser?.isLocked),
-        approvalStatus: st.approvalStatus,
+        approvalStatus: pendingReq ? 'PENDING' : st.approvalStatus,
         teacherMemo: st.teacherMemo || '',
         boardStatus: st.boardStatus || 'WAITING'
       };

@@ -272,6 +272,13 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.server.to(academyStaffRoom(academyId)).emit('studentStatusChanged', data);
     this.server.to(`academy_${academyId}`).emit('studentStatusChanged', data);
 
+    const vId = data.vehicleId || data.targetVehicleId;
+    if (vId) {
+      this.server.to(`vehicle_${vId}`).emit('changeRequestCreated', data);
+      this.server.to(`vehicle_${vId}`).emit('studentStatusChanged', data);
+      this.server.to(`vehicle_${vId}`).emit('routeNeedsRefresh', { vehicleId: vId });
+    }
+
     const alertPayload = {
       id: data.id,
       category: data.type === 'ABSENCE' ? 'ABSENT' : data.type === 'ONE_TIME_BOARDING' ? 'SHUTTLE_REQUEST' : data.type === 'PICKUP' || data.type === 'INDIVIDUAL_DISMISSAL' ? 'PICKUP' : 'GENERAL',
@@ -361,9 +368,10 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   /**
    * 당일 탑승 신청 취소 시 원장 웹 및 교직원 방에 실시간 통보
    */
-  broadcastChangeRequestCancelled(academyId: number, data: { studentId: number; studentName?: string; requestId?: number }) {
+  broadcastChangeRequestCancelled(academyId: number, data: { studentId: number; studentName?: string; requestId?: number; boardStatus?: string; isNotRiding?: boolean }) {
     if (!this.server || !academyId) return;
     this.server.to(`academy_${academyId}`).emit('changeRequestCancelled', data);
+    this.server.to(academyAdminRoom(academyId)).emit('changeRequestCancelled', data);
     this.server.to(academyStaffRoom(academyId)).emit('changeRequestCancelled', data);
     this.broadcastRouteUpdated(academyId);
   }
@@ -440,20 +448,23 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     // 차량 방에는 같은 차를 타는 다른 학부모도 들어오므로 보내지 않는다. 그 원아의 학부모와 학생 본인에게만.
     let parentUserId = data.parentUserId;
     let studentUserId = data.studentUserId;
-    if (!parentUserId || !studentUserId) {
-      const st = await this.studentRepository.findOne({
-        where: { id: data.studentId },
-        relations: { parentUser: true, studentUser: true },
-      });
-      if (!parentUserId && st?.parentUser?.id) {
-        parentUserId = st.parentUser.id;
-      }
-      if (!studentUserId && st?.studentUser?.id) {
-        studentUserId = st.studentUser.id;
-      }
+    let academyId: number | null = null;
+    const st = await this.studentRepository.findOne({
+      where: { id: data.studentId },
+      relations: { parentUser: true, studentUser: true, academy: true },
+    });
+    if (st) {
+      if (!parentUserId && st.parentUser?.id) parentUserId = st.parentUser.id;
+      if (!studentUserId && st.studentUser?.id) studentUserId = st.studentUser.id;
+      if (st.academy?.id) academyId = st.academy.id;
     }
     for (const uid of new Set([parentUserId, studentUserId].filter(Boolean) as number[])) {
       this.server.to(`user_${uid}`).emit('childBoardStatusChanged', payload);
+    }
+    // 원장 웹 및 교직원 실시간 동기화를 위해 원장/교직원 방에도 브로드캐스트
+    if (academyId) {
+      this.server.to(academyAdminRoom(academyId)).emit('childBoardStatusChanged', payload);
+      this.server.to(academyStaffRoom(academyId)).emit('childBoardStatusChanged', payload);
     }
   }
 
