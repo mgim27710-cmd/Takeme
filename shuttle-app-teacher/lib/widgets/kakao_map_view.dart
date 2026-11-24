@@ -6,10 +6,12 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../models/route_model.dart';
+import '../services/socket_service.dart';
 import 'naver_route_map.dart';
 import 'package:geolocator/geolocator.dart';
 
 class KakaoMapView extends StatefulWidget {
+  final int? vehicleId;
   final List<RouteStop> stops;
   final List<Map<String, dynamic>> routePoints;
   final List<dynamic>? actualRoadPath;
@@ -27,6 +29,7 @@ class KakaoMapView extends StatefulWidget {
 
   const KakaoMapView({
     super.key,
+    this.vehicleId,
     required this.stops,
     required this.routePoints,
     this.actualRoadPath,
@@ -291,6 +294,7 @@ class _KakaoMapViewState extends State<KakaoMapView> {
       context,
       MaterialPageRoute(
         builder: (_) => KakaoMapFullscreenPage(
+          vehicleId: widget.vehicleId,
           stops: widget.stops,
           routePoints: widget.routePoints,
           actualRoadPath: widget.actualRoadPath,
@@ -838,6 +842,7 @@ class _KakaoMapViewState extends State<KakaoMapView> {
 }
 
 class KakaoMapFullscreenPage extends StatefulWidget {
+  final int? vehicleId;
   final List<RouteStop> stops;
   final List<Map<String, dynamic>> routePoints;
   final List<dynamic>? actualRoadPath;
@@ -852,6 +857,7 @@ class KakaoMapFullscreenPage extends StatefulWidget {
 
   const KakaoMapFullscreenPage({
     super.key,
+    this.vehicleId,
     required this.stops,
     required this.routePoints,
     this.actualRoadPath,
@@ -871,10 +877,47 @@ class KakaoMapFullscreenPage extends StatefulWidget {
 
 class _KakaoMapFullscreenPageState extends State<KakaoMapFullscreenPage> {
   bool _isCardDismissed = false;
+  late double? _busLat;
+  late double? _busLng;
+  late List<dynamic>? _actualRoadPath;
+  late int _progressIndex;
+  Function(Map<String, dynamic>)? _locationCallback;
+  Function(Map<String, dynamic>)? _routePathCallback;
 
   @override
   void initState() {
     super.initState();
+    _busLat = widget.busLat;
+    _busLng = widget.busLng;
+    _actualRoadPath = widget.actualRoadPath;
+    _progressIndex = widget.progressIndex;
+
+    if (widget.vehicleId != null) {
+      SocketService().joinVehicleRoom(widget.vehicleId!);
+    }
+
+    _locationCallback = (data) {
+      if (!mounted) return;
+      final lat = (data['lat'] as num?)?.toDouble() ?? (data['latitude'] as num?)?.toDouble();
+      final lng = (data['lng'] as num?)?.toDouble() ?? (data['longitude'] as num?)?.toDouble();
+      if (lat != null && lng != null) {
+        setState(() {
+          _busLat = lat;
+          _busLng = lng;
+        });
+      }
+    };
+    SocketService().onLocationUpdated(_locationCallback!);
+
+    _routePathCallback = (data) {
+      if (!mounted) return;
+      setState(() {
+        _actualRoadPath = data['path'];
+        _progressIndex = data['progressIndex'] ?? 0;
+      });
+    };
+    SocketService().onRoutePathUpdated(_routePathCallback!);
+
     _checkCardDismissed();
     // 전체화면 지도에서는 안드로이드 하단 버튼 줄(뒤로·홈·최근 앱)과 상태 표시줄을 숨긴다.
     // 화면 가장자리를 쓸어 올리면 잠깐 나타나고, 뒤로 가기는 위의 ← 버튼으로 한다.
@@ -883,6 +926,12 @@ class _KakaoMapFullscreenPageState extends State<KakaoMapFullscreenPage> {
 
   @override
   void dispose() {
+    if (_locationCallback != null) {
+      SocketService().offLocationUpdated(_locationCallback!);
+    }
+    if (_routePathCallback != null) {
+      SocketService().offRoutePathUpdated(_routePathCallback!);
+    }
     // 지도에서 나가면 시스템 표시줄을 원래대로
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
     super.dispose();
@@ -955,12 +1004,13 @@ class _KakaoMapFullscreenPageState extends State<KakaoMapFullscreenPage> {
           // Fullscreen Map View
           Positioned.fill(
             child: KakaoMapView(
+              vehicleId: widget.vehicleId,
               stops: widget.stops,
               routePoints: widget.routePoints,
-              actualRoadPath: widget.actualRoadPath,
-              progressIndex: widget.progressIndex,
-              busLat: widget.busLat,
-              busLng: widget.busLng,
+              actualRoadPath: _actualRoadPath,
+              progressIndex: _progressIndex,
+              busLat: _busLat,
+              busLng: _busLng,
               academyLat: widget.academyLat,
               academyLng: widget.academyLng,
               academyName: widget.academyName,

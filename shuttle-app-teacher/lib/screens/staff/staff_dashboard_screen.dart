@@ -30,6 +30,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   Timer? _notificationPollTimer;
 
   int _currentRunNumber = 1;
+  int? _vehicleId;
 
   double? _busLat;
   double? _busLng;
@@ -214,6 +215,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
       final vid = vehicle?['id'];
       if (vid != null) {
         final vehicleId = int.tryParse(vid.toString()) ?? 0;
+        _vehicleId = vehicleId;
         SocketService().joinVehicleRoom(vehicleId);
 
         SocketService().onLocationUpdated((data) {
@@ -1649,6 +1651,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                       ? const EdgeInsets.fromLTRB(16, 8, 8, 8)
                       : const EdgeInsets.fromLTRB(16, 8, 16, 8),
                   child: KakaoMapView(
+                    vehicleId: _vehicleId,
                     stops: _routeData?.stops ?? [],
                     routePoints: _routeData?.routePoints ?? [],
                     actualRoadPath: _actualRoadPath,

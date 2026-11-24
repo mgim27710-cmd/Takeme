@@ -151,12 +151,16 @@ class NaverRouteMapState extends State<NaverRouteMap> {
   @override
   void didUpdateWidget(covariant NaverRouteMap oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final onlyBusMoved = oldWidget.stops.length == widget.stops.length &&
-        identical(oldWidget.roadPath, widget.roadPath) &&
+    // 노선의 정적 구성(정류장 수, 유치원 위치, 경로 길이, 진행 단계)이 같고 버스 위치만 변경된 경우
+    final routeUnchanged = oldWidget.stops.length == widget.stops.length &&
+        oldWidget.roadPath.length == widget.roadPath.length &&
         oldWidget.progressIndex == widget.progressIndex &&
         oldWidget.fallbackPoints.length == widget.fallbackPoints.length &&
-        oldWidget.academyLat == widget.academyLat;
-    if (onlyBusMoved && _busMarker != null && widget.busLat != null && widget.busLng != null) {
+        oldWidget.academyLat == widget.academyLat &&
+        oldWidget.academyLng == widget.academyLng;
+
+    // 이미 버스 마커가 생성되어 있다면 마커 좌표만 부드럽게 실시간 이동
+    if (routeUnchanged && _busMarker != null && widget.busLat != null && widget.busLng != null) {
       _busMarker!.setPosition(NLatLng(widget.busLat!, widget.busLng!));
       return;
     }

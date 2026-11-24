@@ -267,8 +267,16 @@ class SocketService {
     _locationUpdatedCallbacks.add(callback);
   }
 
+  void offLocationUpdated(Function(Map<String, dynamic> data) callback) {
+    _locationUpdatedCallbacks.remove(callback);
+  }
+
   void onRoutePathUpdated(Function(Map<String, dynamic> data) callback) {
     _routePathUpdatedCallbacks.add(callback);
+  }
+
+  void offRoutePathUpdated(Function(Map<String, dynamic> data) callback) {
+    _routePathUpdatedCallbacks.remove(callback);
   }
 
   void offChatEvents() {
