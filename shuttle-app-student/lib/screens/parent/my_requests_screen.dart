@@ -145,6 +145,7 @@ class _MyRequestsScreenState extends State<MyRequestsScreen> {
                       final reason = item['reason'] as String? ?? '';
                       final rejectionReason = item['rejectionReason'] as String? ?? '';
                       final isCapacityExceeded = item['isCapacityExceeded'] == true;
+                      final targetAddr = (item['targetAddress'] ?? item['newAddress'] ?? item['address'])?.toString();
 
                       return Container(
                         margin: const EdgeInsets.only(bottom: 12),
@@ -240,7 +241,6 @@ class _MyRequestsScreenState extends State<MyRequestsScreen> {
                               ),
                             ],
 
-                            final targetAddr = (item['targetAddress'] ?? item['newAddress'] ?? item['address'])?.toString();
                             if (targetAddr != null && targetAddr.isNotEmpty) ...[
                               const SizedBox(height: 4),
                               Row(
