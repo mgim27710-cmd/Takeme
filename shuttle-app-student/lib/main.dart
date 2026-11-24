@@ -3,24 +3,37 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'services/api_service.dart';
 import 'screens/login_screen.dart';
-import 'screens/student/student_home_screen.dart';
+import 'screens/parent/parent_home_screen.dart';
 import 'utils/network_helper.dart';
+import 'services/local_push.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'services/push_navigation.dart';
+import 'services/push_notification_service.dart';
+import 'widgets/naver_route_map.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 앱이 꺼져 있을 때 오는 푸시를 받으려면 runApp 전에 백그라운드 핸들러를 등록해야 한다
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   setupNetworkSecurity();
   await initializeDateFormatting('ko_KR', null);
   await ApiService().init();
-  runApp(const TakeMeStudentApp());
+  // 네이버 지도 (실행 시 --dart-define=NAVER_MAP_CLIENT_ID=... 이 있고 인증되면 사용, 아니면 기존 지도)
+  await initNaverMap();
+  // 휴대폰 알림창 알림 (운행 시작·도착 N분 전·하차)
+  await LocalPush.instance.init();
+  await PushNotificationService().initialize();
+  runApp(const TakeMeParentApp());
 }
 
-class TakeMeStudentApp extends StatelessWidget {
-  const TakeMeStudentApp({super.key});
+class TakeMeParentApp extends StatelessWidget {
+  const TakeMeParentApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'TakeMe 학생 통학',
+      navigatorKey: appNavigatorKey, // 푸시 알림을 눌렀을 때 화면 이동용
+      title: 'TakeMe 학부모',
       debugShowCheckedModeBanner: false,
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
@@ -35,8 +48,8 @@ class TakeMeStudentApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF4338CA), // Modern Indigo
-          primary: const Color(0xFF4338CA),
+          seedColor: const Color(0xFF2563EB),
+          primary: const Color(0xFF2563EB),
           surface: const Color(0xFFF8FAFC),
         ),
         scaffoldBackgroundColor: const Color(0xFFF8FAFC),
@@ -73,12 +86,12 @@ class TakeMeStudentApp extends StatelessWidget {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFF4338CA), width: 1.5),
+            borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.5),
           ),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF4338CA),
+            backgroundColor: const Color(0xFF2563EB),
             foregroundColor: Colors.white,
             elevation: 0,
             shape: RoundedRectangleBorder(
@@ -91,13 +104,13 @@ class TakeMeStudentApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const StudentInitialRouterScreen(),
+      home: const ParentInitialRouterScreen(),
     );
   }
 }
 
-class StudentInitialRouterScreen extends StatelessWidget {
-  const StudentInitialRouterScreen({super.key});
+class ParentInitialRouterScreen extends StatelessWidget {
+  const ParentInitialRouterScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -109,10 +122,11 @@ class StudentInitialRouterScreen extends StatelessWidget {
     final user = api.currentUser!;
     final role = user.role;
 
-    if (role == 'STUDENT' || role == 'PARENT') {
-      return const StudentHomeScreen();
+    if (role == 'PARENT' || role == 'STUDENT') {
+      return const ParentHomeScreen();
     }
 
+    // 학부모 계정이 아닌 경우 로그아웃 후 안내
     WidgetsBinding.instance.addPostFrameCallback((_) {
       api.logout();
       showDialog(
@@ -121,7 +135,7 @@ class StudentInitialRouterScreen extends StatelessWidget {
         builder: (ctx) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('접근 권한 안내', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: const Text('본 앱은 [중·고등부 학생 전용 앱]입니다.\n기사님 또는 선생님 계정은 해당 전용 앱을 이용해 주시기 바랍니다.'),
+          content: const Text('본 앱은 [학부모님 전용 앱]입니다.\n기사님 또는 선생님 계정은 해당 전용 앱을 이용해 주시기 바랍니다.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),

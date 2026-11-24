@@ -1,11 +1,11 @@
 {
-    "name": "TakeMe 학생 통학",
-    "short_name": "TakeMe 학생",
+    "name": "shuttle_app",
+    "short_name": "shuttle_app",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#1E1B4B",
-    "theme_color": "#4338CA",
-    "description": "TakeMe 중·고등부 학생용 통학 셔틀 & 실시간 위치 확인 앱",
+    "background_color": "#0175C2",
+    "theme_color": "#0175C2",
+    "description": "A new Flutter project.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

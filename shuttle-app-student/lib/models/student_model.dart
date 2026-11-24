@@ -19,6 +19,8 @@ class StudentModel {
   final String? academyName;
   final String? vehicleName;
   final String? approvalStatus;
+  final bool isNotRiding;
+  String? boardStatus;
 
   StudentModel({
     required this.id,
@@ -41,6 +43,8 @@ class StudentModel {
     this.academyName,
     this.vehicleName,
     this.approvalStatus,
+    this.isNotRiding = false,
+    this.boardStatus,
   });
 
   factory StudentModel.fromJson(Map<String, dynamic> json) {
@@ -71,6 +75,8 @@ class StudentModel {
       academyName: json['academyName'],
       vehicleName: json['vehicleName'] ?? json['vehicle'] ?? json['assignedVehicleName'],
       approvalStatus: json['approvalStatus'],
+      isNotRiding: json['isNotRiding'] == true,
+      boardStatus: json['boardStatus']?.toString(),
     );
   }
 }

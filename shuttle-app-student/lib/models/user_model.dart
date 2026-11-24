@@ -22,7 +22,7 @@ class UserModel {
       id: json['id'] is int ? json['id'] : int.tryParse(json['id']?.toString() ?? ''),
       email: json['email'] ?? '',
       name: json['name'] ?? '',
-      role: json['role'] ?? 'STUDENT',
+      role: json['role']?.toString() ?? '',
       token: token ?? json['token'],
       academyId: json['academyId'] is int ? json['academyId'] : int.tryParse(json['academyId']?.toString() ?? ''),
       assignedClass: json['assignedClass'],

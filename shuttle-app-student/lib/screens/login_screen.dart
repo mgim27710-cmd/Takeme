@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import 'register_screen.dart';
-import 'student/student_home_screen.dart';
+import 'parent/parent_home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -53,7 +53,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (user.role == 'PARENT' || user.role == 'STUDENT') {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => const StudentHomeScreen()),
+        MaterialPageRoute(builder: (_) => const ParentHomeScreen()),
       );
     } else {
       ApiService().logout();
@@ -61,8 +61,8 @@ class _LoginScreenState extends State<LoginScreen> {
         context: context,
         builder: (ctx) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('학생 전용 앱', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: const Text('본 앱은 [중·고등부 학생 전용 앱]입니다.\n기사님 또는 선생님 계정은 해당 전용 앱을 이용해 주세요.'),
+          title: const Text('학부모님 전용 앱', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: const Text('본 앱은 [학부모님 전용 앱]입니다.\n기사님 또는 선생님 계정은 해당 전용 앱을 이용해 주세요.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
@@ -141,7 +141,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       Navigator.pop(ctx);
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4338CA),
+                      backgroundColor: const Color(0xFF2563EB),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
@@ -315,7 +315,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             }
                           },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4338CA),
+                      backgroundColor: const Color(0xFF2563EB),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -406,7 +406,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 _showError(res['message'] ?? 'OTP 인증에 실패했습니다.');
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4338CA)),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2563EB)),
             child: const Text('인증 및 로그인', style: TextStyle(color: Colors.white)),
           ),
         ],
@@ -477,7 +477,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 _showError(res['message'] ?? 'OTP 인증에 실패했습니다.');
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4338CA)),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2563EB)),
             child: const Text('완료', style: TextStyle(color: Colors.white)),
           ),
         ],
@@ -506,11 +506,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       width: 68,
                       height: 68,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF4338CA),
+                        color: const Color(0xFF2563EB),
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF4338CA).withValues(alpha: 0.3),
+                            color: const Color(0xFF2563EB).withValues(alpha: 0.3),
                             blurRadius: 12,
                             offset: const Offset(0, 4),
                           )
@@ -543,7 +543,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 6),
                   const Center(
                     child: Text(
-                      '중·고등부 안심 셔틀 & 실시간 통학 플랫폼',
+                      '안전한 유치원 통학차량 관리 플랫폼',
                       style: TextStyle(
                         fontSize: 13,
                         color: Color(0xFF64748B),
@@ -637,7 +637,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ElevatedButton(
                     onPressed: _isLoading ? null : _handleLogin,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4338CA),
+                      backgroundColor: const Color(0xFF2563EB),
                       disabledBackgroundColor: const Color(0xFF93C5FD),
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),

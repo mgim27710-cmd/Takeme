@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io_client;
 import '../config.dart';
+import 'push_notification_service.dart';
 
 class SocketService {
   static final SocketService _instance = SocketService._internal();
@@ -23,8 +25,28 @@ class SocketService {
 
     _socket = io_client.io(AppConfig.apiHost, options.build());
 
+    _attachRoomUpdated();
     _socket!.onConnect((_) {
       debugPrint('Socket connected: ${_socket!.id}');
+    });
+
+    _socket!.off('notificationReceived');
+    _socket!.on('notificationReceived', (data) {
+      debugPrint('[Socket] notificationReceived: $data');
+      if (data is Map) {
+        final map = Map<String, dynamic>.from(data);
+        final title = map['title']?.toString() ?? 'TakeMe 알림';
+        final message = (map['message'] ?? map['body'])?.toString().trim() ?? '';
+        if (message.isEmpty) {
+          // 본문 없는 내부 이벤트 객체는 빈 알림을 띄우지 않음
+          return;
+        }
+        PushNotificationService().showNotification(
+          title: title,
+          body: message,
+          payload: jsonEncode(map),
+        );
+      }
     });
 
     _socket!.onDisconnect((_) {
@@ -72,6 +94,30 @@ class SocketService {
       } else if (data is Map) {
         callback(Map<String, dynamic>.from(data));
       }
+    });
+  }
+
+  /// 내 아이 정류장까지 남은 정류장 수 (서버가 버스 위치가 올 때마다 보냄)
+  void onBusProgress(Function(Map<String, dynamic> data) callback) {
+    _socket?.off('busProgress');
+    _socket?.on('busProgress', (data) {
+      if (data is Map) callback(Map<String, dynamic>.from(data));
+    });
+  }
+
+  /// 내 아이 정류장 도착 임박(SOON) / 유치원 도착(ARRIVED_ACADEMY) 알림 (서버가 그 원아 학부모에게만 보냄)
+  void onBusArriving(Function(Map<String, dynamic> data) callback) {
+    _socket?.off('busArriving');
+    _socket?.on('busArriving', (data) {
+      if (data is Map) callback(Map<String, dynamic>.from(data));
+    });
+  }
+
+  /// 차량 운행 시작/종료 (차량 방에 들어가면 현재 상태도 한 번 온다)
+  void onVehicleOperatingStatus(Function(Map<String, dynamic> data) callback) {
+    _socket?.off('vehicleOperatingStatus');
+    _socket?.on('vehicleOperatingStatus', (data) {
+      if (data is Map) callback(Map<String, dynamic>.from(data));
     });
   }
 
@@ -151,13 +197,23 @@ class SocketService {
     });
   }
 
-  void onRoomUpdated(Function(Map<String, dynamic> data) callback) {
+  /// 대화방 변경(새 메시지·읽음 처리) 알림을 받을 화면들. 화면마다 key 를 다르게 주면
+  /// 홈 화면 배지와 대화방 목록이 함께 받는다 (예전에는 나중에 등록한 화면만 받았다)
+  final Map<String, Function(Map<String, dynamic> data)> _roomUpdatedListeners = {};
+
+  void onRoomUpdated(Function(Map<String, dynamic> data) callback, {String key = 'default'}) {
+    _roomUpdatedListeners[key] = callback;
+    _attachRoomUpdated();
+  }
+
+  void offRoomUpdated(String key) => _roomUpdatedListeners.remove(key);
+
+  void _attachRoomUpdated() {
     _socket?.off('roomUpdated');
     _socket?.on('roomUpdated', (data) {
-      if (data is Map<String, dynamic>) {
-        callback(data);
-      } else if (data is Map) {
-        callback(Map<String, dynamic>.from(data));
+      final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      for (final cb in List.of(_roomUpdatedListeners.values)) {
+        cb(map);
       }
     });
   }
@@ -165,7 +221,6 @@ class SocketService {
   void offChatEvents() {
     _socket?.off('receiveMessage');
     _socket?.off('messagesRead');
-    _socket?.off('roomUpdated');
   }
 
   void disconnect() {

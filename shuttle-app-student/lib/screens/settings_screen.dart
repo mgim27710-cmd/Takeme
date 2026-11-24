@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../models/student_model.dart';
+import '../models/user_model.dart';
 import 'login_screen.dart';
+import 'parent/child_info_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  final bool isEmbeddedTab;
+  const SettingsScreen({super.key, this.isEmbeddedTab = false});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -17,6 +20,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isDeletingAccount = false;
   String _userPhone = '';
   bool _notifyShuttleOperation = true;
+  int _arrivalNoticeMinutes = 2; // 도착 알림 시점: 2분 전 / 5분 전 / 0 끄기
   bool _notifyBoardPost = true;
 
   @override
@@ -37,6 +41,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final child = await ApiService().getMyChild(user.email);
       final profile = await ApiService().getParentProfile();
       final notiSettings = await ApiService().getNotificationSettings();
+      final arrivalMin = await ApiService().getArrivalNoticeMinutes();
       if (mounted) {
         setState(() {
           _childInfo = child;
@@ -47,6 +52,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _userPhone = profile['phone'].toString();
           }
           _notifyShuttleOperation = notiSettings['notifyShuttleOperation'] ?? true;
+          _arrivalNoticeMinutes = arrivalMin;
           _notifyBoardPost = notiSettings['notifyBoardPost'] ?? true;
         });
       }
@@ -130,6 +136,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
         },
       ),
     );
+  }
+
+  /// 원아·보호자 정보(주보호자·비상연락망 등) 열기
+  Future<void> _openChildInfo() async {
+    try {
+      final list = await ApiService().getChildInfoList();
+      if (!mounted) return;
+      if (list.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('연결된 원아 정보가 없습니다.')));
+        return;
+      }
+      // 선택된 아이가 있으면 그 아이, 없으면 첫 번째 아이
+      final selectedId = _childInfo?.id;
+      final info = list.firstWhere((e) => e['studentId'] == selectedId, orElse: () => list.first);
+      await Navigator.push(context, MaterialPageRoute(builder: (_) => ChildInfoScreen(info: info)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('원아 정보를 불러오지 못했습니다. ${friendlyError(e)}')));
+    }
   }
 
   void _showPasswordChangeDialog() {
@@ -352,10 +377,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         backgroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, size: 20, color: Color(0xFF64748B)),
-          onPressed: () => Navigator.pop(context),
-        ),
+        automaticallyImplyLeading: !widget.isEmbeddedTab,
+        leading: widget.isEmbeddedTab
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new, size: 20, color: Color(0xFF64748B)),
+                onPressed: () => Navigator.pop(context),
+              ),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
           child: Container(color: const Color(0xFFF1F5F9), height: 1),
@@ -476,6 +504,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               await ApiService().updateNotificationSettings(notifyBoardPost: val);
                             },
                           ),
+                          const Divider(height: 1, color: Color(0xFFF1F5F9)),
+                          // 버스 도착 알림을 언제 받을지 (서버가 이 시점에 TakeMe 알림을 한 번 보낸다)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('버스 도착 알림 시점', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF0F172A))),
+                                const SizedBox(height: 2),
+                                const Text('버스가 우리 아이 정류장에 도착하기 몇 분 전에 알려드릴까요?', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 8,
+                                  children: [
+                                    for (final opt in const [(5, '5분 전'), (2, '2분 전'), (0, '받지 않기')])
+                                      ChoiceChip(
+                                        label: Text(opt.$2, style: const TextStyle(fontSize: 14)),
+                                        selected: _arrivalNoticeMinutes == opt.$1,
+                                        onSelected: (_) async {
+                                          final before = _arrivalNoticeMinutes;
+                                          setState(() => _arrivalNoticeMinutes = opt.$1);
+                                          final ok = await ApiService().setArrivalNoticeMinutes(opt.$1);
+                                          if (!ok && mounted) {
+                                            setState(() => _arrivalNoticeMinutes = before);
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(content: Text('저장하지 못했습니다. 잠시 후 다시 시도해 주세요.')),
+                                            );
+                                          }
+                                        },
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -501,11 +564,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const Divider(height: 20, color: Color(0xFFF1F5F9)),
                         _buildInfoRow(
                           '계정 역할',
-                          user?.role == 'DRIVER'
-                              ? '기사님'
-                              : (user?.role == 'TEACHER'
-                                  ? '차량선생님'
-                                  : (user?.role == 'PARENT' ? '학부모' : '학생')),
+                          UserModel.getRoleKorean(user?.role),
                         ),
                         const Divider(height: 20, color: Color(0xFFF1F5F9)),
                         Row(
@@ -514,7 +573,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('연락처 (전화번호)', style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
+                                const Text('주보호자 연락처', style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
                                 const SizedBox(height: 2),
                                 Text(
                                   _userPhone.isNotEmpty ? _userPhone : '등록된 전화번호 없음',
@@ -538,6 +597,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               child: const Text('수정', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF2563EB))),
                             ),
                           ],
+                        ),
+                        const Divider(height: 20, color: Color(0xFFF1F5F9)),
+                        // 원아·보호자 정보: 주보호자·비상연락망·알레르기 등 (웹 [원아 추가] 와 같은 정보)
+                        InkWell(
+                          onTap: _openChildInfo,
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 6),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('원아·보호자 정보', style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
+                                      SizedBox(height: 2),
+                                      Text('주보호자, 비상연락망, 알레르기 등', style: TextStyle(fontSize: 13, color: Color(0xFF1E293B), fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
+                                Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
+                              ],
+                            ),
+                          ),
                         ),
                         const Divider(height: 20, color: Color(0xFFF1F5F9)),
                         Row(

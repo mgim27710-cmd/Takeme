@@ -1,5 +1,5 @@
-name: shuttle_app_student
-description: "Takeme 중·고등부 전용 학생 통학 셔틀 & 실시간 위치 확인 앱"
+name: shuttle_app_parent
+description: "Takeme 학부모용 전용 안심 통학 & 자녀 승하차 알림 앱"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -44,8 +44,12 @@ dependencies:
   mobile_scanner: ^7.4.2
   qr_flutter: ^4.1.0
   flutter_tts: ^4.2.5
-  intl: ^0.20.3
+  intl: ^0.20.2
+  flutter_naver_map: ^1.4.4
   image_picker: ^1.2.3
+  flutter_local_notifications: ^19.4.2
+  firebase_core: ^5.1.0
+  firebase_messaging: ^17.0.1
 
 dev_dependencies:
   flutter_test:

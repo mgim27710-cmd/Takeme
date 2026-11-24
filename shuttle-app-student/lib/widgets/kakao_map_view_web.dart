@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 class KakaoMapViewWeb extends StatefulWidget {
   final String htmlContent;
+  final bool isInteractive;
   final VoidCallback? onZoomIn;
   final VoidCallback? onZoomOut;
   final VoidCallback? onFitAll;
@@ -13,6 +14,7 @@ class KakaoMapViewWeb extends StatefulWidget {
   const KakaoMapViewWeb({
     super.key,
     required this.htmlContent,
+    this.isInteractive = true,
     this.onZoomIn,
     this.onZoomOut,
     this.onFitAll,
@@ -37,7 +39,8 @@ class KakaoMapViewWebState extends State<KakaoMapViewWeb> {
       ..srcdoc = widget.htmlContent
       ..style.border = 'none'
       ..style.width = '100%'
-      ..style.height = '100%';
+      ..style.height = '100%'
+      ..style.pointerEvents = widget.isInteractive ? 'auto' : 'none';
 
     ui_web.platformViewRegistry.registerViewFactory(
       _viewId,
@@ -48,8 +51,13 @@ class KakaoMapViewWebState extends State<KakaoMapViewWeb> {
   @override
   void didUpdateWidget(covariant KakaoMapViewWeb oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.htmlContent != widget.htmlContent && _iframe != null) {
-      _iframe!.srcdoc = widget.htmlContent;
+    if (_iframe != null) {
+      if (oldWidget.htmlContent != widget.htmlContent) {
+        _iframe!.srcdoc = widget.htmlContent;
+      }
+      if (oldWidget.isInteractive != widget.isInteractive) {
+        _iframe!.style.pointerEvents = widget.isInteractive ? 'auto' : 'none';
+      }
     }
   }
 
