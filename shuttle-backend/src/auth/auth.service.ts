@@ -551,9 +551,10 @@ export class AuthService {
     });
 
     let detectedEduLevel = '유치원';
-    if (academy?.educationLevel === 'ELEMENTARY') {
+    const academyObj = academyId ? await this.academyRepository.findOne({ where: { id: academyId } }) : null;
+    if (academyObj?.educationLevel === 'ELEMENTARY') {
       detectedEduLevel = '초등부';
-    } else if (academy?.educationLevel === 'MIDDLE_HIGH') {
+    } else if (academyObj?.educationLevel === 'MIDDLE_HIGH') {
       detectedEduLevel = '중,고등부';
     } else {
       const combinedMeta = `${academyName || ''} ${user.name || ''} ${user.email || ''}`.toLowerCase();
