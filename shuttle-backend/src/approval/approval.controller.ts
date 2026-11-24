@@ -66,6 +66,20 @@ export class ApprovalController {
   /**
    * 미탑승 원아의 오늘 하루 탑승 신청 취소
    */
+  /**
+   * 오늘 하루 결석 신청 취소 (정상 등원 복귀)
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('cancel-today-absence')
+  async cancelTodayAbsence(
+    @Req() req: any,
+    @Body('studentId') studentId: number,
+  ) {
+    const user = req.dbUser;
+    if (!studentId) throw new BadRequestException('studentId가 필요합니다.');
+    return this.approvalService.cancelTodayAbsence(user, Number(studentId));
+  }
+
   @UseGuards(JwtAuthGuard)
   @Post('cancel-today-boarding')
   async cancelTodayBoarding(

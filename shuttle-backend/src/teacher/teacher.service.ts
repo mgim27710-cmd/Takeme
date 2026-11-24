@@ -239,12 +239,12 @@ export class TeacherService implements OnModuleInit {
       const override = overrides.find(o => o.student?.id === s.id);
       if (override) {
         if (absentTypes.includes(override.overrideType)) {
-          s.boardStatus = 'ABSENT';
-          (s as any).overrideType = override.overrideType;
-          (s as any).overrideReason = override.reason;
-        } else if (override.overrideType === OverrideType.CHANGE_LOCATION) {
+          // 결석, 직접 픽업, 셔틀 미이용 신청 원아: 기존 호차 탑승자 명단에서 완전히 제외
+          return null;
+        } else if (override.overrideType === OverrideType.CHANGE_LOCATION || override.overrideType === OverrideType.ONE_TIME_BOARDING) {
           if (override.newVehicleId && override.newVehicleId !== vehicleId) {
-            return null; // moved to another vehicle
+            // 다른 호차로 탑승 변경된 원아: 기존 호차 탑승자 명단에서 완전히 제외
+            return null;
           }
           applyOverrideLocation(s, override);
           if (override.targetTime && s.raw) {
@@ -265,7 +265,7 @@ export class TeacherService implements OnModuleInit {
     // Students moved into this vehicle today or one-time boarding
     const movedInOverrides = overrides.filter(o => 
       (o.overrideType === OverrideType.CHANGE_LOCATION || o.overrideType === OverrideType.ONE_TIME_BOARDING) &&
-      (o.newVehicleId === vehicleId || (!o.newVehicleId && (o.student?.assignedVehicle?.id === vehicleId || (o.student as any)?.assignedDepartureVehicle?.id === vehicleId)))
+      o.newVehicleId === vehicleId
     );
     const movedInStudentIds = movedInOverrides.map(o => o.student?.id).filter(Boolean);
 

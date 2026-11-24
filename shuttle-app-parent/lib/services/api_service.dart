@@ -595,6 +595,20 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> cancelTodayAbsence(int studentId) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/approval/cancel-today-absence');
+      final res = await postWithAuth(url, jsonEncode({'studentId': studentId}));
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'message': data['message'] ?? '결석 신청이 취소되었습니다.',
+      };
+    } catch (e) {
+      return {'success': false, 'message': friendlyError(e)};
+    }
+  }
+
   Future<Map<String, dynamic>> updateChildAllergies(String email, String allergies) async {
     final url = Uri.parse('${AppConfig.apiHost}/parent/my-child/allergies');
     final res = await http.post(

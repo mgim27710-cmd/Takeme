@@ -904,6 +904,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
     final myUser = ApiService().currentUser;
     final myRole = (myUser?.role ?? '').toUpperCase();
     final bool isDirectorOrAdmin = myRole == 'ACADEMY_ADMIN' || myRole == 'SUPER_ADMIN' || myRole == 'DIRECTOR';
+    final bool isTeacher = myRole == 'SHUTTLE_TEACHER' || myRole == 'HOMEROOM_TEACHER' || myRole == 'TEACHER';
 
     final myId = _toNumber(myUser?.id ?? _currentUserId);
     final myEmail = (myUser?.email ?? '').toLowerCase().trim();
@@ -916,7 +917,10 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
         (myId > 0 && (myId == senderId || myId == applicantId)) ||
         (myEmail.isNotEmpty && (myEmail == senderEmail || myEmail == applicantEmail));
 
-    final bool canApprove = isDirectorOrAdmin && !isApplicant;
+    // 직원 휴가·연차 신청은 원장님만 결재, 원아 통학 변동/결재 신청은 차량교사/담임교사/원장님 모두 결재 가능
+    final bool canApprove = isLeave
+        ? (isDirectorOrAdmin && !isApplicant)
+        : ((isDirectorOrAdmin || isTeacher) && !isApplicant);
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),

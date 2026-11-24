@@ -607,10 +607,10 @@ export default function AdminMainHome({
               <div>
                 <span className="text-sm font-bold text-slate-600 block mb-1">탑승 대상</span>
                 <div className="text-4xl font-black text-slate-900">
-                  {busMetrics.totalAssignedStudents} <span className="text-base font-bold text-slate-500">명</span>
+                  {busMetrics.totalRegularStudents + (busMetrics.totalOneTimeStudents || changeStats.oneTime)} <span className="text-base font-bold text-slate-500">명</span>
                 </div>
                 <div className="mt-2 text-sm font-bold text-slate-500">
-                  정규 {busMetrics.totalRegularStudents}명 · 1회 {busMetrics.totalOneTimeStudents}명
+                  정규 {busMetrics.totalRegularStudents}명 · 1회 {busMetrics.totalOneTimeStudents || changeStats.oneTime}명
                 </div>
               </div>
               <div className="w-13 h-13 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-black shrink-0">
@@ -628,10 +628,10 @@ export default function AdminMainHome({
                   {changeStats.total} <span className="text-base font-bold text-slate-500">건</span>
                 </div>
                 <div className="flex items-center gap-2 mt-2">
-                  <span className="px-2.5 py-0.5 rounded text-sm font-bold bg-amber-100 text-amber-800">
+                  <span className="px-2.5 py-0.5 rounded text-sm font-bold bg-amber-100 text-amber-800 whitespace-nowrap">
                     결석 {changeStats.absences}
                   </span>
-                  <span className="px-2.5 py-0.5 rounded text-sm font-bold bg-blue-100 text-blue-800">
+                  <span className="px-2.5 py-0.5 rounded text-sm font-bold bg-blue-100 text-blue-800 whitespace-nowrap">
                     탑승지 변경 {changeStats.locationChanges}
                   </span>
                 </div>
@@ -648,14 +648,14 @@ export default function AdminMainHome({
               <div>
                 <span className="text-sm font-bold text-slate-600 block mb-1">결재 및 D-Day</span>
                 <div className="text-4xl font-black text-rose-600">
-                  {pendingApprovalsList.length + safetyDdayList.filter(i => i.dday <= 14).length} <span className="text-base font-bold text-slate-500">건</span>
+                  {pendingApprovalsList.length + safetyDdayList.length} <span className="text-base font-bold text-slate-500">건</span>
                 </div>
                 <div className="flex items-center gap-2 mt-2">
-                  <span className="px-2.5 py-0.5 rounded text-sm font-bold bg-emerald-100 text-emerald-800">
+                  <span className="px-2.5 py-0.5 rounded text-sm font-bold bg-emerald-100 text-emerald-800 whitespace-nowrap">
                     결재 {pendingApprovalsList.length}
                   </span>
-                  <span className="px-2.5 py-0.5 rounded text-sm font-bold bg-rose-100 text-rose-800">
-                    서류 {safetyDdayList.filter(i => i.dday <= 14).length}
+                  <span className="px-2.5 py-0.5 rounded text-sm font-bold bg-rose-100 text-rose-800 whitespace-nowrap">
+                    서류 {safetyDdayList.length}
                   </span>
                 </div>
               </div>

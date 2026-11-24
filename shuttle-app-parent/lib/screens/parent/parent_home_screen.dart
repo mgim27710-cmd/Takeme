@@ -518,6 +518,61 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
     }
   }
 
+  Future<void> _handleCancelAbsence() async {
+    if (_childInfo == null) return;
+    final childName = _childInfo!.name;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('결석 신청 취소', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        content: Text('$childName 원아의 오늘 결석 신청을 취소하고 정상 등원(셔틀 탑승)하시겠습니까?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('닫기', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2563EB),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('결석 취소하기', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      final res = await ApiService().cancelTodayAbsence(_childInfo!.id);
+      if (!mounted) return;
+      if (res['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['message']?.toString() ?? '결석이 취소되었습니다. 오늘 정상 통학합니다.'),
+            backgroundColor: const Color(0xFF10B981),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        _loadAllData();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['message']?.toString() ?? '결석 취소에 실패했습니다.'),
+            backgroundColor: const Color(0xFFEF4444),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('오류 발생: $e'), backgroundColor: const Color(0xFFEF4444)),
+      );
+    }
+  }
+
   // ───────────── 실시간 도착 예정 시간 · 지연 · 운행 상태 ─────────────
 
   /// 위치가 이 시간 넘게 안 들어오면 "위치가 갱신되지 않았어요"로 알린다
@@ -1488,36 +1543,63 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
             Row(
               children: [
                 Expanded(
-                  child: MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: InkWell(
-                      onTap: () => _handleQuickChangeRequest(
-                        type: 'ABSENCE',
-                        title: '오늘 결석',
-                        description: '오늘 하루 종일 등원하지 않으며 차량에 탑승하지 않습니다.',
-                      ),
-                      borderRadius: BorderRadius.circular(12),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 10),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFFECACA)),
-                        ),
-                        child: const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text('🚨', style: TextStyle(fontSize: 13)),
-                            SizedBox(width: 6),
-                            Text(
-                              '오늘 하루 결석',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
+                  child: (_todaySchedule?['hasTodayAbsence'] == true || _childInfo?.boardStatus == 'ABSENT')
+                      ? MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: InkWell(
+                            onTap: _handleCancelAbsence,
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFEFF6FF),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFF3B82F6)),
+                              ),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.event_available, size: 14, color: Color(0xFF2563EB)),
+                                  SizedBox(width: 6),
+                                  Text(
+                                    '결석 취소 (정상 등원)',
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ],
+                          ),
+                        )
+                      : MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: InkWell(
+                            onTap: () => _handleQuickChangeRequest(
+                              type: 'ABSENCE',
+                              title: '오늘 결석',
+                              description: '오늘 하루 종일 등원하지 않으며 차량에 탑승하지 않습니다.',
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 10),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFFFECACA)),
+                              ),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.event_busy, size: 14, color: Color(0xFFDC2626)),
+                                  SizedBox(width: 6),
+                                  Text(
+                                    '오늘 하루 결석',
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(

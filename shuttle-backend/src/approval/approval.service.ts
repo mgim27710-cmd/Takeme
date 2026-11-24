@@ -691,6 +691,7 @@ export class ApprovalService {
         student: { id: studentId },
         targetDate,
         type: ChangeRequestType.ONE_TIME_BOARDING,
+        status: ApprovalStatus.APPROVED,
       },
     });
     if (req) return true;
@@ -702,6 +703,87 @@ export class ApprovalService {
       },
     });
     return !!ov;
+  }
+
+  async hasTodayAbsence(studentId: number, targetDate: string): Promise<boolean> {
+    const req = await this.approvalRepo.findOne({
+      where: {
+        student: { id: studentId },
+        targetDate,
+        type: ChangeRequestType.ABSENCE,
+      },
+    });
+    if (req) return true;
+    const ov = await this.overrideRepo.findOne({
+      where: {
+        student: { id: studentId },
+        startDate: LessThanOrEqual(targetDate),
+        endDate: MoreThanOrEqual(targetDate),
+        overrideType: OverrideType.ABSENCE,
+      },
+    });
+    return !!ov;
+  }
+
+  async cancelTodayAbsence(callingUser: User, studentId: number) {
+    const student = await this.studentRepo.findOne({
+      where: { id: studentId },
+      relations: { parentUser: true, assignedVehicle: true, academy: true },
+    });
+    if (!student) throw new NotFoundException('원아를 찾을 수 없습니다.');
+
+    if (callingUser.role === UserRole.PARENT) {
+      const isParent = student.parentUser?.id === callingUser.id || student.parentUser?.email === callingUser.email;
+      if (!isParent) {
+        throw new ForbiddenException('본인의 자녀에 대해서만 결석 신청을 취소할 수 있습니다.');
+      }
+    }
+
+    const todayStr = kstDateString();
+
+    const requests = await this.approvalRepo.find({
+      where: {
+        student: { id: student.id },
+        targetDate: todayStr,
+        type: ChangeRequestType.ABSENCE,
+      },
+    });
+
+    for (const req of requests) {
+      await this.overrideRepo.delete({ approvalRequest: { id: req.id } });
+      await this.approvalRepo.remove(req);
+    }
+
+    await this.overrideRepo.delete({
+      student: { id: student.id },
+      startDate: todayStr,
+      overrideType: OverrideType.ABSENCE,
+    });
+
+    student.boardStatus = 'WAITING';
+    await this.studentRepo.save(student);
+
+    const academyId = student.academy?.id || callingUser.academyId;
+    if (academyId && this.locationGateway) {
+      this.locationGateway.broadcastChangeRequestCancelled(academyId, {
+        studentId: student.id,
+        studentName: student.adminDisplayName || student.name,
+        boardStatus: 'WAITING',
+        isNotRiding: false,
+      });
+      this.locationGateway.broadcastChildBoardStatus({
+        studentId: student.id,
+        studentName: student.adminDisplayName || student.name,
+        boardStatus: 'WAITING',
+        parentUserId: student.parentUser?.id,
+        studentUserId: student.studentUser?.id,
+      });
+    }
+
+    return {
+      success: true,
+      message: '결석 신청이 정상적으로 취소되었습니다. 오늘 정상 통학합니다.',
+    };
   }
 
   async cancelTodayBoarding(callingUser: User, studentId: number) {

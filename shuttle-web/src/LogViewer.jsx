@@ -760,13 +760,13 @@ export default function LogViewer({
 
   // Render Calendar Date Cells
   const getDayClasses = (dateStr) => {
-    let classes = 'w-11 h-11 mx-auto rounded-2xl flex items-center justify-center text-sm font-black transition-all relative cursor-pointer ';
+    let classes = 'w-9 h-9 mx-auto rounded-xl flex items-center justify-center text-xs font-bold transition-all relative cursor-pointer ';
     const isSelected = dateStr === selectedDateStr;
     const isToday = dateStr === todayStr;
     const info = dateIndicatorMap.get(dateStr);
 
     if (isSelected) {
-      return classes + 'bg-blue-600 text-white shadow-md scale-105 ring-2 ring-blue-400';
+      return classes + 'bg-blue-600 text-white shadow-xs font-black ring-2 ring-blue-300';
     }
 
     if (info?.hasHoliday) {
@@ -1126,7 +1126,7 @@ export default function LogViewer({
         </div>
 
         {/* Selected Date Summary Header */}
-        <div className="px-5 py-3 bg-white border-b border-slate-200/80 flex items-center justify-between shadow-2xs shrink-0">
+        <div className="px-5 py-3 bg-white border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-2 shadow-2xs shrink-0">
           <div>
             <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
               <span>{selectedDate.getFullYear()}년 {selectedDate.getMonth() + 1}월 {selectedDate.getDate()}일</span>

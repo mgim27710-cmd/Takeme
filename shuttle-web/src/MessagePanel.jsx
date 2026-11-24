@@ -2044,11 +2044,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                         {otherUser?.name?.[0] || title[0] || '대'}
                       </div>
                     )}
-                    {room.unreadCount > 0 && (
-                      <span className="absolute -bottom-1 -right-1 bg-red-500 text-white text-[10px] font-black min-w-5 h-5 px-1 rounded-full flex items-center justify-center border-2 border-white shadow-2xs">
-                        {room.unreadCount > 9 ? '9+' : room.unreadCount}
-                      </span>
-                    )}
+
                   </div>
 
                   {/* Room Info */}
@@ -2241,12 +2237,7 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                 messagesWithDates
                   .filter(m => !showBookmarksOnly || bookmarkedIds.includes(m.id))
                   .filter(m => {
-                    // ★ 핵심 권한 격리: 결재는 선생-관리자 간의 내부 절차이므로 학부모 계정 또는 학부모와의 대화방에서는 완전 숨김
-                    if (isParent || isChatWithParent) {
-                      if (m.type === 'PAYMENT_REQUEST' || m.payload?.studentName) {
-                        return false;
-                      }
-                    }
+                    // 결재 및 변동 신청 카드는 대화방 내 모든 참여자(교직원, 학부모)에게 정상 노출
                     return true;
                   })
                   .map((msg) => {

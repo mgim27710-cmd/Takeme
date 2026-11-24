@@ -1452,7 +1452,8 @@ export class RoutingService {
     }
     const vehicles = await this.vehicleRepository.find({ 
       where: { academy: { id: academy.id } },
-      relations: { driverUser: true, teacherUser: true } 
+      relations: { driverUser: true, teacherUser: true },
+      order: { id: 'ASC' }
     });
     const formattedVehicles = vehicles.map(v => {
       let parsedPoints = v.polygonCoordinates;
@@ -1568,36 +1569,41 @@ export class RoutingService {
 
       const override = overrideMap.get(st.id);
       const pendingReq = pendingMap.get(st.id);
-      const isOneTimeBoarding = Boolean((override && override.overrideType === OverrideType.ONE_TIME_BOARDING) || (pendingReq && pendingReq.type === 'ONE_TIME_BOARDING'));
-      const isAbsence = Boolean((override && override.overrideType === OverrideType.ABSENCE) || (pendingReq && pendingReq.type === 'ABSENCE'));
-      const isLateness = Boolean((override && override.overrideType === OverrideType.LATENESS) || (pendingReq && pendingReq.type === 'LATENESS'));
-      const isPickup = Boolean((override && (override.overrideType === OverrideType.PICKUP || override.overrideType === OverrideType.INDIVIDUAL_DISMISSAL)) || (pendingReq && (pendingReq.type === 'PICKUP' || pendingReq.type === 'INDIVIDUAL_DISMISSAL')));
-      const isNoShuttle = Boolean((override && override.overrideType === OverrideType.NO_SHUTTLE) || (pendingReq && pendingReq.type === 'NO_SHUTTLE'));
+      // 승인 완료된 override 건만 실제 노선 및 탑승지에 적용 (PENDING 상태는 승인 전까지 노선에 선반영하지 않음)
+      const isOneTimeBoarding = Boolean(override && override.overrideType === OverrideType.ONE_TIME_BOARDING);
+      const isAbsence = Boolean(override && override.overrideType === OverrideType.ABSENCE);
+      const isLateness = Boolean(override && override.overrideType === OverrideType.LATENESS);
+      const isPickup = Boolean(override && (override.overrideType === OverrideType.PICKUP || override.overrideType === OverrideType.INDIVIDUAL_DISMISSAL));
+      const isNoShuttle = Boolean(override && override.overrideType === OverrideType.NO_SHUTTLE);
 
       const isNotRiding = isOneTimeBoarding ? false : Boolean(st.isNotRiding || isAbsence || isNoShuttle || parsedRaw['미탑승'] || parsedRaw['차량미탑승']);
       const needsAddress = !isNotRiding && (!st.address || st.latitude === null || st.latitude === undefined || isNaN(st.latitude) || !st.longitude || isNaN(st.longitude) || !!parsedRaw['주소입력필요']);
 
       const isOneTimeRide = Boolean(
         isOneTimeBoarding ||
-        pendingReq ||
         (override && (override.overrideType === OverrideType.CHANGE_LOCATION || override.overrideType === OverrideType.PICKUP || override.overrideType === OverrideType.LATENESS || override.overrideType === OverrideType.INDIVIDUAL_DISMISSAL)) ||
         (parsedRaw.isTemporaryRide && (!parsedRaw.temporaryRideDate || parsedRaw.temporaryRideDate === todayStr)) ||
         (parsedRaw.rideType === 'TODAY_ONLY' && (!parsedRaw.temporaryRideDate || parsedRaw.temporaryRideDate === todayStr)) ||
         parsedRaw.isTemporaryLocation
       );
 
-      const effectiveBusId = (isOneTimeBoarding && (pendingReq?.targetVehicleId || override?.newVehicleId))
-        ? (pendingReq?.targetVehicleId || override?.newVehicleId)
-        : (st.assignedVehicle ? st.assignedVehicle.id : null);
+      let effectiveBusId = st.assignedVehicle ? st.assignedVehicle.id : null;
+      if (isAbsence || isNoShuttle) {
+        // 결석 또는 셔틀 미이용 시 해당 호차 탑승자 명단에서 완전 제외
+        effectiveBusId = null;
+      } else if (override && (override.overrideType === OverrideType.ONE_TIME_BOARDING || override.overrideType === OverrideType.CHANGE_LOCATION) && override.newVehicleId) {
+        // 타 차량으로 변경 승인된 경우: 대상 차량으로 배정 변경 (기존 호차에서 빠지고 새 호차로 배정)
+        effectiveBusId = override.newVehicleId;
+      }
+
       const effectiveVehicle = effectiveBusId
         ? vehicles.find(v => v.id === effectiveBusId)
-        : st.assignedVehicle;
+        : null;
 
-      const dailyBoardingLocation = pendingReq?.newAddress || override?.newAddress || st.boardingLocation || '';
-      const isMorningReq = pendingReq && (pendingReq.direction === 'MORNING' || pendingReq.direction === 'BOARDING' || pendingReq.direction === 'GOTO');
-      const dailyDropoffLocation = pendingReq ? (isMorningReq ? '유치원' : (pendingReq.newAddress || st.dropoffLocation || '')) : (st.dropoffLocation || parsedRaw['하차지'] || parsedRaw['하원지'] || '');
-      const studentLat = pendingReq?.newLatitude ? Number(pendingReq.newLatitude) : ((override && override.latitude) ? Number(override.latitude) : st.latitude);
-      const studentLng = pendingReq?.newLongitude ? Number(pendingReq.newLongitude) : ((override && override.longitude) ? Number(override.longitude) : st.longitude);
+      const dailyBoardingLocation = override?.newAddress || st.boardingLocation || '';
+      const dailyDropoffLocation = st.dropoffLocation || parsedRaw['하차지'] || parsedRaw['하원지'] || '';
+      const studentLat = (override && override.latitude) ? Number(override.latitude) : st.latitude;
+      const studentLng = (override && override.longitude) ? Number(override.longitude) : st.longitude;
 
       return {
         id: st.id,

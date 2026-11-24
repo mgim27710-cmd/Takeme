@@ -275,16 +275,16 @@ export const getStudentExtraBusInfo = (st, buses = [], students = [], operationM
   const currentBusRiders = displayBusId
     ? students.filter(s => {
         const sBType = getStudentBoardingType(s);
-        if (sBType === 'NONE' || s.isNotRiding) return false;
+        if (sBType === 'NONE' || s.isNotRiding || s.isAbsence || s.boardStatus === 'ABSENT') return false;
         if (operationMode === 'MORNING') {
           if (sBType === 'AFTERNOON_ONLY') return false;
-          return s.assignedBusId === displayBusId || s.assignedVehicle?.id === displayBusId;
+          return s.assignedBusId === displayBusId;
         } else if (operationMode === 'AFTERNOON') {
           if (sBType === 'MORNING_ONLY') return false;
           const sDep = s.assignedDepartureBusId || s.assignedBusId;
           return sDep === displayBusId;
         }
-        return (s.assignedBusId === displayBusId || s.assignedDepartureBusId === displayBusId || s.assignedVehicle?.id === displayBusId);
+        return (s.assignedBusId === displayBusId || s.assignedDepartureBusId === displayBusId);
       })
     : [];
 
@@ -352,7 +352,7 @@ export const getBusRiderDetails = (bus, studentList = [], operationMode = 'ALL',
       st.raw?.isTemporaryLocation
     );
 
-    if (bType === 'NONE' && !isOneTime) return false;
+    if ((bType === 'NONE' || st.isNotRiding || st.isAbsence || st.boardStatus === 'ABSENT') && !isOneTime) return false;
 
     if (operationMode === 'MORNING') {
       if (bType === 'AFTERNOON_ONLY') return false;
@@ -1962,15 +1962,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         setStudents(prev => prev.map(s => s.id === stId ? {
           ...s,
           approvalStatus: 'PENDING',
-          isOneTimeRide: data.type === 'ONE_TIME_BOARDING' ? true : s.isOneTimeRide,
-          oneTimeType: data.type,
-          dailyBoardingLocation: data.newAddress || data.address || s.boardingLocation,
-          dailyDropoffLocation: data.direction === 'MORNING' ? (s.dropoffLocation || '유치원') : (data.newAddress || data.address || s.dropoffLocation),
-          lat: (data.newLatitude || data.latitude) ? Number(data.newLatitude || data.latitude) : s.lat,
-          lng: (data.newLongitude || data.longitude) ? Number(data.newLongitude || data.longitude) : s.lng,
-          assignedBusId: data.targetVehicleId || data.vehicleId || s.assignedBusId,
-          isNotRiding: data.type === 'ONE_TIME_BOARDING' ? false : s.isNotRiding,
-          raw: { ...(s.raw || {}), approvalStatus: 'PENDING', isPendingApproval: true }
+          raw: { ...(s.raw || {}), approvalStatus: 'PENDING', isPendingApproval: true, pendingRequest: data }
         } : s));
       }
       handleIncomingDirectorAlert({
@@ -1999,6 +1991,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
         setStudents(prev => prev.map(s => s.id === stId ? { ...s, approvalStatus: req.decision, raw: { ...(s.raw || {}), approvalStatus: req.decision } } : s));
         setHighlightedStudentId(prev => prev === stId ? null : prev);
       }
+      loadInitialState();
     });
 
     socket.on('childBoardStatusChanged', (data) => {
@@ -3114,7 +3107,12 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   }, [academyIconSettings, academy?.name]);
 
   const computePolygons = (busArray) => {
-    return (busArray || []).map(bus => {
+    const sorted = [...(busArray || [])].sort((a, b) => {
+      const aName = a.busNumber || a.name || ('호차 ' + a.id);
+      const bName = b.busNumber || b.name || ('호차 ' + b.id);
+      return aName.localeCompare(bName, 'ko-KR', { numeric: true });
+    });
+    return sorted.map(bus => {
       let poly = bus.polygon || bus.polygonCoordinates || bus.points;
       while (typeof poly === 'string') {
         try { poly = JSON.parse(poly); } catch(e) { break; }
@@ -4980,7 +4978,7 @@ const parseKindergartenExcelSheet = (sheet) => {
       {/* Bookmark Rail (Left Navigation) */}
       <div className={`w-28 h-full max-h-screen shrink-0 ${terms.themeBg} flex flex-col items-center py-5 gap-3.5 z-20 shadow-xl transition-colors duration-300 overflow-y-auto overflow-x-hidden select-none [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-white/40`}>
         <div className="text-white font-black text-base tracking-wider shrink-0 mb-0.5">Takeme</div>
-        <div className="text-xs text-white/90 text-center truncate max-w-[96px] mb-2 font-bold shrink-0 px-1.5 py-0.5 rounded-md bg-black/20" title={currentUser.name}>
+        <div className="text-[11px] text-white/95 text-center truncate max-w-[104px] mb-2 font-bold shrink-0 px-2 py-0.5 rounded-md bg-black/25" title={currentUser.name}>
           {isSuperAdmin ? '플랫폼관리' : (currentUser.name ? `${currentUser.name} 관리자` : '관리자')}
         </div>
         <button 
@@ -5358,11 +5356,18 @@ const parseKindergartenExcelSheet = (sheet) => {
 
               const extraBusList = students.filter(isExtraBusStudent);
 
-              const allExtraSelected = extraBusList.length > 0 && extraBusList.every(s => selectedExtraBusStudentIds.has(s.id));
+              const allExtraSelected = extraBusList.length > 0 && (
+                selectedExtraBusStudentIds.size === 0 ||
+                (!selectedExtraBusStudentIds.has('__NONE__') && extraBusList.every(s => selectedExtraBusStudentIds.has(s.id)))
+              );
+
+              const selectedCount = selectedExtraBusStudentIds.size === 0
+                ? extraBusList.length
+                : (selectedExtraBusStudentIds.has('__NONE__') ? 0 : extraBusList.filter(s => selectedExtraBusStudentIds.has(s.id)).length);
 
               const handleToggleSelectAllExtra = () => {
                 if (allExtraSelected) {
-                  setSelectedExtraBusStudentIds(new Set());
+                  setSelectedExtraBusStudentIds(new Set(['__NONE__']));
                 } else {
                   setSelectedExtraBusStudentIds(new Set(extraBusList.map(s => s.id)));
                 }
@@ -5370,9 +5375,17 @@ const parseKindergartenExcelSheet = (sheet) => {
 
               const handleToggleStudentCheck = (id) => {
                 setSelectedExtraBusStudentIds(prev => {
-                  const next = new Set(prev);
-                  if (next.has(id)) next.delete(id);
-                  else next.add(id);
+                  let next;
+                  if (prev.size === 0) {
+                    next = new Set(extraBusList.map(s => s.id));
+                    next.delete(id);
+                  } else if (prev.has('__NONE__')) {
+                    next = new Set([id]);
+                  } else {
+                    next = new Set(prev);
+                    if (next.has(id)) next.delete(id);
+                    else next.add(id);
+                  }
                   return next;
                 });
               };
@@ -5558,7 +5571,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                                   onChange={handleToggleSelectAllExtra}
                                   className="w-3.5 h-3.5 rounded text-orange-600 cursor-pointer"
                                 />
-                                <span>전체 선택 ({selectedExtraBusStudentIds.size > 0 ? selectedExtraBusStudentIds.size : extraBusList.length}/{extraBusList.length})</span>
+                                <span>전체 선택 ({selectedCount}/{extraBusList.length})</span>
                               </label>
                               <button
                                 type="button"
@@ -5572,7 +5585,7 @@ const parseKindergartenExcelSheet = (sheet) => {
 
                             <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
                               {extraBusList.map(st => {
-                                const isChecked = selectedExtraBusStudentIds.size === 0 || selectedExtraBusStudentIds.has(st.id);
+                                const isChecked = selectedExtraBusStudentIds.size === 0 ? true : (!selectedExtraBusStudentIds.has('__NONE__') && selectedExtraBusStudentIds.has(st.id));
                                 const homonym = getHomonymInfo(st, students);
                                 const isHomonym = Boolean(homonym?.isHomonym);
                                 const exInfo = getStudentExtraBusInfo(st, buses, students, operationMode, selectedDay, academy, academyRadiusKm);
@@ -6052,59 +6065,24 @@ const parseKindergartenExcelSheet = (sheet) => {
                   </div>
                 ) : null}
 
-                {/* Row 3: Guardian Phone & Bus Badge */}
+                {/* Row 3: Guardian Info & Class */}
                 <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-100">
                   <span className="text-slate-600 font-semibold text-[11px] flex items-center gap-1 truncate">
                     <span className="text-slate-400 font-normal">보호자:</span>
-                    {st.raw?.['보호자 성함'] ? `${st.raw['보호자 성함']} ` : ''}
-                    <span className="text-slate-700 font-bold">
-                      {maskPhoneNumber(st.raw?.['부모연락처'] || st.raw?.['보호자연락처'] || st.raw?.['보호자 연락처'] || st.parentPhone)}
-                    </span>
+                    {(() => {
+                      const gName = st.raw?.['보호자 성함'] || st.raw?.['보호자성함'] || st.raw?.['보호자'] || st.parentName;
+                      const gPhone = maskPhoneNumber(st.raw?.['부모연락처'] || st.raw?.['보호자연락처'] || st.raw?.['보호자 연락처'] || st.parentPhone);
+                      if (gName && gPhone) return `${gName} (${gPhone})`;
+                      if (gName) return gName;
+                      if (gPhone) return gPhone;
+                      return <span className="text-slate-400 font-normal">미등록</span>;
+                    })()}
                   </span>
-
-                  {showBusBadge && (() => {
-                    const bType = getStudentBoardingType(st);
-                    if (bType === 'NONE') {
-                      return (
-                        <span className="font-extrabold text-[10px] px-1.5 py-0.5 rounded border border-slate-300 bg-slate-100 text-slate-600 shrink-0">
-                          미탑승(도보/자차)
-                        </span>
-                      );
-                    }
-                    if (needsAddress) {
-                      return (
-                        <span className="font-extrabold text-[10px] px-1.5 py-0.5 rounded border border-red-200 bg-red-50 text-red-600 shrink-0">
-                          배정 대기
-                        </span>
-                      );
-                    }
-                    if (bType === 'MORNING_ONLY') {
-                      return (
-                        <span className="font-extrabold text-[10px] px-1.5 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-800 shrink-0">
-                          등원만: {bus ? bus.name : '배정대기'}
-                        </span>
-                      );
-                    }
-                    if (bType === 'AFTERNOON_ONLY') {
-                      return (
-                        <span className="font-extrabold text-[10px] px-1.5 py-0.5 rounded border border-indigo-300 bg-indigo-50 text-indigo-800 shrink-0">
-                          하원만: {depBus ? depBus.name : (bus ? bus.name : '배정대기')}
-                        </span>
-                      );
-                    }
-                    return (
-                      <span 
-                        className="font-extrabold text-[10px] px-1.5 py-0.5 rounded border shrink-0" 
-                        style={{ 
-                          color: st.color || bus?.color || '#475569', 
-                          borderColor: `${st.color || bus?.color || '#94a3b8'}50`, 
-                          backgroundColor: `${st.color || bus?.color || '#64748b'}15` 
-                        }}
-                      >
-                        {bus && depBus && bus.id !== depBus.id ? `등:${bus.name} / 하:${depBus.name}` : (bus ? bus.name : (depBus ? `하원:${depBus.name}` : '배정 대기'))}
-                      </span>
-                    );
-                  })()}
+                  {(st.raw?.['반명'] || st.raw?.['반']) && (
+                    <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md shrink-0">
+                      {st.raw?.['반명'] || st.raw?.['반']}
+                    </span>
+                  )}
                 </div>
 
                 {/* Expandable Details */}
@@ -7391,15 +7369,37 @@ const parseKindergartenExcelSheet = (sheet) => {
           )}
 
           {activeTab === 'documents' && (
-            <DocumentSidebar 
-              academyId={selectedAcademyId} 
-              academyName={academy?.name}
-              currentUser={currentUser}
-              buses={buses}
-              students={students}
-              activeEducationLevel={activeEducationLevel}
-              terms={terms}
-            />
+            <div className="flex flex-col h-full bg-white select-none">
+              <div className="p-5 border-b border-slate-100 bg-white">
+                <h2 className="text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                  서류함
+                </h2>
+              </div>
+              <div className="p-4 flex flex-col gap-3 text-xs text-slate-600">
+                <div className="p-3.5 bg-blue-50/80 border border-blue-200/80 rounded-xl text-blue-900 font-bold leading-snug shadow-2xs">
+                  통학차량 행정 및 법정 서식 관리함
+                </div>
+                <div className="p-3 bg-slate-50 border border-slate-200/70 rounded-xl space-y-2 text-slate-600 font-medium">
+                  <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                    <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                    <span>주요 제공 서식</span>
+                  </div>
+                  <ul className="list-disc list-inside space-y-1 text-[11px] text-slate-500 pl-1">
+                    <li>일일 안전점검표 (운행 전·후)</li>
+                    <li>동승보호자 탑승일지 및 승하차 명부</li>
+                    <li>통학차량 비상연락망 명부</li>
+                    <li>호차별 운행 노선표 및 시간표</li>
+                    <li>영유아 귀가 및 응급처치 동의서</li>
+                  </ul>
+                </div>
+                <div className="p-3 bg-rose-50/70 border border-rose-200/70 rounded-xl text-[11px] text-rose-800 font-semibold space-y-1">
+                  <div className="font-bold flex items-center gap-1 text-rose-900">
+                    <span>안전 점검 안내</span>
+                  </div>
+                  <p>우측 서류 관리함에서 차량별 서류를 발급하거나 검사증 및 보험 증권을 안전하게 보관할 수 있습니다.</p>
+                </div>
+              </div>
+            </div>
           )}
 
           {activeTab === 'board' && (
@@ -8086,19 +8086,8 @@ const parseKindergartenExcelSheet = (sheet) => {
           {/* Draw New Students */}
           {(selectedBusId ? students.filter(s => {
             const bType = getStudentBoardingType(s);
-            if (s.isNotRiding || bType === 'NONE') {
-              const bus = buses.find(b => b.id === selectedBusId);
-              const busName = bus?.name || '';
-              const matchesBus = (s.boardingLocation && busName && s.boardingLocation.includes(busName)) ||
-                                 (s.dropoffLocation && busName && s.dropoffLocation.includes(busName)) ||
-                                 (s.assignedBusId === selectedBusId || s.assignedDepartureBusId === selectedBusId);
-              if (matchesBus) return true;
-              if (bus?.turfPolygon && s.lat && s.lng) {
-                try {
-                  return turf.booleanPointInPolygon(turf.point([Number(s.lng), Number(s.lat)]), bus.turfPolygon);
-                } catch (_) {}
-              }
-              return false;
+            if (s.isNotRiding || bType === 'NONE' || s.isAbsence || s.boardStatus === 'ABSENT') {
+              return false; // 결석 또는 미탑승 원아는 해당 호차 탑승자 명단 및 지도에서 제외
             }
             if (operationMode === 'MORNING') {
               return s.assignedBusId === selectedBusId && bType !== 'AFTERNOON_ONLY';

@@ -2215,19 +2215,47 @@ export class ChatService implements OnModuleInit {
   ): Promise<ChatMessage | null> {
     try {
       // 1. 대화방 결정: 클라이언트에서 넘겨준 roomId가 있으면 우선 사용
-      let room: ChatRoom | null = null;
+      const targetRooms: ChatRoom[] = [];
       if (targetRoomId) {
-        room = await this.roomRepo.findOne({
+        const r = await this.roomRepo.findOne({
           where: { id: Number(targetRoomId) },
           relations: { members: { user: true } },
         });
+        if (r) targetRooms.push(r);
       }
 
-      // 2. 지정된 roomId가 없으면, 신청자와 담당교사(차량교사/담임교사/원장) 간의 1:1 대화방 탐색 또는 생성
-      if (!room) {
-        let recipientUserId: number | null = null;
-        const isHomeroomType = approval.type === ChangeRequestType.ABSENCE || approval.type === ChangeRequestType.LATENESS;
+      // 2. 지정된 roomId가 없으면, 신청자와 담당 차량교사/담임교사 간의 1:1 대화방을 탐색 또는 생성
+      if (targetRooms.length === 0) {
+        const recipientUserIds: number[] = [];
 
+        // 2-1. 원아의 현재 배정 차량 담당 차량교사 (최우선)
+        let currentVehicleTeacherId: number | null = approval.student?.assignedVehicle?.teacherUser?.id || null;
+        if (!currentVehicleTeacherId && approval.student?.assignedVehicle?.id) {
+          const v = await this.vehicleRepo.findOne({
+            where: { id: approval.student.assignedVehicle.id },
+            relations: { teacherUser: true },
+          });
+          currentVehicleTeacherId = v?.teacherUser?.id || null;
+        }
+        if (currentVehicleTeacherId && currentVehicleTeacherId !== callingUser.id) {
+          recipientUserIds.push(currentVehicleTeacherId);
+        }
+
+        // 2-2. 변경 신청된 대상 차량교사 (기존 차량과 다른 경우)
+        let targetVehicleTeacherId: number | null = targetVehicle?.teacherUser?.id || null;
+        if (!targetVehicleTeacherId && targetVehicle?.id) {
+          const v = await this.vehicleRepo.findOne({
+            where: { id: targetVehicle.id },
+            relations: { teacherUser: true },
+          });
+          targetVehicleTeacherId = v?.teacherUser?.id || null;
+        }
+        if (targetVehicleTeacherId && targetVehicleTeacherId !== callingUser.id && !recipientUserIds.includes(targetVehicleTeacherId)) {
+          recipientUserIds.push(targetVehicleTeacherId);
+        }
+
+        // 2-3. 결석/지각의 경우 담임교사도 포함
+        const isHomeroomType = approval.type === ChangeRequestType.ABSENCE || approval.type === ChangeRequestType.LATENESS;
         if (isHomeroomType) {
           const studentClass = getStudentClassName(approval.student);
           if (studentClass) {
@@ -2238,31 +2266,14 @@ export class ChatService implements OnModuleInit {
                 assignedClass: studentClass,
               },
             });
-            recipientUserId = hrTeacher?.id || null;
+            if (hrTeacher && hrTeacher.id !== callingUser.id && !recipientUserIds.includes(hrTeacher.id)) {
+              recipientUserIds.push(hrTeacher.id);
+            }
           }
         }
 
-        if (!recipientUserId) {
-          recipientUserId = targetVehicle?.teacherUser?.id || null;
-          if (!recipientUserId && targetVehicle?.id) {
-            const v = await this.vehicleRepo.findOne({
-              where: { id: targetVehicle.id },
-              relations: { teacherUser: true },
-            });
-            recipientUserId = v?.teacherUser?.id || null;
-          }
-        }
-
-        if (!recipientUserId && approval.student?.assignedVehicle?.id) {
-          const v = await this.vehicleRepo.findOne({
-            where: { id: approval.student.assignedVehicle.id },
-            relations: { teacherUser: true },
-          });
-          recipientUserId = v?.teacherUser?.id || null;
-        }
-
-        // 신청자 본인이거나 수신자가 없으면 원장/관리자로 지정
-        if (!recipientUserId || recipientUserId === callingUser.id) {
+        // 2-4. 그래도 수신자가 없으면 원장/관리자로 지정
+        if (recipientUserIds.length === 0) {
           const admin = await this.userRepo.findOne({
             where: {
               academyId: callingUser.academyId || approval.academy?.id,
@@ -2270,24 +2281,28 @@ export class ChatService implements OnModuleInit {
             },
           });
           if (admin && admin.id !== callingUser.id) {
-            recipientUserId = admin.id;
+            recipientUserIds.push(admin.id);
           }
         }
 
-        if (recipientUserId && recipientUserId !== callingUser.id) {
-          room = (await this.createRoomByEmail(
+        for (const recipientId of recipientUserIds) {
+          const r = (await this.createRoomByEmail(
             undefined,
             'DIRECT',
-            [callingUser.id, recipientUserId],
+            [callingUser.id, recipientId],
             callingUser.email,
           )) as ChatRoom;
+          if (r && !targetRooms.some(tr => tr.id === r.id)) {
+            targetRooms.push(r);
+          }
         }
       }
 
-      if (!room) {
+      if (targetRooms.length === 0) {
         console.warn('[ChatService] postApprovalRequestToChat: 적절한 대화방을 찾지 못함');
         return null;
       }
+      const room = targetRooms[0];
 
       const typeKr = typeToKorean(approval.type);
       const studentName = approval.student?.adminDisplayName || approval.student?.name || '원아';
@@ -2324,33 +2339,36 @@ export class ChatService implements OnModuleInit {
 
       const summaryText = `[${typeKr} 결재 신청]\n원아: ${studentName}\n배정차량: ${busNumber}\n탑승/하차지: ${boardingLocation}\n신청일: ${payload.requestDate}\n사유: ${payload.note}\n\n결재 승인을 부탁드립니다.`;
 
-      const message = this.messageRepo.create({
-        room,
-        sender: callingUser,
-        text: summaryText,
-        type: 'PAYMENT_REQUEST',
-        payload,
-        readBy: [callingUser.id],
-      });
+      let primaryMessage: any = null;
+      for (const targetRoom of targetRooms) {
+        const message = this.messageRepo.create({
+          room: targetRoom,
+          sender: callingUser,
+          text: summaryText,
+          type: 'PAYMENT_REQUEST',
+          payload,
+          readBy: [callingUser.id],
+        });
 
-      const saved = await this.messageRepo.save(message);
-      await this.roomRepo.update(room.id, { updatedAt: new Date() });
+        const saved = await this.messageRepo.save(message);
+        await this.roomRepo.update(targetRoom.id, { updatedAt: new Date() });
 
-      const fullMessage = await this.messageRepo.findOne({
-        where: { id: saved.id },
-        relations: { sender: true, room: true },
-      });
+        const fullMessage = await this.messageRepo.findOne({
+          where: { id: saved.id },
+          relations: { sender: true, room: true },
+        });
 
-      if (fullMessage) {
-        const resMsg = {
-          ...fullMessage,
-          roomId: room.id,
-        };
-        await this.broadcastToRoom(room.id, resMsg);
-        return resMsg as any;
+        if (fullMessage) {
+          const resMsg = {
+            ...fullMessage,
+            roomId: targetRoom.id,
+          };
+          await this.broadcastToRoom(targetRoom.id, resMsg);
+          if (!primaryMessage) primaryMessage = resMsg;
+        }
       }
 
-      return fullMessage;
+      return primaryMessage;
     } catch (err) {
       console.error('[ChatService] postApprovalRequestToChat 오류:', err);
       return null;

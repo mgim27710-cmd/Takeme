@@ -775,6 +775,7 @@ export class ParentService {
     }
 
     (result as any).hasTodayBoarding = await this.approvalService.hasTodayBoarding(student.id, localISOTime);
+    (result as any).hasTodayAbsence = await this.approvalService.hasTodayAbsence(student.id, localISOTime);
 
     return result;
   }

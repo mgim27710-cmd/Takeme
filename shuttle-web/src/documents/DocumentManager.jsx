@@ -477,13 +477,13 @@ export default function DocumentManager({
     return (
       <div
         key={id}
-        className={`bg-white border border-slate-200/90 border-l-[6px] ${themeStyles.borderLeft} rounded-2xl p-4.5 flex items-center justify-between gap-4 transition-all shadow-xs hover:shadow-md ${
-          colSpan2 ? 'md:col-span-2' : ''
+        className={`bg-white border border-slate-200/90 border-l-[6px] ${themeStyles.borderLeft} rounded-2xl p-4 flex items-center justify-between gap-3 transition-all shadow-xs hover:shadow-md ${
+          colSpan2 ? 'xl:col-span-2' : ''
         }`}
       >
-        <div className="min-w-0 pr-2">
+        <div className="flex-1 min-w-0 pr-1 flex flex-col justify-center">
           <div className="flex items-center gap-2 flex-wrap mb-1">
-            <span className="text-[15px] font-extrabold text-slate-900 tracking-tight leading-snug">
+            <span className="text-[14px] font-extrabold text-slate-900 tracking-tight leading-snug">
               {title}
             </span>
             {tag && (
@@ -492,13 +492,13 @@ export default function DocumentManager({
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-500 font-medium leading-relaxed truncate">
+          <p className="text-xs text-slate-500 font-medium leading-relaxed line-clamp-2">
             {subtitle}
           </p>
         </div>
         <button
           onClick={() => handleDownloadTemplate(id)}
-          className={`inline-flex items-center gap-1.5 text-xs font-bold border px-3.5 py-2.5 rounded-xl transition-all shadow-2xs hover:shadow-xs shrink-0 cursor-pointer active:scale-95 ${themeStyles.btn}`}
+          className={`inline-flex items-center gap-1.5 text-xs font-bold border px-3 py-2 rounded-xl transition-all shadow-2xs hover:shadow-xs shrink-0 ml-auto cursor-pointer active:scale-95 whitespace-nowrap ${themeStyles.btn}`}
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
@@ -960,7 +960,7 @@ export default function DocumentManager({
                     차량 안전 5종
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   {renderTemplateCard({
                     id: 'safety',
                     title: `일일 안전점검표 ${activeBus ? `(${activeBus.name})` : ''}`,
@@ -1009,7 +1009,7 @@ export default function DocumentManager({
                     학부모 동의 3종
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   {renderTemplateCard({
                     id: 'consent',
                     title: '통학차량 이용 신청 및 안전동의서',
@@ -1044,7 +1044,7 @@ export default function DocumentManager({
                     운영·행정 3종
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   {renderTemplateCard({
                     id: 'consent-driver-location',
                     title: '운전자 위치정보 수집·이용 동의서',
@@ -1079,7 +1079,7 @@ export default function DocumentManager({
                     안전·보건 4종
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   {renderTemplateCard({
                     id: 'health-allergy',
                     title: '원아 건강·알레르기 및 기저질환 명부',

@@ -1470,7 +1470,7 @@ export default function ClassManager({
                           }}
                           className="text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 rounded-lg border border-slate-200 cursor-pointer"
                         >
-                          <option value="">배정 ▼</option>
+                          <option value="">반 배정</option>
                           {allClassNames.map(c => {
                             const cAge = classAgeMap[c] || '혼합반';
                             return (
