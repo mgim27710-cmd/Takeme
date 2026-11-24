@@ -49,11 +49,21 @@ export default function IntegratedCalendar({
   };
 
   const loadCalendar = async () => {
+    if (!selectedAcademyId) {
+      setCalendarData({
+        summary: { pendingCount: 0, todayNewCount: 0, monthApprovedCount: 0 },
+        holidays: [],
+        scheduleChanges: [],
+      });
+      setIsLoading(false);
+      return;
+    }
     try {
       setIsLoading(true);
       const queryParams = new URLSearchParams({
         year: String(currentYear),
         month: String(currentMonth),
+        academyId: String(selectedAcademyId),
       });
       if (filterClass) queryParams.append('className', filterClass);
 
@@ -114,7 +124,10 @@ export default function IntegratedCalendar({
       const res = await fetch(`${API_BASE_URL}/approval/calendar/event`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify(newEvent),
+        body: JSON.stringify({
+          ...newEvent,
+          academyId: selectedAcademyId ? Number(selectedAcademyId) : undefined,
+        }),
       });
       const data = await res.json();
       if (res.ok && data.success) {

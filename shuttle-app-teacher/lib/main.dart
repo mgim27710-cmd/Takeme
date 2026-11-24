@@ -29,6 +29,8 @@ class TakeMeTeacherApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final primaryColor = ApiService().currentUser?.themePrimaryColor ?? const Color(0xFF0D9488);
+
     return MaterialApp(
       navigatorKey: appNavigatorKey, // 푸시 알림을 눌렀을 때 화면 이동용
       title: 'TakeMe 교사',
@@ -46,8 +48,8 @@ class TakeMeTeacherApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0D9488),
-          primary: const Color(0xFF0D9488),
+          seedColor: primaryColor,
+          primary: primaryColor,
           surface: const Color(0xFFF8FAFC),
         ),
         scaffoldBackgroundColor: const Color(0xFFF8FAFC),
@@ -84,12 +86,12 @@ class TakeMeTeacherApp extends StatelessWidget {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFF0D9488), width: 1.5),
+            borderSide: BorderSide(color: primaryColor, width: 1.5),
           ),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF0D9488),
+            backgroundColor: primaryColor,
             foregroundColor: Colors.white,
             elevation: 0,
             shape: RoundedRectangleBorder(

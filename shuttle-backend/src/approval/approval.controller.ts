@@ -58,9 +58,12 @@ export class ApprovalController {
   async getAdminRequests(
     @Req() req: any,
     @Query('status') status?: ApprovalStatus,
+    @Query('academyId') academyIdQuery?: string,
   ) {
     const user = req.dbUser;
-    return this.approvalService.getAdminRequests(user, status);
+    const headerAcademyId = req.headers?.['x-academy-id'];
+    const academyId = academyIdQuery || headerAcademyId;
+    return this.approvalService.getAdminRequests(user, status, academyId ? Number(academyId) : undefined);
   }
 
   /**

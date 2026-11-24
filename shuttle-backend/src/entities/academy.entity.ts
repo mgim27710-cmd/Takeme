@@ -30,6 +30,9 @@ export class Academy {
   @Column({ type: 'varchar', nullable: true })
   businessNumber?: string | null; // 사업자 등록번호 (예: 123-45-67890)
 
+  @Column({ type: 'varchar', default: 'KINDERGARTEN' })
+  educationLevel: string; // 'KINDERGARTEN' | 'ELEMENTARY' | 'MIDDLE_HIGH'
+
   @OneToOne(() => User)
   @JoinColumn()
   owner: User;

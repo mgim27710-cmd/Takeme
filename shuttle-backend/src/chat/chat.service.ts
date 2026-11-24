@@ -1456,7 +1456,9 @@ export class ChatService implements OnModuleInit {
       .where("m.type = 'PAYMENT_REQUEST'");
 
     if (academyId) {
-      qb.andWhere('(room.academyId = :aId OR room.academyId IS NULL)', { aId: Number(academyId) });
+      qb.andWhere('room.academyId = :aId', { aId: Number(academyId) });
+    } else {
+      qb.andWhere('1 = 0');
     }
 
     const messages = await qb.orderBy('m.createdAt', 'DESC').getMany();

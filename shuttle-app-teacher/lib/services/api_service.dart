@@ -379,6 +379,7 @@ class ApiService {
           name: data['name'] ?? user.name,
           assignedClass: data['assignedClass'] ?? user.assignedClass,
           academyId: data['academyId'] ?? user.academyId,
+          educationLevel: data['educationLevel'] ?? user.educationLevel,
           token: _accessToken,
         );
         await setAuth(_accessToken!, updatedUser, refreshToken: _refreshToken);

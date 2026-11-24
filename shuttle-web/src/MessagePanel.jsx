@@ -139,7 +139,12 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   const [rooms, setRooms] = useState(() => {
     try {
       const saved = localStorage.getItem(chatRoomsCacheKey);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(r => (r.educationLevel || '유치원') === currentEducationLevel);
+        }
+      }
     } catch (_) {}
     return [];
   });
@@ -502,26 +507,41 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   })();
 
   const isParent = myUser.role === 'PARENT';
-  const targetAcademyId = selectedAcademyId || myUser.academyId;
+  const isSuperAdmin = myUser.role === 'SUPER_ADMIN';
+  const targetAcademyId = useMemo(() => {
+    if (selectedAcademyId) return selectedAcademyId;
+    if (!isSuperAdmin) {
+      const userEdu = myUser?.educationLevel || '유치원';
+      if (userEdu === currentEducationLevel) return myUser.academyId || null;
+    }
+    return null;
+  }, [selectedAcademyId, isSuperAdmin, myUser, currentEducationLevel]);
 
   // Initial Load: Fetch rooms
   useEffect(() => {
+    if (!targetAcademyId) {
+      setRooms([]);
+      setActiveRoom(null);
+      return;
+    }
+
     // 로컬 캐시에서 즉시 방 목록 복원 (0초 반응)
     try {
       const saved = localStorage.getItem(chatRoomsCacheKey);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setRooms(parsed);
-          if (!activeRoomRef.current) {
-            setActiveRoom(parsed[0]);
+          const valid = parsed.filter(r => (r.educationLevel || '유치원') === currentEducationLevel);
+          setRooms(valid);
+          if (!activeRoomRef.current && valid.length > 0) {
+            setActiveRoom(valid[0]);
           }
         }
       }
     } catch (_) {}
 
     fetchRooms();
-  }, [myUser.email, currentEducationLevel]);
+  }, [myUser.email, currentEducationLevel, targetAcademyId]);
 
   // Socket.IO event listeners
   useEffect(() => {
@@ -655,19 +675,28 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
 
   const fetchRooms = async () => {
     if (!myUser?.email) return;
+    if (!targetAcademyId) {
+      setRooms([]);
+      setActiveRoom(null);
+      return;
+    }
     try {
       const q = new URLSearchParams({
         email: myUser.email,
         educationLevel: currentEducationLevel,
+        academyId: String(targetAcademyId),
       });
-      if (targetAcademyId) q.append('academyId', String(targetAcademyId));
       const res = await fetch(`${API_BASE_URL}/chat/rooms?${q.toString()}`, {
         headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
-        // 학제 일치 검증 필터 (방에 educationLevel이 명시된 경우 현재 학제와 반드시 일치해야 함)
-        const filtered = (data || []).filter((r) => !r.educationLevel || r.educationLevel === currentEducationLevel);
+        // 학제 및 기관 일치 엄격 검증 필터
+        const filtered = (data || []).filter((r) => {
+          if (r.academyId && Number(r.academyId) !== Number(targetAcademyId)) return false;
+          const roomLevel = r.educationLevel || '유치원';
+          return roomLevel === currentEducationLevel;
+        });
         setRooms(filtered);
         try {
           localStorage.setItem(chatRoomsCacheKey, JSON.stringify(filtered));
@@ -1748,7 +1777,11 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
   const filteredRooms = useMemo(() => {
     const seenSpecial = new Set();
     return rooms
-      .filter((r) => !r.educationLevel || r.educationLevel === currentEducationLevel)
+      .filter((r) => {
+        if (targetAcademyId && r.academyId && Number(r.academyId) !== Number(targetAcademyId)) return false;
+        const roomLevel = r.educationLevel || '유치원';
+        return roomLevel === currentEducationLevel;
+      })
       .filter((r) => {
         if (r.type === 'PAYMENT_SYSTEM') {
           return false; // Hide payment system channel

@@ -27,6 +27,7 @@ export default function LogViewer({
   currentUser = null,
   availableClasses = [],
   academyId = null,
+  activeEducationLevel = '유치원',
 }) {
   // Resolved user info & role
   const resolvedUser = useMemo(() => {
@@ -46,11 +47,15 @@ export default function LogViewer({
   const myAssignedClass = resolvedUser.assignedClass || '';
 
   const activeAcadId = useMemo(() => {
-    return academyId ||
-      localStorage.getItem('takeme_selected_academy_id') ||
-      resolvedUser.academyId ||
-      '';
-  }, [academyId, resolvedUser]);
+    if (academyId) return academyId;
+    const levelKey = activeEducationLevel || '유치원';
+    const scopedId = localStorage.getItem(`takeme_selected_academy_id_${levelKey}`);
+    if (scopedId && !isNaN(Number(scopedId))) return Number(scopedId);
+    if (resolvedUser?.educationLevel === levelKey && resolvedUser?.academyId) {
+      return resolvedUser.academyId;
+    }
+    return null;
+  }, [academyId, activeEducationLevel, resolvedUser]);
 
   // Auth headers helper
   const getAuthHeaders = useCallback(() => {
@@ -258,9 +263,16 @@ export default function LogViewer({
 
   // Fetch Calendar Data (Holidays + Overrides) with class & search filters
   const fetchCalendarData = useCallback(async () => {
+    if (!activeAcadId) {
+      setCalendarHolidays([]);
+      setCalendarOverrides([]);
+      setIsLoadingCalendar(false);
+      return;
+    }
     try {
       setIsLoadingCalendar(true);
       const queryParams = new URLSearchParams();
+      queryParams.append('academyId', String(activeAcadId));
       if (selectedClass && selectedClass !== 'ALL') {
         queryParams.append('className', selectedClass);
       }
@@ -273,26 +285,39 @@ export default function LogViewer({
       });
       if (res.ok) {
         const data = await res.json();
-        setCalendarHolidays(data.holidays || []);
-        setCalendarOverrides(data.scheduleChanges || []);
+        // 타 부문/기관 데이터 유출 차단 클라이언트 가드
+        const safeHolidays = (data.holidays || []).filter(h => {
+          if (activeAcadId && h.academyId && Number(h.academyId) !== Number(activeAcadId)) return false;
+          return true;
+        });
+        const safeOverrides = (data.scheduleChanges || []).filter(s => {
+          if (activeAcadId && s.student?.academyId && Number(s.student.academyId) !== Number(activeAcadId)) return false;
+          return true;
+        });
+        setCalendarHolidays(safeHolidays);
+        setCalendarOverrides(safeOverrides);
       }
     } catch (e) {
       console.error('Failed to load calendar data', e);
     } finally {
       setIsLoadingCalendar(false);
     }
-  }, [selectedClass, searchKeyword, getAuthHeaders]);
+  }, [selectedClass, searchKeyword, getAuthHeaders, activeAcadId]);
 
   // Fetch Approved Rides (1:1 상담 결재 건 + 학부모 통학 변동 신청 승인 내역 통합)
   const fetchApprovedRides = useCallback(async () => {
+    if (!activeAcadId) {
+      setApprovedRides([]);
+      return;
+    }
     try {
       const p1 = fetch(
-        `${API_BASE_URL}/chat/payment/requests${activeAcadId ? `?academyId=${activeAcadId}` : ''}`,
+        `${API_BASE_URL}/chat/payment/requests?academyId=${activeAcadId}`,
         { headers: getAuthHeaders() }
       ).then(r => r.ok ? r.json() : []).catch(() => []);
 
       const p2 = fetch(
-        `${API_BASE_URL}/approval/admin`,
+        `${API_BASE_URL}/approval/admin?academyId=${activeAcadId}`,
         { headers: getAuthHeaders() }
       ).then(r => r.ok ? r.json() : []).catch(() => []);
 
@@ -341,16 +366,35 @@ export default function LogViewer({
       });
 
       const combined = [...data1, ...data2];
-      setApprovedRides(combined.filter(d => d.status === 'APPROVED') || []);
+      // 타 부문/기관 결재 승인 데이터 유출 차단 클라이언트 가드
+      const safeApproved = combined.filter(d => {
+        if (d.status !== 'APPROVED') return false;
+        if (activeAcadId) {
+          const itemAcadId = d.academyId || d.academy?.id || d.room?.academyId || d.student?.academyId || d.student?.academy?.id;
+          if (itemAcadId && Number(itemAcadId) !== Number(activeAcadId)) return false;
+        } else {
+          return false;
+        }
+        const itemLevel = d.educationLevel || d.student?.educationLevel || d.room?.educationLevel || '유치원';
+        if (itemLevel !== activeEducationLevel) return false;
+        return true;
+      });
+      setApprovedRides(safeApproved);
     } catch (e) {
       // ignore
     }
   }, [activeAcadId, getAuthHeaders]);
 
   useEffect(() => {
+    if (!activeAcadId) {
+      setCalendarHolidays([]);
+      setCalendarOverrides([]);
+      setApprovedRides([]);
+      return;
+    }
     fetchCalendarData();
     fetchApprovedRides();
-  }, [fetchCalendarData, fetchApprovedRides]);
+  }, [activeAcadId, fetchCalendarData, fetchApprovedRides]);
 
   // Fetch Operation Logs when in LOG mode
   useEffect(() => {
@@ -492,27 +536,6 @@ export default function LogViewer({
         });
       }
     });
-
-    if (list.length === 0 && (selectedDateStr === toDateStr(new Date()) || calendarFilter === 'STAFF_LEAVE')) {
-      list.push(
-        {
-          id: 'sample-leave-1',
-          name: '김철수 기사님',
-          role: '1호차 운전자',
-          type: '연차 휴가',
-          period: `${selectedDateStr} (금일)`,
-          substitute: '대체 기사 박임시 운행 중',
-        },
-        {
-          id: 'sample-leave-2',
-          name: '이지은 교사',
-          role: '햇살반 동승교사',
-          type: '병가 (병원 진료)',
-          period: `${selectedDateStr} (금일 오전)`,
-          substitute: '원내 보조지도원 배정',
-        }
-      );
-    }
 
     return list;
   }, [buses, calendarHolidays, selectedDateStr, calendarFilter]);
@@ -657,7 +680,10 @@ export default function LogViewer({
       const res = await fetch(`${API_BASE_URL}/approval/calendar/event`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify(newEvent),
+        body: JSON.stringify({
+          ...newEvent,
+          academyId: activeAcadId ? Number(activeAcadId) : undefined,
+        }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -699,6 +725,7 @@ export default function LogViewer({
           startDate: newAbsence.startDate,
           endDate: newAbsence.endDate,
           reason: newAbsence.reason,
+          academyId: activeAcadId ? Number(activeAcadId) : undefined,
         }),
       });
       const data = await res.json();
@@ -1476,8 +1503,8 @@ export default function LogViewer({
             </div>
           )}
 
-          {/* Section: 직원 휴가 및 연차 현황 (STAFF_LEAVE 필터 또는 선택일 상세) */}
-          {(calendarFilter === 'STAFF_LEAVE' || (calendarFilter === 'SELECTED_DATE' && activeMode !== 'LOG' && activeMode !== 'PAYMENT_APPROVAL')) && (
+          {/* Section: 직원 휴가 및 연차 현황 (STAFF_LEAVE 필터 또는 선택일에 등록된 휴가가 있을 때) */}
+          {(calendarFilter === 'STAFF_LEAVE' || (calendarFilter === 'SELECTED_DATE' && staffLeavesOnDate.length > 0 && activeMode !== 'LOG' && activeMode !== 'PAYMENT_APPROVAL')) && (
             <div className="mt-2">
               <div className="flex items-center justify-between mb-3.5">
                 <div className="flex items-center gap-2.5">

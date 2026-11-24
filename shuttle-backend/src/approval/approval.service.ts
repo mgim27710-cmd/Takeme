@@ -630,13 +630,13 @@ export class ApprovalService {
   /**
    * 관리자 신청함 목록 (대기 우선, 정원 초과 시 대체 후보 포함)
    */
-  async getAdminRequests(callingUser: User, statusFilter?: ApprovalStatus) {
+  async getAdminRequests(callingUser: User, statusFilter?: ApprovalStatus, targetAcademyId?: number) {
     const allowed = [UserRole.ACADEMY_ADMIN, UserRole.SUPER_ADMIN, UserRole.DESK_STAFF];
     if (!allowed.includes(callingUser.role as UserRole)) {
       throw new ForbiddenException('기관 관리자 또는 데스크 직원만 신청함을 조회할 수 있습니다.');
     }
 
-    const academyId = callingUser.academyId;
+    const academyId = targetAcademyId || callingUser.academyId;
     const qb = this.approvalRepo.createQueryBuilder('req')
       .leftJoinAndSelect('req.student', 'student')
       .leftJoinAndSelect('student.assignedVehicle', 'assignedVehicle')
@@ -644,8 +644,10 @@ export class ApprovalService {
       .leftJoinAndSelect('req.targetVehicle', 'targetVehicle')
       .leftJoinAndSelect('req.processedBy', 'processedBy');
 
-    if (callingUser.role !== UserRole.SUPER_ADMIN && academyId) {
+    if (academyId) {
       qb.where('(req.academyId = :academyId OR student.academyId = :academyId)', { academyId });
+    } else {
+      qb.where('1 = 0');
     }
 
     if (statusFilter) {
@@ -1077,7 +1079,7 @@ export class ApprovalService {
   ) {
     let academyId = query.academyId && !isNaN(Number(query.academyId))
       ? Number(query.academyId)
-      : callingUser.academyId;
+      : (callingUser.role === UserRole.SUPER_ADMIN ? null : callingUser.academyId);
 
     if (!academyId && callingUser.role === UserRole.PARENT) {
       const st = await this.studentRepo.findOne({
@@ -1109,6 +1111,9 @@ export class ApprovalService {
 
     if (academyId) {
       holidayQb.andWhere('h.academyId = :academyId', { academyId });
+    } else {
+      // 기관이 지정되지 않은 경우 다른 기관 일정이 누출되지 않도록 차단
+      holidayQb.andWhere('1 = 0');
     }
 
     // 역할별 열람 범위 차등화:
@@ -1154,6 +1159,9 @@ export class ApprovalService {
 
     if (academyId) {
       overrideQb.andWhere('student.academyId = :academyId', { academyId });
+    } else {
+      // 기관이 지정되지 않은 경우 다른 기관 결석/변동 내역이 누출되지 않도록 차단
+      overrideQb.andWhere('1 = 0');
     }
 
     // 역할별 범위 제한:
@@ -1297,8 +1305,11 @@ export class ApprovalService {
       }
     }
 
-    const academyId = data.academyId || callingUser.academyId;
-    const academy = academyId ? await this.academyRepo.findOne({ where: { id: academyId } }) : null;
+    const academyId = data.academyId || (callingUser.role === UserRole.SUPER_ADMIN ? undefined : callingUser.academyId);
+    if (!academyId) {
+      throw new BadRequestException('일정을 등록할 대상 기관(academyId)이 지정되지 않았습니다.');
+    }
+    const academy = await this.academyRepo.findOne({ where: { id: academyId } });
 
     const holiday = this.holidayRepo.create({
       type: data.type || CalendarEventType.EVENT,

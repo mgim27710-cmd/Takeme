@@ -606,6 +606,7 @@ export class RoutingService {
       results.push({
         id: ac.id,
         name: ac.name,
+        educationLevel: ac.educationLevel || 'KINDERGARTEN',
         roadAddress: ac.roadAddress,
         latitude: ac.latitude,
         longitude: ac.longitude,
@@ -1849,6 +1850,14 @@ export class RoutingService {
     const address = data.address !== undefined ? data.address : (data.roadAddress !== undefined ? data.roadAddress : (academy?.roadAddress || ''));
     const name = data.name || academy?.name || '새 유치원';
 
+    let eduLevel = data.educationLevel;
+    if (!eduLevel) {
+      const nm = String(name).toLowerCase();
+      if (nm.includes('초등') || nm.includes('elem')) eduLevel = 'ELEMENTARY';
+      else if (nm.includes('중등') || nm.includes('고등') || nm.includes('middle') || nm.includes('high')) eduLevel = 'MIDDLE_HIGH';
+      else eduLevel = 'KINDERGARTEN';
+    }
+
     if (!academy) {
       let code = Math.random().toString(36).substring(2, 8).toUpperCase();
       while (await this.academyRepository.findOne({ where: { authCode: code } })) {
@@ -1859,7 +1868,8 @@ export class RoutingService {
         roadAddress: String(address),
         latitude: String(lat),
         longitude: String(lng),
-        businessNumber: data.businessNumber || null
+        businessNumber: data.businessNumber || null,
+        educationLevel: eduLevel
       });
     } else {
       academy.name = String(name);
@@ -1868,6 +1878,9 @@ export class RoutingService {
       academy.longitude = String(lng);
       if (data.businessNumber !== undefined) {
         academy.businessNumber = data.businessNumber;
+      }
+      if (data.educationLevel) {
+        academy.educationLevel = data.educationLevel;
       }
       if (!academy.authCode) {
         let code = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -4564,7 +4577,8 @@ export class RoutingService {
       role: teacher.role,
       assignedClass: teacher.assignedClass || '',
       academyId: teacher.academy?.id,
-      academyName: teacher.academy?.name
+      academyName: teacher.academy?.name,
+      educationLevel: teacher.academy?.educationLevel || 'KINDERGARTEN'
     };
   }
 

@@ -52,7 +52,6 @@ class SocketService {
 
     _socket = io_client.io(AppConfig.apiHost, options.build());
 
-    _attachRoomUpdated();
     _socket!.onConnect((_) {
       debugPrint('[Socket] Connected: ${_socket!.id}');
       joinAcademyRoom();
