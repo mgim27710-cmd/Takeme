@@ -214,7 +214,7 @@ export class RoutingService {
 
   public async geocodeAddress(
     address: string,
-    defaultRegion = '경기도 양주시',
+    defaultRegion?: string,
     centerCoords?: { lat: number, lng: number }
   ): Promise<{ lat: number, lng: number } | null> {
     if (!address) return null;
@@ -231,67 +231,64 @@ export class RoutingService {
     raw = raw.replace(/^[0-9]+\s*노선\s*/, '');
     raw = raw.trim();
 
-    // Extract region if present (e.g., '경기도 양주시')
-    const regionMatch = raw.match(/^([가-힣]+(?:시|도)\s+[가-힣]+(?:구|군|시))/);
-    const region = regionMatch ? regionMatch[1] : defaultRegion;
+    // 1. Raw exact address has highest priority (works nationwide)
+    if (raw) {
+      cleanCandidates.push(raw);
+    }
 
-    // 1. Full address without parentheses (road name + building number)
+    // Extract region if present (e.g., '경기도 양주시', '서울특별시 강남구')
+    const regionMatch = raw.match(/^([가-힣]+(?:시|도)\s+[가-힣]+(?:구|군|시))/);
+    const region = regionMatch ? regionMatch[1] : (defaultRegion || '');
+
+    // 2. Full address without parentheses (road name + building number)
     let withoutParen = raw.replace(/\([^)]*\)/g, '').replace(/\[[^\]]*\]/g, '').trim();
     withoutParen = withoutParen
       .replace(/\d+\s*동\s*\d+\s*호/g, '')
       .replace(/\d+\s*동/g, '')
       .replace(/\d+\s*호/g, '')
-      .replace(/\d+\s*-\s*\d+/g, '')
       .trim();
-    if (withoutParen) {
-      if (!withoutParen.startsWith(region) && !withoutParen.match(/^[가-힣]+(?:시|도)/)) {
+    if (withoutParen && withoutParen !== raw) {
+      if (region && !withoutParen.startsWith(region) && !withoutParen.match(/^[가-힣]+(?:시|도)/)) {
         cleanCandidates.push(`${region} ${withoutParen}`);
       }
       cleanCandidates.push(withoutParen);
     }
 
-    // 2. Inside parentheses: apartment / complex / building name
+    // 3. Inside parentheses: apartment / complex / building name
     const parenMatch = raw.match(/\(([^)]+)\)/);
     if (parenMatch) {
       let inside = parenMatch[1]
         .replace(/\d+\s*동\s*\d+\s*호/g, '')
         .replace(/\d+\s*동/g, '')
         .replace(/\d+\s*호/g, '')
-        .replace(/\d+\s*-\s*\d+/g, '')
         .replace(/[0-9]+\s*호차/g, '')
         .trim();
       if (inside && inside.length >= 2) {
-        cleanCandidates.push(`${region} ${inside}`);
+        if (region) cleanCandidates.push(`${region} ${inside}`);
         cleanCandidates.push(inside);
         const strippedInside = inside.replace(/[0-9]+\s*차/g, '').replace(/센트럴파크|파크빌리지/g, '').trim();
         if (strippedInside && strippedInside !== inside) {
-          cleanCandidates.push(`${region} ${strippedInside}`);
+          if (region) cleanCandidates.push(`${region} ${strippedInside}`);
           cleanCandidates.push(strippedInside);
         }
       }
     }
 
-    // 3. Road name without building number (e.g., '경기도 양주시 고읍북로')
+    // 4. Road name without building number (e.g., '고읍북로', '테헤란로')
     const roadOnlyMatch = withoutParen.match(/([가-힣]+(?:시|도)?\s*[가-힣]+(?:구|군|시)?\s*[가-힣0-9]+(?:로|길))/);
     if (roadOnlyMatch && roadOnlyMatch[1]) {
       const roadOnly = roadOnlyMatch[1].trim();
-      if (!roadOnly.startsWith(region) && !roadOnly.match(/^[가-힣]+(?:시|도)/)) {
+      if (region && !roadOnly.startsWith(region) && !roadOnly.match(/^[가-힣]+(?:시|도)/)) {
         cleanCandidates.push(`${region} ${roadOnly}`);
       }
       cleanCandidates.push(roadOnly);
     }
 
-    // 4. Raw cleaned address
-    if (raw && !cleanCandidates.includes(raw)) {
-      cleanCandidates.push(raw);
-    }
-
     const uniqueCandidates = Array.from(new Set(cleanCandidates.filter(Boolean)));
-    const cCoords = centerCoords || { lat: 37.8083, lng: 127.0717 };
 
     for (const query of uniqueCandidates) {
       if (!query) continue;
-      // 1. Kakao address search
+      // 1. Kakao address search (전국 정확한 도로명/지번 좌표 조회)
       try {
         const response = await firstValueFrom(
           this.httpService.get('https://dapi.kakao.com/v2/local/search/address.json', {
@@ -304,42 +301,34 @@ export class RoutingService {
           const x = parseFloat(docs[0].x);
           const y = parseFloat(docs[0].y);
           if (!isNaN(x) && !isNaN(y)) {
-            const dist = this.getDistanceKm(y, x, cCoords.lat, cCoords.lng);
-            // Distance Guard: Must be within 25km of academy in Yangju!
-            if (dist <= 25.0) {
-              return { lat: y, lng: x };
-            }
+            return { lat: y, lng: x };
           }
         }
       } catch (e) {}
 
-      // 2. Kakao keyword search
+      // 2. Kakao keyword search (아파트명, 건물명, 주요 시설물 조회)
       try {
         const kw = query.replace(/앞|뒤|옆|근처|건너편|인근/g, '').trim();
+        const kwParams: any = { query: kw, size: 5 };
+        if (centerCoords && centerCoords.lat && centerCoords.lng) {
+          kwParams.x = centerCoords.lng;
+          kwParams.y = centerCoords.lat;
+          kwParams.radius = 20000;
+          kwParams.sort = 'accuracy';
+        }
         const kwResponse = await firstValueFrom(
           this.httpService.get('https://dapi.kakao.com/v2/local/search/keyword.json', {
-            params: { 
-              query: kw,
-              x: cCoords.lng,
-              y: cCoords.lat,
-              radius: 20000,
-              sort: 'accuracy'
-            },
+            params: kwParams,
             headers: { Authorization: `KakaoAK ${apiKey}` }
           })
         );
         const kwDocs = kwResponse.data?.documents;
         if (kwDocs && kwDocs.length > 0) {
-          for (const doc of kwDocs) {
-            const x = parseFloat(doc.x);
-            const y = parseFloat(doc.y);
-            if (!isNaN(x) && !isNaN(y)) {
-              const dist = this.getDistanceKm(y, x, cCoords.lat, cCoords.lng);
-              // Distance Guard: Must be within 25km of academy in Yangju!
-              if (dist <= 25.0) {
-                return { lat: y, lng: x };
-              }
-            }
+          const doc = kwDocs[0];
+          const x = parseFloat(doc.x);
+          const y = parseFloat(doc.y);
+          if (!isNaN(x) && !isNaN(y)) {
+            return { lat: y, lng: x };
           }
         }
       } catch (e) {}
@@ -362,15 +351,11 @@ export class RoutingService {
           );
           const addrs = nResponse.data?.addresses;
           if (addrs && addrs.length > 0) {
-            for (const doc of addrs) {
-              const x = parseFloat(doc.x);
-              const y = parseFloat(doc.y);
-              if (!isNaN(x) && !isNaN(y)) {
-                const dist = this.getDistanceKm(y, x, cCoords.lat, cCoords.lng);
-                if (dist <= 25.0) {
-                  return { lat: y, lng: x };
-                }
-              }
+            const doc = addrs[0];
+            const x = parseFloat(doc.x);
+            const y = parseFloat(doc.y);
+            if (!isNaN(x) && !isNaN(y)) {
+              return { lat: y, lng: x };
             }
           }
         } catch (e) {}
@@ -379,6 +364,86 @@ export class RoutingService {
 
     console.warn(`[geocodeAddress] 주소 변환 실패: ${address} -> null 반환 (임의 기본좌표 사용 금지)`);
     return null;
+  }
+
+  /**
+   * 도로명 주소 실시간 검색 API (자동완성 및 지도 핀 연동용)
+   */
+  async searchAddress(query: string): Promise<Array<{
+    addressName: string;
+    roadAddress: string;
+    buildingName: string;
+    lat: number;
+    lng: number;
+  }>> {
+    if (!query || !query.trim()) return [];
+    const apiKey = this.configService.get<string>('KAKAO_REST_API_KEY');
+    if (!apiKey) return [];
+
+    const results: Array<{
+      addressName: string;
+      roadAddress: string;
+      buildingName: string;
+      lat: number;
+      lng: number;
+    }> = [];
+
+    const cleanQuery = query.trim();
+
+    // 1. Kakao 도로명 주소 검색
+    try {
+      const resp = await firstValueFrom(
+        this.httpService.get('https://dapi.kakao.com/v2/local/search/address.json', {
+          params: { query: cleanQuery, size: 10 },
+          headers: { Authorization: `KakaoAK ${apiKey}` },
+        }),
+      );
+      const docs = resp.data?.documents || [];
+      for (const d of docs) {
+        const road = d.road_address;
+        const lat = parseFloat(d.y);
+        const lng = parseFloat(d.x);
+        if (!isNaN(lat) && !isNaN(lng)) {
+          results.push({
+            addressName: d.address_name,
+            roadAddress: road?.address_name || d.address_name,
+            buildingName: road?.building_name || '',
+            lat,
+            lng,
+          });
+        }
+      }
+    } catch (_) {}
+
+    // 2. Kakao 키워드 검색 (아파트명, 건물명, 상호명 등)
+    if (results.length < 5) {
+      try {
+        const kwResp = await firstValueFrom(
+          this.httpService.get('https://dapi.kakao.com/v2/local/search/keyword.json', {
+            params: { query: cleanQuery, size: 10 },
+            headers: { Authorization: `KakaoAK ${apiKey}` },
+          }),
+        );
+        const kwDocs = kwResp.data?.documents || [];
+        for (const kd of kwDocs) {
+          const lat = parseFloat(kd.y);
+          const lng = parseFloat(kd.x);
+          if (!isNaN(lat) && !isNaN(lng)) {
+            if (!results.some(r => Math.abs(r.lat - lat) < 0.0001 && Math.abs(r.lng - lng) < 0.0001)) {
+              results.push({
+                addressName: kd.address_name,
+                roadAddress: kd.road_address_name || kd.address_name,
+                buildingName: kd.place_name || '',
+                lat,
+                lng,
+              });
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    return results;
   }
 
   private colorPalette = [

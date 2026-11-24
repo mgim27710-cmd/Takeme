@@ -331,6 +331,8 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     note: '학부모 상담 후 신규 탑승지 지정 및 결재 승인 요청',
   });
   const [paymentStudentSearch, setPaymentStudentSearch] = useState('');
+  const [addressSuggestions, setAddressSuggestions] = useState([]);
+  const [isSearchingAddress, setIsSearchingAddress] = useState(false);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [isDeciding, setIsDeciding] = useState(null);
   const [isPushingParent, setIsPushingParent] = useState(null);
@@ -1265,18 +1267,55 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
     }
   };
 
+  const handleSelectAddressSuggestion = (item) => {
+    const finalLocation = item.buildingName ? `${item.roadAddress} (${item.buildingName})` : item.roadAddress;
+    setPaymentForm((prev) => ({
+      ...prev,
+      address: item.roadAddress,
+      boardingLocation: finalLocation,
+      latitude: item.lat,
+      longitude: item.lng,
+      locationType: 'ADDRESS',
+    }));
+    setAddressSuggestions([]);
+  };
+
+  const handleQueryAddressSuggestions = async (queryText) => {
+    if (!queryText || queryText.trim().length < 2) {
+      setAddressSuggestions([]);
+      return;
+    }
+    setIsSearchingAddress(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/routing/search-address?query=${encodeURIComponent(queryText.trim())}`, {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAddressSuggestions(Array.isArray(data) ? data : []);
+      }
+    } catch (_) {
+      setAddressSuggestions([]);
+    } finally {
+      setIsSearchingAddress(false);
+    }
+  };
+
   // Daum Postcode Search in Director Payment Modal
   const handleOpenPostcodeForPayment = () => {
     const trigger = () => {
       new window.daum.Postcode({
         oncomplete: async (data) => {
-          const fullAddress = data.roadAddress || data.jibunAddress;
+          const fullAddress = data.roadAddress || data.jibunAddress || data.address;
+          const buildingName = data.buildingName ? ` (${data.buildingName})` : '';
+          const finalLocation = `${fullAddress}${buildingName}`.trim();
           setPaymentForm((prev) => ({
             ...prev,
             address: fullAddress,
-            boardingLocation: fullAddress,
+            boardingLocation: finalLocation,
             locationType: 'ADDRESS',
           }));
+          setAddressSuggestions([]);
           // Geocode address to coordinates
           try {
             const geoRes = await fetch(`${API_BASE_URL}/routing/geocode-bulk`, {
@@ -4677,31 +4716,56 @@ export default function MessagePanel({ currentUser, selectedAcademyId, socket, i
                     ) : (
                       /* Mode 2: 주소로 등록하기 (도로명 주소 검색 및 지오코딩) */
                       <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            placeholder="도로명 주소 입력 (예: 경기도 양주시 화합로...)"
-                            value={paymentForm.address}
-                            onChange={(e) => setPaymentForm((prev) => ({ ...prev, address: e.target.value }))}
-                            className="flex-1 p-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold"
-                          />
-                          <button
-                            type="button"
-                            onClick={handleOpenPostcodeForPayment}
-                            className="px-3 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs shrink-0 flex items-center gap-1"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                            <span>우편번호 검색</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleSearchAddressForPayment}
-                            className="px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold shrink-0"
-                          >
-                            위치 찾기
-                          </button>
+                        <div className="relative">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              placeholder="도로명 주소 입력 (예: 판교역로 235, 화합로...)"
+                              value={paymentForm.address}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setPaymentForm((prev) => ({ ...prev, address: val }));
+                                handleQueryAddressSuggestions(val);
+                              }}
+                              className="flex-1 p-2.5 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleOpenPostcodeForPayment}
+                              className="px-3 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs shrink-0 flex items-center gap-1"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                              </svg>
+                              <span>도로명 주소 검색</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleSearchAddressForPayment}
+                              className="px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold shrink-0"
+                            >
+                              위치 찾기
+                            </button>
+                          </div>
+
+                          {addressSuggestions.length > 0 && (
+                            <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-indigo-200 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto divide-y divide-slate-100">
+                              {addressSuggestions.map((item, idx) => (
+                                <div
+                                  key={idx}
+                                  onClick={() => handleSelectAddressSuggestion(item)}
+                                  className="p-2.5 hover:bg-indigo-50 cursor-pointer text-left transition-colors"
+                                >
+                                  <div className="text-xs font-bold text-slate-800">
+                                    {item.roadAddress} {item.buildingName ? <span className="text-indigo-600 font-normal">({item.buildingName})</span> : null}
+                                  </div>
+                                  {item.addressName && item.addressName !== item.roadAddress && (
+                                    <div className="text-[11px] text-slate-400 mt-0.5">지번: {item.addressName}</div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                         <input
                           type="text"

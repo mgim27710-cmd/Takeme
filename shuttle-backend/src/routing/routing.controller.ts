@@ -399,6 +399,11 @@ export class RoutingController {
     return this.routingService.geocodeBulk(body.addresses);
   }
 
+  @Get('search-address')
+  async searchAddress(@Query('query') query: string) {
+    return this.routingService.searchAddress(query);
+  }
+
   @Get('reverse-geocode')
   async reverseGeocode(
     @Query('lat') lat: string,

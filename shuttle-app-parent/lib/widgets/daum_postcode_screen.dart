@@ -31,10 +31,20 @@ class _DaumPostcodeScreenState extends State<DaumPostcodeScreen> {
 <body>
   <div id="postcode-layer"></div>
   <script>
-    new daum.Postcode({
-      oncomplete: function(data) {
+    function notifyFlutter(data) {
+      try {
         if (window.PostcodeChannel) {
           window.PostcodeChannel.postMessage(JSON.stringify(data));
+        }
+      } catch (e) {}
+    }
+    new daum.Postcode({
+      oncomplete: function(data) {
+        notifyFlutter(data);
+      },
+      onclose: function(state) {
+        if (state === 'FORCE_CLOSE') {
+          notifyFlutter({ closed: true });
         }
       },
       width: '100%',
@@ -69,7 +79,7 @@ class _DaumPostcodeScreenState extends State<DaumPostcodeScreen> {
           }
         },
       )
-      ..loadHtmlString(_htmlContent);
+      ..loadHtmlString(_htmlContent, baseUrl: 'https://postcode.map.daum.net');
   }
 
   @override
