@@ -453,46 +453,6 @@ export default function Landing() {
               </div>
             </div>
             <button type="submit" className="btn-primary w-full py-3 text-base font-bold shadow-md shadow-blue-500/20">로그인</button>
-
-            {/* 부문별 본원 계정 빠른 선택 버튼 */}
-            <div className="mt-4 pt-3.5 border-t border-slate-100">
-              <p className="text-[11px] font-bold text-slate-400 mb-2 text-center">부문별 본원 관리자 테스트 계정</p>
-              <div className="grid grid-cols-3 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmail('director@takeme.com');
-                    setPassword('takeme1234!');
-                    setShowSelfUnlock(false);
-                  }}
-                  className="px-2 py-2 text-xs font-bold rounded-xl border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition text-center shadow-2xs"
-                >
-                  🏫 유치원 본원
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmail('elementary@takeme.com');
-                    setPassword('Takeme1234!');
-                    setShowSelfUnlock(false);
-                  }}
-                  className="px-2 py-2 text-xs font-bold rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition text-center shadow-2xs"
-                >
-                  🎒 초등부 본원
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmail('middle@takeme.com');
-                    setPassword('Takeme1234!');
-                    setShowSelfUnlock(false);
-                  }}
-                  className="px-2 py-2 text-xs font-bold rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition text-center shadow-2xs"
-                >
-                  🎓 중등부 본원
-                </button>
-              </div>
-            </div>
             {showSelfUnlock && (
               <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-2xl text-left space-y-3 shadow-sm">
                 <div className="flex items-center justify-between">
@@ -677,30 +637,6 @@ export default function Landing() {
             </div>
             <input type="text" placeholder="앱에 표시된 6자리 번호" maxLength={6} value={otpToken} onChange={e=>setOtpToken(e.target.value)} className="form-input text-center tracking-widest font-mono text-xl" required />
             <button type="submit" className="btn-primary w-full py-3 font-bold">연동 완료하기</button>
-            <button
-              type="button"
-              onClick={async () => {
-                setOtpToken('123456');
-                try {
-                  const res = await fetch(`${API_BASE_URL}/auth/otp/verify`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ userId, token: '123456' })
-                  });
-                  if (res.ok) {
-                    alert('OTP 연동이 완료되었습니다! 로그인해 주세요.');
-                    setMode('login');
-                  } else {
-                    alert('테스트 계정 전용 고정 OTP(123456) 연동이 지원되지 않는 계정입니다. Google Authenticator 번호를 입력해 주세요.');
-                  }
-                } catch (_) {
-                  alert('서버 연결에 실패했습니다.');
-                }
-              }}
-              className="w-full py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold transition"
-            >
-              ⚡ 테스트 계정 간편 연동 (123456)
-            </button>
           </form>
         )}
 
