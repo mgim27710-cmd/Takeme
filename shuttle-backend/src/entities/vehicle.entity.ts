@@ -29,12 +29,12 @@ export class Vehicle {
   @Column({ type: 'int', default: 25 })
   capacity: number; // Seats available
 
-  @OneToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn()
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'driverUserId' })
   driverUser: User;
 
-  @OneToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn()
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'teacherUserId' })
   teacherUser: User;
 
   @Column({ nullable: true })

@@ -117,7 +117,7 @@ export class DirectionsService {
           this.logger.warn(`[directions] Kakao 길찾기 호출 실패: ${kakaoErr?.message}`);
           const naverResult = await tryNaver();
           if (naverResult) return naverResult;
-          throw kakaoErr;
+          this.logger.warn(`[directions] 안전 경로 탐색 실패 (Kakao/Naver 불가) - 직선 보간 폴백 적용`);
         }
       }
       const naverResult = await tryNaver();
@@ -129,7 +129,11 @@ export class DirectionsService {
 
     // 2. 네이버 키가 없거나 실패하면(경유지 15개 초과 등) 카카오 길찾기
     if (kakaoApiKey && typeof this.http?.post === 'function') {
-      return await this.fetchKakaoRoute(origin, destination, waypoints, mode, kakaoApiKey);
+      try {
+        return await this.fetchKakaoRoute(origin, destination, waypoints, mode, kakaoApiKey);
+      } catch (kErr: any) {
+        this.logger.warn(`[directions] 보조 카카오 길찾기 호출 실패: ${kErr?.message}`);
+      }
     }
 
     // 3. 직선 보간 안전 폴백 (API 키 미설정 시)

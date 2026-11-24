@@ -218,15 +218,21 @@ export class TeacherService implements OnModuleInit {
         }
 
         const bType = raw['탑승구분'] || (s.isNotRiding ? 'NONE' : 'BOTH');
-        if (s.isNotRiding || bType === 'NONE') return false;
+        // 오늘 유효한 일일 탑승(ONE_TIME_BOARDING) 승인 건이 있는지 확인
+        const hasTodayBoardingOverride = overrides.some(
+          o => o.student?.id === s.id &&
+               o.overrideType === OverrideType.ONE_TIME_BOARDING &&
+               (!o.newVehicleId || o.newVehicleId === vehicleId)
+        );
+        if (!hasTodayBoardingOverride && (s.isNotRiding || bType === 'NONE')) return false;
 
         if (isMorning) {
           if (bType === 'AFTERNOON_ONLY' || bType === '하원만') return false;
-          return s.assignedVehicle?.id === vehicleId;
+          return s.assignedVehicle?.id === vehicleId || hasTodayBoardingOverride;
         } else {
           if (bType === 'MORNING_ONLY' || bType === '등원만') return false;
           const depVehId = s.assignedDepartureVehicle?.id || s.assignedVehicle?.id;
-          return depVehId === vehicleId;
+          return depVehId === vehicleId || hasTodayBoardingOverride;
         }
       })
       .map(s => {
@@ -247,6 +253,11 @@ export class TeacherService implements OnModuleInit {
           (s as any).isOverride = true;
           (s as any).overrideType = override.overrideType;
         }
+      } else {
+        // 오늘 날짜에 유효한 결석/변동 Override가 없다면 과거 기록된 ABSENT는 오늘 WAITING으로 정상 처리
+        if (s.boardStatus === 'ABSENT') {
+          s.boardStatus = 'WAITING';
+        }
       }
       return s;
     }).filter(Boolean) as Student[];
@@ -254,7 +265,7 @@ export class TeacherService implements OnModuleInit {
     // Students moved into this vehicle today or one-time boarding
     const movedInOverrides = overrides.filter(o => 
       (o.overrideType === OverrideType.CHANGE_LOCATION || o.overrideType === OverrideType.ONE_TIME_BOARDING) &&
-      o.newVehicleId === vehicleId
+      (o.newVehicleId === vehicleId || (!o.newVehicleId && (o.student?.assignedVehicle?.id === vehicleId || (o.student as any)?.assignedDepartureVehicle?.id === vehicleId)))
     );
     const movedInStudentIds = movedInOverrides.map(o => o.student?.id).filter(Boolean);
 
@@ -1173,8 +1184,16 @@ export class TeacherService implements OnModuleInit {
       });
       if (!lastLog || lastLog.endTime) {
         const todayStudents = await this.getTodayStudentsForVehicle(vehicle.id);
+        const todayOverrides = await this.getActiveOverridesForToday();
+        const absentOverrideTypes = [
+          OverrideType.ABSENCE,
+          OverrideType.INDIVIDUAL_DISMISSAL,
+          OverrideType.PICKUP,
+          OverrideType.NO_SHUTTLE,
+        ];
         for (const st of todayStudents) {
-          if (st.boardStatus === 'BOARDED' || st.boardStatus === 'DROPPED') {
+          const hasTodayAbsence = todayOverrides.some(o => o.student?.id === st.id && absentOverrideTypes.includes(o.overrideType));
+          if (st.boardStatus === 'BOARDED' || st.boardStatus === 'DROPPED' || (!hasTodayAbsence && st.boardStatus === 'ABSENT')) {
             st.boardStatus = 'WAITING';
             st.actualBoardTime = null as any;
             await this.studentRepository.save(st);

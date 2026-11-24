@@ -65,8 +65,8 @@ export class Student {
   @JoinColumn()
   studentUser: User;
 
-  @OneToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn()
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'parentUserId' })
   parentUser: User;
 
   @Column({ type: 'int', nullable: true, default: 1 })

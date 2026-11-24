@@ -842,6 +842,16 @@ export class ApprovalService {
     if (decision === ApprovalStatus.APPROVED) {
       const overrideType = mapToOverrideType(req.type);
 
+      let resolvedVehicleId = req.targetVehicle?.id;
+      if (!resolvedVehicleId && (overrideType === OverrideType.CHANGE_LOCATION || overrideType === OverrideType.ONE_TIME_BOARDING)) {
+        if (student?.assignedVehicle?.id) {
+          resolvedVehicleId = student.assignedVehicle.id;
+        } else if (academyId && (req.newLatitude ?? req.latitude) && (req.newLongitude ?? req.longitude)) {
+          const bestV = await this.findBestVehicleForPoint(academyId, Number(req.newLatitude ?? req.latitude), Number(req.newLongitude ?? req.longitude));
+          if (bestV) resolvedVehicleId = bestV.id;
+        }
+      }
+
       const override = this.overrideRepo.create({
         student,
         startDate: targetDate,
@@ -853,14 +863,17 @@ export class ApprovalService {
         newAddress: req.newAddress || req.address || undefined,
         latitude: req.newLatitude ?? req.latitude ?? undefined,
         longitude: req.newLongitude ?? req.longitude ?? undefined,
-        newVehicleId: req.targetVehicle?.id || undefined,
+        newVehicleId: resolvedVehicleId || undefined,
         approvalRequest: req,
       });
       await this.overrideRepo.save(override);
 
-      // 당일 결석이면 student boardStatus 즉시 갱신
+      // 당일 결석이면 student boardStatus 즉시 갱신, 반대로 탑승 승인이면 WAITING으로 복구
       if (req.type === ChangeRequestType.ABSENCE && targetDate === kstDateString()) {
         student.boardStatus = 'ABSENT';
+        await this.studentRepo.save(student);
+      } else if (targetDate === kstDateString() && student.boardStatus === 'ABSENT') {
+        student.boardStatus = 'WAITING';
         await this.studentRepo.save(student);
       }
 

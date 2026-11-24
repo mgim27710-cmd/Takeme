@@ -128,8 +128,31 @@ export async function sendSnsPushNotification(
     );
     return true;
   } catch (err: any) {
+    const errMsg = String(err?.message || '');
+    if (errMsg.includes('Endpoint is disabled')) {
+      try {
+        console.log(`[SNS] Re-enabling disabled endpoint ${endpointArn}...`);
+        await client.send(
+          new SetEndpointAttributesCommand({
+            EndpointArn: endpointArn,
+            Attributes: { Enabled: 'true' },
+          }),
+        );
+        // Retry publish once
+        await client.send(
+          new PublishCommand({
+            TargetArn: endpointArn,
+            Message: message,
+            MessageStructure: 'json',
+          }),
+        );
+        console.log(`[SNS] Successfully published after re-enabling ${endpointArn}`);
+        return true;
+      } catch (retryErr: any) {
+        console.warn(`[SNS] Retry failed after re-enabling ${endpointArn}:`, retryErr?.message || retryErr);
+      }
+    }
     console.error(`[SNS] Failed to publish push to ${endpointArn}:`, err?.message || err);
-    // 엔드포인트가 비활성화/삭제된 경우 비활성화 처리 가능
     return false;
   }
 }

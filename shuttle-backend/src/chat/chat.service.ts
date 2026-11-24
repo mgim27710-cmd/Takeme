@@ -1980,11 +1980,15 @@ export class ChatService implements OnModuleInit {
       }
       student.raw = rawObj;
 
-      student.assignedVehicle = vehicle;
-      student.boardingLocation = finalBoardingLocation;
-      student.address = finalAddress;
-      if (finalLat) student.latitude = finalLat;
-      if (finalLng) student.longitude = finalLng;
+      // 정규 셔틀 등록인 경우에만 학생 마스터 레코드의 차량·주소·좌표를 영구 변경
+      // 당일 1회성(TODAY_ONLY) 탑승인 경우 영구 마스터는 보존하고 아래 ScheduleOverride로만 당일 적용
+      if (!isTodayOnly) {
+        student.assignedVehicle = vehicle;
+        student.boardingLocation = finalBoardingLocation;
+        student.address = finalAddress;
+        if (finalLat) student.latitude = finalLat;
+        if (finalLng) student.longitude = finalLng;
+      }
       student.approvalStatus = 'APPROVED';
       student.isNotRiding = false;
       student.boardStatus = 'WAITING';

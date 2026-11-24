@@ -3561,22 +3561,23 @@ const parseKindergartenExcelSheet = (sheet) => {
         addressMap.forEach((item, idx) => {
           const targetAddr = (item.targetGeocode || '').trim();
           const homeAddr = (item.address || '').trim();
+          const cleanAddr = (homeAddr || targetAddr || '').trim();
           const coords = (targetAddr ? (geocodeLookup.get(targetAddr) || geocodeLookup.get(item.targetGeocode)) : null) ||
                          (homeAddr ? (geocodeLookup.get(homeAddr) || geocodeLookup.get(item.address)) : null);
           const isGeocoded = Boolean(coords && coords.lat && coords.lng);
 
           let lat = null;
           let lng = null;
-          let address = homeAddr || targetAddr;
-          let boardingLocation = item.boardingLocation || address;
-          let dropoffLocation = item.dropoffLocation || address;
+          let address = cleanAddr;
+          let boardingLocation = item.boardingLocation || cleanAddr;
+          let dropoffLocation = item.dropoffLocation || cleanAddr;
           let assignedBus = null;
 
           if (isGeocoded) {
             lat = coords.lat;
             lng = coords.lng;
-            address = trimmedAddr;
-            boardingLocation = item.boardingLocation || address;
+            address = cleanAddr;
+            boardingLocation = item.boardingLocation || cleanAddr;
             successCount++;
 
             const pt = turf.point([lng, lat]);
@@ -3628,8 +3629,8 @@ const parseKindergartenExcelSheet = (sheet) => {
           } else {
             // Geocoding failed: keep address text intact, mark for coordinate input if necessary
             failedCount++;
-            address = trimmedAddr;
-            boardingLocation = item.boardingLocation || trimmedAddr;
+            address = cleanAddr;
+            boardingLocation = item.boardingLocation || cleanAddr;
             lat = null;
             lng = null;
             assignedBus = null;
