@@ -210,9 +210,10 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> w
   }
 
   String _getAppTitle() {
+    final term = ApiService().currentUser?.studentTerm ?? '원아';
     switch (_selectedTabIndex) {
       case 0:
-        return '우리 반 원아 명단';
+        return '우리 반 $term 명단';
       case 1:
         return '학급 알림장·게시물';
       case 2:
@@ -318,9 +319,9 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> w
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
-                  '원장님 또는 관리자 웹에서 담당 반이 배정되면\n우리 반 원아 명단 및 알림장이 자동으로 활성화됩니다.',
-                  style: TextStyle(fontSize: 13, color: Color(0xFF64748B), height: 1.5),
+                Text(
+                  '${ApiService().currentUser?.institutionTerm ?? '원장님 또는 기관'} 관리자 웹에서 담당 반이 배정되면\n우리 반 ${ApiService().currentUser?.studentTerm ?? '원아'} 명단 및 알림장이 자동으로 활성화됩니다.',
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF64748B), height: 1.5),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 28),
@@ -454,7 +455,7 @@ class _HomeroomTeacherHomeScreenState extends State<HomeroomTeacherHomeScreen> w
             height: 64,
             child: Row(
               children: [
-                _buildTabItem(index: 0, icon: Icons.people_alt_outlined, label: '우리 반 원아'),
+                _buildTabItem(index: 0, icon: Icons.people_alt_outlined, label: '우리 반 ${ApiService().currentUser?.studentTerm ?? '원아'}'),
                 _buildTabItem(index: 1, icon: Icons.photo_library_outlined, label: '알림장·게시물'),
                 _buildTabItem(index: 2, icon: Icons.fact_check_outlined, label: '출석부'),
                 _buildTabItem(index: 3, icon: Icons.edit_calendar_outlined, label: '통학 변동'),

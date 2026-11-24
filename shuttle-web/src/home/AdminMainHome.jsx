@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { getOverallExpirySummary } from '../documents/documentStorage';
 import { getBusRiderDetails } from '../Dashboard';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+import { API_BASE_URL } from '../config';
 
 export default function AdminMainHome({
   academy,
@@ -35,6 +34,13 @@ export default function AdminMainHome({
   // Load backend data (changes, chats, approvals)
   useEffect(() => {
     let isMounted = true;
+    if (!academy?.id) {
+      setCalendarChanges([]);
+      setChatRooms([]);
+      setApprovalRequests([]);
+      return;
+    }
+
     const fetchHomeData = async () => {
       setIsLoadingData(true);
       try {
@@ -42,9 +48,9 @@ export default function AdminMainHome({
         const year = today.getFullYear();
         const month = today.getMonth() + 1;
 
-        // 1. Fetch Calendar Schedule Changes & Absences
+        // 1. Fetch Calendar Schedule Changes & Absences (현재 소속 기관 한정)
         try {
-          const calRes = await fetch(`${API_BASE_URL}/approval/calendar?year=${year}&month=${month}`, {
+          const calRes = await fetch(`${API_BASE_URL}/approval/calendar?year=${year}&month=${month}&academyId=${academy.id}`, {
             headers: getAuthHeaders(),
           });
           if (calRes.ok && isMounted) {
@@ -53,22 +59,26 @@ export default function AdminMainHome({
           }
         } catch (_) {}
 
-        // 2. Fetch Chat Rooms & Chronological Notifications
+        // 2. Fetch Chat Rooms & Chronological Notifications (현재 소속 기관 한정)
         try {
-          const q = new URLSearchParams({ email: currentUser?.email || '' });
-          if (academy?.id) q.append('academyId', String(academy.id));
+          const q = new URLSearchParams({ email: currentUser?.email || '', academyId: String(academy.id), educationLevel: activeEducationLevel });
           const roomRes = await fetch(`${API_BASE_URL}/chat/rooms?${q.toString()}`, {
             headers: getAuthHeaders(),
           });
           if (roomRes.ok && isMounted) {
             const roomData = await roomRes.json();
-            setChatRooms(Array.isArray(roomData) ? roomData : []);
+            const safeRooms = (Array.isArray(roomData) ? roomData : []).filter(r => {
+              if (r.academyId && Number(r.academyId) !== Number(academy.id)) return false;
+              const rLevel = r.educationLevel || '유치원';
+              return rLevel === activeEducationLevel;
+            });
+            setChatRooms(safeRooms);
           }
         } catch (_) {}
 
-        // 3. Fetch Operational Approvals
+        // 3. Fetch Operational Approvals (현재 소속 기관 한정)
         try {
-          const apprRes = await fetch(`${API_BASE_URL}/approval/admin?status=PENDING`, {
+          const apprRes = await fetch(`${API_BASE_URL}/approval/admin?status=PENDING&academyId=${academy.id}`, {
             headers: getAuthHeaders(),
           });
           if (apprRes.ok && isMounted) {
@@ -87,12 +97,15 @@ export default function AdminMainHome({
 
   // Overall Document & Vehicle Expiry Summary
   const expirySummary = useMemo(() => {
+    if (!academy?.id || buses.length === 0) {
+      return { totalBuses: 0, urgentCount: 0, urgentItems: [] };
+    }
     try {
       return getOverallExpirySummary(buses, activeEducationLevel);
     } catch (_) {
       return { totalBuses: buses.length, urgentCount: 0, urgentItems: [] };
     }
-  }, [buses, activeEducationLevel]);
+  }, [academy?.id, buses, activeEducationLevel]);
 
   // Compute Live Statistics across Buses (호차별 탑승 인원 산출 - 정원 표시 제외)
   const busMetrics = useMemo(() => {
@@ -190,20 +203,6 @@ export default function AdminMainHome({
       });
     });
 
-    // Default mock samples if list is empty to provide realistic initial preview
-    if (list.length === 0) {
-      list.push(
-        { id: 'sample-1', name: '김서아', type: 'ABSENCE', typeLabel: '결석' },
-        { id: 'sample-2', name: '박민준', type: 'ABSENCE', typeLabel: '결석' },
-        { id: 'sample-3', name: '최예은', type: 'ABSENCE', typeLabel: '결석' },
-        { id: 'sample-4', name: '이도윤', type: 'LOCATION_CHANGE', typeLabel: '탑승지 변경' },
-        { id: 'sample-5', name: '정시우', type: 'LOCATION_CHANGE', typeLabel: '탑승지 변경' },
-        { id: 'sample-6', name: '윤하은', type: 'ONE_TIME', typeLabel: '당일 1회 탑승' },
-        { id: 'sample-7', name: '한지호', type: 'ONE_TIME', typeLabel: '당일 1회 탑승' },
-        { id: 'sample-8', name: '송지안', type: 'SELF_WALK', typeLabel: '자가 등하원' }
-      );
-    }
-
     return list;
   }, [students, calendarChanges]);
 
@@ -259,59 +258,6 @@ export default function AdminMainHome({
       }
     });
 
-    // If none currently on leave in buses, add realistic sample entries
-    if (currentOnLeave.length === 0) {
-      currentOnLeave.push(
-        {
-          id: 'leave-sample-1',
-          name: '김철수 기사님',
-          role: '1호차 운전자',
-          type: '연차 휴가',
-          period: '금일 (11/18)',
-          substitute: '대체 기사 박임시 운행 중',
-        },
-        {
-          id: 'leave-sample-2',
-          name: '이지은 교사',
-          role: '햇살반 동승교사',
-          type: '병가 (병원 진료)',
-          period: '금일 오전',
-          substitute: '원내 보조지도원 배정',
-        }
-      );
-    }
-
-    // Upcoming scheduled leaves
-    upcomingLeaves.push(
-      {
-        id: 'upcoming-1',
-        name: '최영호 기사님',
-        role: '4호차 운전자',
-        type: '정기 건강검진 및 연차',
-        date: '11월 24일(월) ~ 11월 25일(화)',
-        dday: 'D-6',
-        substitute: '대체 기사 사전 지정 완료',
-      },
-      {
-        id: 'upcoming-2',
-        name: '박미란 교사',
-        role: '풀잎반 담임교사',
-        type: '직무 법정안전교육 연수',
-        date: '11월 28일(금)',
-        dday: 'D-10',
-        substitute: '보조교사 직무대행 예정',
-      },
-      {
-        id: 'upcoming-3',
-        name: '정성훈 기사님',
-        role: '2호차 운전자',
-        type: '동계 정기 휴가',
-        date: '12월 08일(월) ~ 12월 10일(수)',
-        dday: 'D-20',
-        substitute: '대체 기사 배정 준비 중',
-      }
-    );
-
     return {
       currentOnLeave,
       upcomingLeaves,
@@ -342,45 +288,7 @@ export default function AdminMainHome({
         });
     }
 
-    // Default sample feed if chat rooms empty
-    return [
-      {
-        id: 'mock-msg-1',
-        title: '김서아 학부모님 (햇살반)',
-        roleLabel: '학부모',
-        badgeColor: 'bg-sky-100 text-sky-800 border-sky-200',
-        content: '선생님 안녕하세요, 오늘 서아가 열이 조금 있어 병원 다녀오느라 등원 결석합니다.',
-        time: '08:15',
-        unreadCount: 1,
-      },
-      {
-        id: 'mock-msg-2',
-        title: '1호차 박기사님',
-        roleLabel: '기사님',
-        badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-        content: '1호차 1차 코스 탑승 완료하였으며 현재 2차 경유지로 정시 이동 중입니다.',
-        time: '08:35',
-        unreadCount: 0,
-      },
-      {
-        id: 'mock-msg-3',
-        title: '이도윤 학부모님 (바다반)',
-        roleLabel: '학부모',
-        badgeColor: 'bg-sky-100 text-sky-800 border-sky-200',
-        content: '오늘 방과후 특기 수업 마친 뒤 탑승지 변경 신청 승인 부탁드립니다.',
-        time: '08:42',
-        unreadCount: 2,
-      },
-      {
-        id: 'mock-msg-4',
-        title: '바다반 정담임 선생님',
-        roleLabel: '담임교사',
-        badgeColor: 'bg-indigo-100 text-indigo-800 border-indigo-200',
-        content: '오늘 2호차 하원 인계 관련해서 특이사항 메모 남겨두었습니다.',
-        time: '09:05',
-        unreadCount: 0,
-      },
-    ];
+    return [];
   }, [chatRooms]);
 
   // Pending Approvals List
@@ -452,43 +360,6 @@ export default function AdminMainHome({
       });
     }
 
-    if (items.length === 0) {
-      items.push(
-        {
-          id: 'insp-1',
-          title: '1호차 자동차 종합안전검사',
-          target: '1호차 (스타렉스)',
-          dday: 7,
-          status: 'URGENT',
-          dateStr: '2026-11-25',
-        },
-        {
-          id: 'insp-2',
-          title: '3호차 통학버스 자동차 종합보험 갱신',
-          target: '3호차 (카운티)',
-          dday: 14,
-          status: 'WARNING',
-          dateStr: '2026-12-02',
-        },
-        {
-          id: 'insp-3',
-          title: '2호차 운전자 법정 안전교육 이수 (2년 주기)',
-          target: '2호차 운전자 이기사',
-          dday: 19,
-          status: 'WARNING',
-          dateStr: '2026-12-07',
-        },
-        {
-          id: 'insp-4',
-          title: '동승보호자 도로교통공단 안전교육 갱신',
-          target: '5호차 차량선생님',
-          dday: 28,
-          status: 'SAFE',
-          dateStr: '2026-12-16',
-        }
-      );
-    }
-
     return items;
   }, [expirySummary]);
 
@@ -512,8 +383,8 @@ export default function AdminMainHome({
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2.5 mb-1.5">
-              <span className="px-3 py-1 rounded-full text-sm font-black bg-blue-100 text-blue-800 border border-blue-200">
-                {academy?.name || '경동대학교 부설유치원'}
+              <span className={`px-3 py-1 rounded-full text-sm font-black border ${terms.themeBadge || 'bg-blue-100 text-blue-800 border-blue-200'}`}>
+                {academy?.name || `${activeEducationLevel} 기관 (미설정)`}
               </span>
               <span className="text-sm font-semibold text-slate-500">{todayFormatted}</span>
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
@@ -950,7 +821,12 @@ export default function AdminMainHome({
               </div>
 
               <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
-                {safetyDdayList.map(item => {
+                {safetyDdayList.length === 0 ? (
+                  <div className="py-8 text-center text-sm text-slate-400 font-medium">
+                    등록된 차량 점검 및 서류 갱신 일정이 없습니다.
+                  </div>
+                ) : (
+                  safetyDdayList.map(item => {
                   const isUrgent = item.dday <= 14;
                   const pct = Math.max(0, Math.min(100, Math.round((item.dday / 30) * 100)));
 
@@ -978,7 +854,7 @@ export default function AdminMainHome({
                       </div>
                     </div>
                   );
-                })}
+                }))}
               </div>
             </div>
 

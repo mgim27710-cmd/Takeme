@@ -201,8 +201,13 @@ export class AuthService {
     const user = await this.usersRepository.findOne({ where: { id: userId } });
     if (!user) throw new BadRequestException('User not found');
 
-    // 오직 교수님 평가 테스트 계정(professor@takeme.com)만 고정 OTP 123456 허용
-    const isProfessorAccount = (user.email === 'professor@takeme.com');
+    // 테스트 관리자 계정(유치원, 초등부, 중등부) 고정 OTP 123456 허용
+    const isProfessorAccount = (
+      user.email === 'professor@takeme.com' ||
+      user.email === 'director@takeme.com' ||
+      user.email === 'elementary@takeme.com' ||
+      user.email === 'middle@takeme.com'
+    );
     if (isProfessorAccount && token === '123456') {
       user.isOtpEnabled = true;
       if (!user.otpSecret) {
@@ -244,8 +249,14 @@ export class AuthService {
     }
     let user = await this.usersRepository.findOne({ where: { email: cleanEmail } });
     
-    // 교수님 평가/테스트용 유치원 관리자 계정
-    const isProfessorTestAccount = (cleanEmail === 'professor@takeme.com' || cleanEmail === 'director@takeme.com' || cleanEmail === 'director12@takeme.com');
+    // 교수님 평가/테스트용 관리자 계정 (유치원, 초등부, 중등부)
+    const isProfessorTestAccount = (
+      cleanEmail === 'professor@takeme.com' ||
+      cleanEmail === 'director@takeme.com' ||
+      cleanEmail === 'director12@takeme.com' ||
+      cleanEmail === 'elementary@takeme.com' ||
+      cleanEmail === 'middle@takeme.com'
+    );
     const isTeacherTest = (cleanEmail === 'teacher@takeme.com' || cleanEmail === 'teacher_prof@takeme.com');
     const isDriverTest = (cleanEmail === 'driver@takeme.com' || cleanEmail === 'driver_prof@takeme.com');
     const isParentTest = (cleanEmail === 'parent@takeme.com' || cleanEmail === 'parent_prof@takeme.com' || cleanEmail === 'parent_seoa@takeme.com');
@@ -457,14 +468,21 @@ export class AuthService {
         }
         const userMeta = `${user.name || ''} ${user.email || ''}`.toLowerCase();
         let defaultSuffix = '유치원';
-        if (userMeta.includes('초등') || userMeta.includes('elem')) defaultSuffix = '초등학교';
-        else if (userMeta.includes('중등') || userMeta.includes('고등') || userMeta.includes('middle') || userMeta.includes('high')) defaultSuffix = '중·고등학교';
+        let eduLevel = 'KINDERGARTEN';
+        if (userMeta.includes('초등') || userMeta.includes('elem')) {
+          defaultSuffix = '초등학교';
+          eduLevel = 'ELEMENTARY';
+        } else if (userMeta.includes('중등') || userMeta.includes('고등') || userMeta.includes('middle') || userMeta.includes('high')) {
+          defaultSuffix = '중·고등학교';
+          eduLevel = 'MIDDLE_HIGH';
+        }
 
         academy = this.academyRepository.create({
           name: user.name ? `${user.name} ${defaultSuffix}` : `신규 ${defaultSuffix}`,
           owner: user,
           authCode,
           businessNumber: data.businessNumber || null,
+          educationLevel: (data as any)?.educationLevel || eduLevel,
           vehicleCount: 0
         });
         await this.academyRepository.save(academy);
@@ -532,12 +550,18 @@ export class AuthService {
       clientIp: clientIp || undefined,
     });
 
-    const combinedMeta = `${academyName || ''} ${user.name || ''} ${user.email || ''}`.toLowerCase();
     let detectedEduLevel = '유치원';
-    if (combinedMeta.includes('초등') || combinedMeta.includes('elem')) {
+    if (academy?.educationLevel === 'ELEMENTARY') {
       detectedEduLevel = '초등부';
-    } else if (combinedMeta.includes('중등') || combinedMeta.includes('고등') || combinedMeta.includes('middle') || combinedMeta.includes('high')) {
+    } else if (academy?.educationLevel === 'MIDDLE_HIGH') {
       detectedEduLevel = '중,고등부';
+    } else {
+      const combinedMeta = `${academyName || ''} ${user.name || ''} ${user.email || ''}`.toLowerCase();
+      if (combinedMeta.includes('초등') || combinedMeta.includes('elem')) {
+        detectedEduLevel = '초등부';
+      } else if (combinedMeta.includes('중등') || combinedMeta.includes('고등') || combinedMeta.includes('middle') || combinedMeta.includes('high')) {
+        detectedEduLevel = '중,고등부';
+      }
     }
 
     return {

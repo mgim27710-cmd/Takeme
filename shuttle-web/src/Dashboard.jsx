@@ -543,8 +543,12 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       authCode: isKinder ? '원 인증코드' : '기관 인증코드',
       themeBg: isKinder ? 'bg-blue-700' : (isElem ? 'bg-emerald-700' : 'bg-indigo-800'),
       themeHover: isKinder ? 'hover:bg-blue-600' : (isElem ? 'hover:bg-emerald-600' : 'hover:bg-indigo-700'),
+      themeBtn: isKinder ? 'bg-blue-600 hover:bg-blue-700 text-white' : (isElem ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white'),
+      themeBtnSecondary: isKinder ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200' : (isElem ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200'),
       themeText: isKinder ? 'text-blue-700' : (isElem ? 'text-emerald-700' : 'text-indigo-700'),
       themeBadge: isKinder ? 'bg-blue-100 text-blue-800 border-blue-200' : (isElem ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-indigo-100 text-indigo-800 border-indigo-300'),
+      themeGradient: isKinder ? 'from-blue-600 to-indigo-600' : (isElem ? 'from-emerald-600 to-teal-700' : 'from-indigo-600 to-purple-800'),
+      themeRing: isKinder ? 'ring-blue-500' : (isElem ? 'ring-emerald-500' : 'ring-indigo-500'),
       icon: isKinder ? '🏫' : (isElem ? '🎒' : '🎓')
     };
   }, [activeEducationLevel]);
@@ -595,20 +599,25 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   }, [isAuthenticated, isWebAdmin]);
   const isSuperAdmin = currentUser.role === 'SUPER_ADMIN';
   const [allAcademies, setAllAcademies] = useState([]);
-  const [selectedAcademyId, setSelectedAcademyId] = useState(
-    isSuperAdmin
-      ? (Number(localStorage.getItem('takeme_selected_academy_id')) || currentUser.academyId || null)
-      : (currentUser.academyId || null)
-  );
+  const [selectedAcademyId, setSelectedAcademyId] = useState(() => {
+    if (!isSuperAdmin) {
+      const userEdu = currentUser?.educationLevel || '유치원';
+      return userEdu === activeEducationLevel ? (currentUser.academyId || null) : null;
+    }
+    const saved = Number(localStorage.getItem(`takeme_selected_academy_id_${activeEducationLevel}`));
+    return saved && !isNaN(saved) ? saved : null;
+  });
 
   useEffect(() => {
     if (!isSuperAdmin) {
-      localStorage.removeItem('takeme_selected_academy_id');
-      if (currentUser?.academyId && selectedAcademyId !== currentUser.academyId) {
+      const userEdu = currentUser?.educationLevel || '유치원';
+      if (userEdu !== activeEducationLevel) {
+        setSelectedAcademyId(null);
+      } else if (currentUser?.academyId && selectedAcademyId !== currentUser.academyId) {
         setSelectedAcademyId(currentUser.academyId);
       }
     }
-  }, [isSuperAdmin, currentUser?.academyId]);
+  }, [isSuperAdmin, currentUser?.academyId, currentUser?.educationLevel, activeEducationLevel]);
 
   const [buses, setBuses] = useState([]);
   const [students, setStudents] = useState([]); // Array of { name, address, lat, lng, assignedBusId, color }
@@ -2110,7 +2119,10 @@ export default function Dashboard({ initialEducationLevel } = {}) {
 
   // 교육 부문별 기관 분류 헬퍼
   const getAcademyLevel = (acad) => {
-    if (acad?.educationLevel) return acad.educationLevel;
+    const rawLevel = String(acad?.educationLevel || '').toUpperCase();
+    if (rawLevel === 'ELEMENTARY' || acad?.educationLevel === '초등부') return '초등부';
+    if (rawLevel === 'MIDDLE_HIGH' || acad?.educationLevel === '중,고등부' || acad?.educationLevel === '중등부') return '중,고등부';
+    if (rawLevel === 'KINDERGARTEN' || acad?.educationLevel === '유치원') return '유치원';
     const name = acad?.name || '';
     if (name.includes('중등') || name.includes('고등') || name.includes('중학교') || name.includes('고등학교') || name.includes('Middle') || name.includes('High')) return '중,고등부';
     if (name.includes('초등') || name.includes('초교') || name.includes('Elementary')) return '초등부';
@@ -2140,9 +2152,15 @@ export default function Dashboard({ initialEducationLevel } = {}) {
   // 교육 부문(activeEducationLevel) 변경 시 해당 부문의 기관으로 자동 스위칭 및 데이터 완전 격리
   useEffect(() => {
     if (!isSuperAdmin) {
-      if (currentUser?.academyId && selectedAcademyId !== currentUser.academyId) {
+      const userEdu = currentUser?.educationLevel || '유치원';
+      if (userEdu !== activeEducationLevel) {
+        setSelectedAcademyId(null);
+        setAcademy(null);
+        setBuses([]);
+        setStudents([]);
+      } else if (currentUser?.academyId && selectedAcademyId !== currentUser.academyId) {
         setSelectedAcademyId(currentUser.academyId);
-        localStorage.setItem('takeme_selected_academy_id', String(currentUser.academyId));
+        localStorage.setItem(`takeme_selected_academy_id_${activeEducationLevel}`, String(currentUser.academyId));
         loadInitialState(currentUser.academyId);
       }
       return;
@@ -2156,7 +2174,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       if (!isCurrentSelectedValid) {
         const nextId = matched[0].id;
         setSelectedAcademyId(nextId);
-        localStorage.setItem('takeme_selected_academy_id', String(nextId));
+        localStorage.setItem(`takeme_selected_academy_id_${activeEducationLevel}`, String(nextId));
         loadInitialState(nextId);
       }
     } else {
@@ -3151,13 +3169,40 @@ export default function Dashboard({ initialEducationLevel } = {}) {
     if (!isAuthenticated) return;
     try {
       setIsInitializing(true);
-      const targetAcademyId = (!isSuperAdmin && currentUser?.academyId)
-        ? currentUser.academyId
-        : (overrideAcademyId !== undefined ? overrideAcademyId : (selectedAcademyId || currentUser?.academyId));
+
+      // 교육 부문(activeEducationLevel)과 기관 테넌트 엄격 일치 검증
+      let targetAcademyId = overrideAcademyId !== undefined ? overrideAcademyId : selectedAcademyId;
+
+      if (!isSuperAdmin) {
+        const userEdu = currentUser?.educationLevel || '유치원';
+        if (userEdu === activeEducationLevel) {
+          targetAcademyId = currentUser?.academyId || targetAcademyId;
+        } else {
+          // 타 부문 조회 시 타 기관(유치원) 데이터 노출 완전 차단
+          targetAcademyId = null;
+        }
+      } else {
+        if (allAcademies.length > 0) {
+          const matched = allAcademies.filter(ac => getAcademyLevel(ac) === activeEducationLevel);
+          if (matched.length > 0) {
+            const isValid = matched.some(m => m.id === targetAcademyId);
+            if (!isValid) targetAcademyId = matched[0].id;
+          } else {
+            targetAcademyId = null;
+          }
+        }
+      }
+
+      if (!targetAcademyId) {
+        setSelectedAcademyId(null);
+        setAcademy(null);
+        setBuses([]);
+        setStudents([]);
+        return;
+      }
+
       const eduQuery = activeEducationLevel ? `&educationLevel=${encodeURIComponent(activeEducationLevel)}` : '';
-      const url = targetAcademyId 
-        ? `${API_BASE_URL}/routing/initial-state?academyId=${targetAcademyId}${eduQuery}`
-        : `${API_BASE_URL}/routing/initial-state?${eduQuery.replace(/^&/, '')}`;
+      const url = `${API_BASE_URL}/routing/initial-state?academyId=${targetAcademyId}${eduQuery}`;
       const res = await fetch(url);
       const data = await res.json();
       
@@ -3220,7 +3265,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
 
   useEffect(() => {
     loadInitialState();
-  }, [location.state]);
+  }, [location.state, activeEducationLevel]);
 
   const handleAcademySubmit = async (e) => {
     e.preventDefault();
@@ -3244,6 +3289,7 @@ export default function Dashboard({ initialEducationLevel } = {}) {
           roadAddress: targetRoad,
           detailAddress: academyForm.detailAddress || '',
           businessNumber: academyForm.businessNumber ? academyForm.businessNumber.trim() : '',
+          educationLevel: activeEducationLevel,
           lat: geocoded[0].coords.lat,
           lng: geocoded[0].coords.lng
         };
@@ -4889,7 +4935,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                   onClick={() => setSetupStep(2)}
                   className="w-full mt-3 py-2 text-xs font-semibold text-slate-500 hover:text-blue-600 transition-colors underline"
                 >
-                  엑셀 파일 없이 유치원 정보 직접 등록하기 &rarr;
+                  엑셀 파일 없이 {terms.institution} 정보 직접 등록하기 &rarr;
                 </button>
               </>
             )}
@@ -4897,19 +4943,19 @@ const parseKindergartenExcelSheet = (sheet) => {
             {setupStep === 2 && (
               <>
                 <div className="text-center mb-6">
-                  <h2 className="text-2xl font-bold text-slate-800">유치원 정보 등록</h2>
-                  <p className="text-slate-500 text-sm mt-2">지도의 중심이 될 유치원 위치와 사업자등록번호를 등록해주세요.</p>
+                  <h2 className="text-2xl font-bold text-slate-800">{terms.institution} 정보 등록</h2>
+                  <p className="text-slate-500 text-sm mt-2">지도의 중심이 될 {terms.institution} 위치와 사업자등록번호를 등록해주세요.</p>
                 </div>
                 
                 <form onSubmit={handleAcademySubmit} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-1">유치원명 <span className="text-red-500">*</span></label>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">{terms.institution}명 <span className="text-red-500">*</span></label>
                     <input 
                       type="text" 
                       value={academyForm.name} 
                       onChange={e => setAcademyForm({...academyForm, name: e.target.value})}
                       className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                      placeholder="예: 해솔 유치원"
+                      placeholder={`예: 해솔 ${terms.institution}`}
                       required
                     />
                   </div>
@@ -4926,7 +4972,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                     <p className="text-[11px] text-slate-400 mt-1">숫자 10자리를 입력하시면 하이픈(-)이 자동으로 적용됩니다.</p>
                   </div>
                   <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-1">원 도로명 주소 <span className="text-red-500">*</span></label>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">{terms.institution} 도로명 주소 <span className="text-red-500">*</span></label>
                     <div className="flex gap-2 mb-2">
                       <input 
                         type="text" 
@@ -4940,7 +4986,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                       <button
                         type="button"
                         onClick={() => openAcademyAddressSearch(false)}
-                        className="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition-colors whitespace-nowrap shadow-sm flex items-center gap-1.5 cursor-pointer"
+                        className={`px-4 py-3 ${terms.themeBtn} rounded-xl text-sm font-bold transition-colors whitespace-nowrap shadow-sm flex items-center gap-1.5 cursor-pointer`}
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -4966,7 +5012,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                   <button 
                     type="submit" 
                     disabled={isProcessing}
-                    className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors mt-6 disabled:opacity-50"
+                    className={`w-full py-3 ${terms.themeBtn} font-bold rounded-xl transition-colors mt-6 disabled:opacity-50 shadow-md`}
                   >
                     {isProcessing ? '위치 확인 및 저장 중...' : '모든 설정 완료하고 메인으로'}
                   </button>
@@ -5125,7 +5171,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                   });
                   setShowAddBusModal(true);
                 }}
-                className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl shadow-xs hover:shadow-md transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm active:scale-[0.99] cursor-pointer"
+                className={`w-full py-2.5 px-3 ${terms.themeBtn} font-extrabold rounded-xl shadow-xs hover:shadow-md transition-all flex items-center justify-center gap-1.5 text-xs sm:text-sm active:scale-[0.99] cursor-pointer`}
               >
                 <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
@@ -6271,7 +6317,7 @@ const parseKindergartenExcelSheet = (sheet) => {
               <div className="flex gap-1.5 mb-1.5 shrink-0">
                 <button
                   onClick={handleOpenAddStudentModal}
-                  className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 text-xs active:scale-[0.99]"
+                  className={`flex-1 py-2 px-3 ${terms.themeBtn} font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 text-xs active:scale-[0.99]`}
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
@@ -7476,6 +7522,7 @@ const parseKindergartenExcelSheet = (sheet) => {
             currentUser={currentUser}
             availableClasses={availableClasses}
             academyId={selectedAcademyId}
+            activeEducationLevel={activeEducationLevel}
           />
         )}
 
@@ -7673,7 +7720,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                   }}
                   className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer ${
                     activeEducationLevel === lvl.label
-                      ? 'bg-blue-600 text-white shadow-md font-black'
+                      ? (lvl.id === 'elementary' ? 'bg-emerald-600 text-white shadow-md font-black' : (lvl.id === 'middle_high' ? 'bg-indigo-600 text-white shadow-md font-black' : 'bg-blue-600 text-white shadow-md font-black'))
                       : 'text-slate-200 hover:text-white hover:bg-slate-800 font-bold'
                   }`}
                   title={`${lvl.label} 대시보드로 즉시 전환`}
@@ -7791,7 +7838,7 @@ const parseKindergartenExcelSheet = (sheet) => {
                 <button
                   type="button"
                   onClick={handleCreateSampleAcademy}
-                  className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-black text-sm shadow-md transition-all active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer"
+                  className={`w-full py-3 px-4 bg-gradient-to-r ${terms.themeGradient} text-white rounded-xl font-black text-sm shadow-md transition-all active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer hover:opacity-95`}
                 >
                   <span>✨</span>
                   <span>{activeEducationLevel} 신규 기관 개설하기</span>
