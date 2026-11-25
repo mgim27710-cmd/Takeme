@@ -865,7 +865,7 @@ export class TeacherService implements OnModuleInit {
     }
 
     // 4. 전원 탑승 완료 여부 검사 및 원장/기사 실시간 알림 발송
-    const allBoardedRes = await this.checkAndNotifyAllBoarded(vehicle, student.academyId || user.academyId);
+    const allBoardedRes = await this.checkAndNotifyAllBoarded(vehicle, student.academy?.id || user.academyId);
 
     return { 
       success: true, 
@@ -912,7 +912,7 @@ export class TeacherService implements OnModuleInit {
     await this.notifyParentBoardStatus(student, vehicle, 'ABSENT', 'SYSTEM');
 
     // 결석 처리 후 남은 대기 원아가 0명인지(전원 처리 완료) 검사 및 알림 발송
-    const allBoardedRes = await this.checkAndNotifyAllBoarded(vehicle, student.academyId || user.academyId);
+    const allBoardedRes = await this.checkAndNotifyAllBoarded(vehicle, student.academy?.id || user.academyId);
 
     return { 
       success: true, 
@@ -968,10 +968,9 @@ export class TeacherService implements OnModuleInit {
       if (targetAcademyId) {
         const noti = this.notificationRepository.create({
           type: 'NOTICE',
-          title: `[전원 탑승 완료] ${busName}`,
-          message: `${busName} (${totalCount}명) 원아 전원 탑승이 완료되었습니다. 안전 운행을 시작하세요.`,
+          message: `[전원 탑승 완료] ${busName} (${totalCount}명) 원아 전원 탑승이 완료되었습니다. 안전 운행을 시작하세요.`,
           recipientRole: 'ACADEMY_ADMIN',
-          academyId: targetAcademyId,
+          academy: { id: targetAcademyId } as any,
           vehicle,
         });
         await this.notificationRepository.save(noti);
@@ -992,7 +991,7 @@ export class TeacherService implements OnModuleInit {
           recipientIds,
           '전원 탑승 완료',
           `${busName} (${totalCount}명) 원아 전원 탑승이 완료되었습니다. 안전 운행을 시작하세요.`,
-          { type: 'shuttle', vehicleId: vehicle.id }
+          { type: 'shuttle', metadata: { vehicleId: vehicle.id } }
         ).catch(() => {});
       }
 
@@ -1487,7 +1486,7 @@ export class TeacherService implements OnModuleInit {
     await this.appendBoardingLog(vehicle.id, student.id, student.adminDisplayName || student.name, 'QR');
 
     // 4. 전원 탑승 완료 여부 검사 및 원장/기사 실시간 알림 발송
-    const allBoardedRes = await this.checkAndNotifyAllBoarded(vehicle, student.academyId);
+    const allBoardedRes = await this.checkAndNotifyAllBoarded(vehicle, student.academy?.id);
 
     return { 
       success: true, 

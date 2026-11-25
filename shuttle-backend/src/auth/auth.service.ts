@@ -453,6 +453,7 @@ export class AuthService {
 
     let academyId: number | null = null;
     let academyName: string | null = null;
+    let resolvedAcademy: Academy | null = null;
     if (user.role === UserRole.SUPER_ADMIN) {
       academyId = null;
       academyName = '통합 플랫폼 관리자';
@@ -487,6 +488,7 @@ export class AuthService {
         });
         await this.academyRepository.save(academy);
       }
+      resolvedAcademy = academy;
       academyId = academy.id;
       academyName = academy.name;
       if (user.academyId !== academy.id) {
@@ -500,6 +502,7 @@ export class AuthService {
         relations: { academy: true }
       });
       if (student?.academy) {
+        resolvedAcademy = student.academy;
         academyId = student.academy.id;
         academyName = student.academy.name;
       }
@@ -514,6 +517,7 @@ export class AuthService {
         relations: { academy: true }
       });
       if (teacherUser?.academy) {
+        resolvedAcademy = teacherUser.academy;
         academyId = teacherUser.academy.id;
         academyName = teacherUser.academy.name;
       }
@@ -523,6 +527,7 @@ export class AuthService {
         relations: { academy: true }
       });
       if (vehicle?.academy) {
+        resolvedAcademy = vehicle.academy;
         academyId = vehicle.academy.id;
         academyName = vehicle.academy.name;
       }
@@ -551,9 +556,9 @@ export class AuthService {
     });
 
     let detectedEduLevel = '유치원';
-    if (academy?.educationLevel === 'ELEMENTARY') {
+    if (resolvedAcademy?.educationLevel === 'ELEMENTARY') {
       detectedEduLevel = '초등부';
-    } else if (academy?.educationLevel === 'MIDDLE_HIGH') {
+    } else if (resolvedAcademy?.educationLevel === 'MIDDLE_HIGH') {
       detectedEduLevel = '중,고등부';
     } else {
       const combinedMeta = `${academyName || ''} ${user.name || ''} ${user.email || ''}`.toLowerCase();
