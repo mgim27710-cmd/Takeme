@@ -13,6 +13,8 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "seed:rds": "ts-node -r tsconfig-paths/register src/seed-rds.ts",
+    "seed:board": "ts-node -r tsconfig-paths/register src/scripts/seed-board-dummy-data.ts",
+    "seed:board:prod": "node -e \"const f=require('fs');require(f.existsSync('./dist/src/scripts/seed-board-dummy-data.js')?'./dist/src/scripts/seed-board-dummy-data.js':'./dist/scripts/seed-board-dummy-data.js')\"",
     "sync:board-media": "ts-node -r tsconfig-paths/register src/scripts/sync-board-photos-to-media.ts",
     "seed:test-accounts": "ts-node -r tsconfig-paths/register src/scripts/seed-test-accounts.ts",
     "report:location-changes": "ts-node -r tsconfig-paths/register src/scripts/report-location-changes.ts",

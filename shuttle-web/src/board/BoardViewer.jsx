@@ -34,109 +34,460 @@ const DEFAULT_POSTS_BY_LEVEL = {
     {
       id: 101,
       educationLevel: '유치원',
-      title: '햇살반 가을 낙엽 탐색 및 숲 체험 활동',
-      content: '오늘 햇살반 친구들과 함께 유치원 뒤뜰에서 알록달록 단풍잎과 솔방울을 모아 왕관 만들기 놀이를 했습니다. 아이들이 자연 속에서 너무 신나게 참여했어요!',
+      postType: 'NOTICE',
+      title: '[햇살반 알림장] 🍁 가을 숲 체험 및 알록달록 낙엽 왕관 만들기',
+      content: `안녕하세요, 햇살반 학부모님!
+오늘 우리 햇살반 친구들과 함께 따뜻한 가을 햇살을 맞으며 유치원 뒤뜰 생태 숲으로 나들이를 다녀왔습니다.
+
+바스락거리는 단풍잎과 동글동글한 솔방울, 도토리를 주워 모아 멋진 '가을 숲 요정 왕관'을 직접 꾸며보았습니다. 자연 속에서 자연물을 만지고 냄새 맡으며 오감으로 가을을 듬뿍 느낀 행복한 시간이었습니다.
+
+📌 알림 사항
+- 오늘 만든 낙엽 왕관은 가방에 넣어 보냈으니 가정에서도 칭찬 많이 해주세요.
+- 내일은 체육 활동이 예정되어 있으니 원복 대신 편안한 활동복과 운동화 착용을 부탁드립니다.`,
       imageUrl: 'https://images.unsplash.com/photo-1596464716127-f2a82984de30?w=800&auto=format&fit=crop&q=80',
-      images: [],
-      authorName: '햇살반 담임선생님',
-      authorRole: 'TEACHER',
-      visibility: 'CLASS',
-      targetClass: '햇살반',
-      likeCount: 5,
-      likedUserIds: ['admin'],
-      comments: [
-        { id: 1, authorName: '하늘이 어머님', authorRole: 'PARENT', content: '사진 너무 예쁘네요! 오늘도 수고 많으셨습니다 선생님~', createdAt: new Date(Date.now() - 3600000).toISOString() },
-        { id: 2, authorName: '원장선생님', authorRole: 'ADMIN', content: '햇살반 친구들 표정이 정말 밝고 예쁩니다 ^^', createdAt: new Date(Date.now() - 1800000).toISOString() }
+      images: [
+        'https://images.unsplash.com/photo-1596464716127-f2a82984de30?w=800&auto=format&fit=crop&q=80',
+        'https://images.unsplash.com/photo-1472162072942-cd5147eb3902?w=800&auto=format&fit=crop&q=80'
       ],
-      createdAt: new Date(Date.now() - 7200000).toISOString()
-    },
-    {
-      id: 102,
-      educationLevel: '유치원',
-      title: '[전체 공지] 10월 유치원 가을 운동회 및 꿈나무 축제 안내',
-      content: '학부모님 안녕하십니까. 다음 주 금요일 진행되는 가을 운동회 및 꿈나무 축제 일정 안내드립니다. 편안한 복장과 운동화 착용을 부탁드리며 셔틀 운행 시간표를 확인해 주시기 바랍니다.',
-      imageUrl: 'https://images.unsplash.com/photo-1587654780291-39c9404d746b?w=800&auto=format&fit=crop&q=80',
-      images: [],
-      authorName: '관리자',
-      authorRole: 'ADMIN',
-      visibility: 'ALL',
-      targetClass: null,
-      likeCount: 12,
-      likedUserIds: [],
-      comments: [],
-      createdAt: new Date(Date.now() - 86400000).toISOString()
-    }
-  ],
-  '초등부': [
-    {
-      id: 201,
-      educationLevel: '초등부',
-      title: '[초등 1·2호차] 방과 후 맞춤형 하교 셔틀 안전 수칙 및 시간표 안내',
-      content: '초등부 학부모님 및 학생 여러분 안녕하십니까. 정규 수업 및 방과 후 학습 일정에 맞춰 셔틀 1, 2호차 운행 시간이 소폭 조정되었습니다. 정류장 도착 5분 전 대기를 부탁드립니다.',
-      imageUrl: 'https://images.unsplash.com/photo-1509062522246-3755977927d7?w=800&auto=format&fit=crop&q=80',
-      images: [],
-      authorName: '초등부 행정실',
-      authorRole: 'ADMIN',
-      visibility: 'ALL',
-      targetClass: null,
-      likeCount: 8,
-      likedUserIds: ['admin'],
-      comments: [
-        { id: 1, authorName: '지민이 학부모님', authorRole: 'PARENT', content: '시간표 확인했습니다. 안전운행 부탁드려요!', createdAt: new Date(Date.now() - 3600000).toISOString() }
-      ],
-      createdAt: new Date(Date.now() - 5400000).toISOString()
-    },
-    {
-      id: 202,
-      educationLevel: '초등부',
-      title: '초등 4학년 햇살반 창의 과학 탐구 발표회 활동 사진',
-      content: '오늘 햇살반 친구들이 팀별로 준비한 친환경 로봇 프로젝트를 멋지게 발표했습니다. 창의력 넘치는 작품들을 감상해보세요!',
-      imageUrl: 'https://images.unsplash.com/photo-1588072432836-e10032774350?w=800&auto=format&fit=crop&q=80',
-      images: [],
-      authorName: '박선생님 (햇살반)',
+      authorName: '이유진 담임교사 (햇살반)',
       authorRole: 'TEACHER',
       visibility: 'CLASS',
       targetClass: '햇살반',
       likeCount: 9,
+      likedUserIds: ['admin'],
+      comments: [
+        { id: 1, authorName: '하늘이 어머님', authorRole: 'PARENT', content: '하늘이가 집에 오자마자 낙엽 왕관 자랑하네요! 자연에서 뛰노는 모습이 너무 예쁩니다. 선생님 늘 감사드려요~', createdAt: new Date(Date.now() - 7200000).toISOString() },
+        { id: 2, authorName: '원장선생님', authorRole: 'ADMIN', content: '햇살반 친구들 작품 솜씨가 대단하네요. 밝은 웃음이 사진 너머로 전해집니다 ^^', createdAt: new Date(Date.now() - 3600000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 10800000).toISOString()
+    },
+    {
+      id: 102,
+      educationLevel: '유치원',
+      postType: 'NOTICE',
+      title: '[새싹반 알림장] 🎨 조물조물 친환경 찰흙 & 감각 도예 놀이',
+      content: `새싹반 학부모님 안녕하십니까.
+소근육 발달과 창의력 증진을 위한 '친환경 찰흙 조형 활동'을 진행했습니다.
+
+찰흙의 부드러운 질감을 손끝으로 느끼며 동글동글 빚고 길쭉하게 늘려 나만의 동물 친구들과 컵을 완성했습니다. 찰흙이 옷에 조금 묻을 수 있으니 세탁 시 미온수에 가볍게 불려 세탁해 주시면 말끔히 지워집니다.
+
+📌 준비물 안내:
+- 다음 주 월요일 양치컵과 칫솔 교체 주간이오니 새 칫솔을 지퍼백에 넣어 이름표 부착 후 보내주시기 바랍니다.`,
+      imageUrl: 'https://images.unsplash.com/photo-1566140967404-b8b3932483f5?w=800&auto=format&fit=crop&q=80',
+      images: [
+        'https://images.unsplash.com/photo-1566140967404-b8b3932483f5?w=800&auto=format&fit=crop&q=80'
+      ],
+      authorName: '박민지 담임교사 (새싹반)',
+      authorRole: 'TEACHER',
+      visibility: 'CLASS',
+      targetClass: '새싹반',
+      likeCount: 7,
+      likedUserIds: [],
+      comments: [
+        { id: 1, authorName: '도윤이 아버님', authorRole: 'PARENT', content: '도윤이가 집중해서 빚는 모습이 기특하네요. 알림 확인했습니다!', createdAt: new Date(Date.now() - 14400000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 86400000).toISOString()
+    },
+    {
+      id: 103,
+      educationLevel: '유치원',
+      postType: 'NOTICE',
+      title: '[풀잎반 알림장] 🎵 쿵작쿵작 오감 리듬 악기 합주 및 율동 시간',
+      content: `풀잎반 학부모님 안녕하세요!
+신나는 템버린, 에그 셰이커, 실로폰을 활용하여 가을 동요 '도토리' 음악에 맞추어 악기 합주를 해보았습니다.
+
+친구들과 박자를 맞추며 귀 기울이고, 신나게 흔들며 리듬감을 키웠답니다. 
+환절기 기온 변화가 심하니 얇은 겉옷을 챙겨 입혀 보내주세요.`,
+      imageUrl: 'https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?w=800&auto=format&fit=crop&q=80',
+      images: [
+        'https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?w=800&auto=format&fit=crop&q=80'
+      ],
+      authorName: '정수연 담임교사 (풀잎반)',
+      authorRole: 'TEACHER',
+      visibility: 'CLASS',
+      targetClass: '풀잎반',
+      likeCount: 6,
       likedUserIds: [],
       comments: [],
-      createdAt: new Date(Date.now() - 10800000).toISOString()
-    }
-  ],
-  '중,고등부': [
+      createdAt: new Date(Date.now() - 93600000).toISOString()
+    },
     {
-      id: 301,
-      educationLevel: '중,고등부',
-      title: '[중·고등부] 2학기 중간고사 대비 심야 안심 귀가 셔틀 특별 편성',
-      content: '중·고등부 원생 여러분 안녕하십니까. 시험 기간 야간 자율학습 참여 학생들의 안전한 귀가를 위해 심야 셔틀(밤 10시 10분, 11시 10분)을 특별 연장 운행합니다.',
-      imageUrl: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=800&auto=format&fit=crop&q=80',
-      images: [],
-      authorName: '원장선생님',
+      id: 104,
+      educationLevel: '유치원',
+      postType: 'NOTICE',
+      title: '[열매반 알림장] 🌱 유치원 텃밭 가꾸기: 무와 배추 관찰 일지 작성',
+      content: `열매반 학부모님 안녕하십니까.
+지난 초가을에 직접 심었던 김장용 배추와 가을 무가 어느덧 튼실하게 자라났습니다!
+아이들과 함께 돋보기로 배춧잎을 갉아먹는 애벌레도 관찰하고 물주기 활동을 하였습니다. 다음 주 수확 활동도 많은 기대 바랍니다.`,
+      imageUrl: 'https://images.unsplash.com/photo-1472162072942-cd5147eb3902?w=800&auto=format&fit=crop&q=80',
+      images: [
+        'https://images.unsplash.com/photo-1472162072942-cd5147eb3902?w=800&auto=format&fit=crop&q=80'
+      ],
+      authorName: '김태희 담임교사 (열매반)',
+      authorRole: 'TEACHER',
+      visibility: 'CLASS',
+      targetClass: '열매반',
+      likeCount: 8,
+      likedUserIds: [],
+      comments: [
+        { id: 1, authorName: '시우 어머님', authorRole: 'PARENT', content: '직접 가꾼 채소 수확하면 편식도 줄어들 것 같네요. 기대됩니다!', createdAt: new Date(Date.now() - 50000000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 100000000).toISOString()
+    },
+    {
+      id: 105,
+      educationLevel: '유치원',
+      postType: 'NOTICE',
+      title: '[전체 공지] 🍱 11월 4주차 친환경 식단표 및 영양 관리 안내',
+      content: `유치원 학부모님 안녕하십니까.
+아이들의 건강하고 균형 잡힌 성장을 위한 11월 4주차 주간 식단표를 공지합니다.
+
+- 월: 기장밥, 소고기미역국, 수제 떡갈비구이, 시금치나물, 깍두기, 배
+- 화: 흑미밥, 들깨무채국, 닭안심 카레볶음, 콩나물무침, 백김치, 귤
+- 수: 오색비빔밥(친환경 유기농 채소), 유부장국, 계란후라이, 단호박죽, 사과
+- 목: 찰보리밥, 감자애호박된장국, 삼치데리야끼구이, 메추리알장조림, 배추김치, 바나나
+- 금: 클로렐라밥, 맑은 순두부탕, 치즈 불고기, 파프리카 잡채, 깍두기, 요구르트
+
+* 모든 식자재는 HACCP 인증 국내산 무농약/친환경 식자재를 사용하고 있습니다.
+* 식품 알레르기(달걀, 우유, 견과류 등)가 있는 어린이는 대체 급식이 제공됩니다.`,
+      imageUrl: 'https://images.unsplash.com/photo-1587654780291-39c9404d746b?w=800&auto=format&fit=crop&q=80',
+      images: [
+        'https://images.unsplash.com/photo-1587654780291-39c9404d746b?w=800&auto=format&fit=crop&q=80'
+      ],
+      authorName: '영양사 & 행정실',
       authorRole: 'ADMIN',
       visibility: 'ALL',
       targetClass: null,
       likeCount: 15,
       likedUserIds: ['admin'],
       comments: [
-        { id: 1, authorName: '이준호 학생', authorRole: 'STUDENT', content: '늦게까지 공부하고 안전하게 집에 갈 수 있어 좋아요!', createdAt: new Date(Date.now() - 7200000).toISOString() }
+        { id: 1, authorName: '지우 어머님', authorRole: 'PARENT', content: '매번 균형 잡힌 맛있는 식단 준비해 주셔서 안심이 됩니다. 감사합니다!', createdAt: new Date(Date.now() - 120000000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 172800000).toISOString()
+    },
+    {
+      id: 106,
+      educationLevel: '유치원',
+      postType: 'NOTICE',
+      title: '[전체 공지] 🚌 동절기 통학버스 안전 운행 및 정류장 5분 전 대기 협조 요청',
+      content: `학부모님 안녕하십니까.
+기온이 내려가고 도로 결빙 위험이 발생하는 동절기를 맞이하여, 안전한 원아 통학을 위해 안내 말씀 드립니다.
+
+1. 정류장 도착 5분 전 대기
+   - 추운 날씨로 인해 도로 흐름이 지연될 수 있습니다. 대기 시간 단축 및 정시 운행을 위해 지정 탑승 장소에 5분 전 미리 대기해 주시기 바랍니다.
+2. 차량 안전벨트 착용 지도
+   - 차량에 탑승하는 모든 어린이는 안전지도교사의 인솔 하에 100% 안전벨트를 체결하고 출발합니다.
+3. 승·하차지 변경 및 일일 불참 안내
+   - 학부모 앱의 [탑승 변경 신청] 메뉴를 통해 당일 탑승 1시간 전까지 접수해 주시면 기사님 및 동승 교사에게 실시간 반영됩니다.
+
+아이들의 안전하고 따뜻한 등하원을 위해 최선을 다하겠습니다.`,
+      imageUrl: 'https://images.unsplash.com/photo-1513151233558-d860c5398176?w=800&auto=format&fit=crop&q=80',
+      images: [
+        'https://images.unsplash.com/photo-1513151233558-d860c5398176?w=800&auto=format&fit=crop&q=80'
+      ],
+      authorName: '안전관리 책임자 (원장)',
+      authorRole: 'ADMIN',
+      visibility: 'ALL',
+      targetClass: null,
+      likeCount: 22,
+      likedUserIds: ['admin'],
+      comments: [
+        { id: 1, authorName: '서준이 어머님', authorRole: 'PARENT', content: '항상 원아 안전에 각별히 신경 써주셔서 든든합니다. 5분 전 대기 잘 지키겠습니다!', createdAt: new Date(Date.now() - 150000000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 259200000).toISOString()
+    },
+    {
+      id: 107,
+      educationLevel: '유치원',
+      postType: 'POST',
+      title: '❤️ [칭찬합니다] 2호차 기사님과 지도교사 선생님 늘 감사드려요',
+      content: `매일 아침 2호차에서 밝은 미소로 아이 이름 하나하나 다정하게 불러주시는 기사님과, 아이 신발 끈 풀린 것까지 세심하게 챙겨주시는 지도교사 선생님께 감사 인사 남깁니다.
+처음 유치원 버스를 탈 때 울먹이던 아이가 이제는 버스 오는 시간만 기다릴 정도로 편안해졌어요.
+항상 안전 운전해 주셔서 마음 놓고 보냅니다. 선생님, 기사님 모두 건강 조심하세요!`,
+      imageUrl: 'https://images.unsplash.com/photo-1587654780291-39c9404d746b?w=800&auto=format&fit=crop&q=80',
+      images: [],
+      authorName: '햇살반 예은맘',
+      authorRole: 'PARENT',
+      visibility: 'ALL',
+      targetClass: null,
+      likeCount: 18,
+      likedUserIds: ['admin'],
+      comments: [
+        { id: 1, authorName: '2호차 운전기사님', authorRole: 'ADMIN', content: '따뜻한 말씀 감사합니다 예은 어머님! 예은이가 인사도 잘해서 제가 매일 아침 큰 힘을 얻습니다. 늘 안전하게 모시겠습니다 ^^', createdAt: new Date(Date.now() - 14400000).toISOString() },
+        { id: 2, authorName: '2호차 동승 지도교사', authorRole: 'TEACHER', content: '어머님 따뜻한 후기글에 오늘 피로가 싹 가시네요! 예은이랑 내일도 활기차게 인사 나누겠습니다 ㅎㅎ', createdAt: new Date(Date.now() - 10800000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 18000000).toISOString()
+    },
+    {
+      id: 108,
+      educationLevel: '유치원',
+      postType: 'POST',
+      title: '📢 [나눔] 원복 7호 동복 자켓 & 활동복 바지 나눔합니다',
+      content: `안녕하세요 학부모님들!
+아이가 쑥쑥 자라서 작년에 깨끗하게 입었던 원복 7호(동복 자켓 1벌, 활동복 상하의 1벌)를 나눔하고자 합니다.
+헤진 곳 없이 상태 매우 깨끗하고 드라이클리닝 완료했습니다.
+필요하신 학부모님께서는 댓글 남겨주시면 가방에 담아 원무실에 맡겨두겠습니다.`,
+      imageUrl: 'https://images.unsplash.com/photo-1513151233558-d860c5398176?w=800&auto=format&fit=crop&q=80',
+      images: [],
+      authorName: '새싹반 준우맘',
+      authorRole: 'PARENT',
+      visibility: 'ALL',
+      targetClass: null,
+      likeCount: 5,
+      likedUserIds: [],
+      comments: [
+        { id: 1, authorName: '풀잎반 지호맘', authorRole: 'PARENT', content: '어머님 안녕하세요! 저희 지호가 체구가 작아서 7호가 딱 맞을 것 같아요. 나눔 가능할까요?', createdAt: new Date(Date.now() - 5400000).toISOString() },
+        { id: 2, authorName: '새싹반 준우맘', authorRole: 'PARENT', content: '네 지호맘님! 내일 등원길에 원무실 앞 바구니에 지호 이름 적어서 전달해 놓겠습니다 ^^', createdAt: new Date(Date.now() - 2700000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 86400000).toISOString()
+    },
+    {
+      id: 109,
+      educationLevel: '유치원',
+      postType: 'POST',
+      title: '☀️ 햇살반 사랑 나눔 바자회 부스 운영 아이디어 모음 & 학부모 소통',
+      content: `햇살반 부모님들 안녕하세요!
+다음 달 예정된 사랑 나눔 가을 바자회 부스 운영과 관련하여 학부모님들의 다양한 아이디어나 재능 기부 의견을 자유롭게 나눠주시면 좋겠습니다.
+
+현재 제안된 코너:
+1. 핸드메이드 어린이 머리핀 & 키링 만들기
+2. 안 쓰는 동화책 및 보드게임 나눔 부스
+3. 팝콘 & 오미자차 쉼터
+
+좋은 의견 있으시면 댓글로 편하게 말씀해 주세요!`,
+      imageUrl: 'https://images.unsplash.com/photo-1472162072942-cd5147eb3902?w=800&auto=format&fit=crop&q=80',
+      images: [],
+      authorName: '햇살반 학부모대표',
+      authorRole: 'PARENT',
+      visibility: 'CLASS',
+      targetClass: '햇살반',
+      likeCount: 8,
+      likedUserIds: [],
+      comments: [
+        { id: 1, authorName: '햇살반 담임선생님', authorRole: 'TEACHER', content: '학부모님들의 자발적인 관심과 참여에 깊이 감사드립니다! 교실에서도 아이들과 기부 물품 분류 활동을 연계해 보겠습니다 ^^', createdAt: new Date(Date.now() - 18000000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 172800000).toISOString()
+    }
+  ],
+  '초등부': [
+    {
+      id: 201,
+      educationLevel: '초등부',
+      postType: 'NOTICE',
+      title: '[초등 1·2호차] 방과 후 맞춤형 하교 셔틀 안전 수칙 및 시간표 안내',
+      content: `초등부 학부모님 및 학생 여러분 안녕하십니까.
+초등학교 정규 수업 및 방과 후 교실 개편에 따라, 셔틀버스 운행 시간 및 학교 정문 앞 혼잡 방지를 위한 승하차 지점이 일부 조정되었습니다.
+
+- 시행 일자: 이번 주 월요일부터 즉시 적용
+- 초등 1호차: 본원 출발 14:10 -> 초등학교 동문 후문 경유 (14:25) -> 아파트 단지 순환
+- 초등 2호차: 본원 출발 15:30 -> 방과후 2차 하교 연계 운행 (15:50)
+
+학부모님께서는 학생이 정류장에 5분 전 미리 도착하여 안전 지도교사의 신호에 따라 승차할 수 있도록 지도 바랍니다.`,
+      imageUrl: 'https://images.unsplash.com/photo-1509062522246-3755977927d7?w=800&auto=format&fit=crop&q=80',
+      images: [
+        'https://images.unsplash.com/photo-1509062522246-3755977927d7?w=800&auto=format&fit=crop&q=80'
+      ],
+      authorName: '초등부 행정실',
+      authorRole: 'ADMIN',
+      visibility: 'ALL',
+      targetClass: null,
+      likeCount: 14,
+      likedUserIds: ['admin'],
+      comments: [
+        { id: 1, authorName: '민재 학부모님', authorRole: 'PARENT', content: '동문 후문 정류장 위치 확인했습니다. 기사님 수고 많으십니다!', createdAt: new Date(Date.now() - 3600000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 5400000).toISOString()
+    },
+    {
+      id: 202,
+      educationLevel: '초등부',
+      postType: 'NOTICE',
+      title: '초등 4학년 햇살반 창의 과학 탐구 및 로봇 코딩 프로젝트 발표회',
+      content: `오늘 햇살반 친구들이 팀별로 4주간 준비한 친환경 스마트 시티 로봇 프로젝트를 멋지게 발표했습니다!
+스크래치 블록 코딩과 모터 센서를 결합해 스스로 장애물을 피하는 스마트 청소 로봇을 완성했어요.
+창의력 넘치는 작품들을 감상해보세요!`,
+      imageUrl: 'https://images.unsplash.com/photo-1588072432836-e10032774350?w=800&auto=format&fit=crop&q=80',
+      images: [
+        'https://images.unsplash.com/photo-1588072432836-e10032774350?w=800&auto=format&fit=crop&q=80'
+      ],
+      authorName: '박준호 선생님 (햇살반)',
+      authorRole: 'TEACHER',
+      visibility: 'CLASS',
+      targetClass: '햇살반',
+      likeCount: 11,
+      likedUserIds: [],
+      comments: [],
+      createdAt: new Date(Date.now() - 10800000).toISOString()
+    },
+    {
+      id: 203,
+      educationLevel: '초등부',
+      postType: 'NOTICE',
+      title: '[초등부 전체] 12월 창의 융합 독서 골든벨 대회 개최 안내',
+      content: `초등부 전 학년을 대상으로 생각의 깊이를 더하는 제3회 창의 융합 독서 골든벨 대회를 개최합니다.
+지정 도서 3권을 읽고 흥미진진한 퀴즈를 맞히며 독서의 즐거움을 함께 나눕니다. 많은 참여와 격려 부탁드립니다.`,
+      imageUrl: 'https://images.unsplash.com/photo-1509062522246-3755977927d7?w=800&auto=format&fit=crop&q=80',
+      images: [],
+      authorName: '초등부 교무실',
+      authorRole: 'ADMIN',
+      visibility: 'ALL',
+      targetClass: null,
+      likeCount: 9,
+      likedUserIds: [],
+      comments: [],
+      createdAt: new Date(Date.now() - 86400000).toISOString()
+    },
+    {
+      id: 204,
+      educationLevel: '초등부',
+      postType: 'POST',
+      title: '☂️ [분실물] 초등 1호차 뒷좌석 노란색 캐릭터 장우산 보관 중입니다',
+      content: `오늘 1호차 15:30 운행 종료 후 차량 내부 정리 중 4번째 좌석에서 노란색 손잡이 캐릭터 장우산이 발견되었습니다.
+손잡이에 이름이 적혀있지 않아 행정실 분실물 보관함에 보관하고 있으니, 해당 학생 또는 학부모님께서는 문의 바랍니다.`,
+      imageUrl: 'https://images.unsplash.com/photo-1509062522246-3755977927d7?w=800&auto=format&fit=crop&q=80',
+      images: [],
+      authorName: '1호차 담당 안전기사',
+      authorRole: 'ADMIN',
+      visibility: 'ALL',
+      targetClass: null,
+      likeCount: 6,
+      likedUserIds: [],
+      comments: [
+        { id: 1, authorName: '태현이 학부모님', authorRole: 'PARENT', content: '태현이가 오늘 우산 잃어버렸다고 했는데 맞네요! 보관해 주셔서 정말 감사합니다.', createdAt: new Date(Date.now() - 3600000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 14400000).toISOString()
+    },
+    {
+      id: 205,
+      educationLevel: '초등부',
+      postType: 'POST',
+      title: '👏 비 오는 날 우산 씌워주신 기사님 정말 감사합니다',
+      content: `갑작스럽게 소나기가 쏟아졌는데 정류장에서 아이가 비 맞지 않게 직접 우산 들고 마중 나와주신 2호차 기사님께 감사의 마음을 전합니다.
+늘 아이들을 내 가족처럼 아껴주셔서 마음 놓고 보냅니다.`,
+      imageUrl: 'https://images.unsplash.com/photo-1588072432836-e10032774350?w=800&auto=format&fit=crop&q=80',
+      images: [],
+      authorName: '서우 학부모님',
+      authorRole: 'PARENT',
+      visibility: 'ALL',
+      targetClass: null,
+      likeCount: 15,
+      likedUserIds: ['admin'],
+      comments: [
+        { id: 1, authorName: '2호차 기사님', authorRole: 'ADMIN', content: '당연히 해야 할 일인 걸요! 아이들이 감기 걸리지 않는 게 가장 중요합니다. 감사합니다 ^^', createdAt: new Date(Date.now() - 7200000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 28800000).toISOString()
+    }
+  ],
+  '중,고등부': [
+    {
+      id: 301,
+      educationLevel: '중,고등부',
+      postType: 'NOTICE',
+      title: '[중·고등부] 2학기 기말고사 대비 심야 안심 귀가 셔틀 특별 편성',
+      content: `중·고등부 원생 여러분 안녕하십니까.
+내신 고득점을 위한 2학기 기말고사 대비 자율학습 집중 기간을 맞이하여, 밤늦게까지 학업에 매진하는 학생들의 귀가 안전을 지원합니다.
+
+- 운행 기간: 11월 25일(월) ~ 12월 13일(금) [3주간 평일 및 토요일 운영]
+- 심야 특별 셔틀 출발 시각:
+  1차 귀가: 22:15 정각 출발 (주요 거점 대단지 아파트 순환)
+  2차 귀가: 23:15 정각 출발 (역세권 및 학생 자택 인근 직결 노선)
+
+* 심야 노선 탑승을 희망하는 학생은 당일 18:00까지 데스크 또는 앱에서 좌석 예약을 완료해 주시기 바랍니다.`,
+      imageUrl: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=800&auto=format&fit=crop&q=80',
+      images: [
+        'https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=800&auto=format&fit=crop&q=80'
+      ],
+      authorName: '학원 총괄원장',
+      authorRole: 'ADMIN',
+      visibility: 'ALL',
+      targetClass: null,
+      likeCount: 25,
+      likedUserIds: ['admin'],
+      comments: [
+        { id: 1, authorName: '김민성 학생', authorRole: 'STUDENT', content: '늦게까지 자습하고 안전하게 집에 갈 수 있어 너무 좋아요!', createdAt: new Date(Date.now() - 7200000).toISOString() },
+        { id: 2, authorName: '고2 학부모님', authorRole: 'PARENT', content: '시험 기간마다 픽업 가느라 부담이었는데 학원에서 안심 셔틀 운영해 주시니 든든합니다.', createdAt: new Date(Date.now() - 3600000).toISOString() }
       ],
       createdAt: new Date(Date.now() - 14400000).toISOString()
     },
     {
       id: 302,
       educationLevel: '중,고등부',
-      title: '중2 열매반 자기주도학습 우수 학생 멘토링 활동',
-      content: '중등 2학년 열매반에서 선배 멘토들과 함께 진행한 학습 플래너 작성법 및 과목별 오답노트 정리 멘토링 세션 현장입니다.',
+      postType: 'NOTICE',
+      title: '[중등 심화 열매반] 📝 전국 연합 모의평가 분석 및 1:1 오답 클리닉 안내',
+      content: `열매반 학생 여러분 및 학부모님.
+지난주 시행된 전국 연합 모의평가 과목별 가채점 결과 분석표가 발송되었습니다.
+이번 주 수요일부터 금요일까지 수업 전후 30분씩 1:1 심층 취약 유형 분석 클리닉이 진행되오니 오답 노트를 반드시 지참해 오시기 바랍니다.`,
       imageUrl: 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=800&auto=format&fit=crop&q=80',
-      images: [],
-      authorName: '김선생님 (열매반)',
+      images: [
+        'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=800&auto=format&fit=crop&q=80'
+      ],
+      authorName: '김도현 책임강사 (열매반)',
       authorRole: 'TEACHER',
       visibility: 'CLASS',
       targetClass: '열매반',
-      likeCount: 11,
+      likeCount: 12,
       likedUserIds: [],
       comments: [],
       createdAt: new Date(Date.now() - 28800000).toISOString()
+    },
+    {
+      id: 303,
+      educationLevel: '중,고등부',
+      postType: 'NOTICE',
+      title: '[전체 공지] 기말고사 대비 자율학습 스터디룸 주말 상시 개방 안내',
+      content: `학생 여러분의 집중력 있는 시험 대비를 돕기 위해 본관 3층 프리미엄 스터디룸을 주말(토/일) 아침 08:30부터 밤 23:00까지 전면 개방합니다.
+좌석은 1인 지정석으로 운영되며, 인강 청취용 고속 Wi-Fi 및 공기청정기가 상시 가동됩니다.`,
+      imageUrl: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=800&auto=format&fit=crop&q=80',
+      images: [],
+      authorName: '학습관리팀',
+      authorRole: 'ADMIN',
+      visibility: 'ALL',
+      targetClass: null,
+      likeCount: 18,
+      likedUserIds: [],
+      comments: [],
+      createdAt: new Date(Date.now() - 86400000).toISOString()
+    },
+    {
+      id: 304,
+      educationLevel: '중,고등부',
+      postType: 'POST',
+      title: '💡 기말고사 스터디룸 주말 오전 개방 건의 및 영어 기출 스터디원 모집',
+      content: `원장선생님 안녕하세요! 고등부 자습실 A룸 시험 기간 주말 개방 시간을 오전 8시부터 오픈해 주실 수 있는지 문의드립니다.
+그리고 주말 오전에 영어 빈칸추론 기출 10회독 스터디 같이할 고2 친구들 있으면 댓글 남겨주세요! 같이 열공합시다.`,
+      imageUrl: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=800&auto=format&fit=crop&q=80',
+      images: [],
+      authorName: '이준호 (고2)',
+      authorRole: 'STUDENT',
+      visibility: 'ALL',
+      targetClass: null,
+      likeCount: 16,
+      likedUserIds: ['admin'],
+      comments: [
+        { id: 1, authorName: '학원 총괄원장', authorRole: 'ADMIN', content: '학생들의 학구열을 응원합니다! 이번 주말부터 자습실을 주말 아침 8시부터 상시 개방하도록 조치하겠습니다 ^^', createdAt: new Date(Date.now() - 14400000).toISOString() },
+        { id: 2, authorName: '박서연 (고2)', authorRole: 'STUDENT', content: '준호야 나 영어 스터디 참여할래! 내일 자습실에서 보자.', createdAt: new Date(Date.now() - 7200000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 43200000).toISOString()
+    },
+    {
+      id: 305,
+      educationLevel: '중,고등부',
+      postType: 'POST',
+      title: '🚌 심야 셔틀 덕분에 늦게까지 자습하고 안전하게 집 갑니다!',
+      content: `매번 시험 기간마다 버스 끊길까 봐 조마조마하며 일찍 일어났는데, 심야 안심 셔틀 덕분에 23시까지 꽉 채워 공부할 수 있어서 너무 좋습니다.
+밤길에도 안전하게 집 앞까지 데려다주시는 3호차 기사님 감사합니다!`,
+      imageUrl: 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=800&auto=format&fit=crop&q=80',
+      images: [],
+      authorName: '정다은 (고1)',
+      authorRole: 'STUDENT',
+      visibility: 'ALL',
+      targetClass: null,
+      likeCount: 20,
+      likedUserIds: ['admin'],
+      comments: [
+        { id: 1, authorName: '3호차 기사님', authorRole: 'ADMIN', content: '다은 학생 열공하는 모습이 대견합니다! 항상 조심히 집까지 바래다줄 테니 시험 준비 화이팅하세요 ^^', createdAt: new Date(Date.now() - 10800000).toISOString() }
+      ],
+      createdAt: new Date(Date.now() - 72000000).toISOString()
     }
   ]
 };
@@ -289,7 +640,11 @@ export default function BoardViewer({
       if (activeAcademyId) queryParams.set('academyId', activeAcademyId);
       queryParams.set('educationLevel', currentEducationLevel);
 
-      const res = await fetch(`${API_BASE_URL}/routing/board/posts?${queryParams.toString()}`);
+      const token = localStorage.getItem('takeme_token');
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`${API_BASE_URL}/routing/board/posts?${queryParams.toString()}`, { headers });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
@@ -303,19 +658,27 @@ export default function BoardViewer({
       // Fallback to local storage or defaults
       const saved = localStorage.getItem(boardStorageKey);
       if (saved) {
-        setPosts(JSON.parse(saved));
-      } else {
-        setPosts(defaultPosts);
-        localStorage.setItem(boardStorageKey, JSON.stringify(defaultPosts));
+        const parsed = JSON.parse(saved);
+        // 이전 구버전 데이터(게시물이 적거나 postType이 누락된 경우)는 최신 defaultPosts로 업그레이드
+        if (Array.isArray(parsed) && parsed.length >= defaultPosts.length && parsed.some(p => p.postType)) {
+          setPosts(parsed);
+          return;
+        }
       }
+      setPosts(defaultPosts);
+      localStorage.setItem(boardStorageKey, JSON.stringify(defaultPosts));
     } catch (e) {
       console.warn('Backend fetch failed, falling back to local data', e);
       const saved = localStorage.getItem(boardStorageKey);
       if (saved) {
-        setPosts(JSON.parse(saved));
-      } else if (!posts || posts.length === 0) {
-        setPosts(defaultPosts);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length >= defaultPosts.length && parsed.some(p => p.postType)) {
+          setPosts(parsed);
+          return;
+        }
       }
+      setPosts(defaultPosts);
+      localStorage.setItem(boardStorageKey, JSON.stringify(defaultPosts));
     } finally {
       setIsLoading(false);
     }
@@ -327,9 +690,15 @@ export default function BoardViewer({
       const saved = localStorage.getItem(boardStorageKey);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed) && parsed.length >= defaultPosts.length && parsed.some(p => p.postType)) {
           setPosts(parsed);
+        } else {
+          setPosts(defaultPosts);
+          localStorage.setItem(boardStorageKey, JSON.stringify(defaultPosts));
         }
+      } else {
+        setPosts(defaultPosts);
+        localStorage.setItem(boardStorageKey, JSON.stringify(defaultPosts));
       }
     } catch (_) {}
 
@@ -406,9 +775,13 @@ export default function BoardViewer({
     savePostsLocal(updated);
 
     try {
+      const token = localStorage.getItem('takeme_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       await fetch(`${API_BASE_URL}/routing/board/posts/${postId}/like`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ userId: currentUserId })
       });
     } catch (e) {
@@ -442,9 +815,13 @@ export default function BoardViewer({
     setCommentInputs(prev => ({ ...prev, [postId]: '' }));
 
     try {
+      const token = localStorage.getItem('takeme_token');
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       await fetch(`${API_BASE_URL}/routing/board/posts/${postId}/comments`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           content: text,
           authorName,
@@ -470,8 +847,13 @@ export default function BoardViewer({
     savePostsLocal(updated);
 
     try {
+      const token = localStorage.getItem('takeme_token');
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       await fetch(`${API_BASE_URL}/routing/board/posts/${postId}/comments/${commentId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers
       });
     } catch (e) {
       console.warn('Comment delete API failed, updated locally', e);
@@ -485,8 +867,13 @@ export default function BoardViewer({
     setPostToDelete(null);
 
     try {
+      const token = localStorage.getItem('takeme_token');
+      const headers = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       await fetch(`${API_BASE_URL}/routing/board/posts/${postId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers
       });
     } catch (e) {
       console.warn('Post delete API failed, updated locally', e);
@@ -643,9 +1030,13 @@ export default function BoardViewer({
       setIsCreatingPost(false);
 
       try {
+        const token = localStorage.getItem('takeme_token');
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
         await fetch(`${API_BASE_URL}/routing/board/posts/${editingPost.id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             title: postForm.title.trim(),
             content: postForm.content.trim(),
@@ -685,9 +1076,13 @@ export default function BoardViewer({
       setSelectedPostType(postForm.postType);
 
       try {
+        const token = localStorage.getItem('takeme_token');
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
         const res = await fetch(`${API_BASE_URL}/routing/board/posts`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             title: newPost.title,
             content: newPost.content,
