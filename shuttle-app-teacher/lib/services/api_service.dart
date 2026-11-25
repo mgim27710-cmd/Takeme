@@ -691,6 +691,19 @@ class ApiService {
     }
   }
 
+  /// 이 글을 누가 읽었는지 (교직원 전용). 학부모가 글을 열면 서버에 자동으로 기록된다. 실패하면 null
+  Future<Map<String, dynamic>?> getPostReaders(int postId) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId/reads');
+      final res = await getWithAuth(url);
+      if (res.statusCode != 200) return null;
+      final data = _decodeBody(res);
+      return data is Map ? Map<String, dynamic>.from(data) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>> togglePostLike(int postId, String userId) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId/like');
