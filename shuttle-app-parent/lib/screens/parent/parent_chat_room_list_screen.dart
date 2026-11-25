@@ -67,7 +67,7 @@ class _ParentChatRoomListScreenState extends State<ParentChatRoomListScreen> {
       _contactsError = null;
     });
     try {
-      final res = await ApiService().getChatUsers(_myEmail ?? 'parent@takeme.com', throwOnError: true);
+      final res = await ApiService().getChatUsers(_myEmail ?? 'parent@takeme.com', true);
       final List<ChatContact> fetched = [];
 
       // 1. 원장님 및 행정실

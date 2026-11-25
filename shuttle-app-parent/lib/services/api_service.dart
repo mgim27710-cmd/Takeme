@@ -1143,8 +1143,8 @@ class ApiService {
     }
   }
 
-  Future<dynamic> createChatRoom(
-    List<int> userIds, {
+  Future<dynamic> createChatRoom({
+    required List<int> userIds,
     String? name,
     String? type,
     String? creatorEmail,
@@ -1160,7 +1160,7 @@ class ApiService {
       final res = await postWithAuth(url, jsonEncode(payload)).timeout(const Duration(seconds: 6));
       final data = _decodeBody(res);
       if (res.statusCode == 200 || res.statusCode == 201) {
-        return data;
+        return (data is Map<String, dynamic> && data['data'] != null) ? data['data'] : data;
       }
       return {'success': false, 'message': '채팅방 생성 실패: ${res.statusCode}', 'data': data};
     } catch (e) {

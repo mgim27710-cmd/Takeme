@@ -532,7 +532,6 @@ class _BoardDetailScreenState extends State<BoardDetailScreen> {
       });
     }
   }
-  }
 
   @override
   void dispose() {
