@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../models/chat_model.dart';
 import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
 import '../../widgets/load_error_view.dart';
