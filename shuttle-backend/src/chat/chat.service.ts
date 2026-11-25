@@ -444,7 +444,6 @@ export class ChatService implements OnModuleInit {
           sentEndpoints.add(targetArn);
           await sendSnsPushNotification(targetArn, title, body, data);
         }
-        }
       }
     } catch (snsErr) {
       console.warn(`[SNS] Failed to send push to users ${ids.join(',')}:`, snsErr);
