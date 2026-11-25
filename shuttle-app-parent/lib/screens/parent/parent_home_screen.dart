@@ -1473,71 +1473,71 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
             ],
           ),
           const SizedBox(height: 10),
-          if (isNotRiding) ...[
-            // 기본 미탑승 학생: 셔틀 안탐 숨김. 하루 탑승 신청 또는 취소 버튼
-            if (hasTodayBoarding)
-              InkWell(
-                onTap: _handleCancelTodayBoarding,
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFFECACA), width: 1.5),
-                  ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.cancel_outlined, size: 18, color: Color(0xFFDC2626)),
-                      SizedBox(width: 8),
-                      Text(
-                        '오늘 하루 탑승 취소',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
-                      ),
-                    ],
-                  ),
+          if (hasTodayBoarding || _childInfo?.isOverride == true) ...[
+            // 당일 탑승 승인/신청 상태: 취소 버튼 최우선 표시
+            InkWell(
+              onTap: _handleCancelTodayBoarding,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFFECACA), width: 1.5),
                 ),
-              )
-            else
-              InkWell(
-                onTap: () async {
-                  final user = ApiService().currentUser;
-                  if (user == null) return;
-                  if (mounted) setState(() => _isModalOpen = true);
-                  await showDialog(
-                    context: context,
-                    builder: (_) => ChangeRequestModal(
-                      email: user.email,
-                      initialType: 'ONE_TIME_BOARDING',
-                      onSuccess: _loadAllData,
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.cancel_outlined, size: 18, color: Color(0xFFDC2626)),
+                    SizedBox(width: 8),
+                    Text(
+                      '오늘 하루 탑승 취소',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
                     ),
-                  );
-                  if (mounted) setState(() => _isModalOpen = false);
-                },
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFEFF6FF),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF93C5FD), width: 1.5),
-                  ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.directions_bus, size: 18, color: Color(0xFF2563EB)),
-                      SizedBox(width: 8),
-                      Text(
-                        '오늘 하루 탑승 신청',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
-                      ),
-                    ],
-                  ),
+                  ],
                 ),
               ),
+            ),
+          ] else if (isNotRiding) ...[
+            // 기본 미탑승 학생: 하루 탑승 신청 버튼
+            InkWell(
+              onTap: () async {
+                final user = ApiService().currentUser;
+                if (user == null) return;
+                if (mounted) setState(() => _isModalOpen = true);
+                await showDialog(
+                  context: context,
+                  builder: (_) => ChangeRequestModal(
+                    email: user.email,
+                    initialType: 'ONE_TIME_BOARDING',
+                    onSuccess: _loadAllData,
+                  ),
+                );
+                if (mounted) setState(() => _isModalOpen = false);
+              },
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF93C5FD), width: 1.5),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.directions_bus, size: 18, color: Color(0xFF2563EB)),
+                    SizedBox(width: 8),
+                    Text(
+                      '오늘 하루 탑승 신청',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ] else ...[
             // 기본 탑승 학생: 하루 탑승 숨김. 오늘 하루 결석 / 오늘 직접 하원 (보호자 픽업)
             Row(

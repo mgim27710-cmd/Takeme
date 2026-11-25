@@ -5899,9 +5899,44 @@ const parseKindergartenExcelSheet = (sheet) => {
                                       <span className="text-[10px] text-amber-800 font-bold mt-0.5">{homonym.subLabel}</span>
                                     )}
                                   </div>
-                                  <span className="text-rose-700 font-medium text-xs truncate max-w-[130px] shrink-0" title={st.address || st.boardingLocation}>
-                                    {st.boardingLocation || st.address || '위치 미등록'}
-                                  </span>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <span className="text-rose-700 font-medium text-xs truncate max-w-[110px]" title={st.address || st.boardingLocation}>
+                                      {st.boardingLocation || st.address || '위치 미등록'}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        if (!window.confirm(`[${st.name}] 원아의 일일 탑승 신청 및 배정을 취소하시겠습니까?\n취소 시 미탑승/원래 상태로 즉시 복원됩니다.`)) return;
+                                        try {
+                                          const token = localStorage.getItem('takeme_token') || localStorage.getItem('token') || '';
+                                          const res = await fetch(`${API_BASE_URL}/approval/cancel-today-boarding`, {
+                                            method: 'POST',
+                                            headers: {
+                                              'Content-Type': 'application/json',
+                                              'Authorization': token ? `Bearer ${token}` : '',
+                                              'x-academy-id': String(selectedAcademyId || ''),
+                                            },
+                                            body: JSON.stringify({ studentId: st.id }),
+                                          });
+                                          const data = await res.json();
+                                          if (res.ok && data.success) {
+                                            alert(`[${st.name}] 원아의 일일 탑승이 성공적으로 취소되었습니다.`);
+                                            loadInitialState();
+                                          } else {
+                                            alert(data.message || '일일 탑승 취소에 실패했습니다.');
+                                          }
+                                        } catch (err) {
+                                          console.error(err);
+                                          alert('일일 탑승 취소 처리 중 오류가 발생했습니다.');
+                                        }
+                                      }}
+                                      className="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold rounded shadow-2xs transition-colors shrink-0"
+                                      title="일일 탑승 취소"
+                                    >
+                                      취소
+                                    </button>
+                                  </div>
                                 </div>
                               );})}
                             </div>
@@ -8385,9 +8420,47 @@ const parseKindergartenExcelSheet = (sheet) => {
 
                 {(isOneTimeStudent || isApprovalPending || st.isOneTimeRide || st.dailyBoardingLocation) && (
                   <div className="bg-amber-50 text-amber-950 border-2 border-amber-400 text-xs font-bold p-2.5 rounded-xl mb-2 shadow-2xs">
-                    <div className="flex items-center gap-1.5 font-black text-amber-900 mb-1">
-                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-                      <span>[일일 통학 정보] {isApprovalPending ? '결재 승인 대기' : '당일 탑승 확정'}</span>
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-1.5 font-black text-amber-900">
+                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                        <span>[일일 통학 정보] {isApprovalPending ? '결재 승인 대기' : '당일 탑승 확정'}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!window.confirm(`[${st.name}] 원아의 일일 탑승 신청 및 배정을 취소하시겠습니까?\n취소 시 미탑승/원래 상태로 즉시 복원됩니다.`)) return;
+                          try {
+                            const token = localStorage.getItem('takeme_token') || localStorage.getItem('token') || '';
+                            const res = await fetch(`${API_BASE_URL}/approval/cancel-today-boarding`, {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': token ? `Bearer ${token}` : '',
+                                'x-academy-id': String(selectedAcademyId || ''),
+                              },
+                              body: JSON.stringify({ studentId: st.id }),
+                            });
+                            const data = await res.json();
+                            if (res.ok && data.success) {
+                              alert(`[${st.name}] 원아의 일일 탑승이 성공적으로 취소되었습니다.`);
+                              loadInitialState();
+                            } else {
+                              alert(data.message || '일일 탑승 취소에 실패했습니다.');
+                            }
+                          } catch (err) {
+                            console.error(err);
+                            alert('일일 탑승 취소 처리 중 오류가 발생했습니다.');
+                          }
+                        }}
+                        className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold rounded-lg shadow-2xs transition-colors flex items-center gap-1 shrink-0"
+                        title="일일 탑승을 취소하고 미탑승 상태로 되돌립니다"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                        일일 탑승 취소
+                      </button>
                     </div>
                     <div className="text-slate-800">
                       <b>일일 탑승지:</b> <span className="text-blue-700 font-extrabold">{st.dailyBoardingLocation || st.boardingLocation || st.newAddress || st.address || '유치원/원내'}</span>

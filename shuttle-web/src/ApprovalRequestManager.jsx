@@ -145,6 +145,39 @@ export default function ApprovalRequestManager({
     }
   };
 
+  const handleCancelDailyBoarding = async req => {
+    const studentId = req.studentId || req.student?.id;
+    if (!studentId) {
+      alert('원아 정보를 찾을 수 없습니다.');
+      return;
+    }
+    const studentName = req.studentName || req.student?.name || '해당';
+    if (!window.confirm(`[${studentName}] 원아의 일일 탑승 승인을 취소하시겠습니까?\n취소 시 미탑승/원래 상태로 즉시 복구됩니다.`)) {
+      return;
+    }
+
+    try {
+      setIsProcessing(true);
+      const res = await fetch(`${API_BASE_URL}/approval/cancel-today-boarding`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ studentId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setAlertToast(`[${studentName}] 원아의 일일 탑승이 성공적으로 취소되었습니다.`);
+        setTimeout(() => setAlertToast(null), 3000);
+        loadRequests();
+      } else {
+        alert(data.message || '일일 탑승 취소 처리에 실패했습니다.');
+      }
+    } catch (e) {
+      alert('일일 탑승 취소 처리 중 오류가 발생했습니다.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const pendingCount = requests.filter(r => r.status === 'PENDING').length;
   const approvedCount = requests.filter(r => r.status === 'APPROVED').length;
   const rejectedCount = requests.filter(r => r.status === 'REJECTED').length;
@@ -417,6 +450,27 @@ export default function ApprovalRequestManager({
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                         </svg>
                         승인
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Action Buttons for Approved Requests (일일 탑승 승인 취소) */}
+                  {isApproved && (
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-emerald-700 font-bold flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                        승인 완료됨
+                      </span>
+                      <button
+                        onClick={() => handleCancelDailyBoarding(req)}
+                        disabled={isProcessing}
+                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-xl border border-rose-200 transition-colors flex items-center gap-1 shadow-2xs"
+                        title="일일 탑승 승인을 취소하고 미탑승/원래 상태로 되돌립니다"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                        일일 탑승 취소
                       </button>
                     </div>
                   )}

@@ -41,6 +41,65 @@ class _MyRequestsScreenState extends State<MyRequestsScreen> {
     }
   }
 
+  Future<void> _handleCancelDailyBoarding(Map<String, dynamic> item) async {
+    final studentId = item['studentId'] ?? item['student']?['id'];
+    final studentName = item['studentName'] ?? item['student']?['name'] ?? '원아';
+    if (studentId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('원아 정보를 확인할 수 없습니다.')),
+      );
+      return;
+    }
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('일일 탑승 신청 취소', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        content: Text('$studentName 원아의 일일 탑승 신청을 취소하시겠습니까?\n취소 시 미탑승/원래 상태로 되돌아갑니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('아니오', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('신청 취소', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final id = studentId is int ? studentId : int.parse(studentId.toString());
+      final res = await ApiService().cancelTodayBoarding(id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['message'] ?? '일일 탑승 신청이 취소되었습니다.'),
+          backgroundColor: res['success'] == true ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+        ),
+      );
+      if (res['success'] == true) {
+        _loadRequests();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(friendlyError(e)),
+          backgroundColor: const Color(0xFFEF4444),
+        ),
+      );
+    }
+  }
+
   Color _getStatusBg(String status) {
     switch (status) {
       case 'APPROVED':
@@ -327,6 +386,29 @@ class _MyRequestsScreenState extends State<MyRequestsScreen> {
                                       ),
                                     ),
                                   ],
+                                ),
+                              ),
+                            ],
+
+                            // 일일 탑승 신청 취소 버튼 (대기중이거나 승인 완료된 경우)
+                            if ((status == 'PENDING' || status == 'APPROVED') &&
+                                (item['type'] == 'ONE_TIME_BOARDING' || typeKr.contains('탑승') || typeKr.contains('1회'))) ...[
+                              const SizedBox(height: 12),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: OutlinedButton.icon(
+                                  onPressed: () => _handleCancelDailyBoarding(item),
+                                  icon: const Icon(Icons.cancel_outlined, size: 16, color: Color(0xFFDC2626)),
+                                  label: const Text(
+                                    '일일 탑승 취소',
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    side: const BorderSide(color: Color(0xFFFECACA)),
+                                    backgroundColor: const Color(0xFFFEF2F2),
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
                                 ),
                               ),
                             ],
