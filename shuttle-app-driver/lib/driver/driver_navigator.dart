@@ -11,6 +11,7 @@ import '../config.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import '../widgets/nav_map_view.dart';
+import 'direction_lock.dart';
 import 'geo.dart';
 import 'stop_order.dart';
 
@@ -173,6 +174,8 @@ class DriverNavigator extends ChangeNotifier {
   DateTime _lastReroute = DateTime.fromMillisecondsSinceEpoch(0);
   // 재탐색을 해도 계속 경로 밖이면(예: 아파트 단지 안에 서 있음) 간격을 점점 늘려 무한 반복을 막는다.
   int _rerouteStreak = 0;
+  // 방향 잠금: 재탐색으로 안내 방향이 정해지면 15초 동안은 반대 방향으로 뒤집는 새 경로를 받지 않는다 (앞뒤로 왔다 갔다 방지)
+  final DirectionLock _dirLock = DirectionLock(seconds: 15);
   static const int _rerouteBaseGapSec = 8;
   static const int _rerouteMaxGapSec = 120;
   DateTime _lastAutoRouteSync = DateTime.fromMillisecondsSinceEpoch(0);
@@ -1040,6 +1043,17 @@ class DriverNavigator extends ChangeNotifier {
       if (moving) {
         plan = await _preferSensibleStart(plan, pos, h, input);
         if (seq != _routeSeq) return;
+        // 방금 정한 방향을 15초 안에 뒤집는 경로면 받지 않고 지금 경로를 유지한다 (차가 실제로 유턴했으면 따라간다)
+        final now = DateTime.now();
+        final newStart = startBearing(plan.path);
+        if (active != null && _dirLock.blocksFlip(now: now, newStartBearing: newStart, vehicleHeading: h)) {
+          debugPrint('[nav] 방향 잠금: 15초 안에 반대 방향(${newStart?.round()}°)으로 뒤집는 경로라 받지 않고 지금 경로 유지');
+          return;
+        }
+        _activate(plan, fit: fit);
+        _dirLock.lock(newStart, now);
+        routeWarning = null;
+        return;
       }
       _activate(plan, fit: fit);
       routeWarning = null;
@@ -1332,6 +1346,7 @@ class DriverNavigator extends ChangeNotifier {
     rerouting = false;
     routeWarning = null;
     speedKmh = 0;
+    _dirLock.clear();
     isOverspeeding = false;
     departSignalBanner = null;
     _departBannerTimer?.cancel();
@@ -1809,6 +1824,7 @@ class DriverNavigator extends ChangeNotifier {
     _offRouteTestTicks = 4;
     _lastReroute = DateTime.fromMillisecondsSinceEpoch(0);
     _rerouteStreak = 0;
+    _dirLock.clear();
     notifyListeners();
   }
 
@@ -1820,6 +1836,7 @@ class DriverNavigator extends ChangeNotifier {
     _wrongTurnTicks = 3;
     _lastReroute = DateTime.fromMillisecondsSinceEpoch(0);
     _rerouteStreak = 0;
+    _dirLock.clear();
     notifyListeners();
   }
 
