@@ -428,8 +428,8 @@ export class ChatService implements OnModuleInit {
 
       for (const u of users) {
         if (settingType && !isNotificationEnabled(u, settingType)) continue;
-
-        // 해당 사용자의 최신 기기 엔드포인트 1개만 우선 선택 (중복 발송 방지)
+        // 중복 푸시 방지: 등록된 활성 기기 테이블(userDeviceRepo) 중 최신 1개만 우선 사용하고,
+        // 없을 때만 레거시 u.snsEndpointArn을 대체(Fallback)로 사용하여 동일 기기 2중 발송 방지
         const userDevs = devices.filter(d => d.userId === u.id && d.endpointArn);
         let targetArn: string | null = null;
         if (userDevs.length > 0) {
@@ -439,9 +439,11 @@ export class ChatService implements OnModuleInit {
           targetArn = u.snsEndpointArn;
         }
 
+        // 동일 배치 브로드캐스트 내에서 이미 발송된 물리 단말기 엔드포인트는 중복 발송 스킵
         if (targetArn && !sentEndpoints.has(targetArn)) {
           sentEndpoints.add(targetArn);
           await sendSnsPushNotification(targetArn, title, body, data);
+        }
         }
       }
     } catch (snsErr) {
