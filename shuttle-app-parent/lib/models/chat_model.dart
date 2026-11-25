@@ -41,6 +41,8 @@ class ChatMessageModel {
   final List<String> readBy;
   /// 선생님 방해금지 시간에 보낸 메시지가 선생님께 전달될 시각 (null = 이미 전달됨)
   final DateTime? deliverAt;
+  /// 사진 메시지(type IMAGE)의 사진 주소 (payload.imageUrl). 사진이 아니면 null
+  final String? imageUrl;
 
   ChatMessageModel({
     required this.id,
@@ -54,6 +56,7 @@ class ChatMessageModel {
     required this.senderRole,
     required this.readBy,
     this.deliverAt,
+    this.imageUrl,
   });
 
   /// 아직 선생님께 전달되지 않은 메시지인지
@@ -90,6 +93,9 @@ class ChatMessageModel {
       senderRole: sender['role'] as String? ?? '',
       readBy: readByList,
       deliverAt: DateTime.tryParse(json['deliverAt']?.toString() ?? '')?.toLocal(),
+      imageUrl: (json['type'] == 'IMAGE' && json['payload'] is Map && json['payload']['imageUrl'] is String)
+          ? json['payload']['imageUrl'] as String
+          : null,
     );
   }
 }

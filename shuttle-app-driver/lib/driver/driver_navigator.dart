@@ -11,7 +11,9 @@ import '../config.dart';
 import '../services/api_service.dart';
 import '../services/socket_service.dart';
 import '../widgets/nav_map_view.dart';
+import 'direction_lock.dart';
 import 'geo.dart';
+import 'stop_order.dart';
 
 /// 경로 모드. 서버 /directions 가 카카오 길찾기에 실제로 보내는 기준:
 /// - safe: priority=RECOMMEND + avoid=[uturn]  (큰 길·간선도로 추천 경로 + 유턴 회피)
@@ -122,15 +124,6 @@ class _RouteInput {
   _RouteInput(this.waypoints, this.destination);
 }
 
-/// 공공데이터포털 어린이 보호구역 주요 지점 + 유치원/정류장 반경 보호구역
-const List<(String, GeoPoint)> _publicSchoolZones = [
-  ('안산 중앙어린이보호구역', GeoPoint(37.3195, 126.8360)),
-  ('고잔초등학교 어린이보호구역', GeoPoint(37.3238, 126.8282)),
-  ('송산초등학교 어린이보호구역', GeoPoint(37.7435, 127.0965)),
-  ('민락어린이보호구역', GeoPoint(37.7478, 127.1021)),
-  ('삼현초등학교 어린이보호구역', GeoPoint(37.7392, 127.1088)),
-];
-
 /// 기사 앱의 운행·내비게이션 상태
 class DriverNavigator extends ChangeNotifier {
   DriverNavigator(this.map) {
@@ -179,6 +172,12 @@ class DriverNavigator extends ChangeNotifier {
   double _progressFrac = 0.0;
   int _offRouteCount = 0;
   DateTime _lastReroute = DateTime.fromMillisecondsSinceEpoch(0);
+  // 재탐색을 해도 계속 경로 밖이면(예: 아파트 단지 안에 서 있음) 간격을 점점 늘려 무한 반복을 막는다.
+  int _rerouteStreak = 0;
+  // 방향 잠금: 재탐색으로 안내 방향이 정해지면 15초 동안은 반대 방향으로 뒤집는 새 경로를 받지 않는다 (앞뒤로 왔다 갔다 방지)
+  final DirectionLock _dirLock = DirectionLock(seconds: 15);
+  static const int _rerouteBaseGapSec = 8;
+  static const int _rerouteMaxGapSec = 120;
   DateTime _lastAutoRouteSync = DateTime.fromMillisecondsSinceEpoch(0);
 
   int _lastSyncedProgress = -1;
@@ -188,8 +187,6 @@ class DriverNavigator extends ChangeNotifier {
   int speedKmh = 0;
   int _prevSpeedKmh = 0;
   DateTime _prevSpeedAt = DateTime.now();
-  bool inSchoolZone = false;
-  String? schoolZoneName;
   bool isOverspeeding = false;
   DateTime _lastOverspeedAlert = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastSuddenStopAlert = DateTime.fromMillisecondsSinceEpoch(0);
@@ -199,9 +196,6 @@ class DriverNavigator extends ChangeNotifier {
 
   /// 시속 5km 이상 주행 중인지 여부 (주행 중 조작 잠금 기준)
   bool get isMovingFast => driving && speedKmh >= 5;
-
-  /// 현재 도로 제한 속도 (어린이 보호구역: 30km/h, 일반 도로: 50km/h)
-  int get speedLimitKmh => inSchoolZone ? 30 : 50;
 
   // ── 위치 ──
   GeoPoint? position;
@@ -520,6 +514,7 @@ class DriverNavigator extends ChangeNotifier {
         }
         final passedNames = stops.where((s) => s.passed).map((s) => s.name).toSet();
         final prevByName = {for (final s in stops) s.name: s};
+        final prevList = List<NavStop>.from(stops);
         final approachedNames = stops.where((s) => s.saidApproach).map((s) => s.name).toSet();
         stops
           ..clear()
@@ -541,6 +536,8 @@ class DriverNavigator extends ChangeNotifier {
             }
             return stop;
           }));
+        // 운행 중이면 정해 둔 순서는 그대로 두고, 새 정류장만 가장 덜 돌아가는 자리에 끼워 넣는다
+        if (driving && !testMode) _keepOrderAndInsertNew(prevList);
       }
       loadError = null;
       notifyListeners();
@@ -779,6 +776,57 @@ class DriverNavigator extends ChangeNotifier {
 
   // ───────────── 경로 계산 ─────────────
 
+  /// 운행 전: 차의 현재 위치(없으면 유치원)에서 출발해 유치원으로 돌아오는 가장 짧은 순서로 남은 정류장을 다시 정한다.
+  /// (서버 순서는 '유치원에서 가까운 순'이라 차 위치를 몰라서, 차가 반대편에 있으면 크게 돌아가는 경로가 나온다)
+  void _optimizeStopOrder() {
+    if (driving || academy == null) return;
+    final passed = stops.where((s) => s.passed).toList();
+    final rest = stops.where((s) => !s.passed).toList();
+    if (rest.length < 2) return;
+    final order = bestOrder([for (final s in rest) s.point], start: position ?? academy, end: academy);
+    var changed = false;
+    for (var i = 0; i < order.length; i++) {
+      if (order[i] != i) changed = true;
+    }
+    if (!changed) return;
+    debugPrint('[nav] 정류장 순서 정리: ${rest.map((s) => s.name).join(' → ')} ⇒ ${order.map((i) => rest[i].name).join(' → ')}');
+    stops
+      ..clear()
+      ..addAll(passed)
+      ..addAll(order.map((i) => rest[i]));
+  }
+
+  /// 운행 중 서버에서 목록을 다시 받았을 때: 이전에 정한 순서를 유지하고 새 정류장(또는 위치가 크게 바뀐 정류장)만
+  /// 현재 위치 기준으로 돌아가는 거리가 가장 적은 자리에 끼워 넣는다. 지나친 정류장은 그대로 앞에 둔다.
+  void _keepOrderAndInsertNew(List<NavStop> prev) {
+    final fresh = List<NavStop>.from(stops);
+    final prevIndex = {for (var i = 0; i < prev.length; i++) prev[i].name: i};
+    bool isKnown(NavStop s) {
+      final i = prevIndex[s.name];
+      return i != null && distanceM(prev[i].point, s.point) < 30;
+    }
+
+    final known = fresh.where(isKnown).toList()
+      ..sort((a, b) => prevIndex[a.name]!.compareTo(prevIndex[b.name]!));
+    final added = fresh.where((s) => !isKnown(s)).toList();
+    final passed = known.where((s) => s.passed).toList();
+    final seq = known.where((s) => !s.passed).toList();
+    final start = position ?? academy;
+    for (final s in added) {
+      if (s.passed) {
+        passed.add(s);
+        continue;
+      }
+      final idx = cheapestInsertIndex([for (final x in seq) x.point], s.point, start: start, end: academy);
+      seq.insert(idx, s);
+      debugPrint('[nav] 새 정류장 ${s.name}: ${idx + 1}번째로 끼워 넣음 (${seq.map((x) => x.name).join(' → ')})');
+    }
+    stops
+      ..clear()
+      ..addAll(passed)
+      ..addAll(seq);
+  }
+
   _RouteInput? _inputFor(List<NavStop> list) {
     final remaining = list.where((s) => !s.passed).toList();
     if (academy != null) return _RouteInput(remaining, academy!);
@@ -786,16 +834,24 @@ class DriverNavigator extends ChangeNotifier {
     return _RouteInput(remaining.sublist(0, remaining.length - 1), remaining.last.point);
   }
 
-  Future<RoutePlan> _fetchPlan(RouteMode m, GeoPoint origin, _RouteInput input) async {
+  Future<RoutePlan> _fetchPlan(RouteMode m, GeoPoint origin, _RouteInput input, {double? headingDeg}) async {
     var effectiveOrigin = origin;
     if (input.waypoints.isNotEmpty && distanceM(origin, input.destination) < 25) {
       effectiveOrigin = GeoPoint(origin.lat + 0.0002, origin.lng + 0.0002);
     }
+    // 경로가 돌아갈 때 원인(출발점·정류장 순서)을 찾기 위해 서버로 보내는 좌표를 기록에 남긴다
+    final shifted = effectiveOrigin.lat != origin.lat || effectiveOrigin.lng != origin.lng;
+    debugPrint('[nav] 요청 ${m.key}: 출발 ${origin.lat},${origin.lng}'
+        '${shifted ? ' (출발=도착이라 ${effectiveOrigin.lat},${effectiveOrigin.lng} 로 옮겨 보냄)' : ''}'
+        ' / 도착 ${input.destination.lat},${input.destination.lng}'
+        ' / 경유지 ${input.waypoints.length}개: '
+        '${[for (var i = 0; i < input.waypoints.length; i++) '${i + 1}.${input.waypoints[i].name}(${input.waypoints[i].point.lat},${input.waypoints[i].point.lng})'].join(' → ')}');
     final raw = await _post('/directions/', {
       'origin': effectiveOrigin.toJson(),
       'destination': input.destination.toJson(),
       'waypoints': input.waypoints.take(30).map((s) => s.point.toJson()).toList(),
       'mode': m.key,
+      if (headingDeg != null) 'heading': headingDeg.round() % 360,
     });
     if (raw is! Map<String, dynamic>) {
       throw NavException('경로 서버 응답 형식이 올바르지 않습니다.');
@@ -853,6 +909,7 @@ class DriverNavigator extends ChangeNotifier {
   /// 운행 전: 안전·빠른 경로를 같은 출발지·경유지·도착지로 동시에 계산
   Future<void> previewRoutes() async {
     if (driving) return;
+    _optimizeStopOrder();
     final input = _inputFor(stops);
     final origin = position ?? academy;
     if (input == null || origin == null) {
@@ -978,8 +1035,26 @@ class DriverNavigator extends ChangeNotifier {
     rerouting = true;
     notifyListeners();
     try {
-      final plan = await _fetchPlan(mode, pos, input);
+      // 달리는 중이면 차가 향하는 방향을 함께 보내고, 뒤로 출발하는 경로는 한 번 더 따져 본다
+      final h = heading;
+      final moving = driving && speedKmh >= _movingKmh && h != null;
+      var plan = await _fetchPlan(mode, pos, input, headingDeg: moving ? h : null);
       if (seq != _routeSeq) return;
+      if (moving) {
+        plan = await _preferSensibleStart(plan, pos, h, input);
+        if (seq != _routeSeq) return;
+        // 방금 정한 방향을 15초 안에 뒤집는 경로면 받지 않고 지금 경로를 유지한다 (차가 실제로 유턴했으면 따라간다)
+        final now = DateTime.now();
+        final newStart = startBearing(plan.path);
+        if (active != null && _dirLock.blocksFlip(now: now, newStartBearing: newStart, vehicleHeading: h)) {
+          debugPrint('[nav] 방향 잠금: 15초 안에 반대 방향(${newStart?.round()}°)으로 뒤집는 경로라 받지 않고 지금 경로 유지');
+          return;
+        }
+        _activate(plan, fit: fit);
+        _dirLock.lock(newStart, now);
+        routeWarning = null;
+        return;
+      }
       _activate(plan, fit: fit);
       routeWarning = null;
     } catch (e) {
@@ -996,6 +1071,67 @@ class DriverNavigator extends ChangeNotifier {
     }
   }
 
+  // 재탐색 방향 판단 기준
+  static const double _movingKmh = 10; // 이 속도 이상일 때만 "앞으로 달리는 중"으로 본다
+  static const double _backwardDeg = 120; // 차 방향과 이만큼 어긋나면 "뒤로 출발하는 경로"
+  static const double _probeAheadM = 60; // 비교용으로 차 앞쪽 이만큼에서 다시 경로를 받는다
+  static const double _uTurnMinSavingS = 90; // 뒤로 도는 경로를 고르려면 최소 이만큼(초) 빨라야 한다
+  static const double _uTurnMinSavingRatio = 0.15; // …그리고 전체 시간의 15% 이상
+
+  /// 달리는 중인데 새 경로가 차 뒤쪽으로 출발하면(유턴·반대 방향), 차 앞쪽에서 출발하는 경로도 받아 비교한다.
+  /// - 유턴·반대 방향이 정말 빠르면(1분 30초 이상이면서 15% 이상) 그 경로를 그대로 쓴다.
+  /// - 앞쪽 출발 경로도 결국 뒤로 돌라고 하면(막다른 길 등) 그 경로가 맞으므로 그대로 쓴다.
+  /// - 그 밖에는 차가 가던 방향으로 이어지는 경로를 쓴다. (말도 안 되게 뒤로 돌리는 재탐색 방지)
+  Future<RoutePlan> _preferSensibleStart(RoutePlan plan, GeoPoint pos, double h, _RouteInput input) async {
+    final start = startBearing(plan.path);
+    if (start == null || _angleDiff(start, h) < _backwardDeg) return plan;
+
+    final ahead = offsetPoint(pos, h, _probeAheadM);
+    final RoutePlan fwd;
+    try {
+      fwd = await _fetchPlan(plan.mode, ahead, input, headingDeg: h);
+    } catch (e) {
+      debugPrint('[nav] 앞쪽 출발 경로 조회 실패, 받은 경로 사용: $e');
+      return plan;
+    }
+    final fwdStart = startBearing(fwd.path);
+    if (fwdStart != null && _angleDiff(fwdStart, h) >= _backwardDeg) {
+      debugPrint('[nav] 앞쪽에서 출발해도 뒤로 돌라고 함 → 유턴 경로 사용');
+      return plan;
+    }
+    final speedMps = math.max(3.0, speedKmh / 3.6);
+    final fwdTotalS = fwd.durationS + _probeAheadM / speedMps;
+    final savingS = fwdTotalS - plan.durationS;
+    if (savingS >= math.max(_uTurnMinSavingS, fwdTotalS * _uTurnMinSavingRatio)) {
+      debugPrint('[nav] 유턴 경로가 ${savingS.round()}초 빠름 → 유턴 경로 사용');
+      return plan;
+    }
+    debugPrint('[nav] 유턴 경로 이득 ${savingS.round()}초뿐 → 가던 방향 경로 사용');
+    return _withLeadIn(fwd, pos);
+  }
+
+  /// 앞쪽에서 받은 경로 앞에 현재 위치를 붙여, 차가 경로 시작점까지 자연스럽게 이어지게 한다.
+  RoutePlan _withLeadIn(RoutePlan p, GeoPoint pos) {
+    final path = [pos, ...p.path];
+    final leadM = distanceM(pos, p.path.first);
+    for (final g in p.guides) {
+      g.pathIndex += 1;
+    }
+    return RoutePlan(
+      mode: p.mode,
+      origin: pos,
+      path: path,
+      cum: cumulativeDistances(path),
+      guides: p.guides,
+      distanceM: p.distanceM + leadM,
+      durationS: p.durationS + leadM / math.max(3.0, speedKmh / 3.6),
+      turnCount: p.turnCount,
+      traffic: [for (final t in p.traffic) TrafficSegment(t.from + 1, t.to + 1, t.state)],
+      criteriaFromServer: p.criteriaFromServer,
+      provider: p.provider,
+    );
+  }
+
   double? _roadBearingAt(List<GeoPoint> path, int index) {
     if (path.length < 2) return null;
     final startIdx = math.min(math.max(index, 0), path.length - 1);
@@ -1009,8 +1145,12 @@ class DriverNavigator extends ChangeNotifier {
 
   void _activate(RoutePlan plan, {bool fit = false}) {
     active = plan;
+    // 달리는 중에는 실제 진행 방향(GPS)을 그대로 둔다.
+    // 새 경로의 첫 방향으로 덮어쓰면, 유턴 경로를 받았을 때 화살표가 뒤로 돌아
+    // 바로 "진행 방향 어긋남"으로 다시 재탐색하는 반복이 생긴다.
     final initialRoadHeading = _roadBearingAt(plan.path, 0);
-    if (initialRoadHeading != null) {
+    final keepGpsHeading = driving && speedKmh >= _movingKmh && heading != null;
+    if (initialRoadHeading != null && !keepGpsHeading) {
       heading = initialRoadHeading;
     }
     var from = 0;
@@ -1213,8 +1353,7 @@ class DriverNavigator extends ChangeNotifier {
     rerouting = false;
     routeWarning = null;
     speedKmh = 0;
-    inSchoolZone = false;
-    schoolZoneName = null;
+    _dirLock.clear();
     isOverspeeding = false;
     departSignalBanner = null;
     _departBannerTimer?.cancel();
@@ -1281,54 +1420,16 @@ class DriverNavigator extends ChangeNotifier {
     _prevSpeedAt = now;
     speedKmh = newSpeed;
 
-    // 2) 어린이 보호구역 진입 감지 (유치원 반경 300m, 정류장 반경 180m, 공공데이터 어린이보호구역 반경 300m)
-    String? detectedZone;
-    if (academy != null && distanceM(p, academy!) <= 300) {
-      detectedZone = '유치원 앞 어린이 보호구역';
-    }
-    if (detectedZone == null) {
-      for (final (zName, zPt) in _publicSchoolZones) {
-        if (distanceM(p, zPt) <= 300) {
-          detectedZone = zName;
-          break;
-        }
-      }
-    }
-    if (detectedZone == null) {
-      for (final s in activeStops) {
-        if (!s.passed && distanceM(p, s.point) <= 180) {
-          detectedZone = '${s.name} 승하차 보호구역';
-          break;
-        }
-      }
-    }
-
-    final wasInZone = inSchoolZone;
-    inSchoolZone = detectedZone != null;
-    schoolZoneName = detectedZone;
-
-    if (driving && !wasInZone && inSchoolZone) {
-      _speak('어린이 보호구역에 진입했습니다. 시속 30킬로미터 이하로 서행하세요.');
-    }
-
-    // 3) 과속 감지 (어린이 보호구역 30km/h 초과, 일반도로 80km/h 초과)
-    final limit = inSchoolZone ? 30 : 80;
+    // 2) 과속 감지 (일반도로 80km/h 초과)
+    const limit = 80;
     isOverspeeding = driving && speedKmh > limit;
     if (isOverspeeding && now.difference(_lastOverspeedAlert).inSeconds > 25) {
       _lastOverspeedAlert = now;
-      if (inSchoolZone) {
-        _speak('어린이 보호구역 제한속도 시속 30킬로미터를 초과했습니다. 감속해 주세요.');
-        unawaited(_logSafetyEventToServer(
-          'OVERSPEED_SCHOOL_ZONE',
-          '안전운전 기록: 어린이 보호구역 과속 (${speedKmh}km/h, 제한 30km/h)',
-        ));
-      } else {
-        _speak('과속입니다. 규정 속도를 준수해 주세요.');
-        unawaited(_logSafetyEventToServer(
-          'OVERSPEED',
-          '안전운전 기록: 과속 감지 (${speedKmh}km/h)',
-        ));
-      }
+      _speak('과속입니다. 규정 속도를 준수해 주세요.');
+      unawaited(_logSafetyEventToServer(
+        'OVERSPEED',
+        '안전운전 기록: 과속 감지 (${speedKmh}km/h)',
+      ));
     }
   }
 
@@ -1579,13 +1680,22 @@ class DriverNavigator extends ChangeNotifier {
     final headingDeviated = (speedMpsVal >= 3.0 && curHeading != null)
         ? _angleDiff(curHeading, roadBearing) >= 100.0
         : false;
-    final isOff = (!isSnapped && off >= 35.0) || headingDeviated;
+    // 멈춰 있을 때(시속 3.6km 미만)는 GPS 흔들림일 뿐이라 이탈로 보지 않는다 (제자리에서 재탐색 반복 방지)
+    final isStationary = speedMpsVal < 1.0 && !simulating;
+    final isOff = !isStationary && ((!isSnapped && off >= 35.0) || headingDeviated);
+
+    // 경로 위로 돌아오면 재탐색 간격을 처음(8초)으로 되돌린다
+    if (isSnapped && !headingDeviated) _rerouteStreak = 0;
 
     _offRouteCount = isOff ? _offRouteCount + 1 : 0;
-    if (_offRouteCount >= 2 && !rerouting && DateTime.now().difference(_lastReroute).inSeconds >= 8) {
+    // 재탐색 간격: 8초 → 16초 → 32초 … 최대 120초 (재탐색해도 계속 경로 밖이면 점점 드물게)
+    final gapSec = math.min(_rerouteMaxGapSec, _rerouteBaseGapSec * (1 << math.min(_rerouteStreak, 4)));
+    if (_offRouteCount >= 2 && !rerouting && DateTime.now().difference(_lastReroute).inSeconds >= gapSec) {
       _offRouteCount = 0;
       _lastReroute = DateTime.now();
-      _speak('경로를 다시 찾습니다.');
+      // 음성 안내는 처음 한 번만 (계속 '다시 찾습니다'라고 말하지 않게)
+      if (_rerouteStreak == 0) _speak('경로를 다시 찾습니다.');
+      _rerouteStreak++;
       _reroute(reason: 'off-route');
       return;
     }
@@ -1720,6 +1830,8 @@ class DriverNavigator extends ChangeNotifier {
     if (!simulating) return;
     _offRouteTestTicks = 4;
     _lastReroute = DateTime.fromMillisecondsSinceEpoch(0);
+    _rerouteStreak = 0;
+    _dirLock.clear();
     notifyListeners();
   }
 
@@ -1730,6 +1842,8 @@ class DriverNavigator extends ChangeNotifier {
     if (!simulating) return;
     _wrongTurnTicks = 3;
     _lastReroute = DateTime.fromMillisecondsSinceEpoch(0);
+    _rerouteStreak = 0;
+    _dirLock.clear();
     notifyListeners();
   }
 

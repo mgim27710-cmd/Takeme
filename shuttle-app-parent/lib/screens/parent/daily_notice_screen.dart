@@ -59,6 +59,9 @@ class _DailyNoticeScreenState extends State<DailyNoticeScreen> {
       if (mounted) {
         setState(() {
           _notices = list;
+          for (final n in list) {
+            if (n['isRead'] == true && n['id'] is int) _confirmedNoticeIds.add(n['id'] as int);
+          }
           _isLoading = false;
         });
       }
@@ -80,23 +83,15 @@ class _DailyNoticeScreenState extends State<DailyNoticeScreen> {
   }
 
   void _openDetail(Map<String, dynamic> notice) {
+    final id = notice['id'];
+    if (id is int) {
+      // 카카오톡처럼 열면 바로 읽음. 서버에도 남겨 담임교사가 누가 읽었는지 볼 수 있다.
+      if (!_confirmedNoticeIds.contains(id)) setState(() => _confirmedNoticeIds.add(id));
+      ApiService().markPostRead(id).ignore();
+    }
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => DailyNoticeDetailScreen(
-          notice: notice,
-          isConfirmed: _confirmedNoticeIds.contains(notice['id']),
-          onConfirmChanged: (confirmed) {
-            setState(() {
-              if (confirmed) {
-                _confirmedNoticeIds.add(notice['id'] as int);
-              } else {
-                _confirmedNoticeIds.remove(notice['id'] as int);
-              }
-            });
-          },
-        ),
-      ),
+      MaterialPageRoute(builder: (_) => DailyNoticeDetailScreen(notice: notice)),
     );
   }
 
@@ -165,29 +160,19 @@ class _DailyNoticeScreenState extends State<DailyNoticeScreen> {
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF2563EB).withValues(alpha: 0.2),
-                          blurRadius: 8,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
                     ),
                     child: Row(
                       children: [
                         Container(
                           padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.2),
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFDBEAFE),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.campaign_rounded, color: Colors.white, size: 26),
+                          child: const Icon(Icons.campaign_rounded, color: Color(0xFF2563EB), size: 22),
                         ),
                         const SizedBox(width: 14),
                         Expanded(
@@ -197,8 +182,8 @@ class _DailyNoticeScreenState extends State<DailyNoticeScreen> {
                               Text(
                                 '$className 담임선생님 일일 알림장',
                                 style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 15,
+                                  color: Color(0xFF1E293B),
+                                  fontSize: 14,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -206,7 +191,7 @@ class _DailyNoticeScreenState extends State<DailyNoticeScreen> {
                               const Text(
                                 '오늘의 활동, 내일 준비물, 귀가 전달사항을 매일 확인해주세요.',
                                 style: TextStyle(
-                                  color: Color(0xFFDBEAFE),
+                                  color: Color(0xFF64748B),
                                   fontSize: 12,
                                   height: 1.3,
                                 ),
@@ -427,7 +412,7 @@ class _DailyNoticeScreenState extends State<DailyNoticeScreen> {
                           ),
                           const SizedBox(width: 3),
                           Text(
-                            isConfirmed ? '확인완료' : '미확인',
+                            isConfirmed ? '읽음' : '안 읽음',
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
@@ -520,6 +505,7 @@ class _DailyNoticeScreenState extends State<DailyNoticeScreen> {
                               setState(() {
                                 _confirmedNoticeIds.add(id);
                               });
+                              ApiService().markPostRead(id).ignore();
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                   content: Text('알림장을 확인 완료했습니다.'),
@@ -565,29 +551,14 @@ class _DailyNoticeScreenState extends State<DailyNoticeScreen> {
 /// 알림장 상세 화면
 class DailyNoticeDetailScreen extends StatefulWidget {
   final Map<String, dynamic> notice;
-  final bool isConfirmed;
-  final ValueChanged<bool> onConfirmChanged;
 
-  const DailyNoticeDetailScreen({
-    super.key,
-    required this.notice,
-    required this.isConfirmed,
-    required this.onConfirmChanged,
-  });
+  const DailyNoticeDetailScreen({super.key, required this.notice});
 
   @override
   State<DailyNoticeDetailScreen> createState() => _DailyNoticeDetailScreenState();
 }
 
 class _DailyNoticeDetailScreenState extends State<DailyNoticeDetailScreen> {
-  late bool _confirmed;
-
-  @override
-  void initState() {
-    super.initState();
-    _confirmed = widget.isConfirmed;
-  }
-
   void _openImageZoom(BuildContext context, String imageUrl) {
     Navigator.push(
       context,
@@ -790,51 +761,9 @@ class _DailyNoticeDetailScreenState extends State<DailyNoticeDetailScreen> {
               ),
             ],
 
-            const SizedBox(height: 30),
-
-            // 학부모 확인 완료 버튼 (한 번 누르면 취소 불가 고정)
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: ElevatedButton.icon(
-                onPressed: _confirmed
-                    ? () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('이미 확인을 완료한 알림장입니다.'),
-                            duration: Duration(seconds: 1),
-                          ),
-                        );
-                      }
-                    : () {
-                        setState(() => _confirmed = true);
-                        widget.onConfirmChanged(true);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('알림장을 확인 완료했습니다.'),
-                            backgroundColor: Color(0xFF10B981),
-                            duration: Duration(seconds: 1),
-                          ),
-                        );
-                      },
-                icon: Icon(
-                  _confirmed ? Icons.check_circle_rounded : Icons.check_circle_outline_rounded,
-                  color: Colors.white,
-                ),
-                label: Text(
-                  _confirmed ? '담임선생님 알림장 확인 완료됨' : '알림장 내용 확인했습니다',
-                  style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _confirmed ? const Color(0xFF059669) : const Color(0xFF2563EB),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  elevation: 0,
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-          ],
-        ),
+              const SizedBox(height: 20),
+            ],
+          ),
       ),
     );
   }

@@ -1115,6 +1115,58 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
     );
   }
 
+
+  // ───────────── 사진 메시지(type IMAGE, payload.imageUrl): 말풍선 안에 사진으로 보여준다 ─────────────
+
+  String? _imageUrlOf(Map<String, dynamic> msg) {
+    if (msg['type'] != 'IMAGE') return null;
+    final p = msg['payload'];
+    if (p is Map && p['imageUrl'] is String && (p['imageUrl'] as String).isNotEmpty) return p['imageUrl'] as String;
+    return null;
+  }
+
+  Widget _bubbleContent(Map<String, dynamic> msg, String text, Color textColor) {
+    final url = _imageUrlOf(msg);
+    if (url == null) {
+      return Text(text, style: TextStyle(color: textColor, fontSize: 14, height: 1.4));
+    }
+    return GestureDetector(
+      onTap: () => showDialog(
+        context: context,
+        builder: (ctx) => Dialog(
+          backgroundColor: Colors.black,
+          insetPadding: EdgeInsets.zero,
+          child: Stack(
+            children: [
+              InteractiveViewer(child: Center(child: Image.network(url, fit: BoxFit.contain))),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: () => Navigator.pop(ctx)),
+              ),
+            ],
+          ),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.network(
+          url,
+          width: 200,
+          fit: BoxFit.cover,
+          loadingBuilder: (c, child, progress) => progress == null
+              ? child
+              : const SizedBox(width: 200, height: 140, child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
+          errorBuilder: (c, e, s) => SizedBox(
+            width: 200,
+            height: 80,
+            child: Center(child: Text('사진을 불러오지 못했습니다', style: TextStyle(fontSize: 12, color: textColor))),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildMessageItem(Map<String, dynamic> msg, bool showDate, String dateText) {
     final senderId = msg['sender']?['id'];
     final isMe = (_currentUserId != null && senderId == _currentUserId);
@@ -1394,14 +1446,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                             bottomRight: Radius.circular(16),
                           ),
                         ),
-                        child: Text(
-                          text,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            height: 1.4,
-                          ),
-                        ),
+                        child: _bubbleContent(msg, text, Colors.white),
                       ),
                     ),
                   ],
@@ -1456,14 +1501,7 @@ class _ChatConversationScreenState extends State<ChatConversationScreen> {
                                       bottomRight: Radius.circular(16),
                                     ),
                                   ),
-                                  child: Text(
-                                    text,
-                                    style: const TextStyle(
-                                      color: Color(0xFF1E293B),
-                                      fontSize: 14,
-                                      height: 1.4,
-                                    ),
-                                  ),
+                                  child: _bubbleContent(msg, text, const Color(0xFF1E293B)),
                                 ),
                               ),
                               const SizedBox(width: 6),

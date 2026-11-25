@@ -1466,4 +1466,285 @@ class _ParentChatRoomScreenState extends State<ParentChatRoomScreen> {
       ),
     );
   }
+
+  bool _shouldShowDateHeader(ChatMessageModel prev, ChatMessageModel curr) {
+    return prev.createdAt.year != curr.createdAt.year ||
+        prev.createdAt.month != curr.createdAt.month ||
+        prev.createdAt.day != curr.createdAt.day;
+  }
+
+  Widget _buildDateHeader(DateTime date) {
+    final dateStr = DateFormat('yyyy년 M월 d일 EEEE', 'ko').format(date);
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE2E8F0),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          dateStr,
+          style: const TextStyle(
+            fontSize: 11,
+            color: Color(0xFF64748B),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 전달 예정 시각 문구: "내일 아침 8시", "월요일 아침 8시" 등
+  String _deliverText(DateTime t) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final day = DateTime(t.year, t.month, t.day);
+    final diff = day.difference(today).inDays;
+    final when = diff == 0 ? '오늘' : (diff == 1 ? '내일' : DateFormat('EEEE', 'ko').format(t));
+    return '$when 아침 ${t.hour}시';
+  }
+
+  // 사진 메시지(type IMAGE)는 말풍선 안에 사진으로 보여준다
+  Widget _bubbleContent(ChatMessageModel msg, Color textColor) {
+    final url = msg.imageUrl;
+    if (url == null || url.isEmpty) {
+      return Text(msg.text, style: TextStyle(color: textColor, fontSize: 14, height: 1.4));
+    }
+    return GestureDetector(
+      onTap: () => showDialog(
+        context: context,
+        builder: (ctx) => Dialog(
+          backgroundColor: Colors.black,
+          insetPadding: EdgeInsets.zero,
+          child: Stack(
+            children: [
+              InteractiveViewer(child: Center(child: Image.network(url, fit: BoxFit.contain))),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: () => Navigator.pop(ctx)),
+              ),
+            ],
+          ),
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.network(
+          url,
+          width: 200,
+          fit: BoxFit.cover,
+          loadingBuilder: (c, child, progress) => progress == null
+              ? child
+              : const SizedBox(width: 200, height: 140, child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
+          errorBuilder: (c, e, s) => SizedBox(
+            width: 200,
+            height: 80,
+            child: Center(child: Text('사진을 불러오지 못했습니다', style: TextStyle(fontSize: 12, color: textColor))),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMessageBubble(ChatMessageModel msg, bool isMe) {
+    final timeStr = DateFormat('a h:mm', 'ko').format(msg.createdAt);
+
+    if (isMe) {
+      // 내 메시지 (우측 블루 버블)
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                // 선생님 방해금지 시간에 보낸 메시지: 전달 예정 표시
+                if (msg.isWaitingDelivery)
+                  Text(
+                    '${_deliverText(msg.deliverAt!)} 전달',
+                    style: const TextStyle(fontSize: 10, color: Color(0xFFB45309), fontWeight: FontWeight.w700),
+                  ),
+                Text(
+                  timeStr,
+                  style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+                ),
+              ],
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF2563EB),
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    topRight: Radius.circular(4),
+                    bottomLeft: Radius.circular(16),
+                    bottomRight: Radius.circular(16),
+                  ),
+                ),
+                child: _bubbleContent(msg, Colors.white),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      // 상대방 메시지 (좌측 흰색 버블)
+      final senderRoleBadge = _getRoleBadge(msg.senderRole);
+
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (msg.senderId == 0)
+              // 시스템 알림(TakeMe 알림): 어두운 종 아이콘
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.notifications_active, color: Colors.white, size: 17),
+              )
+            else
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: const Color(0xFFE0E7FF),
+              child: Text(
+                msg.senderName.isNotEmpty ? msg.senderName.substring(0, 1) : '교',
+                style: const TextStyle(
+                  color: Color(0xFF3730A3),
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        msg.senderName,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1E293B),
+                        ),
+                      ),
+                      if (senderRoleBadge != null) ...[
+                        const SizedBox(width: 4),
+                        senderRoleBadge,
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Flexible(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: const BorderRadius.only(
+                              topLeft: Radius.circular(4),
+                              topRight: Radius.circular(16),
+                              bottomLeft: Radius.circular(16),
+                              bottomRight: Radius.circular(16),
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.04),
+                                blurRadius: 4,
+                                offset: const Offset(0, 1),
+                              ),
+                            ],
+                          ),
+                          child: _bubbleContent(msg, const Color(0xFF1E293B)),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        timeStr,
+                        style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  Widget? _getRoleBadge(String role) {
+    if (role == 'HOMEROOM_TEACHER') {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEF3C7),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: const Text(
+          '담임교사',
+          style: TextStyle(fontSize: 9, color: Color(0xFF92400E), fontWeight: FontWeight.bold),
+        ),
+      );
+    } else if (role == 'ACADEMY_ADMIN') {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        decoration: BoxDecoration(
+          color: const Color(0xFFDCFCE7),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: const Text(
+          '원장선생님',
+          style: TextStyle(fontSize: 9, color: Color(0xFF166534), fontWeight: FontWeight.bold),
+        ),
+      );
+    }
+    return null;
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEFF6FF),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.chat_bubble_outline_rounded, size: 36, color: Color(0xFF2563EB)),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            '대화를 시작해보세요!',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF334155),
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            '선생님 또는 원장님께 문의하실 내용을 남겨주시면\n확인 후 답변을 드립니다.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.4),
+          ),
+        ],
+      ),
+    );
+  }
 }

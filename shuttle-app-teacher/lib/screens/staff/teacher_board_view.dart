@@ -1441,6 +1441,19 @@ class _TeacherBoardViewState extends State<TeacherBoardView> with AutomaticKeepA
     );
   }
 
+  /// 이 글을 누가 읽었는지 (학부모가 글을 열면 자동으로 기록된다)
+  void _showReadersSheet(Map<String, dynamic> post) {
+    final postId = post['id'] as int;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (ctx) => _ReadersSheet(postId: postId, title: post['title']?.toString() ?? ''),
+    );
+  }
+
   void _handleLikeToggle(Map<String, dynamic> post) async {
     final postId = post['id'] as int;
     final user = ApiService().currentUser;
@@ -2043,6 +2056,15 @@ class _TeacherBoardViewState extends State<TeacherBoardView> with AutomaticKeepA
                                           style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
                                         ),
                                       ),
+                                      const SizedBox(width: 8),
+                                      TextButton.icon(
+                                        onPressed: () => _showReadersSheet(post),
+                                        icon: const Icon(Icons.visibility_outlined, size: 18, color: Color(0xFF64748B)),
+                                        label: const Text(
+                                          '읽음',
+                                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+                                        ),
+                                      ),
                                     ],
                                   ),
                                 ),
@@ -2054,6 +2076,134 @@ class _TeacherBoardViewState extends State<TeacherBoardView> with AutomaticKeepA
                     ),
         ),
       ],
+    );
+  }
+}
+
+/// 글을 누가 읽었는지 보여 주는 하단 창 (교직원 전용. 학부모 앱에서는 볼 수 없다)
+class _ReadersSheet extends StatefulWidget {
+  final int postId;
+  final String title;
+
+  const _ReadersSheet({required this.postId, required this.title});
+
+  @override
+  State<_ReadersSheet> createState() => _ReadersSheetState();
+}
+
+class _ReadersSheetState extends State<_ReadersSheet> {
+  late Future<Map<String, dynamic>?> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = ApiService().getPostReaders(widget.postId);
+  }
+
+  String _time(dynamic v) {
+    try {
+      return DateFormat('M월 d일 HH:mm').format(DateTime.parse(v.toString()).toLocal());
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Widget _row({required bool read, required Map<String, dynamic> p}) {
+    final children = (p['childNames'] as List? ?? []).map((e) => e.toString()).join(', ');
+    final name = p['name']?.toString() ?? '학부모';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Icon(
+            read ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+            size: 18,
+            color: read ? const Color(0xFF059669) : const Color(0xFF94A3B8),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              children.isEmpty ? name : '$name ($children)',
+              style: const TextStyle(fontSize: 14, color: Color(0xFF1E293B)),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (read)
+            Text(_time(p['readAt']), style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+          child: FutureBuilder<Map<String, dynamic>?>(
+            future: _future,
+            builder: (context, snap) {
+              if (snap.connectionState != ConnectionState.done) {
+                return const SizedBox(height: 160, child: Center(child: CircularProgressIndicator()));
+              }
+              final data = snap.data;
+              if (data == null) {
+                return const SizedBox(
+                  height: 160,
+                  child: Center(child: Text('읽음 명단을 불러오지 못했습니다.', style: TextStyle(color: Color(0xFF64748B)))),
+                );
+              }
+              final readers = (data['readers'] as List? ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+              final unread = (data['unread'] as List? ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+              final total = (data['total'] as num?)?.toInt() ?? (readers.length + unread.length);
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.title.isEmpty ? '읽음 확인' : widget.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '읽음 ${readers.length}명 / 전체 $total명',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
+                  ),
+                  const SizedBox(height: 10),
+                  const Divider(height: 1),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.only(top: 8),
+                      children: [
+                        if (total == 0)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 24),
+                            child: Center(child: Text('이 글을 볼 수 있는 학부모가 없습니다.', style: TextStyle(color: Color(0xFF94A3B8)))),
+                          ),
+                        if (readers.isNotEmpty) ...[
+                          Text('읽은 학부모 ${readers.length}명', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF059669))),
+                          ...readers.map((p) => _row(read: true, p: p)),
+                          const SizedBox(height: 10),
+                        ],
+                        if (unread.isNotEmpty) ...[
+                          Text('아직 안 읽은 학부모 ${unread.length}명', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFDC2626))),
+                          ...unread.map((p) => _row(read: false, p: p)),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 }

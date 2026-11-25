@@ -4,8 +4,12 @@ import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { DirectionsRequestDto, LatLngDto, RouteMode } from './directions.dto';
 
-const NAVER_DIRECTIONS_15_URL = 'https://naveropenapi.apigw.ntruss.com/map-direction-15/v1/driving';
-const NAVER_DIRECTIONS_5_URL = 'https://naveropenapi.apigw.ntruss.com/map-direction/v1/driving';
+// NCP 콘솔 "Maps"(VPC) 상품에서 만든 Application 은 maps.apigw.ntruss.com 을 쓴다.
+// (예전 AI·NAVER API 상품의 naveropenapi.apigw.ntruss.com 으로 보내면 인증 오류)
+// 다른 주소를 써야 하면 NAVER_DIRECTIONS_BASE_URL 로 바꿀 수 있다.
+const NAVER_DIRECTIONS_BASE_URL = (process.env.NAVER_DIRECTIONS_BASE_URL || 'https://maps.apigw.ntruss.com').replace(/\/+$/, '');
+const NAVER_DIRECTIONS_15_URL = `${NAVER_DIRECTIONS_BASE_URL}/map-direction-15/v1/driving`;
+const NAVER_DIRECTIONS_5_URL = `${NAVER_DIRECTIONS_BASE_URL}/map-direction/v1/driving`;
 const KAKAO_WAYPOINTS_URL = 'https://apis-navi.kakaomobility.com/v1/waypoints/directions';
 
 /** 네이버 Directions 15 가 받을 수 있는 경유지 최대 개수. 이보다 많으면 카카오를 먼저 쓴다 */
@@ -65,6 +69,11 @@ export class DirectionsService {
 
     const mode: RouteMode = req?.mode === 'fast' ? 'fast' : 'safe';
     const criteria = ROUTE_CRITERIA[mode];
+    // 차량 진행 방향 (카카오 길찾기 출발지 angle 로 전달, 네이버는 지원하지 않음)
+    const rawHeading = Number(req?.heading);
+    const heading = req?.heading != null && Number.isFinite(rawHeading)
+      ? ((Math.round(rawHeading) % 360) + 360) % 360
+      : undefined;
 
     // 출발지·도착지와 30m 이내로 중복되거나 연속 중복되는 경유지 자동 필터링
     const waypoints: LatLngDto[] = [];
@@ -112,7 +121,7 @@ export class DirectionsService {
     if (mode === 'safe' || waypoints.length > NAVER_MAX_WAYPOINTS) {
       if (kakaoApiKey && typeof this.http?.post === 'function') {
         try {
-          return await this.fetchKakaoRoute(origin, destination, waypoints, mode, kakaoApiKey);
+          return await this.fetchKakaoRoute(origin, destination, waypoints, mode, kakaoApiKey, heading);
         } catch (kakaoErr: any) {
           this.logger.warn(`[directions] Kakao 길찾기 호출 실패: ${kakaoErr?.message}`);
           const naverResult = await tryNaver();
@@ -130,7 +139,7 @@ export class DirectionsService {
     // 2. 네이버 키가 없거나 실패하면(경유지 15개 초과 등) 카카오 길찾기
     if (kakaoApiKey && typeof this.http?.post === 'function') {
       try {
-        return await this.fetchKakaoRoute(origin, destination, waypoints, mode, kakaoApiKey);
+        return await this.fetchKakaoRoute(origin, destination, waypoints, mode, kakaoApiKey, heading);
       } catch (kErr: any) {
         this.logger.warn(`[directions] 보조 카카오 길찾기 호출 실패: ${kErr?.message}`);
       }
@@ -225,10 +234,12 @@ export class DirectionsService {
     waypoints: LatLngDto[],
     mode: RouteMode,
     apiKey: string,
+    heading?: number,
   ) {
     const criteria = ROUTE_CRITERIA[mode];
     const body = {
-      origin: { x: String(origin.lng), y: String(origin.lat) },
+      // angle: 출발지에서 차량이 향하는 방향. 주면 카카오가 차 방향을 고려해 출발 경로를 잡는다.
+      origin: { x: String(origin.lng), y: String(origin.lat), ...(heading !== undefined ? { angle: heading } : {}) },
       destination: { x: String(destination.lng), y: String(destination.lat) },
       waypoints: waypoints.map(w => ({ x: String(w.lng), y: String(w.lat) })),
       priority: criteria.priority,

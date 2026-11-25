@@ -16,7 +16,9 @@ import '../login_screen.dart';
 import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
 import 'operation_log_screen.dart';
+import '../chat/chat_conversation_screen.dart';
 import '../chat/chat_room_list_screen.dart';
+import '../../services/pending_photo.dart';
 
 /// 기사 전용 화면 (팀 앱과 같은 크기·글꼴)
 /// - 1단계(운행 준비): 전체 지도 + 하단 준비 패널('경로 탐색' 버튼)
@@ -25,7 +27,7 @@ import '../chat/chat_room_list_screen.dart';
 ///   · 시속 5km 이상 주행 중 조작 잠금 & 화면 켜짐 유지
 ///   · 차량선생님 "출발하셔도 됩니다" 신호 수신 배너·음성
 ///   · 정차 지점 메모 음성·화면 안내
-///   · 현재 속도 크게 표시 & 어린이 보호구역(30km/h) 경고 + 급정거·과속 자동 일지 기록
+///   · 현재 속도 크게 표시 + 급정거·과속 자동 일지 기록
 ///   · 길게 눌러 작동하는 SOS 긴급 버튼
 ///   · 운행 종료 시 "차량 내부 확인 완료" 체크 필수
 class DriverHomeScreen extends StatefulWidget {
@@ -91,10 +93,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     _nav = DriverNavigator(_map)..init();
     _initEventSocket();
     _loadUnreadCount();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _recoverLostPhoto());
     SocketService().connect(ApiService().token); // 이미 연결돼 있으면 그대로 둔다 (리스너를 등록하려면 소켓이 먼저 필요)
     SocketService().onRoomUpdated((_) {
       if (mounted) _loadUnreadCount();
-    }, key: 'home');
+    });
     _notificationPollTimer = Timer.periodic(const Duration(seconds: 30), (_) => _loadUnreadCount());
     _ticker = Timer.periodic(const Duration(seconds: 2), (_) {
       if (!mounted) return;
@@ -155,6 +158,27 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     _eventSocket!.on('notificationReceived', (_) {
       if (mounted) _loadUnreadCount();
     });
+  }
+
+  /// 카메라·갤러리를 여는 동안 앱이 종료됐다가 다시 켜진 경우: 보관된 사진을 찾아 원래 대화방으로 보내고 그 대화방을 연다
+  Future<void> _recoverLostPhoto() async {
+    final pending = await PendingPhoto.read();
+    if (pending == null) return;
+    final file = await PendingPhoto.lostFile();
+    await PendingPhoto.clear();
+    if (file == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(content: Text('찍은 사진을 보내는 중입니다...')));
+    final result = await ApiService().sendChatPhoto(pending.roomId, file);
+    if (!mounted) return;
+    messenger.hideCurrentSnackBar();
+    if (result == null) {
+      messenger.showSnackBar(const SnackBar(content: Text('사진을 보내지 못했습니다. 대화방에서 다시 보내 주세요.')));
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ChatConversationScreen(roomId: pending.roomId, title: pending.title)),
+    );
   }
 
   @override
@@ -254,7 +278,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
                       const SizedBox(width: 10),
                       const Expanded(
                         child: Text(
-                          '차량 내부 확인 완료\n(남아있는 원아가 없음을 확인했습니다)',
+                          '남아있는 원아가 없음을\n확인했습니다',
                           style: TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w800,
@@ -661,7 +685,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
               if (_nav.driving) ...[
                 // 좌측 상단: 티맵 스타일 파란색+하얀색 회전 안내 표지판
                 Positioned(left: 0, top: 0, child: _turnHeader()),
-                // 좌측 중단(표지판 아래): 티맵 스타일 제한속도 원형 표지판 + 현재 속도(km/h) 크게 표시
+                // 좌측 중단(표지판 아래): 현재 속도(km/h) 크게 표시
                 Positioned(left: 12, top: 146, child: _speedAndSafetyCluster()),
                 // 우측 상단: 길게 눌러 작동하는 SOS 긴급 버튼
                 Positioned(right: 12, top: 12, child: _sosLongPressButton()),
@@ -772,50 +796,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     );
   }
 
-  /// 티맵 스타일 좌측 속도계 + 어린이 보호구역 경고 표지판
+  /// 티맵 스타일 좌측 현재 속도(km/h) 표시
   Widget _speedAndSafetyCluster() {
-    final limit = _nav.speedLimitKmh;
     final over = _nav.isOverspeeding;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 제한속도 표지판: 실제 도로 제한속도 정보가 없으므로 어린이 보호구역(30)일 때만 표시
-        if (_nav.inSchoolZone)
-        Container(
-          width: 58,
-          height: 58,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: over ? _C.red : Colors.white,
-            border: Border.all(color: _C.red, width: 6),
-            boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 6, offset: Offset(0, 2))],
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            '$limit',
-            style: TextStyle(
-              fontSize: 23,
-              fontWeight: FontWeight.w900,
-              color: over ? Colors.white : _C.slate800,
-              height: 1.0,
-            ),
-          ),
-        ),
-        if (_nav.inSchoolZone)
-          Container(
-            margin: const EdgeInsets.only(top: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-            decoration: BoxDecoration(
-              color: over ? _C.red : const Color(0xFFF59E0B),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: const Text(
-              '보호구역',
-              style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900),
-            ),
-          ),
-        const SizedBox(height: 4),
         // 현재 속도 크게 표시 (티맵 스타일)
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -872,10 +859,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     final items = <PopupMenuEntry<String>>[
       _menuItem('refresh', Icons.refresh, '노선·탑승지 새로고침'),
     ];
-    if (!_nav.driving) {
-      items.add(_menuItem('log', Icons.calendar_month, '운행 일지'));
-      items.add(_menuItem('test', Icons.science_outlined, '테스트 경로로 연습하기'));
-    } else {
+    if (_nav.driving) {
       items.add(_menuItem('sim', _nav.simulating ? Icons.pause : Icons.play_arrow,
           _nav.simulating ? '시뮬레이션 멈추기' : '주행 시뮬레이션 시작'));
       if (_nav.simulating) {
@@ -1414,119 +1398,51 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     );
   }
 
-  /// 정류장 진행 패널 (하단 바 바로 위, 운전 중에도 읽히게 크게)
-  /// - 다음 정류장 / 남은 정류장 수 / 방금 도착한 정류장
-  /// - 정류장마다 도착(✓)·건너뜀(!)·남음(번호)을 색과 기호로 함께 표시
+  /// 정류장 진행 패널 (하단 바 바로 위): 한 줄로 작게
+  /// - 왼쪽: 다음 정류장 이름 (없으면 '유치원으로 이동')
+  /// - 오른쪽: 남은 정류장 수
   /// - 도착은 위치(GPS)로 자동 판정한다 (기사가 직접 누르는 도착 처리는 없다)
   Widget _stopProgressPanel() {
     final list = _nav.activeStops;
     if (list.isEmpty) return const SizedBox.shrink();
     final next = _nav.nextStop;
-    final current = _nav.currentStop;
     final remaining = _nav.remainingStopCount;
-    final skipped = _nav.skippedCount;
-
-    Widget dot(int i) {
-      final s = list[i];
-      final isNext = identical(s, next);
-      Color bg;
-      Widget child;
-      if (s.skipped) {
-        bg = _C.orange;
-        child = const Icon(Icons.priority_high, size: 16, color: Colors.white, semanticLabel: '건너뜀');
-      } else if (s.passed) {
-        bg = _C.green;
-        child = const Icon(Icons.check, size: 16, color: Colors.white, semanticLabel: '도착');
-      } else {
-        bg = isNext ? _C.blue : _C.slate300;
-        child = Text('${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w900));
-      }
-      return Container(
-        width: isNext ? 30 : 24,
-        height: isNext ? 30 : 24,
-        margin: const EdgeInsets.only(right: 6),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: bg,
-          shape: BoxShape.circle,
-          border: isNext ? Border.all(color: _C.blueDark, width: 2) : null,
-        ),
-        child: child,
-      );
-    }
 
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
         boxShadow: [BoxShadow(color: Color(0x22000000), blurRadius: 12, offset: Offset(0, -2))],
       ),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(16, 10, 12, 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(next != null ? '다음 정류장' : '정류장 완료',
-                        style: const TextStyle(fontSize: 14, color: _C.slate600, fontWeight: FontWeight.w700)),
-                    Text(
-                      next?.name ?? '유치원으로 이동',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: _C.slate800, height: 1.2),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(color: _C.blueBg, borderRadius: BorderRadius.circular(12)),
-                child: Text('남은 $remaining곳',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: _C.blue)),
-              ),
-            ],
-          ),
-          if (current != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              '방금: ${current.name}',
+          Text(next != null ? '다음' : '완료',
+              style: const TextStyle(fontSize: 14, color: _C.slate600, fontWeight: FontWeight.w700)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              next?.name ?? '유치원으로 이동',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 15, color: _C.slate600, fontWeight: FontWeight.w600),
-            ),
-          ],
-          const SizedBox(height: 10),
-          SizedBox(
-            height: 32,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: list.length,
-              itemBuilder: (_, i) => Center(child: dot(i)),
+              style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900, color: _C.slate800, height: 1.2),
             ),
           ),
-          if (skipped > 0) ...[
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                const Icon(Icons.warning_amber_rounded, size: 20, color: _C.orange),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    '건너뛴 정류장 $skipped곳 · 계획 순서와 달라요',
-                    style: const TextStyle(fontSize: 15, color: _C.orange, fontWeight: FontWeight.w800),
-                  ),
-                ),
-              ],
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(color: _C.blueBg, borderRadius: BorderRadius.circular(10)),
+            child: Text.rich(
+              TextSpan(children: [
+                const TextSpan(text: '남은 ', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                TextSpan(text: '$remaining', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+                const TextSpan(text: '곳', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+              ]),
+              style: const TextStyle(color: _C.blue, height: 1.1),
+              semanticsLabel: '남은 정류장 $remaining곳',
             ),
-          ],
-          const SizedBox(height: 10),
+          ),
         ],
       ),
     );

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { loadSecretsJson } from './config/secrets-json.config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { RoutingModule } from './routing/routing.module';
@@ -19,6 +20,7 @@ import { ChatRoomMember } from './entities/chat-room-member.entity';
 import { ChatMessage } from './entities/chat-message.entity';
 import { BoardPost } from './entities/board-post.entity';
 import { BoardComment } from './entities/board-comment.entity';
+import { BoardPostRead } from './entities/board-post-read.entity';
 import { AuditLog } from './entities/audit-log.entity';
 import { YearlyZoneMapping } from './entities/yearly-zone-mapping.entity';
 import { Attendance } from './entities/attendance.entity';
@@ -40,6 +42,8 @@ import { UserDevice } from './entities/user-device.entity';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env.development', '.env'],
+      // 네이버 길찾기 인증키 등은 shuttle-backend/secrets.json 에 넣을 수 있다 (secrets.example.json 참고)
+      load: [loadSecretsJson],
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -69,6 +73,7 @@ import { UserDevice } from './entities/user-device.entity';
           ApprovalRequest,
           BoardPost,
           BoardComment,
+          BoardPostRead,
           AuditLog,
           YearlyZoneMapping,
           Attendance,

@@ -13,6 +13,7 @@ import { RoutingModule } from '../routing/routing.module';
 import { PickupPoint } from '../entities/pickup-point.entity';
 
 import { BoardPost } from '../entities/board-post.entity';
+import { BoardPostRead } from '../entities/board-post-read.entity';
 import { ApprovalModule } from '../approval/approval.module';
 
 @Module({
@@ -27,6 +28,7 @@ import { ApprovalModule } from '../approval/approval.module';
       ParentMessage,
       PickupPoint,
       BoardPost,
+      BoardPostRead,
     ]),
     RoutingModule,
     ApprovalModule,

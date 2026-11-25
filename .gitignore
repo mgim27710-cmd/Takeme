@@ -2,6 +2,7 @@ node_modules/
 .expo/
 dist/
 build/
+.dart_tool/
 .DS_Store
 .env
 .env.development
@@ -18,3 +19,8 @@ release_apks/
 /*.js
 .archify/
 uploads/
+
+# 서버 인증키 파일 (shuttle-backend/secrets.example.json 참고)
+secrets.json
+.dart_tool/
+**/.dart_tool/

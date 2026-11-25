@@ -26,6 +26,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   RouteDataModel? _routeData;
 
   bool _isLoading = true;
+  int _unreadNotificationCount = 0;
   int _unreadChatCount = 0;
   Timer? _notificationPollTimer;
 

@@ -15,6 +15,7 @@ import { User } from '../entities/user.entity';
 import { PickupPoint } from '../entities/pickup-point.entity';
 
 import { BoardPost } from '../entities/board-post.entity';
+import { BoardPostRead } from '../entities/board-post-read.entity';
 import { getStudentClassName, kstDateString } from '../utils/school.util';
 import { applyBoardVisibility, getLinkedClassNames } from '../utils/board-visibility.util';
 import { resolveMediaRef, resolveMediaRefs } from '../utils/s3.util';
@@ -33,6 +34,7 @@ export class ParentService {
     @InjectRepository(User) private userRepository: Repository<User>,
     @InjectRepository(PickupPoint) private pickupPointRepository: Repository<PickupPoint>,
     @InjectRepository(BoardPost) private boardPostRepository: Repository<BoardPost>,
+    @InjectRepository(BoardPostRead) private boardPostReadRepository: Repository<BoardPostRead>,
     private routingService: RoutingService,
     private approvalService: ApprovalService,
   ) {}
@@ -1147,6 +1149,13 @@ export class ParentService {
 
     const posts = await qb.getMany();
 
+    // 내가 이미 읽은 글 (다른 학부모의 읽음 여부는 알려 주지 않는다)
+    const myReadIds = new Set<number>();
+    if (posts.length > 0) {
+      const reads = await this.boardPostReadRepository.find({ where: { userId: user.id, postId: In(posts.map(p => p.id)) } });
+      reads.forEach(r => myReadIds.add(r.postId));
+    }
+
     const authorUserIds = posts.map(p => p.authorUserId).filter(Boolean);
     const roleMap = new Map<number, string>();
     if (authorUserIds.length > 0) {
@@ -1177,6 +1186,7 @@ export class ParentService {
         likedUserIds: p.likedUserIds || [],
         commentCount: p.comments?.length || 0,
         comments: p.comments || [],
+        isRead: myReadIds.has(p.id),
       };
     }));
   }
