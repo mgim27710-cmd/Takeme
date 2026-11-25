@@ -55,6 +55,62 @@ class _BoardCommunityScreenState extends State<BoardCommunityScreen> {
     }
   }
 
+  /// 글을 열지 않고 바로 좋아요. 화면에 먼저 반영하고, 서버 요청이 실패하면 되돌린다.
+  Future<void> _quickLike(Map<String, dynamic> post) async {
+    final user = ApiService().currentUser;
+    final postId = int.tryParse('${post['id']}') ?? 0;
+    if (user == null || postId == 0) return;
+    final myId = user.id.toString();
+    final before = List<String>.from((post['likedUserIds'] as List? ?? []).map((e) => e.toString()));
+    final beforeCount = int.tryParse('${post['likeCount']}') ?? 0;
+    final wasLiked = before.contains(myId);
+    setState(() {
+      final now = List<String>.from(before);
+      if (wasLiked) {
+        now.remove(myId);
+      } else {
+        now.add(myId);
+      }
+      post['likedUserIds'] = now;
+      post['likeCount'] = wasLiked ? (beforeCount > 0 ? beforeCount - 1 : 0) : beforeCount + 1;
+    });
+    final res = await ApiService().togglePostLike(postId, myId);
+    if (res['success'] != true && mounted) {
+      setState(() {
+        post['likedUserIds'] = before;
+        post['likeCount'] = beforeCount;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('좋아요에 실패했습니다. 잠시 뒤 다시 눌러 주세요.'), backgroundColor: Color(0xFFEF4444)),
+      );
+    }
+  }
+
+  /// 글을 열지 않고 하단에서 올라오는 입력창으로 바로 댓글 쓰기
+  Future<void> _quickComment(Map<String, dynamic> post) async {
+    final postId = int.tryParse('${post['id']}') ?? 0;
+    if (postId == 0) return;
+    final posted = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (ctx) => _QuickCommentSheet(postId: postId, postTitle: post['title']?.toString() ?? ''),
+    );
+    if (posted != null && mounted) {
+      setState(() {
+        final comments = List<dynamic>.from(post['comments'] as List? ?? []);
+        comments.add(posted);
+        post['comments'] = comments;
+        post['commentCount'] = comments.length;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('댓글이 등록되었습니다.'), duration: Duration(seconds: 2), backgroundColor: Color(0xFF2563EB)),
+      );
+    }
+  }
+
   void _openDetail(Map<String, dynamic> post) {
     Navigator.push(
       context,
@@ -116,6 +172,40 @@ class _BoardCommunityScreenState extends State<BoardCommunityScreen> {
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF2563EB)))
           : Column(
               children: [
+                // 게시판 안내 (알림장 화면의 안내와 같은 모양)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.forum_rounded, color: Color(0xFF2563EB), size: 22),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '우리 반 게시판 & 소식',
+                              style: TextStyle(color: Color(0xFF1E293B), fontSize: 14, fontWeight: FontWeight.bold),
+                            ),
+                            SizedBox(height: 3),
+                            Text(
+                              '유치원 공지, 활동 사진, 우리 반 소식을 볼 수 있어요. 글에 좋아요와 댓글을 남길 수 있어요.',
+                              style: TextStyle(color: Color(0xFF64748B), fontSize: 12, height: 1.3),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
                 // 검색바
                 Container(
                   color: Colors.white,
@@ -225,6 +315,8 @@ class _BoardCommunityScreenState extends State<BoardCommunityScreen> {
         : (images.isNotEmpty ? images.first.toString() : null);
 
     final isNotice = role == 'ADMIN' || role == 'ACADEMY_ADMIN' || title.contains('공지');
+    final myId = ApiService().currentUser?.id.toString();
+    final liked = myId != null && (post['likedUserIds'] as List? ?? []).map((e) => e.toString()).contains(myId);
 
     return Container(
       decoration: BoxDecoration(
@@ -334,16 +426,52 @@ class _BoardCommunityScreenState extends State<BoardCommunityScreen> {
                 const Divider(height: 1, color: Color(0xFFF1F5F9)),
                 const SizedBox(height: 10),
 
-                // 하단 인터랙션 (좋아요, 댓글 수)
+                // 하단 인터랙션: 글을 열지 않고 바로 좋아요·댓글
                 Row(
                   children: [
-                    const Icon(Icons.favorite_rounded, size: 15, color: Color(0xFFEF4444)),
-                    const SizedBox(width: 4),
-                    Text('$likeCount', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
-                    const SizedBox(width: 16),
-                    const Icon(Icons.mode_comment_outlined, size: 15, color: Color(0xFF3B82F6)),
-                    const SizedBox(width: 4),
-                    Text('$commentCount', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
+                    InkWell(
+                      onTap: () => _quickLike(post),
+                      borderRadius: BorderRadius.circular(16),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        child: Row(
+                          children: [
+                            Icon(
+                              liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                              size: 19,
+                              color: liked ? const Color(0xFFEF4444) : const Color(0xFF64748B),
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              '$likeCount',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: liked ? const Color(0xFFDC2626) : const Color(0xFF64748B),
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    InkWell(
+                      onTap: () => _quickComment(post),
+                      borderRadius: BorderRadius.circular(16),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.mode_comment_outlined, size: 18, color: Color(0xFF3B82F6)),
+                            const SizedBox(width: 5),
+                            Text(
+                              '댓글 $commentCount',
+                              style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                     const Spacer(),
                     const Text('자세히 보기 >', style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
                   ],
@@ -384,6 +512,8 @@ class _BoardDetailScreenState extends State<BoardDetailScreen> {
     if (user != null && likedUsers.contains(user.id.toString())) {
       _isLiked = true;
     }
+    final pid = int.tryParse(widget.post['id']?.toString() ?? '');
+    if (pid != null) ApiService().markPostRead(pid).ignore(); // 열면 읽음 기록 (담임교사가 누가 읽었는지 볼 수 있다)
   }
 
   @override
@@ -574,8 +704,10 @@ class _BoardDetailScreenState extends State<BoardDetailScreen> {
               ),
             ),
           ),
-          // 댓글 입력창
-          Container(
+          // 댓글 입력창 (안드로이드 하단 버튼 영역에 가려지지 않게 안전 영역 안에 둔다)
+          SafeArea(
+            top: false,
+            child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: const BoxDecoration(
               color: Colors.white,
@@ -601,9 +733,121 @@ class _BoardDetailScreenState extends State<BoardDetailScreen> {
               ],
             ),
           ),
+          ),
         ],
       ),
     );
   }
 }
 
+/// 글을 열지 않고 바로 댓글을 쓰는 하단 입력창
+class _QuickCommentSheet extends StatefulWidget {
+  final int postId;
+  final String postTitle;
+
+  const _QuickCommentSheet({required this.postId, required this.postTitle});
+
+  @override
+  State<_QuickCommentSheet> createState() => _QuickCommentSheetState();
+}
+
+class _QuickCommentSheetState extends State<_QuickCommentSheet> {
+  final TextEditingController _controller = TextEditingController();
+  bool _sending = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty || _sending) return;
+    final user = ApiService().currentUser;
+    final authorName = (user?.name != null && user!.name.isNotEmpty) ? user.name : '학부모';
+    setState(() {
+      _sending = true;
+      _error = null;
+    });
+    final res = await ApiService().addPostComment(
+      widget.postId,
+      content: text,
+      authorName: authorName,
+      authorRole: 'PARENT',
+    );
+    if (!mounted) return;
+    if (res['success'] == true) {
+      final data = res['data'];
+      Navigator.pop(context, data is Map ? Map<String, dynamic>.from(data) : {'authorName': authorName, 'authorRole': 'PARENT', 'content': text});
+    } else {
+      setState(() {
+        _sending = false;
+        _error = res['message']?.toString() ?? '댓글 등록에 실패했습니다.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 키보드가 올라오면 입력창도 그 위로 올라온다 (useSafeArea 로 하단 시스템 버튼 영역도 피한다)
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                widget.postTitle.isEmpty ? '댓글 쓰기' : widget.postTitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      autofocus: true,
+                      minLines: 1,
+                      maxLines: 4,
+                      maxLength: 1000,
+                      textInputAction: TextInputAction.newline,
+                      decoration: InputDecoration(
+                        hintText: '댓글을 입력하세요...',
+                        hintStyle: const TextStyle(fontSize: 14, color: Color(0xFF94A3B8)),
+                        counterText: '',
+                        isDense: true,
+                        filled: true,
+                        fillColor: const Color(0xFFF1F5F9),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: _sending ? null : _send,
+                    icon: _sending
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.send_rounded, color: Color(0xFF2563EB)),
+                  ),
+                ],
+              ),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(_error!, style: const TextStyle(fontSize: 12, color: Color(0xFFEF4444))),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

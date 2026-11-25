@@ -872,6 +872,14 @@ class ApiService {
     }
   }
 
+  /// 글(알림장 포함)을 열었을 때 '읽음'으로 남긴다. 서버에 저장돼 담임교사가 누가 읽었는지 볼 수 있다. (실패해도 화면에는 영향 없음)
+  Future<void> markPostRead(int postId) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId/read');
+      await postWithAuth(url, jsonEncode({}));
+    } catch (_) {}
+  }
+
   Future<Map<String, dynamic>> togglePostLike(int postId, String userId) async {
     try {
       final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId/like');

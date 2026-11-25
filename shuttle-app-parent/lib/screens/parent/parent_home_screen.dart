@@ -1329,10 +1329,15 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                '⚡ 오늘 통학 간편 변경',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+              const Flexible(
+                child: Text(
+                  '⚡ 오늘 통학 간편 변경',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+                ),
               ),
+              const SizedBox(width: 8),
               MouseRegion(
                 cursor: SystemMouseCursors.click,
                 child: GestureDetector(
@@ -1350,11 +1355,32 @@ class _ParentHomeScreenState extends State<ParentHomeScreen> {
                     );
                     if (mounted) setState(() => _isModalOpen = false);
                   },
+                  // 주요 기능이라 크고 눈에 띄는 파란 버튼 (누르는 영역 높이 44)
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    child: const Text(
-                      '상세 신청 >',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF2563EB)),
+                    constraints: const BoxConstraints(minHeight: 44),
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2563EB),
+                      borderRadius: BorderRadius.circular(22),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF2563EB).withValues(alpha: 0.25),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.edit_calendar_rounded, size: 18, color: Colors.white),
+                        SizedBox(width: 6),
+                        Text(
+                          '상세 신청',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white),
+                        ),
+                      ],
                     ),
                   ),
                 ),
