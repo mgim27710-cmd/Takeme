@@ -510,10 +510,16 @@ export class RoutingService {
         if (isClass && !isSameClass(getStudentClassName(st), post.targetClass)) continue;
         if (st.parentUser?.id) ids.add(st.parentUser.id);
       }
+      const isNotice = post.postType === 'NOTICE';
+      // 알림장(NOTICE)은 학부모 및 담임교사에게만 발송 (차량교사/기사는 제외)
+      // 일반 게시물(POST) 전체 공개 시에만 전 직원(담임, 차량, 기사) 포함
+      const staffRoles = isClass
+        ? [UserRole.HOMEROOM_TEACHER]
+        : (isNotice ? [UserRole.HOMEROOM_TEACHER] : [UserRole.HOMEROOM_TEACHER, UserRole.SHUTTLE_TEACHER, UserRole.DRIVER]);
       const staff = await this.userRepository.find({
         where: {
           academyId,
-          role: In(isClass ? [UserRole.HOMEROOM_TEACHER] : [UserRole.HOMEROOM_TEACHER, UserRole.SHUTTLE_TEACHER, UserRole.DRIVER]),
+          role: In(staffRoles),
         },
       });
       for (const u of staff) {
@@ -521,7 +527,6 @@ export class RoutingService {
         ids.add(u.id);
       }
       if (authorUserId) ids.delete(authorUserId);
-      const isNotice = post.postType === 'NOTICE';
       await this.pushHandler(
         Array.from(ids),
         isNotice ? '새 알림장' : '새 게시물',

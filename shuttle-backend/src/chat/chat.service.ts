@@ -424,15 +424,24 @@ export class ChatService implements OnModuleInit {
     try {
       const users = await this.userRepo.find({ where: { id: In(ids) } });
       const devices = await this.userDeviceRepo.find({ where: { userId: In(ids) } });
+      const sentEndpoints = new Set<string>();
+
       for (const u of users) {
         if (settingType && !isNotificationEnabled(u, settingType)) continue;
-        const endpoints = new Set<string>();
-        if (u.snsEndpointArn) endpoints.add(u.snsEndpointArn);
-        for (const d of devices) {
-          if (d.userId === u.id && d.endpointArn) endpoints.add(d.endpointArn);
+
+        // 해당 사용자의 최신 기기 엔드포인트 1개만 우선 선택 (중복 발송 방지)
+        const userDevs = devices.filter(d => d.userId === u.id && d.endpointArn);
+        let targetArn: string | null = null;
+        if (userDevs.length > 0) {
+          userDevs.sort((a, b) => (b.id || 0) - (a.id || 0));
+          targetArn = userDevs[0].endpointArn;
+        } else if (u.snsEndpointArn) {
+          targetArn = u.snsEndpointArn;
         }
-        for (const ep of endpoints) {
-          await sendSnsPushNotification(ep, title, body, data);
+
+        if (targetArn && !sentEndpoints.has(targetArn)) {
+          sentEndpoints.add(targetArn);
+          await sendSnsPushNotification(targetArn, title, body, data);
         }
       }
     } catch (snsErr) {

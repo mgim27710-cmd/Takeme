@@ -94,20 +94,16 @@ export class MeController {
     const platform = body.platform || 'android';
     const endpointArn = await registerDeviceEndpoint(body.deviceToken, `user_${user.id}`);
 
-    // Update user_devices
-    let dev = await this.userDeviceRepository.findOne({ where: { deviceToken: body.deviceToken } });
-    if (!dev) {
-      dev = this.userDeviceRepository.create({
-        userId: user.id,
-        deviceToken: body.deviceToken,
-        endpointArn,
-        platform,
-      });
-    } else {
-      dev.userId = user.id;
-      dev.endpointArn = endpointArn;
-      dev.platform = platform;
-    }
+    // Update user_devices: 기존 동일 플랫폼 기기 및 이전 등록 기기 정리 후 최신 1건만 유지
+    await this.userDeviceRepository.delete({ userId: user.id, platform });
+    await this.userDeviceRepository.delete({ deviceToken: body.deviceToken });
+
+    const dev = this.userDeviceRepository.create({
+      userId: user.id,
+      deviceToken: body.deviceToken,
+      endpointArn,
+      platform,
+    });
     await this.userDeviceRepository.save(dev);
 
     // Update direct user fields
