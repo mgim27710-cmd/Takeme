@@ -4,6 +4,7 @@ class StudentModel {
   final String? realName;
   final String address;
   final String? boardingLocation;
+  final String? dropoffLocation;
   final double? latitude;
   final double? longitude;
   final String allergies;
@@ -36,6 +37,7 @@ class StudentModel {
     this.realName,
     required this.address,
     this.boardingLocation,
+    this.dropoffLocation,
     this.latitude,
     this.longitude,
     this.allergies = '',
@@ -73,6 +75,7 @@ class StudentModel {
       realName: json['realName'],
       address: json['address'] ?? '',
       boardingLocation: json['boardingLocation'],
+      dropoffLocation: json['dropoffLocation'],
       latitude: parseCoord(json['latitude'] ?? json['lat']),
       longitude: parseCoord(json['longitude'] ?? json['lng']),
       allergies: json['allergies'] ?? '',

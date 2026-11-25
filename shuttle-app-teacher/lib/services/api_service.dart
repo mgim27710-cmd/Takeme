@@ -528,8 +528,9 @@ class ApiService {
   // TEACHER & DRIVER
   // ----------------------------------------------------
   /// 담당 원아 목록 원본(JSON). 한 번의 요청으로 원아 모델과 보호자 연락처를 모두 만들 수 있게 한다.
-  Future<List<Map<String, dynamic>>> getTeacherStudentsJson(String email) async {
-    final url = Uri.parse('${AppConfig.apiHost}/teacher/students?email=${Uri.encodeComponent(email)}');
+  Future<List<Map<String, dynamic>>> getTeacherStudentsJson(String email, {String? mode}) async {
+    final modeParam = (mode != null && mode.isNotEmpty) ? '&mode=${Uri.encodeComponent(mode)}' : '';
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/students?email=${Uri.encodeComponent(email)}$modeParam');
     final res = await getWithAuth(url);
     throwIfServerError(res);
     if (res.statusCode == 200) {
@@ -539,8 +540,8 @@ class ApiService {
     return [];
   }
 
-  Future<List<StudentModel>> getTeacherStudents(String email) async {
-    final list = await getTeacherStudentsJson(email);
+  Future<List<StudentModel>> getTeacherStudents(String email, {String? mode}) async {
+    final list = await getTeacherStudentsJson(email, mode: mode);
     return list.map((item) => StudentModel.fromJson(item)).toList();
   }
 
@@ -554,8 +555,9 @@ class ApiService {
     return null;
   }
 
-  Future<RouteDataModel?> getTeacherRoute(String email) async {
-    final url = Uri.parse('${AppConfig.apiHost}/teacher/route?email=${Uri.encodeComponent(email)}');
+  Future<RouteDataModel?> getTeacherRoute(String email, {String? mode}) async {
+    final modeParam = (mode != null && mode.isNotEmpty) ? '&mode=${Uri.encodeComponent(mode)}' : '';
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/route?email=${Uri.encodeComponent(email)}$modeParam');
     final res = await getWithAuth(url);
     throwIfServerError(res);
     if (res.statusCode == 200) {

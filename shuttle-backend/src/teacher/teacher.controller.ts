@@ -13,9 +13,9 @@ export class TeacherController {
   constructor(private readonly teacherService: TeacherService) {}
 
   @Get('students')
-  async getStudents(@AuthEmail() email: string) {
+  async getStudents(@AuthEmail() email: string, @Query('mode') mode?: string) {
     if (!email) throw new BadRequestException('이메일이 필요합니다.');
-    return this.teacherService.getStudents(email);
+    return this.teacherService.getStudents(email, mode);
   }
 
   @Get('my-vehicle')
@@ -25,9 +25,9 @@ export class TeacherController {
   }
 
   @Get('route')
-  async getRoute(@AuthEmail() email: string) {
+  async getRoute(@AuthEmail() email: string, @Query('mode') mode?: string) {
     if (!email) throw new BadRequestException('이메일이 필요합니다.');
-    return this.teacherService.getRoute(email);
+    return this.teacherService.getRoute(email, mode);
   }
 
   @Post('route-path')

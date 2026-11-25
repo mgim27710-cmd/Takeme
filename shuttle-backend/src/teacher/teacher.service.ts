@@ -339,11 +339,47 @@ export class TeacherService implements OnModuleInit {
     return null;
   }
 
-  async getStudents(email: string) {
+  async getStudents(email: string, mode?: string) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
 
     if (await this.isTodayHoliday(user.academyId)) return [];
+
+    const nowKst = new Date(Date.now() + 9 * 3600 * 1000);
+    const isMorning = mode ? (mode === 'MORNING' || mode === 'goto') : (nowKst.getUTCHours() < 12);
+    // 오늘 낮 12시 KST 기준 시각 (등원/하원 구분점)
+    const todayNoonKst = new Date(nowKst);
+    todayNoonKst.setUTCHours(3, 0, 0, 0); // UTC 03:00 = KST 12:00
+
+    const calcStatus = (s: Student) => {
+      if (s.boardStatus === 'ABSENT') return 'ABSENT';
+
+      if (!isMorning) {
+        // 하원 운행 모드:
+        // 오늘 12시(KST) 이후에 실제로 탑승한 기록이 있으면 탑승 상태 유지
+        const boardedAt = s.actualBoardTime ? new Date(s.actualBoardTime) : null;
+        const isBoardedAfternoon = boardedAt && boardedAt >= todayNoonKst;
+
+        let rawObj: any = s.raw;
+        if (typeof rawObj === 'string') { try { rawObj = JSON.parse(rawObj); } catch { rawObj = {}; } }
+        const lastDrop = rawObj?.['최근 인수'];
+        const dropAt = lastDrop?.at ? new Date(lastDrop.at) : null;
+        const isDroppedAfternoon = dropAt && dropAt >= todayNoonKst && lastDrop?.type !== 'ACADEMY';
+
+        if (isDroppedAfternoon && s.boardStatus === 'DROPPED') {
+          return 'DROPPED';
+        }
+        if (isBoardedAfternoon && s.boardStatus === 'BOARDED') {
+          return 'BOARDED';
+        }
+        // 오전에 유치원에 등원 완료(DROPPED)되었던 아이라도
+        // 오후 하원 운행에서는 유치원에서 차량에 탑승하는 것을 먼저 체크할 수 있도록 'WAITING'으로 시작
+        return 'WAITING';
+      } else {
+        // 등원 운행 모드
+        return s.boardStatus || 'WAITING';
+      }
+    };
 
     if ((user.role as string) === 'HOMEROOM_TEACHER' || user.role === UserRole.HOMEROOM_TEACHER) {
       if (!hasAssignedClass(user.assignedClass)) {
@@ -362,17 +398,20 @@ export class TeacherService implements OnModuleInit {
         .map(s => {
           const rawPhone = s.raw ? (s.raw['학부모연락처'] || s.raw['연락처'] || s.raw['전화번호'] || s.raw['비상연락처'] || '') : '';
           const parentPhone = s.parentUser?.phone || rawPhone || '';
+          const bStatus = calcStatus(s);
           return {
             id: s.id,
             name: s.adminDisplayName || s.name,
             address: s.address,
             latitude: s.latitude,
             longitude: s.longitude,
-            boarded: s.boardStatus === 'BOARDED',
-            absent: s.boardStatus === 'ABSENT',
-            dropped: s.boardStatus === 'DROPPED',
-            boardStatus: s.boardStatus || 'WAITING',
-            expectedTime: s.raw ? s.raw['예상탑승시간'] || '15:30' : '15:30',
+            boarded: bStatus === 'BOARDED',
+            absent: bStatus === 'ABSENT',
+            dropped: bStatus === 'DROPPED',
+            boardStatus: bStatus,
+            boardingLocation: s.boardingLocation || (s.raw ? s.raw['등원지'] || s.raw['탑승지'] : null),
+          dropoffLocation: s.dropoffLocation || (s.raw ? s.raw['하차지'] || s.raw['하원지'] : null),
+          expectedTime: s.raw ? s.raw['예상탑승시간'] || '15:30' : '15:30',
             allergies: s.allergies || (s.raw ? s.raw['알레르기'] : '') || '',
             parentPhone,
             ...guardianFields(s),
@@ -407,16 +446,17 @@ export class TeacherService implements OnModuleInit {
 
       return (classStudents.length > 0 ? classStudents : allStudents).map(s => {
         const rawObj = typeof s.raw === 'string' ? JSON.parse(s.raw || '{}') : (s.raw || {});
+        const bStatus = calcStatus(s);
         return {
           id: s.id,
           name: s.adminDisplayName || s.name,
           address: effectiveAddress(s),
           latitude: effectiveLatitude(s),
           longitude: effectiveLongitude(s),
-          boarded: s.boardStatus === 'BOARDED',
-          absent: s.boardStatus === 'ABSENT',
-          dropped: s.boardStatus === 'DROPPED',
-          boardStatus: s.boardStatus || 'WAITING',
+          boarded: bStatus === 'BOARDED',
+          absent: bStatus === 'ABSENT',
+          dropped: bStatus === 'DROPPED',
+          boardStatus: bStatus,
           expectedTime: rawObj['예상탑승시간'] || '15:30',
           allergies: s.allergies || rawObj['알레르기'] || '',
           teacherMemo: s.teacherMemo,
@@ -431,23 +471,26 @@ export class TeacherService implements OnModuleInit {
       });
     }
 
-    const students = await this.getTodayStudentsForVehicle(vehicle.id);
+    const students = await this.getTodayStudentsForVehicle(vehicle.id, mode);
     
     // Return boardStatus from DB, filter out absent students
     return students
       .map(s => {
         const rawPhone = s.raw ? (s.raw['학부모연락처'] || s.raw['연락처'] || s.raw['전화번호'] || s.raw['비상연락처'] || '') : '';
         const parentPhone = s.parentUser?.phone || rawPhone || '';
+        const bStatus = calcStatus(s);
         return {
           id: s.id,
           name: s.adminDisplayName || s.name,
           address: effectiveAddress(s),
           latitude: effectiveLatitude(s),
           longitude: effectiveLongitude(s),
-          boarded: s.boardStatus === 'BOARDED',
-          absent: s.boardStatus === 'ABSENT',
-          dropped: s.boardStatus === 'DROPPED',
-          boardStatus: s.boardStatus || 'WAITING',
+          boarded: bStatus === 'BOARDED',
+          absent: bStatus === 'ABSENT',
+          dropped: bStatus === 'DROPPED',
+          boardStatus: bStatus,
+          boardingLocation: s.boardingLocation || (s.raw ? s.raw['등원지'] || s.raw['탑승지'] : null),
+          dropoffLocation: s.dropoffLocation || (s.raw ? s.raw['하차지'] || s.raw['하원지'] : null),
           expectedTime: s.raw ? s.raw['예상탑승시간'] || '15:30' : '15:30',
           allergies: s.allergies || (s.raw ? s.raw['알레르기'] : '') || '',
           teacherMemo: s.teacherMemo,

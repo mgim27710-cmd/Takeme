@@ -26,12 +26,15 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   RouteDataModel? _routeData;
 
   bool _isLoading = true;
-  int _unreadNotificationCount = 0;
   int _unreadChatCount = 0;
   Timer? _notificationPollTimer;
 
   int _currentRunNumber = 1;
   int? _vehicleId;
+
+  // 운행 모드: 'MORNING'(등원 운행) | 'AFTERNOON'(하원 운행)
+  // 현재 시각 기준 (낮 12시 이전: 등원, 12시 이후: 하원) 기본 설정
+  String _activeDirection = DateTime.now().hour < 12 ? 'MORNING' : 'AFTERNOON';
 
   double? _busLat;
   double? _busLng;
@@ -128,8 +131,8 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     final Map<String, dynamic>? routePathData;
     try {
       vehicle = await ApiService().getTeacherVehicle(user.email);
-      studentsJson = await ApiService().getTeacherStudentsJson(user.email);
-      route = await ApiService().getTeacherRoute(user.email);
+      studentsJson = await ApiService().getTeacherStudentsJson(user.email, mode: _activeDirection);
+      route = await ApiService().getTeacherRoute(user.email, mode: _activeDirection);
       routePathData = await ApiService().getRoutePath();
     } catch (e) {
       // 불러오기에 실패하면 로딩 화면에서 멈추지 않고 이유와 다시 시도를 알려준다
@@ -422,8 +425,13 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
 
   bool _bulkBoarding = false;
 
-  /// 탑승 처리할 수 있는 원아인지 (아직 타지 않았고 결석·하차가 아닌 아이)
-  bool _canBoard(StudentModel s) => !s.boarded && !s.absent && !s.dropped;
+  /// 탑승 처리할 수 있는 원아인지 (아직 타지 않았고 결석이 아닌 아이)
+  /// 하원 운행 모드에서는 오전에 하차(등원) 완료되었던 원아도 유치원에서 탑승할 수 있도록 허용
+  bool _canBoard(StudentModel s) {
+    if (s.absent) return false;
+    if (s.boarded) return false;
+    return !s.dropped || _activeDirection == 'AFTERNOON';
+  }
 
   /// 명단 전체 선택 / 전체 해제
   void _toggleSelectAll(List<StudentModel> runList) {
@@ -1045,18 +1053,21 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     return g;
   }
 
-  /// 원아 상태(색 + 문구 + 아이콘): 탑승 전 / 탑승 / 하차 / 결석
+  /// 원아 상태(색 + 문구 + 아이콘): 탑승 대기 / 탑승 완료 / 하차 완료 / 결석
   ({String label, IconData icon, Color fg, Color bg, Color border}) _statusOf(StudentModel st) {
     if (st.absent) {
       return (label: '결석', icon: Icons.block, fg: const Color(0xFFB91C1C), bg: const Color(0xFFFEE2E2), border: const Color(0xFFFECACA));
     }
-    if (st.dropped) {
-      return (label: '하차', icon: Icons.where_to_vote, fg: const Color(0xFF6D28D9), bg: const Color(0xFFEDE9FE), border: const Color(0xFFDDD6FE));
-    }
     if (st.boarded) {
-      return (label: '탑승', icon: Icons.check_circle, fg: const Color(0xFF15803D), bg: const Color(0xFFDCFCE7), border: const Color(0xFFBBF7D0));
+      return (label: '탑승 중', icon: Icons.check_circle, fg: const Color(0xFF15803D), bg: const Color(0xFFDCFCE7), border: const Color(0xFFBBF7D0));
     }
-    return (label: '탑승 전', icon: Icons.schedule, fg: const Color(0xFF475569), bg: const Color(0xFFF1F5F9), border: const Color(0xFFE2E8F0));
+    if (st.dropped) {
+      if (_activeDirection == 'AFTERNOON' && !st.boarded) {
+        return (label: '탑승 대기', icon: Icons.schedule, fg: const Color(0xFFD97706), bg: const Color(0xFFFEF3C7), border: const Color(0xFFFDE68A));
+      }
+      return (label: '하차 완료', icon: Icons.where_to_vote, fg: const Color(0xFF6D28D9), bg: const Color(0xFFEDE9FE), border: const Color(0xFFDDD6FE));
+    }
+    return (label: '탑승 대기', icon: Icons.schedule, fg: const Color(0xFF475569), bg: const Color(0xFFF1F5F9), border: const Color(0xFFE2E8F0));
   }
 
   Widget _statusChip(StudentModel st, {double fontSize = 14}) {
@@ -1173,7 +1184,42 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                 ),
               ),
               const SizedBox(width: 6),
-              _statusChip(st),
+              // 직관적인 원클릭 액션 버튼: 탑승 가능하면 [탑승] 버튼이 먼저 노출되어 하원 시 즉시 승차 체크 가능!
+              if (_canBoard(st))
+                SizedBox(
+                  height: 36,
+                  child: ElevatedButton.icon(
+                    onPressed: () => _handleManualBoard(st),
+                    icon: const Icon(Icons.check_circle_outline, size: 16),
+                    label: const Text('탑승', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      elevation: 0,
+                    ),
+                  ),
+                )
+              else if (st.boarded)
+                SizedBox(
+                  height: 36,
+                  child: ElevatedButton.icon(
+                    onPressed: () => _handleDropStudent(st),
+                    icon: const Icon(Icons.where_to_vote, size: 16),
+                    label: const Text('하차', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF7C3AED),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      elevation: 0,
+                    ),
+                  ),
+                )
+              else
+                _statusChip(st),
+              const SizedBox(width: 2),
               const Icon(Icons.chevron_right, color: Color(0xFF94A3B8)),
             ],
           ),
@@ -1509,8 +1555,8 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // 처리 버튼: 상태마다 할 수 있는 동작만 보여준다
-                  if (!st.boarded && !st.absent && !st.dropped)
+                  // 처리 버튼: 상태마다 할 수 있는 동작만 보여준다 (하원 시에도 탑승이 먼저 가능하도록 보장)
+                  if (_canBoard(st))
                     Row(
                       children: [
                         Expanded(
@@ -1661,8 +1707,109 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
           ),
         ],
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(color: const Color(0xFFF1F5F9), height: 1),
+          preferredSize: const Size.fromHeight(50),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                color: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: Container(
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () {
+                            if (_activeDirection != 'MORNING') {
+                              setState(() {
+                                _activeDirection = 'MORNING';
+                                _selectedStudentIds.clear();
+                              });
+                              _loadAllData();
+                            }
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: _activeDirection == 'MORNING' ? const Color(0xFF2563EB) : Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: _activeDirection == 'MORNING'
+                                  ? [const BoxShadow(color: Color(0x1A2563EB), blurRadius: 4, offset: Offset(0, 1))]
+                                  : null,
+                            ),
+                            alignment: Alignment.center,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.wb_sunny_rounded,
+                                    size: 16,
+                                    color: _activeDirection == 'MORNING' ? Colors.white : const Color(0xFF64748B)),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '등원 운행 (오전)',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    color: _activeDirection == 'MORNING' ? Colors.white : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () {
+                            if (_activeDirection != 'AFTERNOON') {
+                              setState(() {
+                                _activeDirection = 'AFTERNOON';
+                                _selectedStudentIds.clear();
+                              });
+                              _loadAllData();
+                            }
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: _activeDirection == 'AFTERNOON' ? const Color(0xFF7C3AED) : Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: _activeDirection == 'AFTERNOON'
+                                  ? [const BoxShadow(color: Color(0x1A7C3AED), blurRadius: 4, offset: Offset(0, 1))]
+                                  : null,
+                            ),
+                            alignment: Alignment.center,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.home_rounded,
+                                    size: 16,
+                                    color: _activeDirection == 'AFTERNOON' ? Colors.white : const Color(0xFF64748B)),
+                                const SizedBox(width: 6),
+                                Text(
+                                  '하원 운행 (오후)',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    color: _activeDirection == 'AFTERNOON' ? Colors.white : const Color(0xFF64748B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Container(color: const Color(0xFFF1F5F9), height: 1),
+            ],
+          ),
         ),
       ),
       body: _isLoading
@@ -1813,12 +1960,19 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                       child: runList.isEmpty
                           ? const Center(child: Text('해당 회차에 배정된 원아가 없습니다.', style: TextStyle(color: Color(0xFF94A3B8))))
                           : Builder(builder: (_) {
-                              // 원아 목록을 정류장(탑승지/주소) 단위로 그룹핑
+                              // 원아 목록을 정류장(등원 탑승지 / 하원 하차지) 단위로 그룹핑
                               final stopGroups = <String, List<StudentModel>>{};
+                              final isAfternoon = _activeDirection == 'AFTERNOON';
                               for (final s in runList) {
-                                final stopName = (s.boardingLocation?.trim().isNotEmpty ?? false)
-                                    ? s.boardingLocation!.trim()
-                                    : (s.address.trim().isNotEmpty ? s.address.trim() : '정류장 미지정');
+                                final stopName = isAfternoon
+                                    ? ((s.dropoffLocation?.trim().isNotEmpty ?? false)
+                                        ? s.dropoffLocation!.trim()
+                                        : ((s.boardingLocation?.trim().isNotEmpty ?? false)
+                                            ? s.boardingLocation!.trim()
+                                            : (s.address.trim().isNotEmpty ? s.address.trim() : '하차 정류장 미지정')))
+                                    : ((s.boardingLocation?.trim().isNotEmpty ?? false)
+                                        ? s.boardingLocation!.trim()
+                                        : (s.address.trim().isNotEmpty ? s.address.trim() : '탑승 정류장 미지정'));
                                 stopGroups.putIfAbsent(stopName, () => []).add(s);
                               }
                               final groupKeys = stopGroups.keys.toList();
