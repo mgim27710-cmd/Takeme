@@ -427,10 +427,17 @@ export class ChatService implements OnModuleInit {
       for (const u of users) {
         if (settingType && !isNotificationEnabled(u, settingType)) continue;
         const endpoints = new Set<string>();
-        if (u.snsEndpointArn) endpoints.add(u.snsEndpointArn);
-        for (const d of devices) {
-          if (d.userId === u.id && d.endpointArn) endpoints.add(d.endpointArn);
+        // 중복 푸시 방지: 등록된 활성 기기 테이블(userDeviceRepo)이 있으면 이를 우선 사용하고,
+        // 없을 때만 레거시 u.snsEndpointArn을 대체(Fallback)로 사용하여 동일 기기 2중 발송 방지
+        const userDevices = devices.filter(d => d.userId === u.id && d.endpointArn);
+        if (userDevices.length > 0) {
+          for (const d of userDevices) {
+            if (d.endpointArn) endpoints.add(d.endpointArn);
+          }
+        } else if (u.snsEndpointArn) {
+          endpoints.add(u.snsEndpointArn);
         }
+
         for (const ep of endpoints) {
           await sendSnsPushNotification(ep, title, body, data);
         }

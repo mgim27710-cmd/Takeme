@@ -150,14 +150,34 @@ class PushNotificationService {
     return null;
   }
 
+  /// 중복 푸시/소켓 알림 방지용 최근 알림 타임스탬프 캐시
+  final Map<String, int> _recentNotificationTimestamps = {};
+
   /// Show notification banner via FlutterLocalNotifications
   Future<void> showNotification({
     required String title,
     required String body,
     String? payload,
+    String? dedupeKey,
   }) async {
     final cleanBody = body.trim();
     if (cleanBody.isEmpty) return;
+
+    // 1. 중복 방지 (Deduplication): 3초 이내에 동일한 내용의 알림은 최초 1회만 표시
+    final key = dedupeKey ?? '$title|$cleanBody';
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final lastTime = _recentNotificationTimestamps[key];
+    if (lastTime != null && (now - lastTime) < 3000) {
+      debugPrint('[PushNotificationService] Suppressed duplicate notification within 3s: $key');
+      return;
+    }
+    _recentNotificationTimestamps[key] = now;
+
+    // 오래된 캐시 정리 (30초 이상 경과 시 제거)
+    if (_recentNotificationTimestamps.length > 50) {
+      _recentNotificationTimestamps.removeWhere((_, time) => now - time > 30000);
+    }
+
     try {
       const androidDetails = AndroidNotificationDetails(
         kPushChannelId,
@@ -172,8 +192,11 @@ class PushNotificationService {
       const iosDetails = DarwinNotificationDetails();
       const details = NotificationDetails(android: androidDetails, iOS: iosDetails);
 
+      // Notification ID: 고유 해시코드를 사용하여 동일 알림 재도착 시 덮어쓰도록 처리
+      final notiId = key.hashCode & 0x7FFFFFFF;
+
       await _localNotifications.show(
-        DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        notiId,
         title,
         cleanBody,
         details,

@@ -1115,23 +1115,29 @@ export class ParentService {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) return [];
 
-    const student = await this.studentRepository.createQueryBuilder('student')
+    let student = await this.studentRepository.createQueryBuilder('student')
       .leftJoinAndSelect('student.parentUser', 'parentUser')
       .leftJoinAndSelect('student.studentUser', 'studentUser')
       .leftJoinAndSelect('student.academy', 'academy')
       .where('parentUser.id = :uid OR studentUser.id = :uid OR parentUser.email = :email OR studentUser.email = :email', { uid: user.id, email })
       .getOne();
 
-    if (!student) return [];
+    if (!student) {
+      student = await this.findStudentByEmailFallback(email, { academy: true });
+    }
 
-    const academyId = student.academy?.id || user.academyId;
+    const academyId = student?.academy?.id || user.academyId || 1;
     if (!academyId) return [];
 
     // 다자녀: 내 아이들이 속한 모든 반의 글 + 전체 공개 (반이 없으면 전체 공개만)
-    const classNames = await getLinkedClassNames(this.studentRepository, user.id);
-    if (classNames.length === 0) {
-      const own = getStudentClassName(student);
-      if (own) classNames.push(own);
+    const classNames: string[] = [];
+    if (student) {
+      const linked = await getLinkedClassNames(this.studentRepository, user.id);
+      classNames.push(...linked);
+      if (classNames.length === 0) {
+        const own = getStudentClassName(student);
+        if (own) classNames.push(own);
+      }
     }
 
     const qb = this.boardPostRepository.createQueryBuilder('post')
