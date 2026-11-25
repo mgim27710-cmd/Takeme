@@ -76,6 +76,8 @@ export class TeacherService implements OnModuleInit {
     private readonly chatService?: ChatService
   ) {}
 
+  private lastAllBoardedNotiTime = new Map<number, number>();
+
   async onModuleInit() {
     try {
       // 서버 구동 시 사용자가 직접 결석 처리하지 않고 남아 있던 결석 상태를 탑승 대기(WAITING)로 일괄 복구
@@ -862,7 +864,15 @@ export class TeacherService implements OnModuleInit {
       await this.appendBoardingLog(vehicle.id, student.id, student.adminDisplayName || student.name, 'MANUAL');
     }
 
-    return { success: true, studentName: student.adminDisplayName || student.name };
+    // 4. 전원 탑승 완료 여부 검사 및 원장/기사 실시간 알림 발송
+    const allBoardedRes = await this.checkAndNotifyAllBoarded(vehicle, student.academyId || user.academyId);
+
+    return { 
+      success: true, 
+      studentName: student.adminDisplayName || student.name,
+      allBoarded: allBoardedRes.allBoarded,
+      totalCount: allBoardedRes.totalCount
+    };
   }
 
   async skipStudent(email: string, studentId: number) {
@@ -901,7 +911,96 @@ export class TeacherService implements OnModuleInit {
     // 학부모 실시간 알림 및 소켓 브로드캐스트
     await this.notifyParentBoardStatus(student, vehicle, 'ABSENT', 'SYSTEM');
 
-    return { success: true, studentName: student.adminDisplayName || student.name };
+    // 결석 처리 후 남은 대기 원아가 0명인지(전원 처리 완료) 검사 및 알림 발송
+    const allBoardedRes = await this.checkAndNotifyAllBoarded(vehicle, student.academyId || user.academyId);
+
+    return { 
+      success: true, 
+      studentName: student.adminDisplayName || student.name,
+      allBoarded: allBoardedRes.allBoarded,
+      totalCount: allBoardedRes.totalCount
+    };
+  }
+
+  /**
+   * 차량 배정 원아가 모두 탑승(BOARDED/ABSENT/DROPPED) 처리되어 
+   * 탑승 대기(WAITING) 중인 원아가 0명이 되었는지 검사하고,
+   * 전원 탑승 완료 시 원장님(웹 대시보드 알림/DB) 및 기사님(TTS 음성/출발 신호 배너/푸시)에게 알림을 발송합니다.
+   */
+  async checkAndNotifyAllBoarded(vehicle: Vehicle | null, academyId?: number): Promise<{ allBoarded: boolean; totalCount: number }> {
+    if (!vehicle) return { allBoarded: false, totalCount: 0 };
+
+    try {
+      const todayStudents = await this.getTodayStudentsForVehicle(vehicle.id);
+      if (!todayStudents || todayStudents.length === 0) {
+        return { allBoarded: false, totalCount: 0 };
+      }
+
+      // 탑승 대기(WAITING) 중인 원아가 남아 있는지 확인
+      const waitingStudents = todayStudents.filter(s => s.boardStatus === 'WAITING');
+      if (waitingStudents.length > 0) {
+        return { allBoarded: false, totalCount: todayStudents.length };
+      }
+
+      // 최근 3분 이내에 이미 전원 탑승 알림을 보낸 차량이면 중복 알림 방지
+      const now = Date.now();
+      const lastTime = this.lastAllBoardedNotiTime.get(vehicle.id) || 0;
+      if (now - lastTime < 180000) {
+        return { allBoarded: true, totalCount: todayStudents.length };
+      }
+      this.lastAllBoardedNotiTime.set(vehicle.id, now);
+
+      const totalCount = todayStudents.length;
+      const targetAcademyId = academyId || vehicle.academy?.id;
+      const busName = vehicle.busNumber || `${vehicle.id}호차`;
+
+      // 1. 실시간 웹소켓 브로드캐스트 (원장 웹 토스트 팝업 + 기사 네비게이션 TTS 및 출발 신호)
+      if (this.locationGateway && targetAcademyId) {
+        await this.locationGateway.broadcastAllStudentsBoarded({
+          academyId: targetAcademyId,
+          vehicleId: vehicle.id,
+          vehicleName: busName,
+          totalCount,
+        });
+      }
+
+      // 2. DB 알림 테이블 저장 (원장 및 데스크 알림 보관함)
+      if (targetAcademyId) {
+        const noti = this.notificationRepository.create({
+          type: 'NOTICE',
+          title: `[전원 탑승 완료] ${busName}`,
+          message: `${busName} (${totalCount}명) 원아 전원 탑승이 완료되었습니다. 안전 운행을 시작하세요.`,
+          recipientRole: 'ACADEMY_ADMIN',
+          academyId: targetAcademyId,
+          vehicle,
+        });
+        await this.notificationRepository.save(noti);
+      }
+
+      // 3. 기사 유저가 있으면 채팅/푸시 시스템 알림 전송
+      const vehicleWithDriver = await this.vehicleRepository.findOne({
+        where: { id: vehicle.id },
+        relations: { driverUser: true, academy: { owner: true } }
+      });
+
+      const recipientIds: number[] = [];
+      if (vehicleWithDriver?.driverUser?.id) recipientIds.push(vehicleWithDriver.driverUser.id);
+      if (vehicleWithDriver?.academy?.owner?.id) recipientIds.push(vehicleWithDriver.academy.owner.id);
+
+      if (recipientIds.length > 0 && this.chatService) {
+        await this.chatService.sendSystemNotificationToUsers(
+          recipientIds,
+          '전원 탑승 완료',
+          `${busName} (${totalCount}명) 원아 전원 탑승이 완료되었습니다. 안전 운행을 시작하세요.`,
+          { type: 'shuttle', vehicleId: vehicle.id }
+        ).catch(() => {});
+      }
+
+      return { allBoarded: true, totalCount };
+    } catch (e) {
+      console.error('[checkAndNotifyAllBoarded] error:', e);
+      return { allBoarded: false, totalCount: 0 };
+    }
   }
 
   /** 하차 처리: 이번 운행에 탄(탑승) 원아만 하차로 바꾼다 */
@@ -1387,7 +1486,15 @@ export class TeacherService implements OnModuleInit {
     // 3. Append to OperationLog
     await this.appendBoardingLog(vehicle.id, student.id, student.adminDisplayName || student.name, 'QR');
 
-    return { success: true, studentName: student.adminDisplayName || student.name };
+    // 4. 전원 탑승 완료 여부 검사 및 원장/기사 실시간 알림 발송
+    const allBoardedRes = await this.checkAndNotifyAllBoarded(vehicle, student.academyId);
+
+    return { 
+      success: true, 
+      studentName: student.adminDisplayName || student.name,
+      allBoarded: allBoardedRes.allBoarded,
+      totalCount: allBoardedRes.totalCount
+    };
   }
 
   async getStaffList(email?: string) {

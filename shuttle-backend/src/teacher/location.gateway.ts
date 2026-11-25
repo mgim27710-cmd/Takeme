@@ -481,6 +481,47 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     }
   }
 
+  /** 차량 배정 원아 전원 탑승 완료 실시간 알림 (원장 웹 + 기사용 앱 실시간 TTS 및 출발 안내) */
+  async broadcastAllStudentsBoarded(data: {
+    academyId: number;
+    vehicleId: number;
+    vehicleName: string;
+    totalCount: number;
+  }) {
+    if (!this.server) return;
+
+    // 1. 원장님 및 데스크 실시간 팝업 알림 (웹 대시보드 directorAlert)
+    const alertPayload = {
+      id: `all_boarded_${data.vehicleId}_${Date.now()}`,
+      category: 'ALL_BOARDED',
+      title: `🚌 [전원 탑승 완료] ${data.vehicleName}`,
+      message: `${data.vehicleName} (${data.totalCount}명) 원아 전원 탑승이 완료되었습니다.`,
+      timestamp: new Date().toISOString(),
+      data,
+    };
+    if (data.academyId) {
+      this.server.to(academyAdminRoom(data.academyId)).emit('directorAlert', alertPayload);
+      this.server.to(academyStaffRoom(data.academyId)).emit('directorAlert', alertPayload);
+      this.server.to(SUPER_ADMIN_ROOM).emit('globalDirectorAlert', alertPayload);
+    }
+
+    // 2. 기사용 앱 전용 알림: 차량 룸(vehicle_{id})으로 TTS 음성 및 출발 신호 전송
+    if (data.vehicleId) {
+      const room = `vehicle_${data.vehicleId}`;
+      // 기사 네비게이션 TTS 음성 안내
+      this.server.to(room).emit('driverTts', {
+        message: `${data.vehicleName} 모든 원아가 탑승을 완료했습니다. 안전 운행해 주세요.`,
+      });
+      // 기사 네비게이션 "출발 가능" 배너 알림
+      this.server.to(room).emit('driverDepartSignal', {
+        vehicleId: data.vehicleId,
+        message: `전원 탑승 완료 (${data.totalCount}명)! 출발하셔도 됩니다.`,
+      });
+      // 일반 이벤트
+      this.server.to(room).emit('allStudentsBoarded', data);
+    }
+  }
+
   @SubscribeMessage('joinVehicleRoom')
   async handleJoinVehicleRoom(
     @MessageBody() data: { vehicleId: number },

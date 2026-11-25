@@ -274,7 +274,18 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     if (!mounted) return;
     if (res['success'] == true) {
       _loadAllData();
-      _flutterTts.speak('${student.name} 원아 탑승 완료');
+      if (res['allBoarded'] == true) {
+        _flutterTts.speak('${student.name} 원아 탑승 완료. 모든 원아가 탑승했습니다.');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('🎉 모든 원아가 탑승을 완료했습니다!\n원장님과 기사님께 알림이 전송되었습니다.'),
+            backgroundColor: Color(0xFF10B981),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      } else {
+        _flutterTts.speak('${student.name} 원아 탑승 완료');
+      }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -457,10 +468,15 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
 
     setState(() => _bulkBoarding = true);
     final failed = <String>[];
+    bool lastAllBoarded = false;
     for (final s in targets) {
       try {
         final res = await ApiService().manualBoardStudent(user.email, s.id, '');
-        if (res['success'] != true) failed.add(s.name);
+        if (res['success'] != true) {
+          failed.add(s.name);
+        } else if (res['allBoarded'] == true) {
+          lastAllBoarded = true;
+        }
       } catch (_) {
         failed.add(s.name);
       }
@@ -475,13 +491,22 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     });
     _loadAllData();
     final done = targets.length - failed.length;
-    if (done > 0) _flutterTts.speak('$done명 탑승 완료');
+    if (done > 0) {
+      if (lastAllBoarded) {
+        _flutterTts.speak('$done명 탑승 완료. 모든 원아가 탑승했습니다.');
+      } else {
+        _flutterTts.speak('$done명 탑승 완료');
+      }
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(failed.isEmpty
-            ? '$done명 탑승 처리했습니다.'
+            ? (lastAllBoarded
+                ? '🎉 전원 탑승 완료! ($done명)\n원장님과 기사님께 알림이 전송되었습니다.'
+                : '$done명 탑승 처리했습니다.')
             : '$done명 탑승 처리했고, ${failed.length}명은 실패했어요: ${failed.join(', ')}. 다시 시도해 주세요.'),
         backgroundColor: failed.isEmpty ? const Color(0xFF10B981) : Colors.red,
+        duration: const Duration(seconds: 4),
       ),
     );
   }

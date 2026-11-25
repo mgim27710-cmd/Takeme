@@ -27,7 +27,7 @@ export class AuthService {
     @InjectRepository(Student) private studentRepository: Repository<Student>,
     @InjectRepository(Vehicle) private vehicleRepository: Repository<Vehicle>,
     private readonly jwtService: JwtService,
-  ) {}
+  ) { }
 
   private async getTransporter() {
     if (!this.transporter) {
@@ -113,7 +113,7 @@ export class AuthService {
           </div>
         `
       });
-      
+
       const testUrl = nodemailer.getTestMessageUrl(info);
       if (testUrl) {
         console.log(`[TEST EMAIL URL]: ${testUrl}`);
@@ -121,9 +121,9 @@ export class AuthService {
     } catch (e) {
       console.error('Email send failed', e);
     }
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       message: '인증 코드가 발송되었습니다. 메일함을 확인해주세요.'
     };
   }
@@ -248,7 +248,7 @@ export class AuthService {
       throw new BadRequestException('이메일과 비밀번호를 입력해 주세요.');
     }
     let user = await this.usersRepository.findOne({ where: { email: cleanEmail } });
-    
+
     // 교수님 평가/테스트용 관리자 계정 (유치원, 초등부, 중등부)
     const isProfessorTestAccount = (
       cleanEmail === 'professor@takeme.com' ||
@@ -385,7 +385,7 @@ export class AuthService {
         }
       } else if (user.isOtpEnabled) {
         if (!otpToken) return { success: false, requireOtp: true, userId: user.id };
-        
+
         let verified = false;
         if (user.otpSecret) {
           // 그 외 모든 일반 계정은 실제 Google Authenticator TOTP 정상 검증
@@ -426,8 +426,8 @@ export class AuthService {
     }
 
     if (user.role === UserRole.STUDENT || user.role === UserRole.PARENT) {
-      const student = await this.studentRepository.findOne({ 
-        where: user.role === UserRole.STUDENT ? { studentUser: { id: user.id } } : { parentUser: { id: user.id } } 
+      const student = await this.studentRepository.findOne({
+        where: user.role === UserRole.STUDENT ? { studentUser: { id: user.id } } : { parentUser: { id: user.id } }
       });
       if (student && student.approvalStatus === 'PENDING') {
         return {
@@ -439,7 +439,7 @@ export class AuthService {
     }
 
     if (user.role === UserRole.DRIVER) {
-      const vehicle = await this.vehicleRepository.findOne({ 
+      const vehicle = await this.vehicleRepository.findOne({
         where: { driverUser: { id: user.id } }
       });
       if (vehicle && vehicle.driverApprovalStatus === 'PENDING') {
@@ -551,10 +551,9 @@ export class AuthService {
     });
 
     let detectedEduLevel = '유치원';
-    const academyObj = academyId ? await this.academyRepository.findOne({ where: { id: academyId } }) : null;
-    if (academyObj?.educationLevel === 'ELEMENTARY') {
+    if (academy?.educationLevel === 'ELEMENTARY') {
       detectedEduLevel = '초등부';
-    } else if (academyObj?.educationLevel === 'MIDDLE_HIGH') {
+    } else if (academy?.educationLevel === 'MIDDLE_HIGH') {
       detectedEduLevel = '중,고등부';
     } else {
       const combinedMeta = `${academyName || ''} ${user.name || ''} ${user.email || ''}`.toLowerCase();
@@ -569,10 +568,10 @@ export class AuthService {
       success: true,
       accessToken,
       refreshToken: `${user.id}.${rawRefreshToken}`,
-      user: { 
-        id: user.id, 
-        email: user.email, 
-        role: user.role, 
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
         name: user.name,
         assignedClass: user.assignedClass || null,
         academyId,
@@ -689,7 +688,7 @@ export class AuthService {
     if (!password || !passwordRegex.test(password)) {
       throw new BadRequestException('비밀번호는 영문자와 숫자를 포함하여 최소 8자리 이상이어야 합니다.');
     }
-    
+
     // 1. Verify academy auth code (Required for staff & students, skip for admins)
     let targetAcademy: Academy | null = null;
     if (role !== UserRole.ACADEMY_ADMIN && role !== UserRole.SUPER_ADMIN) {
@@ -707,7 +706,7 @@ export class AuthService {
     // 2. Create User account
     const hashedPassword = await bcrypt.hash(password, 10);
     const userRole = role || UserRole.STUDENT;
-    
+
     const user = this.usersRepository.create({
       email,
       passwordHash: hashedPassword,
@@ -715,7 +714,7 @@ export class AuthService {
       role: userRole,
       isOtpEnabled: false,
     });
-    
+
     const savedUser = await this.usersRepository.save(user);
 
     try {
@@ -750,7 +749,7 @@ export class AuthService {
           .where('TRIM(student.name) = :name', { name: searchName.trim() })
           .andWhere('student.academyId = :academyId', { academyId: targetAcademy.id })
           .getMany();
-          
+
         if (matchingStudents.length === 0) {
           throw new BadRequestException('해당 유치원에서 일치하는 이름의 원아 정보를 찾을 수 없습니다.');
         }
@@ -776,7 +775,7 @@ export class AuthService {
             if (unlinked) student = unlinked;
           }
         }
-        
+
         if (userRole === UserRole.STUDENT) {
           if (student.studentUser) throw new BadRequestException('이 원생은 이미 학생 계정과 연동되어 있습니다.');
           student.studentUser = savedUser;
@@ -784,12 +783,12 @@ export class AuthService {
           if (student.parentUser) throw new BadRequestException('이 원생은 이미 학부모 계정과 연동되어 있습니다.');
           student.parentUser = savedUser;
         }
-        
+
         if (data.allergies) {
           student.allergies = String(data.allergies).trim();
           let rawObj: any = student.raw;
           if (typeof rawObj === 'string') {
-            try { rawObj = JSON.parse(rawObj); } catch(e) { rawObj = {}; }
+            try { rawObj = JSON.parse(rawObj); } catch (e) { rawObj = {}; }
           }
           if (!rawObj || typeof rawObj !== 'object') rawObj = {};
           rawObj['알레르기'] = student.allergies;
@@ -798,7 +797,7 @@ export class AuthService {
 
         student.approvalStatus = 'PENDING';
         await this.studentRepository.save(student);
-        
+
       } else if (userRole === UserRole.HOMEROOM_TEACHER || userRole === UserRole.SHUTTLE_TEACHER || userRole === UserRole.TEACHER) {
         if (!targetAcademy) throw new BadRequestException('소속 유치원 정보를 찾을 수 없습니다.');
         savedUser.academy = targetAcademy;
@@ -824,7 +823,7 @@ export class AuthService {
           .where('TRIM(vehicle.driverName) = :name', { name: searchName.trim() })
           .andWhere('vehicle.academyId = :academyId', { academyId: targetAcademy.id })
           .getOne();
-          
+
         if (!vehicle) {
           throw new BadRequestException('해당 유치원에 등록된 통학차량 정보를 찾을 수 없습니다.');
         }
@@ -839,7 +838,7 @@ export class AuthService {
       const secret = speakeasy.generateSecret({ name: `Takeme (${email})` });
       savedUser.otpSecret = secret.base32;
       await this.usersRepository.save(savedUser);
-      
+
       const qrCodeUrl = await qrcode.toDataURL(secret.otpauth_url || '');
 
       return {
@@ -870,8 +869,8 @@ export class AuthService {
 
     // Find if the user is linked to a student
     if (user.role === UserRole.STUDENT || user.role === UserRole.PARENT) {
-      const student = await this.studentRepository.findOne({ 
-        where: user.role === UserRole.STUDENT ? { studentUser: { id: user.id } } : { parentUser: { id: user.id } } 
+      const student = await this.studentRepository.findOne({
+        where: user.role === UserRole.STUDENT ? { studentUser: { id: user.id } } : { parentUser: { id: user.id } }
       });
       if (student) {
         if (user.role === UserRole.STUDENT) student.studentUser = null as any;
@@ -882,8 +881,8 @@ export class AuthService {
         await this.studentRepository.save(student);
       }
     } else if (user.role === UserRole.DRIVER || user.role === UserRole.TEACHER || user.role === UserRole.SHUTTLE_TEACHER) {
-      const vehicle = await this.vehicleRepository.findOne({ 
-        where: user.role === UserRole.DRIVER ? { driverUser: { id: user.id } } : { teacherUser: { id: user.id } } 
+      const vehicle = await this.vehicleRepository.findOne({
+        where: user.role === UserRole.DRIVER ? { driverUser: { id: user.id } } : { teacherUser: { id: user.id } }
       });
       if (vehicle) {
         if (user.role === UserRole.DRIVER) {

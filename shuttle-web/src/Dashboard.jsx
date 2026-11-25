@@ -10241,6 +10241,7 @@ const parseKindergartenExcelSheet = (sheet) => {
         <div className="fixed top-5 right-6 z-[9999] max-w-sm w-full bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border-2 border-amber-300 p-4 animate-bounce-short transition-all">
           <div className="flex items-start gap-3">
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-xs ${
+              directorAlertToast.category === 'ALL_BOARDED' ? 'bg-emerald-100 text-emerald-600' :
               directorAlertToast.category === 'ABSENT' ? 'bg-rose-100 text-rose-600' :
               directorAlertToast.category === 'PICKUP' ? 'bg-blue-100 text-blue-600' :
               directorAlertToast.category === 'SHUTTLE_REQUEST' ? 'bg-amber-100 text-amber-600' :
@@ -10253,8 +10254,11 @@ const parseKindergartenExcelSheet = (sheet) => {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-1 mb-0.5">
-                <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
-                  {directorAlertToast.category === 'ABSENT' ? '결석 알림' :
+                <span className={`text-[10px] font-black uppercase px-1.5 py-0.5 rounded ${
+                  directorAlertToast.category === 'ALL_BOARDED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                }`}>
+                  {directorAlertToast.category === 'ALL_BOARDED' ? '전원 탑승 완료' :
+                   directorAlertToast.category === 'ABSENT' ? '결석 알림' :
                    directorAlertToast.category === 'PICKUP' ? '개별 픽업' :
                    directorAlertToast.category === 'SHUTTLE_REQUEST' ? '셔틀 신청' :
                    directorAlertToast.category === 'PAYMENT_DECISION' ? '결재 완료' :
