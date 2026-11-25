@@ -507,6 +507,18 @@ export class RoutingController {
     return this.routingService.deleteBoardPost(Number(id), userId || user?.sub, user?.role, academyId);
   }
 
+  /** 학부모가 글을 열면 자동으로 '읽음' 기록 */
+  @Post('board/posts/:id/read')
+  async markBoardPostRead(@Param('id') id: string, @AuthUser() user?: JwtPayload) {
+    return this.routingService.markBoardPostRead(Number(id), user);
+  }
+
+  /** 누가 읽었는지 (교직원 전용) */
+  @Get('board/posts/:id/reads')
+  async getBoardPostReaders(@Param('id') id: string, @AuthUser() user?: JwtPayload) {
+    return this.routingService.getBoardPostReaders(Number(id), user);
+  }
+
   @Post('board/posts/:id/like')
   async toggleBoardPostLike(
     @Param('id') id: string,

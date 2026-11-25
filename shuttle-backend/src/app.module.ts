@@ -20,6 +20,7 @@ import { ChatRoomMember } from './entities/chat-room-member.entity';
 import { ChatMessage } from './entities/chat-message.entity';
 import { BoardPost } from './entities/board-post.entity';
 import { BoardComment } from './entities/board-comment.entity';
+import { BoardPostRead } from './entities/board-post-read.entity';
 import { AuditLog } from './entities/audit-log.entity';
 import { YearlyZoneMapping } from './entities/yearly-zone-mapping.entity';
 import { Attendance } from './entities/attendance.entity';
@@ -71,6 +72,7 @@ import { MediaModule } from './media/media.module';
           ApprovalRequest,
           BoardPost,
           BoardComment,
+          BoardPostRead,
           AuditLog,
           YearlyZoneMapping,
           Attendance,
