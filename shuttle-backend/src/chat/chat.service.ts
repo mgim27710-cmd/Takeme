@@ -2380,7 +2380,7 @@ export class ChatService implements OnModuleInit {
   /**
    * ApprovalService 결재 처리 시 대화방 내 카드 상태 동기화
    */
-  async syncPaymentRequestDecision(requestId: number, decision: 'APPROVED' | 'REJECTED' | ApprovalStatus, deciderName: string) {
+  async syncPaymentRequestDecision(requestId: number, decision: 'APPROVED' | 'REJECTED' | 'CANCELLED' | ApprovalStatus, deciderName: string) {
     try {
       const messages = await this.messageRepo.find({
         where: { type: 'PAYMENT_REQUEST' },
@@ -2388,7 +2388,11 @@ export class ChatService implements OnModuleInit {
         take: 100,
         relations: { room: true },
       });
-      const normDecision: 'APPROVED' | 'REJECTED' = String(decision).toUpperCase().includes('APPROV') ? 'APPROVED' : 'REJECTED';
+      const normDecision: 'APPROVED' | 'REJECTED' | 'CANCELLED' = String(decision).toUpperCase().includes('APPROV')
+        ? 'APPROVED'
+        : String(decision).toUpperCase().includes('CANCEL')
+        ? 'CANCELLED'
+        : 'REJECTED';
       const targetMsg = messages.find((m) => {
         let p = m.payload;
         if (typeof p === 'string') {

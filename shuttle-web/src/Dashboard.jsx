@@ -2041,8 +2041,8 @@ export default function Dashboard({ initialEducationLevel } = {}) {
             ...s,
             isOneTimeRide: false,
             oneTimeType: null,
-            isNotRiding: updatedRaw.originalIsNotRiding !== undefined ? updatedRaw.originalIsNotRiding : true,
-            boardStatus: data?.boardStatus || 'SELF_PICKUP',
+            isNotRiding: data?.isNotRiding !== undefined ? data.isNotRiding : (updatedRaw.originalIsNotRiding !== undefined ? updatedRaw.originalIsNotRiding : false),
+            boardStatus: data?.boardStatus || 'WAITING',
             approvalStatus: 'NONE',
             raw: updatedRaw,
           };
@@ -2051,6 +2051,9 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       loadInitialState();
     });
     socket.on('routeUpdated', () => {
+      loadInitialState();
+    });
+    socket.on('studentStatusChanged', () => {
       loadInitialState();
     });
 
@@ -2063,10 +2066,17 @@ export default function Dashboard({ initialEducationLevel } = {}) {
       socket.off('childBoardStatusChanged');
       socket.off('attendanceSubmitted');
       socket.off('routeUpdated');
+      socket.off('studentStatusChanged');
       socket.disconnect();
       socketRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (socketRef.current && socketRef.current.connected && selectedAcademyId) {
+      socketRef.current.emit('joinAcademyRoom', { academyId: Number(selectedAcademyId) });
+    }
+  }, [selectedAcademyId]);
 
   useEffect(() => {
     if (socketRef.current && socketRef.current.connected && buses && buses.length > 0) {

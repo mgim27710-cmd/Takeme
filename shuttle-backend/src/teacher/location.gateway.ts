@@ -20,7 +20,7 @@ import { ApprovalRequest } from '../entities/approval-request.entity';
 import { JwtPayload } from '../auth/auth-user.decorator';
 
 const SUPER_ADMIN_ROOM = 'super_admin';
-const ADMIN_ROLES = new Set(['ACADEMY_ADMIN', 'DESK_STAFF']);
+const ADMIN_ROLES = new Set(['ACADEMY_ADMIN', 'DESK_STAFF', 'SUPER_ADMIN']);
 const STAFF_ROLES = new Set(['DRIVER', 'TEACHER', 'HOMEROOM_TEACHER', 'SHUTTLE_TEACHER']);
 /** 원장·데스크 방: 신청 접수, 결재 결과 같은 관리 알림 */
 const academyAdminRoom = (academyId: number) => `academy_admin_${academyId}`;
@@ -160,8 +160,8 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     if (role === 'SUPER_ADMIN') client.join(SUPER_ADMIN_ROOM);
     const academyId = user.academyId ? Number(user.academyId) : null;
     if (!academyId) return;
-    if (ADMIN_ROLES.has(role)) client.join(academyAdminRoom(academyId));
-    if (ADMIN_ROLES.has(role) || STAFF_ROLES.has(role)) client.join(academyStaffRoom(academyId));
+    if (ADMIN_ROLES.has(role) || role === 'SUPER_ADMIN') client.join(academyAdminRoom(academyId));
+    if (ADMIN_ROLES.has(role) || STAFF_ROLES.has(role) || role === 'SUPER_ADMIN') client.join(academyStaffRoom(academyId));
   }
 
   /** 차량에 배정된 기사·지도교사 개인 방으로 보낸다(차량 방에는 학부모도 들어오므로 원아 정보는 보내지 않는다). */
@@ -322,6 +322,8 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     if (data.academyId) {
       this.server.to(academyAdminRoom(data.academyId)).emit('changeRequestDecided', data.request);
       this.server.to(academyStaffRoom(data.academyId)).emit('changeRequestDecided', data.request);
+      this.server.to(`academy_${data.academyId}`).emit('changeRequestDecided', data.request);
+      this.server.to(academyAdminRoom(data.academyId)).emit('studentStatusChanged', data.request);
       this.server.to(academyStaffRoom(data.academyId)).emit('studentStatusChanged', data.request);
       this.server.to(`academy_${data.academyId}`).emit('studentStatusChanged', data.request);
 
@@ -373,6 +375,9 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.server.to(`academy_${academyId}`).emit('changeRequestCancelled', data);
     this.server.to(academyAdminRoom(academyId)).emit('changeRequestCancelled', data);
     this.server.to(academyStaffRoom(academyId)).emit('changeRequestCancelled', data);
+    this.server.to(`academy_${academyId}`).emit('studentStatusChanged', data);
+    this.server.to(academyAdminRoom(academyId)).emit('studentStatusChanged', data);
+    this.server.to(academyStaffRoom(academyId)).emit('studentStatusChanged', data);
     this.broadcastRouteUpdated(academyId);
   }
 
@@ -396,6 +401,14 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   broadcastRouteUpdated(academyId?: number) {
     if (this.server && academyId) {
       this.server.to(academyStaffRoom(academyId)).emit('routeUpdated', {
+        academyId,
+        timestamp: new Date().toISOString(),
+      });
+      this.server.to(academyAdminRoom(academyId)).emit('routeUpdated', {
+        academyId,
+        timestamp: new Date().toISOString(),
+      });
+      this.server.to(`academy_${academyId}`).emit('routeUpdated', {
         academyId,
         timestamp: new Date().toISOString(),
       });
@@ -574,10 +587,15 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
 
     if (!academyId) {
       if (user?.role === 'SUPER_ADMIN') {
-        return { success: true, room: null, academyId: null };
+        const firstAcademy = await this.userRepository.manager.query(`SELECT id FROM academy ORDER BY id ASC LIMIT 1`);
+        if (firstAcademy && firstAcademy.length > 0) {
+          academyId = Number(firstAcademy[0].id);
+        }
       }
-      console.warn(`[joinAcademyRoom] Academy not found for client: ${client.id}`);
-      return { success: false, message: '유효한 유치원 정보가 없습니다.' };
+      if (!academyId) {
+        console.warn(`[joinAcademyRoom] Academy not found for client: ${client.id}`);
+        return { success: false, message: '유효한 유치원 정보가 없습니다.' };
+      }
     }
 
     const room = `academy_${academyId}`;
@@ -586,6 +604,10 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       client.join(`user_${user.sub}`);
     }
     this.joinRoleRooms(client, { ...user, academyId });
+    if (user?.role === 'SUPER_ADMIN' || ADMIN_ROLES.has(String(user?.role))) {
+      client.join(academyAdminRoom(academyId));
+      client.join(academyStaffRoom(academyId));
+    }
     console.log(`Client ${client.id} joined academy room: ${room}`);
     return { success: true, room, academyId };
   }

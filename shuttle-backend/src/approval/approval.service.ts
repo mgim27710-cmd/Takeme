@@ -752,6 +752,11 @@ export class ApprovalService {
     });
 
     for (const req of requests) {
+      if (this.chatService) {
+        try {
+          await this.chatService.syncPaymentRequestDecision(req.id, 'CANCELLED', callingUser.name || callingUser.email);
+        } catch (_) {}
+      }
       await this.overrideRepo.delete({ approvalRequest: { id: req.id } });
       await this.approvalRepo.remove(req);
     }
@@ -813,6 +818,11 @@ export class ApprovalService {
     });
 
     for (const req of requests) {
+      if (this.chatService) {
+        try {
+          await this.chatService.syncPaymentRequestDecision(req.id, 'CANCELLED', callingUser.name || callingUser.email);
+        } catch (_) {}
+      }
       await this.overrideRepo.delete({ approvalRequest: { id: req.id } });
       await this.approvalRepo.remove(req);
     }
@@ -1038,6 +1048,12 @@ export class ApprovalService {
           status: decision,
           type: req.type,
           typeKr,
+          studentId: student.id,
+          student: {
+            id: student.id,
+            name: student.name,
+            adminDisplayName: student.adminDisplayName || student.name,
+          },
           studentName: student.adminDisplayName || student.name,
           targetDate,
         },
