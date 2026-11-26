@@ -672,7 +672,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
               final failed = <String>[];
               for (final s in waitingList) {
                 try {
-                  final res = await ApiService().manualBoardStudent(user.email, s.id, '');
+                  final res = await ApiService().manualBoardStudent(user.email, s.id, '', mode: _activeDirection);
                   if (res['success'] != true) failed.add(s.name);
                 } catch (_) {
                   failed.add(s.name);

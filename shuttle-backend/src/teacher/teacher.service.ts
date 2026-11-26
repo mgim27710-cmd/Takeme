@@ -1116,7 +1116,16 @@ export class TeacherService implements OnModuleInit {
     if (!vehicle) throw new BadRequestException('배정된 차량이 없습니다.');
 
     const todayStudents = await this.getTodayStudentsForVehicle(vehicle.id);
-    const student = todayStudents.find(s => s.id === studentId);
+    let student = todayStudents.find(s => s.id === studentId);
+    if (!student) {
+      const directStudent = await this.studentRepository.findOne({
+        where: { id: studentId },
+        relations: { parentUser: true, assignedVehicle: true, assignedDepartureVehicle: true }
+      });
+      if (directStudent && (directStudent.assignedVehicle?.id === vehicle.id || directStudent.assignedDepartureVehicle?.id === vehicle.id)) {
+        student = directStudent;
+      }
+    }
     if (!student) throw new BadRequestException('해당 차량에 배정된 원아가 아닙니다.');
     if (student.boardStatus !== 'BOARDED') {
       throw new BadRequestException('탑승한 원아만 하차 처리할 수 있습니다.');
@@ -1142,10 +1151,14 @@ export class TeacherService implements OnModuleInit {
     }
 
     student.boardStatus = 'DROPPED';
-    if (who) {
-      raw['최근 인수'] = { type, who, at: new Date().toISOString(), by: user.name || email, vehicle: vehicle.busNumber };
-      student.raw = raw;
-    }
+    raw['최근 인수'] = {
+      type: type || 'OTHER',
+      who: who || '보호자',
+      at: new Date().toISOString(),
+      by: user.name || email,
+      vehicle: vehicle.busNumber,
+    };
+    student.raw = raw;
     await this.studentRepository.save(student);
 
     const name = student.adminDisplayName || student.name;
@@ -1431,6 +1444,17 @@ export class TeacherService implements OnModuleInit {
         ];
         for (const st of todayStudents) {
           const hasTodayAbsence = todayOverrides.some(o => o.student?.id === st.id && absentOverrideTypes.includes(o.overrideType));
+
+          // 이미 탑승(BOARDED) 처리되어 차에 타고 있는 아이는 초기화하지 않고 탑승 상태를 그대로 유지한다.
+          // (특히 하원 운행 등에서 교사가 출발 전 아이들을 먼저 태운 뒤 기사가 운행 시작을 누르는 경우)
+          const isRecentBoarded = st.boardStatus === 'BOARDED' && (
+            (st.actualBoardTime && (Date.now() - new Date(st.actualBoardTime).getTime() < 3 * 3600 * 1000)) ||
+            (lastLog?.endTime && st.actualBoardTime && new Date(st.actualBoardTime) > new Date(lastLog.endTime))
+          );
+          if (isRecentBoarded) {
+            continue;
+          }
+
           if (st.boardStatus === 'BOARDED' || st.boardStatus === 'DROPPED' || (!hasTodayAbsence && st.boardStatus === 'ABSENT')) {
             st.boardStatus = 'WAITING';
             st.actualBoardTime = null as any;
