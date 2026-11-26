@@ -117,7 +117,9 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   }
 
   Future<void> _loadAllData({bool silent = false}) async {
-    if (!silent) {
+    // 최초 진입 시에만 전체 화면 로딩을 노출하고, 이후 갱신은 부드럽게 백그라운드로 처리
+    final isInitial = _students.isEmpty;
+    if (!silent && isInitial) {
       setState(() => _isLoading = true);
     }
     final user = ApiService().currentUser;
@@ -126,16 +128,22 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     SocketService().connect(ApiService().token);
 
     final dynamic vehicle;
-    final List<Map<String, dynamic>> studentsJson; // 원아 목록 원본 (모델 + 보호자 연락처를 한 번의 요청으로)
+    final List<Map<String, dynamic>> studentsJson;
     final RouteDataModel? route;
     final Map<String, dynamic>? routePathData;
     try {
-      vehicle = await ApiService().getTeacherVehicle(user.email);
-      studentsJson = await ApiService().getTeacherStudentsJson(user.email, mode: _activeDirection);
-      route = await ApiService().getTeacherRoute(user.email, mode: _activeDirection);
-      routePathData = await ApiService().getRoutePath();
+      // 4개의 API를 직렬 대신 Future.wait로 병렬 호출하여 로딩 속도 3~4배 단축
+      final results = await Future.wait([
+        ApiService().getTeacherVehicle(user.email),
+        ApiService().getTeacherStudentsJson(user.email, mode: _activeDirection),
+        ApiService().getTeacherRoute(user.email, mode: _activeDirection),
+        ApiService().getRoutePath(),
+      ]);
+      vehicle = results[0];
+      studentsJson = (results[1] as List).cast<Map<String, dynamic>>();
+      route = results[2] as RouteDataModel?;
+      routePathData = results[3] as Map<String, dynamic>?;
     } catch (e) {
-      // 불러오기에 실패하면 로딩 화면에서 멈추지 않고 이유와 다시 시도를 알려준다
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -269,6 +277,44 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   Future<void> _handleManualBoard(StudentModel student) async {
     final user = ApiService().currentUser;
     if (user == null) return;
+
+    // 즉시 반응형 낙관적 UI 업데이트 (터치 즉시 탑승 상태로 변경)
+    setState(() {
+      final idx = _students.indexWhere((s) => s.id == student.id);
+      if (idx >= 0) {
+        _students[idx] = StudentModel(
+          id: student.id,
+          name: student.name,
+          realName: student.realName,
+          address: student.address,
+          boardingLocation: student.boardingLocation,
+          dropoffLocation: student.dropoffLocation,
+          latitude: student.latitude,
+          longitude: student.longitude,
+          allergies: student.allergies,
+          gender: student.gender,
+          parentName: student.parentName,
+          parentRelation: student.parentRelation,
+          emergencyContactName: student.emergencyContactName,
+          emergencyContactRelation: student.emergencyContactRelation,
+          emergencyContactPhone: student.emergencyContactPhone,
+          boarded: true,
+          absent: false,
+          dropped: false,
+          expectedTime: student.expectedTime,
+          actualBoardTime: DateTime.now().toIso8601String(),
+          teacherMemo: student.teacherMemo,
+          parentMessage: student.parentMessage,
+          runNumber: student.runNumber,
+          isOverride: student.isOverride,
+          className: student.className,
+          academyName: student.academyName,
+          vehicleName: student.vehicleName,
+          approvalStatus: student.approvalStatus,
+        );
+      }
+    });
+
     Map<String, dynamic> res;
     try {
       res = await ApiService().manualBoardStudent(user.email, student.id, '', mode: _activeDirection);
@@ -277,7 +323,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     }
     if (!mounted) return;
     if (res['success'] == true) {
-      _loadAllData();
+      _loadAllData(silent: true);
       if (res['allBoarded'] == true) {
         _flutterTts.speak('${student.name} 원아 탑승 완료. 모든 원아가 탑승했습니다.');
         ScaffoldMessenger.of(context).showSnackBar(
@@ -291,6 +337,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
         _flutterTts.speak('${student.name} 원아 탑승 완료');
       }
     } else {
+      _loadAllData(silent: true);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('${student.name} 원아 탑승 처리에 실패했습니다. ${res['message'] ?? ''}'.trim()),
@@ -309,7 +356,42 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
         jsonEncode({'studentId': student.id, 'handover': ?handover}),
       );
       if (res.statusCode == 200 || res.statusCode == 201) {
-        if (reload) _loadAllData();
+        setState(() {
+          final idx = _students.indexWhere((s) => s.id == student.id);
+          if (idx >= 0) {
+            _students[idx] = StudentModel(
+              id: student.id,
+              name: student.name,
+              realName: student.realName,
+              address: student.address,
+              boardingLocation: student.boardingLocation,
+              dropoffLocation: student.dropoffLocation,
+              latitude: student.latitude,
+              longitude: student.longitude,
+              allergies: student.allergies,
+              gender: student.gender,
+              parentName: student.parentName,
+              parentRelation: student.parentRelation,
+              emergencyContactName: student.emergencyContactName,
+              emergencyContactRelation: student.emergencyContactRelation,
+              emergencyContactPhone: student.emergencyContactPhone,
+              boarded: false,
+              absent: false,
+              dropped: true,
+              expectedTime: student.expectedTime,
+              actualBoardTime: student.actualBoardTime,
+              teacherMemo: student.teacherMemo,
+              parentMessage: student.parentMessage,
+              runNumber: student.runNumber,
+              isOverride: student.isOverride,
+              className: student.className,
+              academyName: student.academyName,
+              vehicleName: student.vehicleName,
+              approvalStatus: student.approvalStatus,
+            );
+          }
+        });
+        if (reload) _loadAllData(silent: true);
         return true;
       }
       if (mounted) {
@@ -426,12 +508,12 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   bool _bulkBoarding = false;
   bool _bulkDropping = false;
 
-  /// 탑승 처리할 수 있는 원아인지 (아직 타지 않았고 결석이 아닌 아이)
-  /// 하원 운행 모드에서는 오전에 하차(등원) 완료되었던 원아도 유치원에서 탑승할 수 있도록 허용
+  /// 탑승 처리할 수 있는 원아인지 (아직 타지 않았고 결석이나 하차 상태가 아닌 아이)
   bool _canBoard(StudentModel s) {
     if (s.absent) return false;
     if (s.boarded) return false;
-    return !s.dropped || _activeDirection == 'AFTERNOON';
+    if (s.dropped) return false;
+    return true;
   }
 
   /// 명단 전체 선택 / 전체 해제
@@ -499,7 +581,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
         if (!failed.contains(s.name)) _selectedStudentIds.remove(s.id);
       }
     });
-    _loadAllData();
+    _loadAllData(silent: true);
     final done = targets.length - failed.length;
     if (done > 0) {
       if (lastAllBoarded) {
@@ -543,7 +625,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
       }
     }
     setState(() => _bulkDropping = false);
-    _loadAllData();
+    _loadAllData(silent: true);
     if (ok > 0) {
       _flutterTts.speak('$ok명 하차 완료');
     }
@@ -555,6 +637,71 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
             : '$ok명 하차 완료, ${failed.length}명 실패: ${failed.join(', ')}'),
         backgroundColor: failed.isEmpty ? const Color(0xFF7C3AED) : Colors.red,
         duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  /// 회차 내 대기 중인 원아들을 한 번에 일괄 탑승(출석) 처리
+  void _confirmBoardAll(List<StudentModel> waitingList) {
+    if (waitingList.isEmpty) return;
+    final names = waitingList.map((s) => s.name).join(', ');
+    final isAfternoon = _activeDirection == 'AFTERNOON';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('${waitingList.length}명 전원 일괄 탑승', style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: Text(
+          isAfternoon
+              ? '유치원에서 하원 버스에 탑승할 원아 ${waitingList.length}명을 모두 탑승 처리할까요?\n\n$names'
+              : '현재 회차의 대기 원아 ${waitingList.length}명을 모두 탑승 처리할까요?\n\n$names',
+          style: const TextStyle(fontSize: 14, height: 1.4),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              setState(() => _bulkBoarding = true);
+              final user = ApiService().currentUser;
+              if (user == null) {
+                setState(() => _bulkBoarding = false);
+                return;
+              }
+              final failed = <String>[];
+              for (final s in waitingList) {
+                try {
+                  final res = await ApiService().manualBoardStudent(user.email, s.id, '');
+                  if (res['success'] != true) failed.add(s.name);
+                } catch (_) {
+                  failed.add(s.name);
+                }
+              }
+              setState(() => _bulkBoarding = false);
+              _loadAllData(silent: true);
+              final done = waitingList.length - failed.length;
+              if (done > 0) {
+                _flutterTts.speak('$done명 전원 탑승 완료');
+              }
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(failed.isEmpty
+                      ? '🎉 $done명 전원 일괄 탑승 완료되었습니다!'
+                      : '$done명 탑승 처리, ${failed.length}명 실패: ${failed.join(', ')}'),
+                  backgroundColor: failed.isEmpty ? const Color(0xFF10B981) : Colors.red,
+                  duration: const Duration(seconds: 3),
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF10B981),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('전원 탑승', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
       ),
     );
   }
@@ -743,7 +890,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
         failed.add(s.name);
       }
     }
-    _loadAllData();
+    _loadAllData(silent: true);
     final done = waiting.length - failed.length;
     if (done > 0) {
       _flutterTts.speak('$done명 탑승 완료');
@@ -777,7 +924,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                 jsonEncode({'studentId': student.id}),
               );
               if (res.statusCode == 200 || res.statusCode == 201) {
-                _loadAllData();
+                _loadAllData(silent: true);
                 _flutterTts.speak('${student.name} 원아 탑승 취소');
               } else {
                 if (!mounted) return;
@@ -809,7 +956,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
               if (user == null) return;
               final res = await ApiService().skipStudent(user.email, student.id);
               if (res['success'] == true) {
-                _loadAllData();
+                _loadAllData(silent: true);
                 _flutterTts.speak('${student.name} 원아 미탑승 처리 완료.');
               }
             },
@@ -889,7 +1036,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
               Navigator.pop(ctx);
               final res = await ApiService().saveTeacherMemo(student.id, _memoController.text.trim());
               if (res['success'] == true) {
-                _loadAllData();
+                _loadAllData(silent: true);
               }
             },
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2563EB)),
@@ -1214,18 +1361,15 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     return g;
   }
 
-  /// 원아 상태(색 + 문구 + 아이콘): 탑승 대기 / 탑승 완료 / 하차 완료 / 결석
+  /// 원아 상태(색 + 문구 + 아이콘): 탑승 대기 / 탑승 중 / 하차 완료 / 결석
   ({String label, IconData icon, Color fg, Color bg, Color border}) _statusOf(StudentModel st) {
     if (st.absent) {
       return (label: '결석', icon: Icons.block, fg: const Color(0xFFB91C1C), bg: const Color(0xFFFEE2E2), border: const Color(0xFFFECACA));
     }
     if (st.boarded) {
-      return (label: '탑승 중', icon: Icons.check_circle, fg: const Color(0xFF15803D), bg: const Color(0xFFDCFCE7), border: const Color(0xFFBBF7D0));
+      return (label: '탑승 중', icon: Icons.check_circle_outline, fg: const Color(0xFF15803D), bg: const Color(0xFFDCFCE7), border: const Color(0xFFBBF7D0));
     }
     if (st.dropped) {
-      if (_activeDirection == 'AFTERNOON' && !st.boarded) {
-        return (label: '탑승 대기', icon: Icons.schedule, fg: const Color(0xFFD97706), bg: const Color(0xFFFEF3C7), border: const Color(0xFFFDE68A));
-      }
       return (label: '하차 완료', icon: Icons.where_to_vote, fg: const Color(0xFF6D28D9), bg: const Color(0xFFEDE9FE), border: const Color(0xFFDDD6FE));
     }
     return (label: '탑승 대기', icon: Icons.schedule, fg: const Color(0xFF475569), bg: const Color(0xFFF1F5F9), border: const Color(0xFFE2E8F0));
@@ -1496,46 +1640,48 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                     ],
                   ),
                 ),
-                // 정류장 내 2명 이상 대기 시 '일괄 탑승' 버튼 노출
+                // 정류장 내 2명 이상 대기 시 '일괄 탑승' 블럭 버튼 노출
                 if (canBoardList.length >= 2) ...[
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 8),
                   SizedBox(
-                    height: 32,
+                    height: 36,
                     child: ElevatedButton.icon(
                       onPressed: () => _boardStopStudents(canBoardList),
-                      icon: const Icon(Icons.check, size: 15),
+                      icon: const Icon(Icons.check_circle_outline, size: 16),
                       label: Text(
-                        '${canBoardList.length}명 탑승',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+                        '${canBoardList.length}명 일괄 탑승',
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF10B981),
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(horizontal: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        elevation: 1,
+                        shadowColor: const Color(0x3310B981),
                       ),
                     ),
                   ),
                 ],
-                // 정류장 내 2명 이상 탑승 중 시 '일괄 하차' 버튼 노출
+                // 정류장 내 2명 이상 탑승 중 시 '일괄 하차' 블럭 버튼 노출
                 if (canDropList.length >= 2) ...[
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 8),
                   SizedBox(
-                    height: 32,
+                    height: 36,
                     child: ElevatedButton.icon(
                       onPressed: () => _dropStopStudents(canDropList),
-                      icon: const Icon(Icons.where_to_vote, size: 15),
+                      icon: const Icon(Icons.where_to_vote, size: 16),
                       label: Text(
-                        '${canDropList.length}명 하차',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+                        '${canDropList.length}명 일괄 하차',
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF7C3AED),
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(horizontal: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        elevation: 1,
+                        shadowColor: const Color(0x337C3AED),
                       ),
                     ),
                   ),
@@ -1747,7 +1893,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                           flex: 2,
                           child: actionButton(
                             label: '탑승',
-                            icon: Icons.check_circle,
+                            icon: Icons.check_circle_outline,
                             color: const Color(0xFF10B981),
                             onPressed: () {
                               Navigator.pop(ctx);
@@ -1813,6 +1959,84 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     );
   }
 
+  /// 등원/하원 운행 모드 전환 블럭 버튼 (높이 48px, 선명한 블럭 카드 형태)
+  Widget _buildDirectionBlockButton({
+    required String label,
+    required String timeLabel,
+    required IconData icon,
+    required Color activeColor,
+    required Color activeShadow,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          height: 48,
+          decoration: BoxDecoration(
+            color: isSelected ? activeColor : const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isSelected ? activeColor : const Color(0xFFCBD5E1),
+              width: isSelected ? 2 : 1.2,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: activeShadow,
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 20,
+                color: isSelected ? Colors.white : const Color(0xFF64748B),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
+                  color: isSelected ? Colors.white : const Color(0xFF334155),
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? Colors.white.withValues(alpha: 0.22)
+                      : const Color(0xFFE2E8F0),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  timeLabel,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: isSelected ? Colors.white : const Color(0xFF64748B),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final runList = _students.where((s) => s.runNumber == _currentRunNumber).toList();
@@ -1830,7 +2054,13 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: Color(0xFF64748B)),
-            onPressed: _loadAllData,
+            onPressed: () async {
+              await _loadAllData(silent: true);
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('최신 정보로 갱신되었습니다.'), duration: Duration(seconds: 1)),
+              );
+            },
           ),
           Stack(
             clipBehavior: Clip.none,
@@ -1891,107 +2121,60 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
           ),
         ],
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(50),
+          preferredSize: const Size.fromHeight(66),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
                 color: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                child: Container(
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () {
-                            if (_activeDirection != 'MORNING') {
-                              setState(() {
-                                _activeDirection = 'MORNING';
-                                _selectedStudentIds.clear();
-                              });
-                              _loadAllData();
-                            }
-                          },
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: _activeDirection == 'MORNING' ? const Color(0xFF2563EB) : Colors.transparent,
-                              borderRadius: BorderRadius.circular(8),
-                              boxShadow: _activeDirection == 'MORNING'
-                                  ? [const BoxShadow(color: Color(0x1A2563EB), blurRadius: 4, offset: Offset(0, 1))]
-                                  : null,
-                            ),
-                            alignment: Alignment.center,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.wb_sunny_rounded,
-                                    size: 16,
-                                    color: _activeDirection == 'MORNING' ? Colors.white : const Color(0xFF64748B)),
-                                const SizedBox(width: 6),
-                                Text(
-                                  '등원 운행 (오전)',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    color: _activeDirection == 'MORNING' ? Colors.white : const Color(0xFF64748B),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                child: Row(
+                  children: [
+                    // 등원 블럭 버튼
+                    Expanded(
+                      child: _buildDirectionBlockButton(
+                        label: '등원 운행',
+                        timeLabel: '오전',
+                        icon: Icons.wb_sunny_rounded,
+                        activeColor: const Color(0xFF2563EB),
+                        activeShadow: const Color(0x3D2563EB),
+                        isSelected: _activeDirection == 'MORNING',
+                        onTap: () {
+                          if (_activeDirection != 'MORNING') {
+                            setState(() {
+                              _activeDirection = 'MORNING';
+                              _selectedStudentIds.clear();
+                            });
+                            _loadAllData(silent: true);
+                          }
+                        },
                       ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () {
-                            if (_activeDirection != 'AFTERNOON') {
-                              setState(() {
-                                _activeDirection = 'AFTERNOON';
-                                _selectedStudentIds.clear();
-                              });
-                              _loadAllData();
-                            }
-                          },
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: _activeDirection == 'AFTERNOON' ? const Color(0xFF7C3AED) : Colors.transparent,
-                              borderRadius: BorderRadius.circular(8),
-                              boxShadow: _activeDirection == 'AFTERNOON'
-                                  ? [const BoxShadow(color: Color(0x1A7C3AED), blurRadius: 4, offset: Offset(0, 1))]
-                                  : null,
-                            ),
-                            alignment: Alignment.center,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.home_rounded,
-                                    size: 16,
-                                    color: _activeDirection == 'AFTERNOON' ? Colors.white : const Color(0xFF64748B)),
-                                const SizedBox(width: 6),
-                                Text(
-                                  '하원 운행 (오후)',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    color: _activeDirection == 'AFTERNOON' ? Colors.white : const Color(0xFF64748B),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                    ),
+                    const SizedBox(width: 10),
+                    // 하원 블럭 버튼
+                    Expanded(
+                      child: _buildDirectionBlockButton(
+                        label: '하원 운행',
+                        timeLabel: '오후',
+                        icon: Icons.home_rounded,
+                        activeColor: const Color(0xFF7C3AED),
+                        activeShadow: const Color(0x3D7C3AED),
+                        isSelected: _activeDirection == 'AFTERNOON',
+                        onTap: () {
+                          if (_activeDirection != 'AFTERNOON') {
+                            setState(() {
+                              _activeDirection = 'AFTERNOON';
+                              _selectedStudentIds.clear();
+                            });
+                            _loadAllData(silent: true);
+                          }
+                        },
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-              Container(color: const Color(0xFFF1F5F9), height: 1),
+              Container(color: const Color(0xFFE2E8F0), height: 1),
             ],
           ),
         ),
@@ -2032,45 +2215,83 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Flexible(
+                              Expanded(
                                 child: Text(
                                   '탑승 명단 (${runList.where((s) => s.boarded).length}/${runList.length}명) · $_currentRunNumber차',
-                                  style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF334155), fontSize: 14),
+                                  style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF1E293B), fontSize: 14),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              // 유치원·하차지에 도착했을 때 타고 있는 원아를 한 번에 하차 처리
-                              if (_selectedStudentIds.isEmpty && runList.any((s) => s.boarded))
-                                TextButton.icon(
-                                  onPressed: () => _confirmDropAll(runList.where((s) => s.boarded).toList()),
-                                  icon: const Icon(Icons.where_to_vote, size: 18, color: Color(0xFF7C3AED)),
-                                  label: Text(
-                                    '모두 하차 (${runList.where((s) => s.boarded).length})',
-                                    style: const TextStyle(color: Color(0xFF7C3AED), fontWeight: FontWeight.w800, fontSize: 14),
+                              if (_selectedStudentIds.isEmpty) ...[
+                                // 대기 원아가 있을 때: '일괄 탑승' 블럭 버튼 노출
+                                if (runList.any((s) => _canBoard(s))) ...[
+                                  const SizedBox(width: 6),
+                                  SizedBox(
+                                    height: 36,
+                                    child: ElevatedButton.icon(
+                                      onPressed: () => _confirmBoardAll(runList.where((s) => _canBoard(s)).toList()),
+                                      icon: const Icon(Icons.check_circle_outline, size: 16),
+                                      label: Text(
+                                        '일괄 탑승 (${runList.where((s) => _canBoard(s)).length})',
+                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFF10B981),
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        elevation: 1,
+                                        shadowColor: const Color(0x3310B981),
+                                      ),
+                                    ),
                                   ),
-                                  style: TextButton.styleFrom(minimumSize: const Size(48, 44)),
-                                ),
-                              if (_selectedStudentIds.isNotEmpty)
+                                ],
+                                // 탑승 중인 원아가 있을 때: '일괄 하차' 블럭 버튼 노출
+                                if (runList.any((s) => s.boarded)) ...[
+                                  const SizedBox(width: 6),
+                                  SizedBox(
+                                    height: 36,
+                                    child: ElevatedButton.icon(
+                                      onPressed: () => _confirmDropAll(runList.where((s) => s.boarded).toList()),
+                                      icon: const Icon(Icons.where_to_vote, size: 16),
+                                      label: Text(
+                                        '일괄 하차 (${runList.where((s) => s.boarded).length})',
+                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFF7C3AED),
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                        elevation: 1,
+                                        shadowColor: const Color(0x337C3AED),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                              if (_selectedStudentIds.isNotEmpty) ...[
+                                const SizedBox(width: 6),
                                 GestureDetector(
                                   onTap: _showBroadcastModal,
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                                     decoration: BoxDecoration(
                                       color: const Color(0xFFEFF6FF),
                                       borderRadius: BorderRadius.circular(8),
                                       border: Border.all(color: const Color(0xFFBFDBFE)),
                                     ),
                                     child: Text(
-                                      '선택 메시지 전송 (${_selectedStudentIds.length})',
-                                      style: const TextStyle(color: Color(0xFF2563EB), fontWeight: FontWeight.bold, fontSize: 11),
+                                      '선택 메시지 (${_selectedStudentIds.length})',
+                                      style: const TextStyle(color: Color(0xFF2563EB), fontWeight: FontWeight.bold, fontSize: 12),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
                                 ),
+                              ],
                             ],
                           ),
                           // 전체 선택 + 선택한 원아 탑승/하차

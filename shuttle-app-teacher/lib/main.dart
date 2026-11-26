@@ -18,9 +18,9 @@ void main() async {
   setupNetworkSecurity();
   await initializeDateFormatting('ko_KR', null);
   await ApiService().init();
-  // 네이버 지도 (실행 시 --dart-define=NAVER_MAP_CLIENT_ID=... 이 있고 인증되면 사용, 아니면 기존 지도)
-  await initNaverMap();
-  await PushNotificationService().initialize();
+  // 네이버 지도 및 푸시 알림은 백그라운드에서 병렬 초기화하여 앱 첫 시작 속도를 극대화
+  initNaverMap();
+  PushNotificationService().initialize();
   runApp(const TakeMeTeacherApp());
 }
 
