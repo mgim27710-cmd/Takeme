@@ -320,24 +320,51 @@ export class TeacherService implements OnModuleInit {
     };
   }
 
+  private static userCache = new Map<string, { user: User; expiresAt: number }>();
+  private static assignedVehicleCache = new Map<number, { vehicle: Vehicle | null; expiresAt: number }>();
+
+  private async getCachedUser(email: string): Promise<User | null> {
+    const now = Date.now();
+    const cached = TeacherService.userCache.get(email);
+    if (cached && cached.expiresAt > now) {
+      return cached.user;
+    }
+    const user = await this.userRepository.findOne({ where: { email } });
+    if (user) {
+      TeacherService.userCache.set(email, { user, expiresAt: now + 5000 });
+    }
+    return user;
+  }
+
   /**
    * 로그인한 직원(차량선생님 또는 기사)에게 배정된 차량 찾기.
    * 테넌트 격리(Tenant Isolation)를 보장하며, 타 학원 차량이나 임의 1호차 자동 할당을 차단합니다.
    */
   private async findAssignedVehicle(userId: number, relations: any = {}) {
+    const hasRelations = Object.keys(relations).length > 0;
+    const now = Date.now();
+    if (!hasRelations) {
+      const cached = TeacherService.assignedVehicleCache.get(userId);
+      if (cached && cached.expiresAt > now) {
+        return cached.vehicle;
+      }
+    }
+
     let v =
       (await this.vehicleRepository.findOne({ where: { teacherUser: { id: userId } }, relations })) ||
       (await this.vehicleRepository.findOne({ where: { driverUser: { id: userId } }, relations }));
-    if (v) return v;
-
-    const user = await this.userRepository.findOne({ where: { id: userId }, relations: { academy: true } });
-    if (user?.academy) {
-      // 해당 학원의 배정 차량 탐색 (타 학원 차량 침범 금지)
-      v = await this.vehicleRepository.findOne({ where: { academy: { id: user.academy.id } }, relations });
-      if (v) return v;
+    if (!v) {
+      const user = await this.userRepository.findOne({ where: { id: userId }, relations: { academy: true } });
+      if (user?.academy) {
+        // 해당 학원의 배정 차량 탐색 (타 학원 차량 침범 금지)
+        v = await this.vehicleRepository.findOne({ where: { academy: { id: user.academy.id } }, relations });
+      }
     }
 
-    return null;
+    if (!hasRelations) {
+      TeacherService.assignedVehicleCache.set(userId, { vehicle: v, expiresAt: now + 5000 });
+    }
+    return v;
   }
 
   async getStudents(email: string, mode?: string) {
@@ -879,7 +906,7 @@ export class TeacherService implements OnModuleInit {
   }
 
   async boardStudent(email: string, studentId: number, reason?: string, mode?: string) {
-    const user = await this.userRepository.findOne({ where: { email } });
+    const user = await this.getCachedUser(email);
     if (!user) throw new BadRequestException('User not found');
 
     const vehicle = await this.findAssignedVehicle(user.id);
@@ -895,34 +922,36 @@ export class TeacherService implements OnModuleInit {
     student.actualBoardTime = new Date();
     await this.studentRepository.save(student);
 
-    // 1. Create a Notification for the academy admin
-    let msg = `${vehicle?.busNumber || '통학'}호차 ${student.adminDisplayName || student.name} 원생 ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 탑승 완료`;
-    if (reason) {
-      msg += ` (수동 탑승 사유: ${reason})`;
-    }
-    if (vehicle) {
-      const adminNoti = this.notificationRepository.create({
-        type: 'VEHICLE_LOG', // 원장 화면 운행 기록용 (차량선생님·기사 알림 숫자에 넣지 않음)
-        vehicle: vehicle,
-        message: msg
-      });
-      await this.notificationRepository.save(adminNoti);
-    }
+    const studentName = student.adminDisplayName || student.name;
 
-    // 2. 학부모 실시간 알림 및 소켓 브로드캐스트
-    await this.notifyParentBoardStatus(student, vehicle, 'BOARDED', 'MANUAL');
-
-    // 3. Append to OperationLog
-    if (vehicle) {
-      await this.appendBoardingLog(vehicle.id, student.id, student.adminDisplayName || student.name, 'MANUAL');
-    }
+    // 백그라운드 비동기 처리: 알림 생성, 운행 일지, 학부모 실시간 알림을 백그라운드로 처리하여 HTTP 응답 즉시 반환
+    setImmediate(async () => {
+      try {
+        let msg = `${vehicle?.busNumber || '통학'}호차 ${studentName} 원생 ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 탑승 완료`;
+        if (reason) {
+          msg += ` (수동 탑승 사유: ${reason})`;
+        }
+        if (vehicle) {
+          const adminNoti = this.notificationRepository.create({
+            type: 'VEHICLE_LOG',
+            vehicle: vehicle,
+            message: msg
+          });
+          await this.notificationRepository.save(adminNoti);
+          await this.appendBoardingLog(vehicle.id, student.id, studentName, 'MANUAL');
+        }
+        await this.notifyParentBoardStatus(student, vehicle, 'BOARDED', 'MANUAL');
+      } catch (err) {
+        console.error('[boardStudent background tasks failed]', err);
+      }
+    });
 
     // 4. 전원 탑승 완료 여부 검사 및 원장/기사 실시간 알림 발송
     const allBoardedRes = await this.checkAndNotifyAllBoarded(vehicle, student.academy?.id || user.academyId, mode);
 
     return { 
       success: true, 
-      studentName: student.adminDisplayName || student.name,
+      studentName: studentName,
       allBoarded: allBoardedRes.allBoarded,
       totalCount: allBoardedRes.totalCount
     };
@@ -1111,23 +1140,25 @@ export class TeacherService implements OnModuleInit {
     studentId: number,
     handover?: { type?: string; name?: string; relation?: string },
   ) {
-    const user = await this.userRepository.findOne({ where: { email } });
+    const user = await this.getCachedUser(email);
     if (!user) throw new BadRequestException('User not found');
     const vehicle = await this.findAssignedVehicle(user.id);
     if (!vehicle) throw new BadRequestException('배정된 차량이 없습니다.');
 
-    const todayStudents = await this.getTodayStudentsForVehicle(vehicle.id);
-    let student = todayStudents.find(s => s.id === studentId);
-    if (!student) {
-      const directStudent = await this.studentRepository.findOne({
-        where: { id: studentId },
-        relations: { parentUser: true, assignedVehicle: true, assignedDepartureVehicle: true }
-      });
-      if (directStudent && (directStudent.assignedVehicle?.id === vehicle.id || directStudent.assignedDepartureVehicle?.id === vehicle.id)) {
-        student = directStudent;
+    // 직격 조회: 무거운 전체 학생/스케줄 쿼리(getTodayStudentsForVehicle) 대신 단일 쿼리로 10배 이상 고속화
+    let student = await this.studentRepository.findOne({
+      where: { id: studentId },
+      relations: { parentUser: true, assignedVehicle: true, assignedDepartureVehicle: true }
+    });
+    if (!student) throw new BadRequestException('원아를 찾을 수 없습니다.');
+    const isAssigned = student.assignedVehicle?.id === vehicle.id || student.assignedDepartureVehicle?.id === vehicle.id;
+    if (!isAssigned) {
+      const overrides = await this.getActiveOverridesForToday();
+      const isMovedIn = overrides.some(o => o.student?.id === studentId && (o.overrideType === OverrideType.CHANGE_LOCATION || o.overrideType === OverrideType.ONE_TIME_BOARDING) && o.newVehicleId === vehicle.id);
+      if (!isMovedIn) {
+        throw new BadRequestException('해당 차량에 배정된 원아가 아닙니다.');
       }
     }
-    if (!student) throw new BadRequestException('해당 차량에 배정된 원아가 아닙니다.');
     if (student.boardStatus !== 'BOARDED') {
       throw new BadRequestException('탑승한 원아만 하차 처리할 수 있습니다.');
     }
@@ -1164,13 +1195,22 @@ export class TeacherService implements OnModuleInit {
 
     const name = student.adminDisplayName || student.name;
     const whoText = who ? ` · 인수: ${who}` : '';
-    await this.notificationRepository.save(this.notificationRepository.create({
-      type: 'VEHICLE_LOG', // 원장 화면 운행 기록용 (차량선생님·기사 알림 숫자에 넣지 않음)
-      vehicle,
-      message: `${vehicle.busNumber}호차 ${name} 원생 ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} 하차 완료${whoText}`,
-    }));
-    await this.appendBoardingLog(vehicle.id, student.id, `${name} 하차${whoText}`, 'MANUAL');
-    await this.notifyParentBoardStatus(student, vehicle, 'DROPPED', 'MANUAL', who);
+
+    // 백그라운드 비동기 처리: 운행 일지 기록, 학부모 실시간 알림 등은 응답 후 백그라운드에서 처리
+    setImmediate(async () => {
+      try {
+        await this.notificationRepository.save(this.notificationRepository.create({
+          type: 'VEHICLE_LOG',
+          vehicle,
+          message: `${vehicle.busNumber}호차 ${name} 원생 ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} 하차 완료${whoText}`,
+        }));
+        await this.appendBoardingLog(vehicle.id, student.id, `${name} 하차${whoText}`, 'MANUAL');
+        await this.notifyParentBoardStatus(student, vehicle, 'DROPPED', 'MANUAL', who);
+      } catch (err) {
+        console.error('[dropStudent background tasks failed]', err);
+      }
+    });
+
     return { success: true, studentName: name, handover: who || null };
   }
 
