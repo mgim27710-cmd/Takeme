@@ -5,6 +5,8 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_naver_map/flutter_naver_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 
+import '../driver/geo.dart' show GeoPoint, distanceM;
+import 'marker_layout.dart';
 import 'nav_map_controller.dart';
 
 /// Map Style Editor 사용자 스타일 ID (secrets.json 의 NAVER_MAP_STYLE_ID). 비어 있으면 기본 스타일.
@@ -700,7 +702,7 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
 
     // 같은 도로를 반대 방향으로 다시 지나는 구간(유턴/복귀) 검출
     final isOverlap = List<bool>.filled(math.max(0, activePoints.length - 1), false);
-    if (activePoints.length >= 4) {
+    if (!_isNavigating && activePoints.length >= 4) {
       for (int j = 2; j < activePoints.length - 1; j++) {
         final bj = _bearingBetween(activePoints[j], activePoints[j + 1]);
         final midJ = LatLng(
@@ -752,51 +754,109 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
     const lineWidth = 9.0;
     const outlineWidth = 2.0;
 
+    // 가고 있는 구간(차 → 다음 정류장)만 진하게 + 방향 화살표로 맨 위에 그리고,
+    // 그 뒤에 갈 길은 옅은 초록으로 아래에 그린다. (같은 길을 갔다 돌아올 때 지금 가는 방향이 위에 보인다)
+    int? legEnd;
+    if (_isNavigating) {
+      final next = _nextStopPoint();
+      if (next != null) {
+        legEnd = nearestPathIndexFrom(
+          [for (final p in pri) GeoPoint(p.latitude, p.longitude)],
+          currentSegIdx,
+          next,
+        );
+      }
+    }
+    final laterSpecs = <_PathSpec>[];
+    final currentSpecs = <_PathSpec>[];
+    void addLater(String id, List<LatLng> pts) {
+      if (pts.length > 1) {
+        laterSpecs.add(_PathSpec(
+          id: id,
+          points: pts,
+          color: const Color(0xFF86EFAC),
+          width: 7,
+          outlineColor: const Color(0xFFBBF7D0),
+          outlineWidth: 1,
+        ));
+      }
+    }
+
     final traffic = _impl.trafficSegments;
     if (traffic != null && traffic.isNotEmpty) {
       for (int t = 0; t < traffic.length; t++) {
         final seg = traffic[t];
         if (_isNavigating && seg.to < currentSegIdx) continue;
+        final isActiveSeg = _isNavigating && seg.from <= currentSegIdx && currentSegIdx <= seg.to;
+        final a = isActiveSeg ? currentSegIdx : seg.from.clamp(0, pri.length - 1);
+        final b = seg.to.clamp(0, pri.length - 1);
+        if (b < a) continue;
 
-        final List<LatLng> segPoints;
-        if (_isNavigating && seg.from <= currentSegIdx && currentSegIdx <= seg.to) {
-          final nextIdx = (currentSegIdx + 1).clamp(0, pri.length);
-          final toIdx = (seg.to + 1).clamp(0, pri.length);
-          // 도로 위에 있을 때만 차량 위치에서 시작, 아니면 도로 경로 점에서 시작 (차량→경로 직선 금지)
-          segPoints = _isSnappedToRoute
-              ? [LatLng(_animatedLat, _animatedLng)]
-              : [pri[currentSegIdx.clamp(0, pri.length - 1)]];
-          if (nextIdx < toIdx) segPoints.addAll(pri.sublist(nextIdx, toIdx));
-        } else {
-          final from = seg.from.clamp(0, pri.length - 1);
-          final to = (seg.to + 1).clamp(0, pri.length);
-          segPoints = to > from + 1 ? pri.sublist(from, to) : const [];
+        // 점 번호 x~y 의 경로 점. fromCar 이면 첫 점을 차 위치로 (도로 위에 있을 때만, 아니면 도로 경로 점)
+        List<LatLng> pointsFor(int x, int y, {bool fromCar = false}) {
+          if (fromCar) {
+            final first = _isSnappedToRoute ? LatLng(_animatedLat, _animatedLng) : pri[x.clamp(0, pri.length - 1)];
+            return [first, if (x + 1 <= y) ...pri.sublist(x + 1, y + 1)];
+          }
+          return y >= x ? pri.sublist(x, y + 1) : const <LatLng>[];
         }
 
-        if (segPoints.length > 1) {
-          specs.add(_PathSpec(
-            id: 'traffic_$t',
-            points: segPoints,
-            color: _trafficColor(seg.state),
-            width: lineWidth,
-            outlineColor: outlineColor,
-            outlineWidth: outlineWidth,
-            chevron: true,
-          ));
+        final split = legEnd == null ? RangeSplit((a, b), null) : splitRangeAt(a, b, legEnd);
+        final cur = split.current;
+        if (cur != null) {
+          final pts = pointsFor(cur.$1, cur.$2, fromCar: isActiveSeg && cur.$1 == currentSegIdx);
+          if (pts.length > 1) {
+            currentSpecs.add(_PathSpec(
+              id: 'traffic_$t',
+              points: pts,
+              color: _trafficColor(seg.state),
+              width: lineWidth,
+              outlineColor: outlineColor,
+              outlineWidth: outlineWidth,
+              chevron: true,
+            ));
+          }
+        }
+        final lat = split.later;
+        if (lat != null) {
+          addLater('later_$t', pointsFor(lat.$1, lat.$2, fromCar: isActiveSeg && lat.$1 == currentSegIdx));
         }
       }
     } else if (activePoints.length > 1) {
-      specs.add(_PathSpec(
-        id: 'main',
-        points: activePoints,
-        color: const Color(0xFF16A34A),
-        width: lineWidth,
-        outlineColor: outlineColor,
-        outlineWidth: outlineWidth,
-        chevron: true,
-      ));
+      final lastIdx = activePoints.length - 1;
+      final k = legEnd == null ? null : (legEnd - currentSegIdx).clamp(0, lastIdx);
+      final split = k == null ? RangeSplit((0, lastIdx), null) : splitRangeAt(0, lastIdx, k);
+      final cur = split.current;
+      if (cur != null && cur.$2 > cur.$1) {
+        currentSpecs.add(_PathSpec(
+          id: 'main',
+          points: activePoints.sublist(cur.$1, cur.$2 + 1),
+          color: const Color(0xFF16A34A),
+          width: lineWidth,
+          outlineColor: outlineColor,
+          outlineWidth: outlineWidth,
+          chevron: true,
+        ));
+      }
+      final lat = split.later;
+      if (lat != null) addLater('later_main', activePoints.sublist(lat.$1, lat.$2 + 1));
     }
+    specs.addAll(laterSpecs);
+    specs.addAll(currentSpecs);
     return specs;
+  }
+
+  /// 아직 안 지난 첫 정류장의 좌표 (없으면 null = 마지막 구간)
+  GeoPoint? _nextStopPoint() {
+    for (int i = 0; i < _impl.stops.length; i++) {
+      final s = _impl.stops[i];
+      if (_impl.passedStopIndices.contains(i) || s['passed'] == true) continue;
+      final lat = s['lat'] as num?;
+      final lng = s['lng'] as num?;
+      if (lat == null || lng == null) continue;
+      return GeoPoint(lat.toDouble(), lng.toDouble());
+    }
+    return null;
   }
 
   Color _trafficColor(int state) {
@@ -894,6 +954,21 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
         order++;
       }
 
+      // 유치원 가까이(40m)의 정류장은 번호가 이름표에 가려지므로 따로 찍지 않고 이름표 옆 번호표로 묶는다
+      final nearAcademy = <int>{};
+      final academyPt = _impl.academy;
+      if (academyPt != null) {
+        nearAcademy.addAll(stopsNearPoint(
+          [
+            for (final s in _impl.stops)
+              (s['lat'] is num && s['lng'] is num)
+                  ? GeoPoint((s['lat'] as num).toDouble(), (s['lng'] as num).toDouble())
+                  : null,
+          ],
+          academyPt,
+        ));
+      }
+
       // 정류장 마커
       for (int i = 0; i < _impl.stops.length; i++) {
         final s = _impl.stops[i];
@@ -902,6 +977,7 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
         if (lat == null || lng == null) continue;
         final isPassed = _impl.passedStopIndices.contains(i) || s['passed'] == true;
         final isTest = s['test'] == true;
+        if (nearAcademy.contains(i)) continue;
         final id = 'stop_$i';
         wanted.add(id);
         final imgKey = 'stop_${i}_${isPassed}_$isTest';
@@ -929,21 +1005,34 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
         }
       }
 
-      // 유치원 마커
+      // 유치원 마커: 이름표는 점 위쪽에 두고(핀 모양) 정류장 번호가 가려지지 않게 한다. 근처 정류장은 이름표 옆 번호표로 묶는다
       final academy = _impl.academy;
       if (academy != null) {
         wanted.add('academy');
-        final icon = await _image('academy', const _AcademyMarkerWidget(), const Size(64, 32));
+        final badges = <(int, bool)>[
+          for (final i in (nearAcademy.toList()..sort()))
+            (i, _impl.passedStopIndices.contains(i) || _impl.stops[i]['passed'] == true),
+        ];
+        final badgeKey = badges.map((b) => '${b.$1}${b.$2 ? "p" : ""}').join(',');
+        final width = 64.0 + 24.0 * badges.length;
+        final icon = await _image('academy_$badgeKey', _AcademyMarkerWidget(badges: badges), Size(width, 32));
         if (!_canUseMap) return;
         final pos = NLatLng(academy.lat, academy.lng);
+        final anchor = NPoint(32 / width, 1.55); // 이름표 아랫면이 점보다 17px 위에 오게 (정류장 번호 원의 반지름 14px)
         final existing = _overlays['academy'];
         if (existing == null) {
-          final m = NMarker(id: 'academy', position: pos, icon: icon, anchor: NPoint.relativeCenter);
+          final m = NMarker(id: 'academy', position: pos, icon: icon, anchor: anchor);
           m.setGlobalZIndex(200001);
           _overlays['academy'] = m;
+          _overlayKeys['academy'] = badgeKey;
           await map.addOverlay(m);
         } else if (existing is NMarker) {
           existing.setPosition(pos);
+          if (_overlayKeys['academy'] != badgeKey) {
+            existing.setIcon(icon);
+            existing.setAnchor(anchor);
+            _overlayKeys['academy'] = badgeKey;
+          }
         }
       }
 
@@ -954,6 +1043,13 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
         final curProgress = _isNavigating ? _impl.routeProgressIndex : 0;
         final icon = await _image('uturn', const _UturnMarkerWidget(), const Size(32, 32));
         if (!_canUseMap) return;
+        // 번호가 보이는 정류장(유치원 근처로 묶인 것 제외)과 유치원 위치 — 유턴 표시가 이 위를 덮지 않게 비껴 놓는다
+        final blockers = <GeoPoint>[
+          for (int i = 0; i < _impl.stops.length; i++)
+            if (!nearAcademy.contains(i) && _impl.stops[i]['lat'] is num && _impl.stops[i]['lng'] is num)
+              GeoPoint((_impl.stops[i]['lat'] as num).toDouble(), (_impl.stops[i]['lng'] as num).toDouble()),
+          if (_impl.academy != null) _impl.academy!,
+        ];
         for (int k = 0; k < uturns.length; k++) {
           final u = uturns[k];
           final uLatLng = LatLng(u.lat, u.lng);
@@ -972,13 +1068,15 @@ class _NaverNavMapViewState extends State<NaverNavMapView> with SingleTickerProv
           final id = 'uturn_$k';
           wanted.add(id);
           if (_overlays[id] == null) {
+            // 정류장·유치원과 겹치면 오른쪽 위로 비껴 놓는다 (아이콘 기준점만 옮기므로 줌과 상관없이 화면에서 같은 간격)
+            final shifted = isNearAny(GeoPoint(u.lat, u.lng), blockers);
             final m = NMarker(
               id: id,
               position: NLatLng(u.lat, u.lng),
               icon: icon,
-              anchor: NPoint.relativeCenter,
+              anchor: shifted ? const NPoint(-0.6, 1.1) : NPoint.relativeCenter,
             );
-            m.setGlobalZIndex(200002);
+            m.setGlobalZIndex(199999); // 정류장 번호(200000)보다 아래: 겹쳐도 번호가 위에 보인다
             _overlays[id] = m;
             await map.addOverlay(m);
           }
@@ -1215,35 +1313,64 @@ class _StopMarkerWidget extends StatelessWidget {
   }
 }
 
-/// 유치원 마커
+/// 유치원 마커 (이름표 + 근처 정류장 번호표)
 class _AcademyMarkerWidget extends StatelessWidget {
-  const _AcademyMarkerWidget();
+  /// 유치원 근처라 이름표 옆에 묶어 보여 줄 정류장: (정류장 번호 0부터, 지나쳤는지)
+  final List<(int, bool)> badges;
+
+  const _AcademyMarkerWidget({this.badges = const []});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: const Color(0xFF10B981),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white, width: 2),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x8010B981),
-            blurRadius: 6,
-            offset: Offset(0, 2),
+    return SizedBox(
+      width: 64.0 + 24.0 * badges.length,
+      height: 32,
+      child: Row(
+        children: [
+          Container(
+            width: 64,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: const Color(0xFF10B981),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.white, width: 2),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x8010B981),
+                  blurRadius: 6,
+                  offset: Offset(0, 2),
+                ),
+              ],
+            ),
+            child: const Text(
+              '유치원',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
+          for (final b in badges)
+            Padding(
+              padding: const EdgeInsets.only(left: 2),
+              child: Container(
+                width: 22,
+                height: 22,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: b.$2 ? const Color(0xFF94A3B8) : const Color(0xFF2563EB),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
+                child: Text(
+                  '${b.$1 + 1}',
+                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
         ],
-      ),
-      child: const Center(
-        child: Text(
-          '유치원',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
       ),
     );
   }
