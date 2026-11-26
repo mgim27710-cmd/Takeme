@@ -139,6 +139,14 @@ describe('DirectionsService', () => {
     await expect(service.getRoute(req)).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('카카오 서버에서 답을 못 받으면(장애·네트워크 오류) 직선 경로로 대신한다', async () => {
+    const http = { post: jest.fn().mockImplementation(() => { throw new Error('connect ETIMEDOUT'); }) };
+    const service = new DirectionsService(http as any, { get: jest.fn().mockReturnValue('TEST_KEY') } as any);
+    const r = await service.getRoute(req);
+    expect(r.provider).toBe('fallback');
+    expect(r.path.length).toBeGreaterThanOrEqual(2);
+  });
+
   describe('경유지가 네이버 한도(15개)를 넘을 때', () => {
     /** 서로 20m 이상 떨어진 경유지 n개 (같은 점으로 합쳐지지 않게) */
     const stops = (n: number) => Array.from({ length: n }, (_, i) => ({ lat: 37.395 + i * 0.001, lng: 127.11 }));
