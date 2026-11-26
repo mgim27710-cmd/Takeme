@@ -27,6 +27,10 @@ async function bootstrap() {
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
       // 모바일 앱 요청(origin이 undefined/null) 및 승인된 웹 도메인/로컬 IP 허용
       const allowedOrigins = [
+        'https://takemesafely.com',
+        'http://takemesafely.com',
+        'https://www.takemesafely.com',
+        'http://www.takemesafely.com',
         'https://52.63.245.203.sslip.io',
         'http://52.63.245.203.sslip.io',
         'https://52.63.245.203',

@@ -4485,7 +4485,7 @@ export class RoutingService {
       fs.writeFileSync(path.join(uploadsDir, thumbFileName), thumbBuffer);
     }
 
-    const host = reqHost || '52.63.245.203.sslip.io';
+    const host = reqHost || 'takemesafely.com';
     const protocol = (host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':3000')) ? 'http' : 'https';
     const url = `${protocol}://${host}/uploads/board/${randomName}`;
     const thumbnailUrl = thumbFileName ? `${protocol}://${host}/uploads/board/${thumbFileName}` : url;
@@ -4854,7 +4854,7 @@ export class RoutingService {
     const filePath = path.join(uploadsDir, randomName);
     fs.writeFileSync(filePath, buffer);
 
-    const host = reqHost || '52.63.245.203.sslip.io';
+    const host = reqHost || 'takemesafely.com';
     const protocol = (host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':3000')) ? 'http' : 'https';
     const fileUrl = `${protocol}://${host}/uploads/documents/${randomName}`;
 
