@@ -594,6 +594,21 @@ class ApiService {
     return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
   }
 
+  /// 기사님께 정류장 탑승/하차 완료 및 출발 가능 신호 전송
+  Future<Map<String, dynamic>> sendReadyToDepart({String? stopName}) async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/ready-to-depart');
+    try {
+      final res = await postWithAuth(url, jsonEncode({
+        if (stopName != null && stopName.trim().isNotEmpty) 'stopName': stopName.trim(),
+      }));
+      final data = _decodeBody(res);
+      return {'success': res.statusCode == 200 || res.statusCode == 201, 'data': data};
+    } catch (e) {
+      debugPrint('[ApiService] sendReadyToDepart error: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
   Future<Map<String, dynamic>> saveTeacherMemo(int studentId, String memo) async {
     final url = Uri.parse('${AppConfig.apiHost}/teacher/student/$studentId/memo');
     final res = await postWithAuth(url, jsonEncode({'memo': memo}));

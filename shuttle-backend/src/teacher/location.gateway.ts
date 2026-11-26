@@ -433,9 +433,10 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   /** 차량선생님이 탑승 완료 후 기사 앱에 "출발하셔도 됩니다" 신호 전송 (해당 차량 방에만 전송) */
   broadcastDepartSignal(vehicleId: number, stopName?: string) {
     const room = `vehicle_${vehicleId}`;
+    const cleanStopName = stopName && stopName.trim().length > 0 ? stopName.trim() : null;
     const payload = {
       vehicleId,
-      stopName: stopName ?? null,
+      stopName: cleanStopName,
       message: '출발하셔도 됩니다',
       timestamp: new Date().toISOString(),
     };

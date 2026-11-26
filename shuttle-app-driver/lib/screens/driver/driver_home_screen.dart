@@ -1678,10 +1678,32 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     );
   }
 
+  Future<void> _confirmAdvanceStop(String stopName) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('정류장 도착/완료 처리', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+        content: Text('\'$stopName\' 정류장 정차를 완료하고 다음 목적지로 전환하시겠습니까?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: _C.blue, foregroundColor: Colors.white),
+            child: const Text('다음 목적지로'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted) {
+      _nav.advanceStop(stopName: stopName);
+    }
+  }
+
   /// 정류장 진행 패널 (하단 바 바로 위): 한 줄로 작게
   /// - 왼쪽: 다음 정류장 이름 (없으면 '유치원으로 이동')
   /// - 오른쪽: 남은 정류장 수
-  /// - 도착은 위치(GPS)로 자동 판정한다 (기사가 직접 누르는 도착 처리는 없다)
+  /// - 도착은 위치(GPS)로 자동 판정하며, 기사가 직접 '완료/다음'을 눌러 즉시 전환할 수도 있다.
   Widget _stopProgressPanel() {
     final list = _nav.activeStops;
     if (list.isEmpty) return const SizedBox.shrink();
@@ -1702,11 +1724,33 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
               style: const TextStyle(fontSize: 14, color: _C.slate600, fontWeight: FontWeight.w700)),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              next?.name ?? '유치원으로 이동',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900, color: _C.slate800, height: 1.2),
+            child: InkWell(
+              onTap: next == null ? null : () => _confirmAdvanceStop(next.name),
+              borderRadius: BorderRadius.circular(8),
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      next?.name ?? '유치원으로 이동',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900, color: _C.slate800, height: 1.2),
+                    ),
+                  ),
+                  if (next != null) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _C.blueBg,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0x4D2563EB)),
+                      ),
+                      child: const Text('완료/다음', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _C.blue)),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 8),

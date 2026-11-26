@@ -663,13 +663,34 @@ class DriverNavigator extends ChangeNotifier {
     });
   }
 
+  /// 특정 정류장을 통과(완료) 처리하거나 다음 정류장으로 전진 (수동 또는 차량선생님 신호 연동)
+  void advanceStop({String? stopName}) {
+    _onReceiveDepartSignal(stopName: stopName);
+  }
+
   void _onReceiveDepartSignal({String? stopName}) {
-    // 현재 정류장 부근(80m 이내)에 정차 중이면 해당 정류장을 통과 완료 처리하고 다음 정류장으로 전환
-    final s = nextStop;
-    if (s != null && position != null && distanceM(position!, s.point) <= 80) {
-      final idx = activeStops.indexOf(s);
-      s.passed = true;
-      s.arrivedAt ??= DateTime.now();
+    // 차량선생님의 출발 신호 또는 일괄 승/하차 완료 시:
+    // 1) 지정된 stopName과 일치하는 미통과 정류장 탐색 (정류장명 공백 제거/부분 일치 매칭)
+    // 2) stopName이 없거나 매칭되지 않은 경우 현재의 nextStop을 대상으로 완료 처리
+    NavStop? target;
+    if (stopName != null && stopName.trim().isNotEmpty) {
+      final clean = stopName.trim().replaceAll(' ', '');
+      for (final st in activeStops) {
+        if (!st.passed) {
+          final stClean = st.name.trim().replaceAll(' ', '');
+          if (stClean == clean || st.name.contains(stopName.trim()) || stopName.trim().contains(st.name)) {
+            target = st;
+            break;
+          }
+        }
+      }
+    }
+    target ??= nextStop;
+
+    if (target != null && !target.passed) {
+      final idx = activeStops.indexOf(target);
+      target.passed = true;
+      target.arrivedAt ??= DateTime.now();
       if (idx >= 0) map.markStopPassed(idx);
     }
 
@@ -682,6 +703,10 @@ class DriverNavigator extends ChangeNotifier {
     });
 
     _speak(next != null ? '출발하셔도 됩니다. 다음 정류장은 ${next.name}입니다.' : '출발하셔도 됩니다. 유치원으로 이동합니다.');
+
+    if (driving && !testMode) {
+      _reroute(reason: 'depart-signal', fit: false);
+    }
     notifyListeners();
   }
 

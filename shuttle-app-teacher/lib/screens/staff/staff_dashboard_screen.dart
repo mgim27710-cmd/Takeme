@@ -388,6 +388,14 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
         );
       } else {
         _flutterTts.speak('${student.name} 원아 탑승 완료');
+        // 해당 정류장에 남은 대기 원아가 없으면 기사님께 정류장 완료 및 출발 신호 전송
+        final stop = student.boardingLocation;
+        if (stop != null && stop.isNotEmpty) {
+          final hasWaiting = _students.any((s) => s.id != student.id && s.boardingLocation == stop && _canBoard(s));
+          if (!hasWaiting) {
+            unawaited(ApiService().sendReadyToDepart(stopName: stop));
+          }
+        }
       }
     } else {
       _loadAllData(silent: true);
@@ -471,6 +479,14 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     if (handover == null) return; // 취소
     if (await _dropStudent(student, handover: handover)) {
       _flutterTts.speak('${student.name} 원아 하차 완료');
+      // 해당 정류장에 남은 탑승 원아가 없으면 기사님께 정류장 완료 및 출발 신호 전송
+      final stop = student.dropoffLocation;
+      if (stop != null && stop.isNotEmpty) {
+        final hasBoarded = _students.any((s) => s.id != student.id && s.dropoffLocation == stop && s.boarded);
+        if (!hasBoarded) {
+          unawaited(ApiService().sendReadyToDepart(stopName: stop));
+        }
+      }
     }
   }
 
@@ -657,7 +673,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   }
 
   /// 일괄 하차 공통 실행 루틴
-  Future<void> _executeBulkDrop(List<StudentModel> targets, Map<String, String> handover) async {
+  Future<void> _executeBulkDrop(List<StudentModel> targets, Map<String, String> handover, {String? stopName}) async {
     if (targets.isEmpty || _bulkDropping) return;
     setState(() => _bulkDropping = true);
     var ok = 0;
@@ -681,6 +697,13 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     _loadAllData(silent: true);
     if (ok > 0) {
       _flutterTts.speak('$ok명 하차 완료');
+      // 기사 앱에 해당 정류장 완료 및 출발 신호 전송
+      final sName = stopName ?? targets.firstOrNull?.dropoffLocation;
+      try {
+        await ApiService().sendReadyToDepart(stopName: sName);
+      } catch (e) {
+        debugPrint('[Staff] sendReadyToDepart error: $e');
+      }
     }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -736,6 +759,11 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
               final done = waitingList.length - failed.length;
               if (done > 0) {
                 _flutterTts.speak('$done명 전원 탑승 완료');
+                try {
+                  await ApiService().sendReadyToDepart();
+                } catch (e) {
+                  debugPrint('[Staff] sendReadyToDepart error: $e');
+                }
               }
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
@@ -791,10 +819,11 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   }
 
   /// 동일 정류장의 탑승 원아들을 한 번에 일괄 하차 처리
-  Future<void> _dropStopStudents(List<StudentModel> students) async {
+  Future<void> _dropStopStudents(List<StudentModel> students, {String? stopName}) async {
     final boarded = students.where((s) => s.boarded).toList();
     if (boarded.isEmpty) return;
 
+    final targetStopName = stopName ?? students.firstOrNull?.dropoffLocation;
     final names = boarded.map((s) => s.name).join(', ');
     final isAfternoon = _activeDirection == 'AFTERNOON';
     final defaultType = isAfternoon ? 'PRIMARY' : 'ACADEMY';
@@ -848,7 +877,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     );
 
     if (ok != true || !mounted) return;
-    await _executeBulkDrop(boarded, {'type': defaultType});
+    await _executeBulkDrop(boarded, {'type': defaultType}, stopName: targetStopName);
   }
 
   /// 선택된 원아들 일괄 하차 처리
@@ -909,10 +938,11 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   }
 
   /// 동일 정류장의 대기 원아들을 한 번에 일괄 탑승 처리
-  Future<void> _boardStopStudents(List<StudentModel> students) async {
+  Future<void> _boardStopStudents(List<StudentModel> students, {String? stopName}) async {
     final waiting = students.where((s) => _canBoard(s)).toList();
     if (waiting.isEmpty) return;
 
+    final targetStopName = stopName ?? students.firstOrNull?.boardingLocation;
     final names = waiting.map((s) => s.name).join(', ');
     final ok = await showDialog<bool>(
       context: context,
@@ -947,6 +977,12 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     final done = waiting.length - failed.length;
     if (done > 0) {
       _flutterTts.speak('$done명 탑승 완료');
+      // 기사 앱에 해당 정류장 완료 및 출발 신호 전송
+      try {
+        await ApiService().sendReadyToDepart(stopName: targetStopName);
+      } catch (e) {
+        debugPrint('[Staff] sendReadyToDepart error: $e');
+      }
     }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1699,7 +1735,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                   SizedBox(
                     height: 36,
                     child: ElevatedButton.icon(
-                      onPressed: () => _boardStopStudents(canBoardList),
+                      onPressed: () => _boardStopStudents(canBoardList, stopName: stopName),
                       icon: const Icon(Icons.check_circle_outline, size: 16),
                       label: Text(
                         '${canBoardList.length}명 일괄 탑승',
@@ -1722,7 +1758,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                   SizedBox(
                     height: 36,
                     child: ElevatedButton.icon(
-                      onPressed: () => _dropStopStudents(canDropList),
+                      onPressed: () => _dropStopStudents(canDropList, stopName: stopName),
                       icon: const Icon(Icons.where_to_vote, size: 16),
                       label: Text(
                         '${canDropList.length}명 일괄 하차',
