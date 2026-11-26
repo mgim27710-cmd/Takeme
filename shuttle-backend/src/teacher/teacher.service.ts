@@ -1227,36 +1227,21 @@ export class TeacherService implements OnModuleInit {
     const direction = isMorning ? 'MORNING' : 'AFTERNOON';
 
     const students = await this.getTodayStudentsForVehicle(vehicleId, direction);
-    const todayNoonKst = new Date(nowKst);
-    todayNoonKst.setUTCHours(3, 0, 0, 0); // UTC 03:00 = KST 12:00
 
-    if (isMorning) {
-      // 등원 운행: 차량에 탑승(BOARDED)했으나 아직 유치원에 하차하지 않은 원아
-      return students.filter(s => s.boardStatus === 'BOARDED');
-    } else {
-      // 하원 운행:
-      // 1. 이미 결석(ABSENT) 처리된 원아는 제외
-      // 2. 오늘 12시(KST) 이후에 유치원이 아닌 곳으로 실제 하차 완료(isDroppedAfternoon)된 원아는 제외
-      // 3. 그 외 탑승 중(BOARDED)이거나 아직 하원 하차 처리가 완료되지 않은 모든 원아를 미하차로 감지!
-      return students.filter(s => {
-        if (s.boardStatus === 'ABSENT') return false;
+    // 운행 종료 시 미하차 원아 검증:
+    // 실제로 차량에 탑승(BOARDED)했으나 하차(DROPPED) 처리되지 않고 차에 남아있는 원아만 정확히 감지한다.
+    // (이미 하차 완료된 원아나 탑승하지 않은 대기/결석 원아는 차 안에 남아있지 않으므로 정상 종료 가능)
+    const undropped = students.filter(s => s.boardStatus === 'BOARDED');
+    if (undropped.length > 0) return undropped;
 
-        let rawObj: any = s.raw;
-        if (typeof rawObj === 'string') {
-          try { rawObj = JSON.parse(rawObj); } catch { rawObj = {}; }
-        }
-        const lastDrop = rawObj?.['최근 인수'];
-        const dropAt = lastDrop?.at ? new Date(lastDrop.at) : null;
-        const isDroppedAfternoon = dropAt && dropAt >= todayNoonKst && lastDrop?.type !== 'ACADEMY';
-
-        // 오늘 오후에 정상 하차 완료된 원아는 제외
-        if (isDroppedAfternoon && s.boardStatus === 'DROPPED') {
-          return false;
-        }
-
-        return true;
-      });
-    }
+    // 혹시 모드/요일 필터링으로 목록에서 제외되었더라도, 현재 해당 차량에 탑승(BOARDED) 상태로 남아있는 원아가 있는지 DB에서 직접 확인
+    const directBoarded = await this.studentRepository.find({
+      where: [
+        { assignedVehicle: { id: vehicleId }, boardStatus: 'BOARDED' },
+        { assignedDepartureVehicle: { id: vehicleId }, boardStatus: 'BOARDED' },
+      ],
+    });
+    return directBoarded;
   }
 
   /** 아직 차에 타고 있는 원아 (탑승 처리 후 하차 처리가 안 된 원아) */
