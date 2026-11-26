@@ -65,6 +65,10 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   }
 
   Function(Map<String, dynamic>)? _operatingStatusCallback;
+  Function(Map<String, dynamic>)? _locationUpdatedCallback;
+  Function(Map<String, dynamic>)? _routePathUpdatedCallback;
+  bool _lastIsOperating = false;
+  int? _vehicleJoinedId;
 
   void _initChangeListeners() {
     void handleRefresh(dynamic data) {
@@ -81,23 +85,80 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
 
     _operatingStatusCallback = (Map<String, dynamic> data) {
       if (!mounted) return;
+      // 방 접속 시 최초 수신되는 초기 상태인 경우 토스트를 띄우지 않고 상태만 기록
+      if (data['initial'] == true) {
+        _lastIsOperating = data['isOperating'] == true;
+        return;
+      }
       final isOperating = data['isOperating'] == true;
-      if (!isOperating) {
+      // 실제 운행 상태가 변경(토글)되었을 때만 1회 안내 및 데이터 갱신
+      if (_lastIsOperating != isOperating) {
+        final wasOperating = _lastIsOperating;
+        _lastIsOperating = isOperating;
+        if (wasOperating && !isOperating) {
+          setState(() {
+            _busLat = null;
+            _busLng = null;
+            _actualRoadPath = null;
+            _progressIndex = 0;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('차량 운행이 종료되었습니다.'),
+              duration: Duration(seconds: 2),
+              backgroundColor: Color(0xFF64748B),
+            ),
+          );
+        } else if (!wasOperating && isOperating) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('차량 운행이 시작되었습니다.'),
+              duration: Duration(seconds: 2),
+              backgroundColor: Color(0xFF2563EB),
+            ),
+          );
+        }
+        _loadAllData(silent: true);
+      }
+    };
+
+    _locationUpdatedCallback = (Map<String, dynamic> data) {
+      if (!mounted) return;
+      final isOperating = data['isOperating'];
+      if (isOperating == false) {
         setState(() {
           _busLat = null;
           _busLng = null;
+        });
+        return;
+      }
+      final lat = (data['lat'] as num?)?.toDouble() ?? (data['latitude'] as num?)?.toDouble();
+      final lng = (data['lng'] as num?)?.toDouble() ?? (data['longitude'] as num?)?.toDouble();
+      if (lat != null && lng != null) {
+        setState(() {
+          _busLat = lat;
+          _busLng = lng;
+        });
+      } else {
+        setState(() {
+          _busLat = null;
+          _busLng = null;
+        });
+      }
+    };
+
+    _routePathUpdatedCallback = (Map<String, dynamic> data) {
+      if (!mounted) return;
+      final path = data['path'];
+      setState(() {
+        if (path is List && path.isNotEmpty) {
+          _actualRoadPath = path;
+          _progressIndex = data['progressIndex'] ?? 0;
+        } else {
           _actualRoadPath = null;
           _progressIndex = 0;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('차량 운행이 종료되었습니다.'),
-            duration: Duration(seconds: 2),
-            backgroundColor: Color(0xFF64748B),
-          ),
-        );
-      }
-      _loadAllData(silent: true);
+        }
+      });
     };
 
     SocketService().on('studentStatusChanged', handleRefresh);
@@ -106,6 +167,8 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     SocketService().on('routeUpdated', handleRefresh);
     SocketService().on('routeNeedsRefresh', handleRefresh);
     SocketService().onVehicleOperatingStatus(_operatingStatusCallback!);
+    SocketService().onLocationUpdated(_locationUpdatedCallback!);
+    SocketService().onRoutePathUpdated(_routePathUpdatedCallback!);
   }
 
   @override
@@ -117,6 +180,12 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     SocketService().off('routeNeedsRefresh');
     if (_operatingStatusCallback != null) {
       SocketService().offVehicleOperatingStatus(_operatingStatusCallback!);
+    }
+    if (_locationUpdatedCallback != null) {
+      SocketService().offLocationUpdated(_locationUpdatedCallback!);
+    }
+    if (_routePathUpdatedCallback != null) {
+      SocketService().offRoutePathUpdated(_routePathUpdatedCallback!);
     }
     _notificationPollTimer?.cancel();
     _scrollController.dispose();
@@ -262,46 +331,10 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
       if (vid != null) {
         final vehicleId = int.tryParse(vid.toString()) ?? 0;
         _vehicleId = vehicleId;
-        SocketService().joinVehicleRoom(vehicleId);
-
-        SocketService().onLocationUpdated((data) {
-          if (!mounted) return;
-          final isOperating = data['isOperating'];
-          if (isOperating == false) {
-            setState(() {
-              _busLat = null;
-              _busLng = null;
-            });
-            return;
-          }
-          final lat = (data['lat'] as num?)?.toDouble() ?? (data['latitude'] as num?)?.toDouble();
-          final lng = (data['lng'] as num?)?.toDouble() ?? (data['longitude'] as num?)?.toDouble();
-          if (lat != null && lng != null) {
-            setState(() {
-              _busLat = lat;
-              _busLng = lng;
-            });
-          } else {
-            setState(() {
-              _busLat = null;
-              _busLng = null;
-            });
-          }
-        });
-
-        SocketService().onRoutePathUpdated((data) {
-          if (!mounted) return;
-          final path = data['path'];
-          setState(() {
-            if (path is List && path.isNotEmpty) {
-              _actualRoadPath = path;
-              _progressIndex = data['progressIndex'] ?? 0;
-            } else {
-              _actualRoadPath = null;
-              _progressIndex = 0;
-            }
-          });
-        });
+        if (_vehicleJoinedId != vehicleId && vehicleId > 0) {
+          _vehicleJoinedId = vehicleId;
+          SocketService().joinVehicleRoom(vehicleId);
+        }
       }
     }
   }
