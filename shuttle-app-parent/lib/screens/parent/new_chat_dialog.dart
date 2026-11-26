@@ -151,7 +151,7 @@ class _NewChatDialogState extends State<NewChatDialog> {
     }
 
     final room = await ApiService().createChatRoom(
-      targetIds,
+      userIds: targetIds,
       name: groupName,
       type: targetUsers.length > 1 ? 'GROUP' : 'DIRECT',
     );

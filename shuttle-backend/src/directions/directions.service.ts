@@ -126,6 +126,9 @@ export class DirectionsService {
           this.logger.warn(`[directions] Kakao 길찾기 호출 실패: ${kakaoErr?.message}`);
           const naverResult = await tryNaver();
           if (naverResult) return naverResult;
+          // 카카오가 '경로 없음·출발지와 도착지가 너무 가까움'처럼 분명하게 답한 오류는 직선으로 덮지 않고 그대로 알린다.
+          // (서버 장애·네트워크 오류처럼 답을 못 받았을 때만 직선 경로로 대신한다)
+          if (kakaoErr instanceof BadRequestException) throw kakaoErr;
           this.logger.warn(`[directions] 안전 경로 탐색 실패 (Kakao/Naver 불가) - 직선 보간 폴백 적용`);
         }
       }

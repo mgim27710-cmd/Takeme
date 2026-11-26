@@ -1126,7 +1126,8 @@ export class ParentService {
       student = await this.findStudentByEmailFallback(email, { academy: true });
     }
 
-    const academyId = student?.academy?.id || user.academyId || 1;
+    // 학원이 정해지지 않은 계정은 다른 학원의 글을 보지 못하게 빈 목록을 준다 (예전에는 1번 학원으로 대신해 노출될 수 있었다)
+    const academyId = student?.academy?.id || user.academyId;
     if (!academyId) return [];
 
     // 다자녀: 내 아이들이 속한 모든 반의 글 + 전체 공개 (반이 없으면 전체 공개만)
