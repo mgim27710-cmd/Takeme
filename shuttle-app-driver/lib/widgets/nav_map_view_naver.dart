@@ -5,7 +5,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_naver_map/flutter_naver_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 
-import '../driver/geo.dart' show GeoPoint, distanceM;
+import '../driver/geo.dart' show GeoPoint;
 import 'marker_layout.dart';
 import 'nav_map_controller.dart';
 
