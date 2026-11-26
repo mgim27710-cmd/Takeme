@@ -1160,17 +1160,60 @@ export class TeacherService implements OnModuleInit {
     return { success: true, studentName: name, handover: who || null };
   }
 
+  /**
+   * 해당 차량의 아직 하차되지 않은 원아 목록 조회
+   * - 등원(MORNING): 현재 탑승 중(BOARDED)인 원아
+   * - 하원(AFTERNOON):
+   *    1) 현재 탑승 중(BOARDED)인 원아
+   *    2) 또는 하원 차량 배정 원아 중 오늘 오후 하차(isDroppedAfternoon) 및 결석(ABSENT) 처리가 안 된 모든 원아
+   */
+  async getUndroppedStudentsForVehicle(vehicleId: number, mode?: string): Promise<Student[]> {
+    const nowKst = new Date(Date.now() + 9 * 3600 * 1000);
+    const isMorning = mode ? (mode === 'MORNING' || mode === 'goto') : (nowKst.getUTCHours() < 12);
+    const direction = isMorning ? 'MORNING' : 'AFTERNOON';
+
+    const students = await this.getTodayStudentsForVehicle(vehicleId, direction);
+    const todayNoonKst = new Date(nowKst);
+    todayNoonKst.setUTCHours(3, 0, 0, 0); // UTC 03:00 = KST 12:00
+
+    if (isMorning) {
+      // 등원 운행: 차량에 탑승(BOARDED)했으나 아직 유치원에 하차하지 않은 원아
+      return students.filter(s => s.boardStatus === 'BOARDED');
+    } else {
+      // 하원 운행:
+      // 1. 이미 결석(ABSENT) 처리된 원아는 제외
+      // 2. 오늘 12시(KST) 이후에 유치원이 아닌 곳으로 실제 하차 완료(isDroppedAfternoon)된 원아는 제외
+      // 3. 그 외 탑승 중(BOARDED)이거나 아직 하원 하차 처리가 완료되지 않은 모든 원아를 미하차로 감지!
+      return students.filter(s => {
+        if (s.boardStatus === 'ABSENT') return false;
+
+        let rawObj: any = s.raw;
+        if (typeof rawObj === 'string') {
+          try { rawObj = JSON.parse(rawObj); } catch { rawObj = {}; }
+        }
+        const lastDrop = rawObj?.['최근 인수'];
+        const dropAt = lastDrop?.at ? new Date(lastDrop.at) : null;
+        const isDroppedAfternoon = dropAt && dropAt >= todayNoonKst && lastDrop?.type !== 'ACADEMY';
+
+        // 오늘 오후에 정상 하차 완료된 원아는 제외
+        if (isDroppedAfternoon && s.boardStatus === 'DROPPED') {
+          return false;
+        }
+
+        return true;
+      });
+    }
+  }
+
   /** 아직 차에 타고 있는 원아 (탑승 처리 후 하차 처리가 안 된 원아) */
-  async getUndroppedStudents(email: string) {
+  async getUndroppedStudents(email: string, mode?: string) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
     const vehicle = await this.findAssignedVehicle(user.id);
     if (!vehicle) return { students: [] };
-    const todayStudents = await this.getTodayStudentsForVehicle(vehicle.id);
+    const undropped = await this.getUndroppedStudentsForVehicle(vehicle.id, mode);
     return {
-      students: todayStudents
-        .filter(s => s.boardStatus === 'BOARDED')
-        .map(s => ({ id: s.id, name: s.adminDisplayName || s.name })),
+      students: undropped.map(s => ({ id: s.id, name: s.adminDisplayName || s.name })),
     };
   }
 
@@ -1445,14 +1488,14 @@ export class TeacherService implements OnModuleInit {
     return { success: true };
   }
 
-  async endOperation(email: string, interiorChecked?: boolean, ignoreUndropped?: boolean) {
+  async endOperation(email: string, interiorChecked?: boolean, ignoreUndropped?: boolean, mode?: string) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
     const vehicle = await this.findAssignedVehicle(user.id);
     if (vehicle) {
       // 운행 종료 전 점검: 탑승 처리 후 하차 처리가 안 된 원아가 있으면 종료하지 않고 이름을 돌려준다.
       // 기사가 경고를 보고도 종료하면(ignoreUndropped) 기록을 남기고 원장님께 알린다.
-      const undropped = (await this.getTodayStudentsForVehicle(vehicle.id)).filter(s => s.boardStatus === 'BOARDED');
+      const undropped = await this.getUndroppedStudentsForVehicle(vehicle.id, mode);
       if (undropped.length > 0 && !ignoreUndropped) {
         throw new ConflictException({
           code: 'UNDROPPED_STUDENTS',

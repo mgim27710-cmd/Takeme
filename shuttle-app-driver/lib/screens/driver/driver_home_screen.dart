@@ -472,6 +472,51 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
   _map.setInteractive(true);
   if (ok != true) return;
 
+  // 1단계: 아직 방문하지 않은 정류장이 남아있는 경우 확인
+  if (!_nav.testMode && _nav.hasRemainingStops) {
+    if (!mounted) return;
+    final remCount = _nav.remainingStopsCount;
+    final remNames = _nav.remainingStopNames.take(3).join(', ') + (_nav.remainingStopsCount > 3 ? ' 외' : '');
+    _map.setInteractive(false);
+    final cont = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PointerInterceptor(
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: const Row(
+            children: [
+              Icon(Icons.location_off_rounded, color: _C.orange, size: 24),
+              SizedBox(width: 8),
+              Text('미방문 정류장 안내', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+            ],
+          ),
+          content: Text(
+            '아직 방문하지 않은 정류장이 $remCount곳 남아있습니다.\n($remNames)\n\n원아들을 모두 하차시키지 않은 상태일 수 있습니다. 계속 운행하시겠습니까?',
+            style: const TextStyle(fontSize: 14, color: _C.slate600, height: 1.45),
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _C.blue,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text('계속 운행하기', style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('종료 계속 진행', style: TextStyle(color: _C.slate500, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      ),
+    );
+    _map.setInteractive(true);
+    if (cont != true) return;
+  }
+
   // 운행 종료 전 점검: 탑승 처리 후 하차 처리가 안 된 원아가 있으면 이름과 함께 경고한다.
   // 남은 원아가 없을 때만 그대로 종료한다.
   var ignoreUndropped = false;

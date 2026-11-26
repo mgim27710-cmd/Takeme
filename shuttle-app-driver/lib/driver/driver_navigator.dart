@@ -1288,12 +1288,16 @@ class DriverNavigator extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool get hasRemainingStops => stops.any((s) => !s.passed);
+  int get remainingStopsCount => stops.where((s) => !s.passed).length;
+  List<String> get remainingStopNames => stops.where((s) => !s.passed).map((s) => s.name).toList();
+
   /// 아직 하차 처리 안 된(차에 타고 있는) 원아 이름. 확인하지 못하면 null
   Future<List<String>?> fetchUndroppedNames() async {
     if (!serverLive || testMode) return const [];
     try {
       final res = await ApiService()
-          .getWithAuth(Uri.parse('${AppConfig.apiHost}/teacher/undropped-students'))
+          .getWithAuth(Uri.parse('${AppConfig.apiHost}/teacher/undropped-students?mode=$directionMode'))
           .timeout(const Duration(seconds: 6));
       if (res.statusCode != 200) return null;
       final data = jsonDecode(utf8.decode(res.bodyBytes));
@@ -1314,7 +1318,11 @@ class DriverNavigator extends ChangeNotifier {
       try {
         final res = await ApiService().postWithAuth(
           Uri.parse('${AppConfig.apiHost}/teacher/end-operation'),
-          {'interiorChecked': interiorChecked, 'ignoreUndropped': ignoreUndropped},
+          {
+            'interiorChecked': interiorChecked,
+            'ignoreUndropped': ignoreUndropped,
+            'mode': directionMode,
+          },
         );
         if (res.statusCode == 409) {
           final data = jsonDecode(utf8.decode(res.bodyBytes));

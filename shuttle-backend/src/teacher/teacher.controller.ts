@@ -137,10 +137,10 @@ export class TeacherController {
   @Post('end-operation')
   async endOperation(
     @AuthEmail() email: string,
-    @Body() body?: { interiorChecked?: boolean; ignoreUndropped?: boolean },
+    @Body() body?: { interiorChecked?: boolean; ignoreUndropped?: boolean; mode?: string },
   ) {
     if (!email) throw new BadRequestException('이메일이 필요합니다.');
-    return this.teacherService.endOperation(email, body?.interiorChecked, body?.ignoreUndropped === true);
+    return this.teacherService.endOperation(email, body?.interiorChecked, body?.ignoreUndropped === true, body?.mode);
   }
 
   /** 하차 처리 */
@@ -155,9 +155,12 @@ export class TeacherController {
 
   /** 아직 하차 처리 안 된(타고 있는) 원아 */
   @Get('undropped-students')
-  async getUndroppedStudents(@AuthEmail() email: string) {
+  async getUndroppedStudents(
+    @AuthEmail() email: string,
+    @Query('mode') mode?: string,
+  ) {
     if (!email) throw new BadRequestException('이메일이 필요합니다.');
-    return this.teacherService.getUndroppedStudents(email);
+    return this.teacherService.getUndroppedStudents(email, mode);
   }
 
   @Post('ready-to-depart')
