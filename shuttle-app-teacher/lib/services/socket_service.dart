@@ -26,6 +26,7 @@ class SocketService {
   final List<Function(Map<String, dynamic>)> _changeRequestCallbacks = [];
   final List<Function(Map<String, dynamic>)> _studentStatusCallbacks = [];
   final List<Function(Map<String, dynamic>)> _attendanceCallbacks = [];
+  final List<Function(Map<String, dynamic>)> _vehicleOperatingStatusCallbacks = [];
 
   void connect(String? token) {
     // 토큰이 변경되었거나 소켓이 없을 경우 재연결
@@ -204,6 +205,17 @@ class SocketService {
       }
     });
 
+    // 10. vehicleOperatingStatus (차량 운행 상태 변경: 시작/종료)
+    _socket!.on('vehicleOperatingStatus', (data) {
+      debugPrint('[Socket] vehicleOperatingStatus: $data');
+      final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
+      for (final cb in List.from(_vehicleOperatingStatusCallbacks)) {
+        try {
+          cb(map);
+        } catch (_) {}
+      }
+    });
+
     _socket!.connect();
   }
 
@@ -336,6 +348,14 @@ class SocketService {
     _attendanceCallbacks.remove(callback);
   }
 
+  void onVehicleOperatingStatus(Function(Map<String, dynamic> data) callback) {
+    _vehicleOperatingStatusCallbacks.add(callback);
+  }
+
+  void offVehicleOperatingStatus(Function(Map<String, dynamic> data) callback) {
+    _vehicleOperatingStatusCallbacks.remove(callback);
+  }
+
   void offRoomUpdated([String? key]) {
     _roomUpdatedCallbacks.clear();
   }
@@ -351,6 +371,7 @@ class SocketService {
     _changeRequestCallbacks.clear();
     _studentStatusCallbacks.clear();
     _attendanceCallbacks.clear();
+    _vehicleOperatingStatusCallbacks.clear();
     _socket?.disconnect();
     _socket = null;
     _currentToken = null;

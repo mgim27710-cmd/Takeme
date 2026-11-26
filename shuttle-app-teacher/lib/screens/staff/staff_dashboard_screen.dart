@@ -64,6 +64,8 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     _initChangeListeners();
   }
 
+  Function(Map<String, dynamic>)? _operatingStatusCallback;
+
   void _initChangeListeners() {
     void handleRefresh(dynamic data) {
       if (!mounted) return;
@@ -77,11 +79,33 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
       );
     }
 
+    _operatingStatusCallback = (Map<String, dynamic> data) {
+      if (!mounted) return;
+      final isOperating = data['isOperating'] == true;
+      if (!isOperating) {
+        setState(() {
+          _busLat = null;
+          _busLng = null;
+          _actualRoadPath = null;
+          _progressIndex = 0;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('차량 운행이 종료되었습니다.'),
+            duration: Duration(seconds: 2),
+            backgroundColor: Color(0xFF64748B),
+          ),
+        );
+      }
+      _loadAllData(silent: true);
+    };
+
     SocketService().on('studentStatusChanged', handleRefresh);
     SocketService().on('changeRequestCreated', handleRefresh);
     SocketService().on('changeRequestDecided', handleRefresh);
     SocketService().on('routeUpdated', handleRefresh);
     SocketService().on('routeNeedsRefresh', handleRefresh);
+    SocketService().onVehicleOperatingStatus(_operatingStatusCallback!);
   }
 
   @override
@@ -91,6 +115,9 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     SocketService().off('changeRequestDecided');
     SocketService().off('routeUpdated');
     SocketService().off('routeNeedsRefresh');
+    if (_operatingStatusCallback != null) {
+      SocketService().offVehicleOperatingStatus(_operatingStatusCallback!);
+    }
     _notificationPollTimer?.cancel();
     _scrollController.dispose();
     _broadcastMessageController.dispose();
@@ -208,13 +235,20 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
       }
     }
 
+    final isVehOperating = vehicle?['isOperating'] == true;
+
     if (mounted) {
       setState(() {
         _students = students;
         _routeData = route;
-        if (routePathData != null) {
+        if (isVehOperating && routePathData != null) {
           _actualRoadPath = routePathData['path'];
           _progressIndex = routePathData['progressIndex'] ?? 0;
+        } else if (!isVehOperating) {
+          _actualRoadPath = null;
+          _progressIndex = 0;
+          _busLat = null;
+          _busLng = null;
         }
         _isLoading = false;
 
@@ -232,6 +266,14 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
 
         SocketService().onLocationUpdated((data) {
           if (!mounted) return;
+          final isOperating = data['isOperating'];
+          if (isOperating == false) {
+            setState(() {
+              _busLat = null;
+              _busLng = null;
+            });
+            return;
+          }
           final lat = (data['lat'] as num?)?.toDouble() ?? (data['latitude'] as num?)?.toDouble();
           final lng = (data['lng'] as num?)?.toDouble() ?? (data['longitude'] as num?)?.toDouble();
           if (lat != null && lng != null) {
@@ -239,14 +281,25 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
               _busLat = lat;
               _busLng = lng;
             });
+          } else {
+            setState(() {
+              _busLat = null;
+              _busLng = null;
+            });
           }
         });
 
         SocketService().onRoutePathUpdated((data) {
           if (!mounted) return;
+          final path = data['path'];
           setState(() {
-            _actualRoadPath = data['path'];
-            _progressIndex = data['progressIndex'] ?? 0;
+            if (path is List && path.isNotEmpty) {
+              _actualRoadPath = path;
+              _progressIndex = data['progressIndex'] ?? 0;
+            } else {
+              _actualRoadPath = null;
+              _progressIndex = 0;
+            }
           });
         });
       }

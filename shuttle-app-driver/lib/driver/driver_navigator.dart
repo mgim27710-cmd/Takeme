@@ -439,6 +439,18 @@ class DriverNavigator extends ChangeNotifier {
     }
   }
 
+  Future<void> _clearRoutePathOnServer() async {
+    final mayLeaveDevice = serverLive && !testMode;
+    if (!mayLeaveDevice || vehicleId == null) return;
+    try {
+      await _post('/teacher/route-path', {
+        'vehicleId': vehicleId,
+        'path': [],
+        'progressIndex': 0,
+      });
+    } catch (_) {}
+  }
+
   /// 실제 도로 경로와 진행률을 서버로 전송 (학부모·지도교사 지도 실시간 공유)
   Future<void> _syncRoutePathToServer({bool force = false}) async {
     final mayLeaveDevice = serverLive && !testMode;
@@ -1349,7 +1361,7 @@ class DriverNavigator extends ChangeNotifier {
     }
     _resetDriving();
     _syncOverlay();
-    _syncRoutePathToServer();
+    _clearRoutePathOnServer();
     busy = false;
     notifyListeners();
     _speak(testMode ? '테스트를 종료합니다.' : '차량 내부 확인이 완료되어 운행을 종료합니다. 수고하셨습니다.');

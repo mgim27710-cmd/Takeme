@@ -237,6 +237,10 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
         if (lastLoc) {
           this.server.to(room).emit('locationUpdated', lastLoc);
         }
+      } else {
+        // 운행 종료 시: 차량 방의 모든 클라이언트에게 버스 위치 및 경로 제거 브로드캐스트
+        this.server.to(room).emit('routePathUpdated', { vehicleId, path: [], progressIndex: 0 });
+        this.server.to(room).emit('locationUpdated', { vehicleId, lat: null, lng: null, isOperating: false });
       }
 
       let academyId = targetAcademyId;

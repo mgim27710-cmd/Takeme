@@ -315,6 +315,7 @@ export class TeacherService implements OnModuleInit {
     return {
       id: vehicle.id,
       name: vehicle.busNumber,
+      isOperating: !!vehicle.isOperating,
       polygon: polygon || []
     };
   }
@@ -674,7 +675,7 @@ export class TeacherService implements OnModuleInit {
     if (!user) throw new BadRequestException('사용자를 찾을 수 없습니다.');
 
     const vehicle = await this.findAssignedVehicle(user.id);
-    if (!vehicle) return { path: [], progressIndex: 0 };
+    if (!vehicle || !vehicle.isOperating) return { path: [], progressIndex: 0 };
 
     return TeacherService.getRoutePathForVehicle(vehicle.id);
   }
@@ -1557,6 +1558,8 @@ export class TeacherService implements OnModuleInit {
 
       vehicle.isOperating = false;
       await this.vehicleRepository.save(vehicle);
+
+      TeacherService.vehicleRoutePaths.delete(vehicle.id);
 
       if (this.locationGateway) {
         this.locationGateway.broadcastOperationStatus(vehicle.id, false, vehicle.busNumber);

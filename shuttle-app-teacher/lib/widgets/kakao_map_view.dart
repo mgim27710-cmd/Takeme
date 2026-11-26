@@ -110,6 +110,9 @@ class _KakaoMapViewState extends State<KakaoMapView> {
     if (widget.busLat != null && widget.busLng != null) {
       final js = 'if (window.updateBus) { window.updateBus(${widget.busLat}, ${widget.busLng}); }';
       _controller?.runJavaScript(js);
+    } else {
+      final js = 'if (window.removeBus) { window.removeBus(); }';
+      _controller?.runJavaScript(js);
     }
   }
 
@@ -121,6 +124,9 @@ class _KakaoMapViewState extends State<KakaoMapView> {
         p['lng'] ?? p['longitude'],
       ]).where((p) => p[0] != null && p[1] != null).toList());
       final js = 'if (window.updateRoutePath) { window.updateRoutePath($roadJson, ${widget.progressIndex}); }';
+      _controller?.runJavaScript(js);
+    } else {
+      final js = 'if (window.updateRoutePath) { window.updateRoutePath([], 0); }';
       _controller?.runJavaScript(js);
     }
   }
@@ -501,8 +507,18 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           map.setView([lat, lng], 16);
         };
 
+        window.removeBus = function() {
+          if (busMarker) {
+            map.removeLayer(busMarker);
+            busMarker = null;
+          }
+        };
+
         window.updateBus = function(lat, lng) {
-          if (!lat || !lng) return;
+          if (!lat || !lng) {
+            window.removeBus();
+            return;
+          }
           if (busMarker) {
             busMarker.setLatLng([lat, lng]);
           } else {
@@ -636,6 +652,8 @@ class _KakaoMapViewState extends State<KakaoMapView> {
           if (bLat && bLng) {
             window.updateBus(bLat, bLng);
             pts.push([bLat, bLng]);
+          } else {
+            window.removeBus();
           }
 
           if (pts.length > 0) {
