@@ -567,15 +567,21 @@ class ApiService {
     return null;
   }
 
-  Future<Map<String, dynamic>> manualBoardStudent(String email, int studentId, String reason) async {
+  Future<Map<String, dynamic>> manualBoardStudent(String email, int studentId, String reason, {String? mode}) async {
     final url = Uri.parse('${AppConfig.apiHost}/teacher/board');
     final res = await postWithAuth(url, jsonEncode({
         'email': email,
         'studentId': studentId,
         'reason': reason,
+        if (mode != null) 'mode': mode,
       }));
     final data = _decodeBody(res);
-    return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
+    return {
+      'success': res.statusCode == 200 || res.statusCode == 201,
+      'message': data is Map ? data['message'] : null,
+      'allBoarded': data is Map ? (data['allBoarded'] == true) : false,
+      'totalCount': data is Map ? data['totalCount'] : 0,
+    };
   }
 
   Future<Map<String, dynamic>> skipStudent(String email, int studentId) async {

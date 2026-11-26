@@ -531,7 +531,16 @@ export class TeacherService implements OnModuleInit {
 
     // Convert to route stops
     let stops = students
-      .filter(s => s.boardStatus === 'WAITING' && effectiveLatitude(s) && effectiveLongitude(s))
+      .filter(s => {
+        if (!effectiveLatitude(s) || !effectiveLongitude(s)) return false;
+        if (s.boardStatus === 'ABSENT') return false;
+        if (isMorning) {
+          return s.boardStatus === 'WAITING';
+        } else {
+          // 하원 운행: 차량에 탑승하여 귀가 하차 대기 중이거나 탑승 대기 중인 원아
+          return s.boardStatus === 'BOARDED' || s.boardStatus === 'WAITING';
+        }
+      })
       .map(s => {
         const raw = s.raw || {};
         const weekly = raw['요일별일정'] || raw.weeklySchedules;
@@ -868,7 +877,7 @@ export class TeacherService implements OnModuleInit {
     }
   }
 
-  async boardStudent(email: string, studentId: number, reason?: string) {
+  async boardStudent(email: string, studentId: number, reason?: string, mode?: string) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) throw new BadRequestException('User not found');
 
@@ -908,7 +917,7 @@ export class TeacherService implements OnModuleInit {
     }
 
     // 4. 전원 탑승 완료 여부 검사 및 원장/기사 실시간 알림 발송
-    const allBoardedRes = await this.checkAndNotifyAllBoarded(vehicle, student.academy?.id || user.academyId);
+    const allBoardedRes = await this.checkAndNotifyAllBoarded(vehicle, student.academy?.id || user.academyId, mode);
 
     return { 
       success: true, 
@@ -970,32 +979,60 @@ export class TeacherService implements OnModuleInit {
    * 탑승 대기(WAITING) 중인 원아가 0명이 되었는지 검사하고,
    * 전원 탑승 완료 시 원장님(웹 대시보드 알림/DB) 및 기사님(TTS 음성/출발 신호 배너/푸시)에게 알림을 발송합니다.
    */
-  async checkAndNotifyAllBoarded(vehicle: Vehicle | null, academyId?: number): Promise<{ allBoarded: boolean; totalCount: number }> {
+  async checkAndNotifyAllBoarded(vehicle: Vehicle | null, academyId?: number, mode?: string): Promise<{ allBoarded: boolean; totalCount: number }> {
     if (!vehicle) return { allBoarded: false, totalCount: 0 };
 
     try {
-      const todayStudents = await this.getTodayStudentsForVehicle(vehicle.id);
+      const nowKst = new Date(Date.now() + 9 * 3600 * 1000);
+      const isMorning = mode ? (mode === 'MORNING' || mode === 'goto') : (nowKst.getUTCHours() < 12);
+      const direction = isMorning ? 'MORNING' : 'AFTERNOON';
+      const todayStudents = await this.getTodayStudentsForVehicle(vehicle.id, direction);
       if (!todayStudents || todayStudents.length === 0) {
         return { allBoarded: false, totalCount: 0 };
       }
 
-      // 탑승 대기(WAITING) 중인 원아가 남아 있는지 확인
-      const waitingStudents = todayStudents.filter(s => s.boardStatus === 'WAITING');
-      if (waitingStudents.length > 0) {
-        return { allBoarded: false, totalCount: todayStudents.length };
+      const todayNoonKst = new Date(nowKst);
+      todayNoonKst.setUTCHours(3, 0, 0, 0); // UTC 03:00 = KST 12:00
+
+      // 결석한 학생 제외한 탑승 대상 학생들
+      const activeStudents = todayStudents.filter(s => s.boardStatus !== 'ABSENT');
+      if (activeStudents.length === 0) {
+        return { allBoarded: false, totalCount: 0 };
       }
 
-      // 최근 3분 이내에 이미 전원 탑승 알림을 보낸 차량이면 중복 알림 방지
+      let waitingStudents: Student[] = [];
+      let boardedStudents: Student[] = [];
+
+      if (isMorning) {
+        waitingStudents = activeStudents.filter(s => s.boardStatus === 'WAITING');
+        boardedStudents = activeStudents.filter(s => s.boardStatus === 'BOARDED');
+      } else {
+        // 하원 운행: 오늘 12시(KST) 이후 실제 탑승 처리된 아이들을 탑승 완료로 간주
+        boardedStudents = activeStudents.filter(s => {
+          const bTime = s.actualBoardTime ? new Date(s.actualBoardTime) : null;
+          return s.boardStatus === 'BOARDED' && (!bTime || bTime >= todayNoonKst);
+        });
+        waitingStudents = activeStudents.filter(s => !boardedStudents.some(b => b.id === s.id));
+      }
+
+      // 아직 대기 중인 원아가 남아있거나, 탑승한 원아가 0명이면 전원 탑승 미완료
+      if (waitingStudents.length > 0 || boardedStudents.length === 0) {
+        return { allBoarded: false, totalCount: activeStudents.length };
+      }
+
+      // 중복 알림 방지 쿨다운 (30초)
       const now = Date.now();
-      const lastTime = this.lastAllBoardedNotiTime.get(vehicle.id) || 0;
-      if (now - lastTime < 180000) {
-        return { allBoarded: true, totalCount: todayStudents.length };
+      const lastKey = `${vehicle.id}_${direction}`;
+      const lastTime = this.lastAllBoardedNotiTime.get(lastKey as any) || 0;
+      if (now - lastTime < 30000) {
+        return { allBoarded: true, totalCount: activeStudents.length };
       }
-      this.lastAllBoardedNotiTime.set(vehicle.id, now);
+      this.lastAllBoardedNotiTime.set(lastKey as any, now);
 
-      const totalCount = todayStudents.length;
+      const totalCount = boardedStudents.length;
       const targetAcademyId = academyId || vehicle.academy?.id;
       const busName = vehicle.busNumber || `${vehicle.id}호차`;
+      const runTypeLabel = isMorning ? '등원' : '하원';
 
       // 1. 실시간 웹소켓 브로드캐스트 (원장 웹 토스트 팝업 + 기사 네비게이션 TTS 및 출발 신호)
       if (this.locationGateway && targetAcademyId) {
@@ -1004,6 +1041,7 @@ export class TeacherService implements OnModuleInit {
           vehicleId: vehicle.id,
           vehicleName: busName,
           totalCount,
+          direction,
         });
       }
 
@@ -1011,7 +1049,7 @@ export class TeacherService implements OnModuleInit {
       if (targetAcademyId) {
         const noti = this.notificationRepository.create({
           type: 'NOTICE',
-          message: `[전원 탑승 완료] ${busName} (${totalCount}명) 원아 전원 탑승이 완료되었습니다. 안전 운행을 시작하세요.`,
+          message: `[${runTypeLabel} 전원 탑승 완료] ${busName} (${totalCount}명) 원아 전원 탑승이 완료되었습니다. 안전 운행을 시작하세요.`,
           recipientRole: 'ACADEMY_ADMIN',
           academy: { id: targetAcademyId } as any,
           vehicle,
@@ -1019,22 +1057,38 @@ export class TeacherService implements OnModuleInit {
         await this.notificationRepository.save(noti);
       }
 
-      // 3. 기사 유저가 있으면 채팅/푸시 시스템 알림 전송
+      // 3. 기사 및 원장님(ACADEMY_ADMIN) 푸시 / 채팅 시스템 알림 전송
       const vehicleWithDriver = await this.vehicleRepository.findOne({
         where: { id: vehicle.id },
         relations: { driverUser: true, academy: { owner: true } }
       });
 
       const recipientIds: number[] = [];
-      if (vehicleWithDriver?.driverUser?.id) recipientIds.push(vehicleWithDriver.driverUser.id);
-      if (vehicleWithDriver?.academy?.owner?.id) recipientIds.push(vehicleWithDriver.academy.owner.id);
+      if (vehicleWithDriver?.driverUser?.id) {
+        recipientIds.push(vehicleWithDriver.driverUser.id);
+      }
+      if (vehicleWithDriver?.academy?.owner?.id) {
+        recipientIds.push(vehicleWithDriver.academy.owner.id);
+      }
+      // 해당 학원의 모든 원장님(ACADEMY_ADMIN)에게도 반드시 전송
+      const admins = await this.userRepository.find({
+        where: [
+          ...(targetAcademyId ? [{ role: UserRole.ACADEMY_ADMIN, academyId: targetAcademyId }] : []),
+          { role: UserRole.ACADEMY_ADMIN }
+        ]
+      });
+      for (const admin of admins) {
+        if (admin.id && !recipientIds.includes(admin.id)) {
+          recipientIds.push(admin.id);
+        }
+      }
 
       if (recipientIds.length > 0 && this.chatService) {
         await this.chatService.sendSystemNotificationToUsers(
           recipientIds,
-          '전원 탑승 완료',
+          `${runTypeLabel} 전원 탑승 완료`,
           `${busName} (${totalCount}명) 원아 전원 탑승이 완료되었습니다. 안전 운행을 시작하세요.`,
-          { type: 'shuttle', metadata: { vehicleId: vehicle.id } }
+          { type: 'shuttle', metadata: { vehicleId: vehicle.id, direction, allBoarded: true } }
         ).catch(() => {});
       }
 

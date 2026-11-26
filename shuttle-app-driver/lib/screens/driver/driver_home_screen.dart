@@ -65,6 +65,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
   Timer? _changeBannerTimer;
   int _unreadMessengerCount = 0; // 메신저 안 읽은 수 (TakeMe 알림 포함)
   Timer? _notificationPollTimer;
+  bool _isWaitingForAfternoonBoarding = false;
+  Timer? _afternoonBoardingCheckTimer;
 
   Future<void> _loadUnreadCount() async {
     try {
@@ -158,6 +160,155 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     _eventSocket!.on('notificationReceived', (_) {
       if (mounted) _loadUnreadCount();
     });
+
+    _eventSocket!.on('allStudentsBoarded', (data) {
+      if (!mounted) return;
+      _onAllStudentsBoardedEvent(data);
+    });
+
+    _eventSocket!.on('driverDepartSignal', (data) {
+      if (!mounted) return;
+      _onAllStudentsBoardedEvent(data);
+    });
+  }
+
+  void _onAllStudentsBoardedEvent(dynamic data) {
+    if (_isWaitingForAfternoonBoarding) {
+      _finishWaitingAndStartRoute();
+    }
+  }
+
+  Future<void> _finishWaitingAndStartRoute() async {
+    _afternoonBoardingCheckTimer?.cancel();
+    if (!_isWaitingForAfternoonBoarding) return;
+    setState(() => _isWaitingForAfternoonBoarding = false);
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
+    _flutterTts.speak('모든 원아가 탑승을 완료했습니다. 하원 운행 알고리즘을 시작합니다.');
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('🎉 원아 전원 탑승 완료! 하원 운행을 시작합니다.'),
+        backgroundColor: Color(0xFF10B981),
+      ),
+    );
+    await _nav.refreshRouteFromServer(speak: false);
+    await _nav.start();
+  }
+
+  Future<void> _handleStartDriving() async {
+    if (_nav.busy || _nav.vehicleId == null) return;
+
+    if (_nav.directionMode == 'AFTERNOON') {
+      final user = ApiService().currentUser;
+      if (user != null) {
+        try {
+          final students = await ApiService().getTeacherStudentsJson(user.email, mode: 'AFTERNOON');
+          final unboarded = students.where((s) {
+            final isAbsent = s['absent'] == true || s['boardStatus'] == 'ABSENT';
+            final isBoarded = s['boarded'] == true || s['boardStatus'] == 'BOARDED';
+            return !isAbsent && !isBoarded;
+          }).toList();
+
+          final boarded = students.where((s) => s['boarded'] == true || s['boardStatus'] == 'BOARDED').toList();
+
+          if (unboarded.isNotEmpty || (boarded.isEmpty && students.isNotEmpty)) {
+            _showAfternoonWaitingDialog();
+            return;
+          }
+        } catch (_) {}
+      }
+    }
+
+    await _nav.start();
+  }
+
+  void _showAfternoonWaitingDialog() {
+    setState(() => _isWaitingForAfternoonBoarding = true);
+    _flutterTts.speak('차량교사가 아이들을 태우고 있습니다. 잠시 기다려 주세요.');
+
+    _afternoonBoardingCheckTimer?.cancel();
+    _afternoonBoardingCheckTimer = Timer.periodic(const Duration(milliseconds: 2500), (t) async {
+      final user = ApiService().currentUser;
+      if (user == null || !_isWaitingForAfternoonBoarding) {
+        t.cancel();
+        return;
+      }
+      try {
+        final students = await ApiService().getTeacherStudentsJson(user.email, mode: 'AFTERNOON');
+        final unboarded = students.where((s) {
+          final isAbsent = s['absent'] == true || s['boardStatus'] == 'ABSENT';
+          final isBoarded = s['boarded'] == true || s['boardStatus'] == 'BOARDED';
+          return !isAbsent && !isBoarded;
+        }).toList();
+
+        final boarded = students.where((s) => s['boarded'] == true || s['boardStatus'] == 'BOARDED').toList();
+
+        if (unboarded.isEmpty && boarded.isNotEmpty) {
+          t.cancel();
+          _finishWaitingAndStartRoute();
+        }
+      } catch (_) {}
+    });
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(
+            children: [
+              Icon(Icons.departure_board, color: _C.blue, size: 26),
+              SizedBox(width: 8),
+              Text('하원 탑승 진행 중', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              const SizedBox(
+                width: 52,
+                height: 52,
+                child: CircularProgressIndicator(strokeWidth: 4, color: _C.blue),
+              ),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: _C.blueBg,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _C.slate200),
+                ),
+                child: const Text(
+                  '차량교사가 아이들을 태우고 있어요.\n잠시 기다려주세요.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: _C.slate800, height: 1.4),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '아이들이 모두 탑승하면 자동으로 경로 알고리즘이 시작됩니다.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: _C.slate500),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                _afternoonBoardingCheckTimer?.cancel();
+                setState(() => _isWaitingForAfternoonBoarding = false);
+                Navigator.pop(ctx);
+              },
+              child: const Text('대기 취소', style: TextStyle(color: _C.slate500, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// 카메라·갤러리를 여는 동안 앱이 종료됐다가 다시 켜진 경우: 보관된 사진을 찾아 원래 대화방으로 보내고 그 대화방을 연다
@@ -195,6 +346,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     _ticker?.cancel();
     _notificationPollTimer?.cancel();
     _changeBannerTimer?.cancel();
+    _afternoonBoardingCheckTimer?.cancel();
     _flutterTts.stop();
     _eventSocket?.disconnect();
     _eventSocket = null;
@@ -1019,6 +1171,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
             ],
           ),
           const SizedBox(height: 10),
+          _directionToggle(),
+          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(child: _routeSignboardCard(RouteMode.safe, Icons.shield_outlined)),
@@ -1256,10 +1410,91 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> with WidgetsBinding
     );
   }
 
+  Widget _directionToggle() {
+    final isMorning = _nav.directionMode == 'MORNING';
+    return Container(
+      decoration: BoxDecoration(
+        color: _C.slate100,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _C.slate200),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: [
+          Expanded(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => _nav.setDirectionMode('MORNING'),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                decoration: BoxDecoration(
+                  color: isMorning ? Colors.white : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: isMorning
+                      ? const [BoxShadow(color: Color(0x14000000), blurRadius: 4, offset: Offset(0, 1))]
+                      : null,
+                ),
+                alignment: Alignment.center,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.wb_sunny_rounded, size: 16, color: isMorning ? _C.orange : _C.slate500),
+                    const SizedBox(width: 6),
+                    Text(
+                      '등원 운행',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: isMorning ? FontWeight.w800 : FontWeight.w600,
+                        color: isMorning ? _C.slate800 : _C.slate500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: () => _nav.setDirectionMode('AFTERNOON'),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                decoration: BoxDecoration(
+                  color: !isMorning ? Colors.white : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: !isMorning
+                      ? const [BoxShadow(color: Color(0x14000000), blurRadius: 4, offset: Offset(0, 1))]
+                      : null,
+                ),
+                alignment: Alignment.center,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.nights_stay_rounded, size: 16, color: !isMorning ? _C.blue : _C.slate500),
+                    const SizedBox(width: 6),
+                    Text(
+                      '하원 운행',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: !isMorning ? FontWeight.w800 : FontWeight.w600,
+                        color: !isMorning ? _C.slate800 : _C.slate500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _startButton() {
     final disabled = _nav.busy || _nav.vehicleId == null;
     return ElevatedButton.icon(
-      onPressed: disabled ? null : _nav.start,
+      onPressed: disabled ? null : _handleStartDriving,
       icon: _nav.busy
           ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
           : const Icon(Icons.navigation, color: Colors.white),

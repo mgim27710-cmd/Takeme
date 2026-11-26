@@ -158,6 +158,7 @@ class DriverNavigator extends ChangeNotifier {
   int _previewSeq = 0;
 
   // ── 운행 ──
+  String directionMode = (DateTime.now().hour < 12 ? 'MORNING' : 'AFTERNOON');
   bool driving = false; // 길 안내 중 (실제 운행 또는 테스트)
   bool serverLive = false; // 실제 운행 (서버에 운행 시작을 알림, 위치 전송)
   bool testMode = false; // 테스트 경로 (서버에 아무것도 보내지 않음)
@@ -496,17 +497,30 @@ class DriverNavigator extends ChangeNotifier {
     }
   }
 
+  /// 운행 방향(등원/하원) 변경
+  void setDirectionMode(String newMode) {
+    if (directionMode == newMode) return;
+    directionMode = newMode;
+    notifyListeners();
+    refreshRouteFromServer(
+      speak: true,
+      customSpeakText: newMode == 'MORNING' ? '등원 운행 경로를 불러옵니다.' : '하원 운행 경로를 불러옵니다.',
+      mode: newMode,
+    );
+  }
+
   /// 서버에서 배정 차량·유치원·정류장(원아+탑승지) 목록을 새로 불러와 경로를 갱신한다.
-  Future<void> refreshRouteFromServer({bool speak = false, String? customSpeakText}) async {
+  Future<void> refreshRouteFromServer({bool speak = false, String? customSpeakText, String? mode}) async {
     final user = ApiService().currentUser;
     if (user == null) return;
+    final effectiveMode = mode ?? directionMode;
     try {
       final v = await ApiService().getTeacherVehicle(user.email);
       if (v != null) {
         vehicleId = int.tryParse('${v['id']}');
         vehicleName = '${v['name'] ?? ''}';
       }
-      final route = await ApiService().getTeacherRoute(user.email);
+      final route = await ApiService().getTeacherRoute(user.email, mode: effectiveMode);
       if (route != null) {
         vehicleId ??= route.vehicleId;
         if (route.academyLat != null && route.academyLng != null) {

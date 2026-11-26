@@ -491,8 +491,9 @@ class ApiService {
     return null;
   }
 
-  Future<RouteDataModel?> getTeacherRoute(String email) async {
-    final url = Uri.parse('${AppConfig.apiHost}/teacher/route?email=${Uri.encodeComponent(email)}');
+  Future<RouteDataModel?> getTeacherRoute(String email, {String? mode}) async {
+    final modeParam = (mode != null && mode.isNotEmpty) ? '&mode=${Uri.encodeComponent(mode)}' : '';
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/route?email=${Uri.encodeComponent(email)}$modeParam');
     final res = await getWithAuth(url);
     throwIfServerError(res);
     if (res.statusCode == 200) {
@@ -500,6 +501,20 @@ class ApiService {
       return RouteDataModel.fromJson(data);
     }
     return null;
+  }
+
+  Future<List<Map<String, dynamic>>> getTeacherStudentsJson(String email, {String? mode}) async {
+    final modeParam = (mode != null && mode.isNotEmpty) ? '&mode=${Uri.encodeComponent(mode)}' : '';
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/students?email=${Uri.encodeComponent(email)}$modeParam');
+    final res = await getWithAuth(url);
+    throwIfServerError(res);
+    if (res.statusCode == 200) {
+      final body = _decodeBody(res);
+      if (body is List) {
+        return body.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      }
+    }
+    return [];
   }
 
   Future<Map<String, dynamic>> manualBoardStudent(String email, int studentId, String reason) async {

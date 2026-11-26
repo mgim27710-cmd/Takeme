@@ -271,7 +271,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     if (user == null) return;
     Map<String, dynamic> res;
     try {
-      res = await ApiService().manualBoardStudent(user.email, student.id, '');
+      res = await ApiService().manualBoardStudent(user.email, student.id, '', mode: _activeDirection);
     } catch (e) {
       res = {'success': false, 'message': friendlyError(e)};
     }
@@ -481,7 +481,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     bool lastAllBoarded = false;
     for (final s in targets) {
       try {
-        final res = await ApiService().manualBoardStudent(user.email, s.id, '');
+        final res = await ApiService().manualBoardStudent(user.email, s.id, '', mode: _activeDirection);
         if (res['success'] != true) {
           failed.add(s.name);
         } else if (res['allBoarded'] == true) {
@@ -737,7 +737,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     final failed = <String>[];
     for (final s in waiting) {
       try {
-        final res = await ApiService().manualBoardStudent(user.email, s.id, '');
+        final res = await ApiService().manualBoardStudent(user.email, s.id, '', mode: _activeDirection);
         if (res['success'] != true) failed.add(s.name);
       } catch (_) {
         failed.add(s.name);

@@ -95,8 +95,13 @@ export class TeacherController {
 
   @Post('board')
   @Post('board-student')
-  async boardStudent(@AuthEmail() email: string, @Body() body: { studentId: number; reason?: string }) {
-    return this.teacherService.boardStudent(email, body.studentId, body.reason);
+  async boardStudent(
+    @AuthEmail() email: string,
+    @Body() body: { studentId: number; reason?: string; mode?: string },
+    @Query('mode') queryMode?: string,
+  ) {
+    const mode = body?.mode || queryMode;
+    return this.teacherService.boardStudent(email, body.studentId, body.reason, mode);
   }
 
   @Post('unboard-student')

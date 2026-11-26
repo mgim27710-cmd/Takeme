@@ -487,14 +487,17 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     vehicleId: number;
     vehicleName: string;
     totalCount: number;
+    direction?: string;
   }) {
     if (!this.server) return;
+
+    const label = data.direction === 'AFTERNOON' ? '하원' : '등원';
 
     // 1. 원장님 및 데스크 실시간 팝업 알림 (웹 대시보드 directorAlert)
     const alertPayload = {
       id: `all_boarded_${data.vehicleId}_${Date.now()}`,
       category: 'ALL_BOARDED',
-      title: `🚌 [전원 탑승 완료] ${data.vehicleName}`,
+      title: `🚌 [${label} 전원 탑승 완료] ${data.vehicleName}`,
       message: `${data.vehicleName} (${data.totalCount}명) 원아 전원 탑승이 완료되었습니다.`,
       timestamp: new Date().toISOString(),
       data,
@@ -515,7 +518,8 @@ export class LocationGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       // 기사 네비게이션 "출발 가능" 배너 알림
       this.server.to(room).emit('driverDepartSignal', {
         vehicleId: data.vehicleId,
-        message: `전원 탑승 완료 (${data.totalCount}명)! 출발하셔도 됩니다.`,
+        message: `${label} 전원 탑승 완료 (${data.totalCount}명)! 출발하셔도 됩니다.`,
+        direction: data.direction,
       });
       // 일반 이벤트
       this.server.to(room).emit('allStudentsBoarded', data);
