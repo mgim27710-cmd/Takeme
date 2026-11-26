@@ -424,6 +424,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
   }
 
   bool _bulkBoarding = false;
+  bool _bulkDropping = false;
 
   /// 탑승 처리할 수 있는 원아인지 (아직 타지 않았고 결석이 아닌 아이)
   /// 하원 운행 모드에서는 오전에 하차(등원) 완료되었던 원아도 유치원에서 탑승할 수 있도록 허용
@@ -520,24 +521,66 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     );
   }
 
+  /// 일괄 하차 공통 실행 루틴
+  Future<void> _executeBulkDrop(List<StudentModel> targets, Map<String, String> handover) async {
+    if (targets.isEmpty || _bulkDropping) return;
+    setState(() => _bulkDropping = true);
+    var ok = 0;
+    final failed = <String>[];
+    for (final s in targets) {
+      try {
+        final success = await _dropStudent(s, reload: false, handover: handover);
+        if (success) {
+          ok++;
+          setState(() {
+            _selectedStudentIds.remove(s.id);
+          });
+        } else {
+          failed.add(s.name);
+        }
+      } catch (_) {
+        failed.add(s.name);
+      }
+    }
+    setState(() => _bulkDropping = false);
+    _loadAllData();
+    if (ok > 0) {
+      _flutterTts.speak('$ok명 하차 완료');
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(failed.isEmpty
+            ? '$ok명 하차 처리 완료되었습니다.'
+            : '$ok명 하차 완료, ${failed.length}명 실패: ${failed.join(', ')}'),
+        backgroundColor: failed.isEmpty ? const Color(0xFF7C3AED) : Colors.red,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
   void _confirmDropAll(List<StudentModel> boarded) {
+    if (boarded.isEmpty) return;
+    final isAfternoon = _activeDirection == 'AFTERNOON';
+    final defaultType = isAfternoon ? 'PRIMARY' : 'ACADEMY';
+    final defaultLabel = isAfternoon ? '각 원아의 주보호자(부모님)' : '유치원 선생님';
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('${boarded.length}명 모두 하차', style: const TextStyle(fontWeight: FontWeight.bold)),
-        content: Text('유치원에 도착해 선생님께 인계한 것으로 모두 하차 처리할까요?\n(하원 중에는 아이마다 [하차]를 눌러 받은 분을 기록해 주세요)\n\n${boarded.map((s) => s.name).join(', ')}',
-            style: const TextStyle(fontSize: 15, height: 1.4)),
+        content: Text(
+          isAfternoon
+              ? '하원 운행 중인 모든 탑승 원아를 하차 처리할까요?\n(인계 대상: $defaultLabel)\n\n${boarded.map((s) => s.name).join(', ')}'
+              : '유치원에 도착해 선생님께 인계한 것으로 모두 하차 처리할까요?\n\n${boarded.map((s) => s.name).join(', ')}',
+          style: const TextStyle(fontSize: 15, height: 1.4),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              var ok = 0;
-              for (final s in boarded) {
-                if (await _dropStudent(s, reload: false, handover: const {'type': 'ACADEMY'})) ok++;
-              }
-              _loadAllData();
-              if (ok > 0) _flutterTts.speak('$ok명 하차 완료');
+              await _executeBulkDrop(boarded, {'type': defaultType});
             },
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF7C3AED)),
             child: const Text('모두 하차', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
@@ -545,6 +588,124 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
         ],
       ),
     );
+  }
+
+  /// 동일 정류장의 탑승 원아들을 한 번에 일괄 하차 처리
+  Future<void> _dropStopStudents(List<StudentModel> students) async {
+    final boarded = students.where((s) => s.boarded).toList();
+    if (boarded.isEmpty) return;
+
+    final names = boarded.map((s) => s.name).join(', ');
+    final isAfternoon = _activeDirection == 'AFTERNOON';
+    final defaultType = isAfternoon ? 'PRIMARY' : 'ACADEMY';
+    final defaultLabel = isAfternoon ? '각 원아의 주보호자(부모님)' : '유치원 선생님';
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('${boarded.length}명 일괄 하차', style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$names 원아를 모두 하차 처리할까요?', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF5F3FF),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFDDD6FE)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, size: 18, color: Color(0xFF7C3AED)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '인계 대상: $defaultLabel',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF7C3AED)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF7C3AED),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('모두 하차', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true || !mounted) return;
+    await _executeBulkDrop(boarded, {'type': defaultType});
+  }
+
+  /// 선택된 원아들 일괄 하차 처리
+  Future<void> _dropSelected(List<StudentModel> runList) async {
+    final targets = runList.where((s) => _selectedStudentIds.contains(s.id) && s.boarded).toList();
+    if (targets.isEmpty) return;
+
+    final names = targets.map((s) => s.name).join(', ');
+    final isAfternoon = _activeDirection == 'AFTERNOON';
+    final defaultType = isAfternoon ? 'PRIMARY' : 'ACADEMY';
+    final defaultLabel = isAfternoon ? '각 원아의 주보호자(부모님)' : '유치원 선생님';
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('선택한 ${targets.length}명 일괄 하차', style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('선택한 원아들을 모두 하차 처리할까요?\n$names', style: const TextStyle(fontSize: 14)),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF5F3FF),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFDDD6FE)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, size: 18, color: Color(0xFF7C3AED)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '인계 대상: $defaultLabel',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF7C3AED)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF7C3AED)),
+            child: const Text('모두 하차', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true || !mounted) return;
+    await _executeBulkDrop(targets, {'type': defaultType});
   }
 
   /// 동일 정류장의 대기 원아들을 한 번에 일괄 탑승 처리
@@ -1233,6 +1394,7 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
     final waiting = students.where((s) => !s.boarded && !s.dropped && !s.absent).toList();
     final boarded = students.where((s) => s.boarded).toList();
     final canBoardList = students.where((s) => _canBoard(s)).toList();
+    final canDropList = students.where((s) => s.boarded).toList();
     final allSelected = students.isNotEmpty && students.every((s) => _selectedStudentIds.contains(s.id));
     final expectedTime = students.map((s) => s.expectedTime).firstWhere((t) => t.isNotEmpty, orElse: () => '');
 
@@ -1348,6 +1510,28 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF10B981),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                ],
+                // 정류장 내 2명 이상 탑승 중 시 '일괄 하차' 버튼 노출
+                if (canDropList.length >= 2) ...[
+                  const SizedBox(width: 6),
+                  SizedBox(
+                    height: 32,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _dropStopStudents(canDropList),
+                      icon: const Icon(Icons.where_to_vote, size: 15),
+                      label: Text(
+                        '${canDropList.length}명 하차',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF7C3AED),
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(horizontal: 10),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -1889,10 +2073,11 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                                 ),
                             ],
                           ),
-                          // 전체 선택 + 선택한 원아 탑승
+                          // 전체 선택 + 선택한 원아 탑승/하차
                           Builder(builder: (_) {
                             final allSelected = runList.isNotEmpty && runList.every((s) => _selectedStudentIds.contains(s.id));
                             final boardable = runList.where((s) => _selectedStudentIds.contains(s.id) && _canBoard(s)).length;
+                            final droppable = runList.where((s) => _selectedStudentIds.contains(s.id) && s.boarded).length;
                             return Row(
                               children: [
                                 TextButton.icon(
@@ -1904,24 +2089,55 @@ class _StaffDashboardScreenState extends State<StaffDashboardScreen> {
                                   style: TextButton.styleFrom(minimumSize: const Size(48, 44), padding: const EdgeInsets.symmetric(horizontal: 8)),
                                 ),
                                 const Spacer(),
-                                if (_selectedStudentIds.isNotEmpty)
-                                  SizedBox(
-                                    height: 44,
-                                    child: ElevatedButton.icon(
-                                      onPressed: (_bulkBoarding || boardable == 0) ? null : () => _boardSelected(runList),
-                                      icon: _bulkBoarding
-                                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                          : const Icon(Icons.check_circle, size: 20),
-                                      label: Text(boardable == 0 ? '탑승할 아이 없음' : '선택한 $boardable명 탑승',
-                                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(0xFF10B981),
-                                        foregroundColor: Colors.white,
-                                        disabledBackgroundColor: const Color(0xFFCBD5E1),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                if (_selectedStudentIds.isNotEmpty) ...[
+                                  if (boardable > 0)
+                                    Padding(
+                                      padding: const EdgeInsets.only(left: 6),
+                                      child: SizedBox(
+                                        height: 40,
+                                        child: ElevatedButton.icon(
+                                          onPressed: _bulkBoarding ? null : () => _boardSelected(runList),
+                                          icon: _bulkBoarding
+                                              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                              : const Icon(Icons.check_circle, size: 18),
+                                          label: Text('$boardable명 탑승',
+                                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: const Color(0xFF10B981),
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                  ),
+                                  if (droppable > 0)
+                                    Padding(
+                                      padding: const EdgeInsets.only(left: 6),
+                                      child: SizedBox(
+                                        height: 40,
+                                        child: ElevatedButton.icon(
+                                          onPressed: _bulkDropping ? null : () => _dropSelected(runList),
+                                          icon: _bulkDropping
+                                              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                              : const Icon(Icons.where_to_vote, size: 18),
+                                          label: Text('$droppable명 하차',
+                                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800)),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: const Color(0xFF7C3AED),
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  if (boardable == 0 && droppable == 0)
+                                    const Padding(
+                                      padding: EdgeInsets.symmetric(horizontal: 8),
+                                      child: Text('처리 가능한 원아 없음', style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+                                    ),
+                                ],
                               ],
                             );
                           }),
