@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_naver_map/flutter_naver_map.dart';
 
 /// 실행할 때 --dart-define=NAVER_MAP_CLIENT_ID=... 로 넣는 네이버 지도 클라이언트 ID
-const String naverMapClientId = String.fromEnvironment('NAVER_MAP_CLIENT_ID');
+const String naverMapClientId = String.fromEnvironment('NAVER_MAP_CLIENT_ID', defaultValue: 'w5mmkij4lq');
 
 /// 네이버 지도 SDK 인증이 성공했는지. 실패하면 기존 지도(OpenStreetMap)로 보여준다.
 final ValueNotifier<bool> naverMapAvailable = ValueNotifier<bool>(false);

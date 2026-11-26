@@ -11,7 +11,7 @@ import 'nav_map_view_naver.dart';
 export 'nav_map_controller.dart';
 
 /// secrets.json (--dart-define-from-file) 에서 받는 네이버 지도 Client ID
-const String naverMapClientId = String.fromEnvironment('NAVER_MAP_CLIENT_ID');
+const String naverMapClientId = String.fromEnvironment('NAVER_MAP_CLIENT_ID', defaultValue: 'w5mmkij4lq');
 
 /// 네이버 지도 SDK 초기화/인증 성공 여부 (main.dart 에서 초기화 후 갱신, 인증 실패 시 false 로 바뀌어 이전 지도로 복귀)
 final ValueNotifier<bool> naverMapAvailable = ValueNotifier<bool>(false);
