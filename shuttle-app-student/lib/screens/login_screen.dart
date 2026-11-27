@@ -2,8 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
-import 'register_screen.dart';
-import 'parent/parent_home_screen.dart';
+import '../utils/student_id.dart';
+import 'student/student_home_screen.dart';
+import 'student/student_register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -50,10 +51,10 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    if (user.role == 'PARENT' || user.role == 'STUDENT') {
+    if (user.role == 'STUDENT') {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => const ParentHomeScreen()),
+        MaterialPageRoute(builder: (_) => const StudentHomeScreen()),
       );
     } else {
       ApiService().logout();
@@ -61,8 +62,8 @@ class _LoginScreenState extends State<LoginScreen> {
         context: context,
         builder: (ctx) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('학부모님 전용 앱', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: const Text('본 앱은 [학부모님 전용 앱]입니다.\n기사님 또는 선생님 계정은 해당 전용 앱을 이용해 주세요.'),
+          title: const Text('학생 전용 앱', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: const Text('본 앱은 [학생 전용 앱]입니다.\n학부모님·기사님·선생님 계정은 해당 전용 앱을 이용해 주세요.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
@@ -159,11 +160,12 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleLogin() async {
-    final email = _emailController.text.trim();
+    final idText = _emailController.text.trim();
+    final email = studentEmailFromId(idText); // 아이디만 쓰면 서버용 주소를 붙인다
     final password = _passwordController.text;
 
-    if (email.isEmpty) {
-      _showError('이메일을 입력해주세요.');
+    if (idText.isEmpty) {
+      _showError('아이디를 입력해 주세요.');
       return;
     }
     if (password.isEmpty) {
@@ -395,7 +397,7 @@ class _LoginScreenState extends State<LoginScreen> {
               }
               setState(() => _isLoading = true);
               final res = await ApiService().login(
-                _emailController.text.trim(),
+                studentEmailFromId(_emailController.text),
                 _passwordController.text,
                 otpToken: otp,
               );
@@ -466,7 +468,7 @@ class _LoginScreenState extends State<LoginScreen> {
               }
               setState(() => _isLoading = true);
               final res = await ApiService().login(
-                _emailController.text.trim(),
+                studentEmailFromId(_emailController.text),
                 _passwordController.text,
                 otpToken: otp,
               );
@@ -555,23 +557,23 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   // Email Input
                   const Text(
-                    '이메일',
+                    '아이디',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF334155)),
                   ),
                   const SizedBox(height: 6),
                   TextField(
                     controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
+                    keyboardType: TextInputType.text,
                     textInputAction: TextInputAction.next,
-                    autofillHints: const [AutofillHints.username, AutofillHints.email],
+                    autofillHints: const [AutofillHints.username],
                     onSubmitted: (_) => _passwordFocusNode.requestFocus(),
                     autocorrect: false,
                     decoration: InputDecoration(
-                      hintText: 'example@email.com',
+                      hintText: '내 아이디',
                       hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
                       filled: true,
                       fillColor: Colors.white,
-                      prefixIcon: const Icon(Icons.email_outlined, color: Color(0xFF94A3B8), size: 20),
+                      prefixIcon: const Icon(Icons.person_outline_rounded, color: Color(0xFF94A3B8), size: 20),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(14),
                         borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
@@ -669,11 +671,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         onTap: () {
                           Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                            MaterialPageRoute(builder: (_) => const StudentRegisterScreen()),
                           );
                         },
                         child: const Text(
-                          '회원가입',
+                          '가입하기',
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w800,

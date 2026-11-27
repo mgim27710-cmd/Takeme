@@ -3,7 +3,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'services/api_service.dart';
 import 'screens/login_screen.dart';
-import 'screens/parent/parent_home_screen.dart';
+import 'screens/student/student_home_screen.dart';
 import 'utils/network_helper.dart';
 import 'services/local_push.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -122,8 +122,8 @@ class ParentInitialRouterScreen extends StatelessWidget {
     final user = api.currentUser!;
     final role = user.role;
 
-    if (role == 'PARENT' || role == 'STUDENT') {
-      return const ParentHomeScreen();
+    if (role == 'STUDENT') {
+      return const StudentHomeScreen();
     }
 
     // 학부모 계정이 아닌 경우 로그아웃 후 안내
@@ -135,7 +135,7 @@ class ParentInitialRouterScreen extends StatelessWidget {
         builder: (ctx) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('접근 권한 안내', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: const Text('본 앱은 [학생·학부모님 전용 앱]입니다.\n기사님 또는 선생님 계정은 해당 전용 앱을 이용해 주시기 바랍니다.'),
+          content: const Text('본 앱은 [학생 전용 앱]입니다.\n학부모님·기사님·선생님 계정은 해당 전용 앱을 이용해 주시기 바랍니다.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),

@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import '../utils/student_id.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -198,6 +199,7 @@ class ApiService {
       'email': email.trim(),
       'password': password,
       'clientType': clientType ?? 'app',
+      'clientLevel': 'ELEMENTARY', // 이 앱의 교육 단계 (초등 ELEMENTARY / 중·고등 MIDDLE_HIGH)
     };
     if (otpToken != null && otpToken.isNotEmpty) {
       body['otpToken'] = otpToken.trim();
@@ -318,6 +320,32 @@ class ApiService {
     return {
       'success': res.statusCode == 200 || res.statusCode == 201,
       'message': data['message'] ?? '회원가입 요청 처리 완료',
+      'data': data,
+    };
+  }
+
+  /// 학생 가입: 학부모님께 받은 초대 코드 + 아이디 + 비밀번호. (이름·유치원은 서버가 초대 코드로 정한다)
+  Future<Map<String, dynamic>> registerStudent({
+    required String loginId,
+    required String password,
+    required String inviteCode,
+  }) async {
+    final url = Uri.parse('${AppConfig.apiHost}/auth/register');
+    final res = await http.post(
+      url,
+      headers: _headers(),
+      body: jsonEncode({
+        'email': studentEmailFromId(loginId),
+        'password': password,
+        'role': 'STUDENT',
+        'inviteCode': normalizeInviteCode(inviteCode),
+      }),
+    );
+    final data = jsonDecode(utf8.decode(res.bodyBytes));
+    final msg = data is Map ? data['message'] : null;
+    return {
+      'success': res.statusCode == 200 || res.statusCode == 201,
+      'message': msg is List ? msg.join(' ') : (msg ?? '회원가입 요청 처리 완료'),
       'data': data,
     };
   }
