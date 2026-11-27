@@ -14,6 +14,7 @@ import { PickupPoint } from '../entities/pickup-point.entity';
 
 import { BoardPost } from '../entities/board-post.entity';
 import { BoardPostRead } from '../entities/board-post-read.entity';
+import { StudentInvite } from '../entities/student-invite.entity';
 import { ApprovalModule } from '../approval/approval.module';
 
 @Module({
@@ -29,6 +30,7 @@ import { ApprovalModule } from '../approval/approval.module';
       PickupPoint,
       BoardPost,
       BoardPostRead,
+      StudentInvite,
     ]),
     RoutingModule,
     ApprovalModule,

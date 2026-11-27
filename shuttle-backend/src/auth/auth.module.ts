@@ -1,3 +1,4 @@
+import { StudentInvite } from '../entities/student-invite.entity';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
@@ -14,7 +15,7 @@ import { UserDevice } from '../entities/user-device.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Academy, Student, Vehicle, UserDevice]),
+    TypeOrmModule.forFeature([User, Academy, Student, Vehicle, UserDevice, StudentInvite]),
     JwtModule.registerAsync({
       global: true,
       inject: [ConfigService],

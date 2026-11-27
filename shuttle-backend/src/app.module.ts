@@ -21,6 +21,7 @@ import { ChatMessage } from './entities/chat-message.entity';
 import { BoardPost } from './entities/board-post.entity';
 import { BoardComment } from './entities/board-comment.entity';
 import { BoardPostRead } from './entities/board-post-read.entity';
+import { StudentInvite } from './entities/student-invite.entity';
 import { AuditLog } from './entities/audit-log.entity';
 import { YearlyZoneMapping } from './entities/yearly-zone-mapping.entity';
 import { Attendance } from './entities/attendance.entity';
@@ -74,6 +75,7 @@ import { UserDevice } from './entities/user-device.entity';
           BoardPost,
           BoardComment,
           BoardPostRead,
+          StudentInvite,
           AuditLog,
           YearlyZoneMapping,
           Attendance,

@@ -12,6 +12,9 @@ import { User, UserRole } from '../entities/user.entity';
 import { Academy } from '../entities/academy.entity';
 import { Student } from '../entities/student.entity';
 import { Vehicle } from '../entities/vehicle.entity';
+import { StudentInvite } from '../entities/student-invite.entity';
+import { inviteProblem, normalizeInviteCode } from '../utils/invite-code.util';
+import { loginLevelProblem, normalizeClientLevel } from '../utils/education-level.util';
 import { JwtService } from '@nestjs/jwt';
 
 @Injectable()
@@ -26,6 +29,7 @@ export class AuthService {
     @InjectRepository(Academy) private academyRepository: Repository<Academy>,
     @InjectRepository(Student) private studentRepository: Repository<Student>,
     @InjectRepository(Vehicle) private vehicleRepository: Repository<Vehicle>,
+    @InjectRepository(StudentInvite) private studentInviteRepository: Repository<StudentInvite>,
     private readonly jwtService: JwtService,
   ) { }
 
@@ -545,6 +549,11 @@ export class AuthService {
     }
     await this.usersRepository.save(user);
 
+    // 앱의 교육 단계(초등/중·고등)와 학원의 교육 단계가 다르면 로그인할 수 없다.
+    // (웹 관리자는 제외, 앱이 단계를 보내지 않으면 제한 없음 = 예전 유치원 앱)
+    const levelProblem = loginLevelProblem(normalizeClientLevel(data?.clientLevel), resolvedAcademy?.educationLevel, user.role);
+    if (levelProblem) throw new ForbiddenException(levelProblem);
+
     // 승인까지 끝난 사용자에게만 토큰 발급 (승인 대기·OTP 미통과는 위에서 이미 return 됨)
     const accessToken = await this.jwtService.signAsync({
       sub: user.id,
@@ -694,13 +703,36 @@ export class AuthService {
       throw new BadRequestException('비밀번호는 영문자와 숫자를 포함하여 최소 8자리 이상이어야 합니다.');
     }
 
+    // 학생 가입: 초대 코드가 있으면 코드 방식, 없으면 예전 방식(학원 인증코드 + 이름, 원장 승인)이다.
+    // 초대 코드가 정해 준 원아와 학생 계정이 연결되고, 코드는 한 번만 쓸 수 있다.
+    // 단, 초등 학원은 이름만으로 가입할 수 없고 초대 코드가 꼭 있어야 한다. (아래 학원 확인에서 막는다)
+    let invite: StudentInvite | null = null;
+    let inviteStudent: Student | null = null;
+    const inviteCodeInput = normalizeInviteCode(data.inviteCode);
+    const useInvite = role === UserRole.STUDENT && !!inviteCodeInput;
+    if (useInvite) {
+      const code = inviteCodeInput;
+      invite = await this.studentInviteRepository.findOne({ where: { code } });
+      const problem = inviteProblem(invite, new Date());
+      if (problem) throw new BadRequestException(problem);
+      inviteStudent = await this.studentRepository.findOne({
+        where: { id: invite!.studentId },
+        relations: { studentUser: true, academy: true },
+      });
+      if (!inviteStudent) throw new BadRequestException('초대 코드에 연결된 원아 정보를 찾을 수 없습니다.');
+      if (inviteStudent.studentUser) throw new BadRequestException('이미 학생 계정이 연결되어 있습니다.');
+    }
+
     // 1. Verify academy auth code (Required for staff & students, skip for admins)
     let targetAcademy: Academy | null = null;
-    if (role !== UserRole.ACADEMY_ADMIN && role !== UserRole.SUPER_ADMIN) {
+    if (role !== UserRole.ACADEMY_ADMIN && role !== UserRole.SUPER_ADMIN && !useInvite) {
       const cleanAuthCode = authCode ? authCode.trim().toUpperCase() : '';
       targetAcademy = await this.academyRepository.findOne({ where: { authCode: cleanAuthCode } });
       if (!targetAcademy) {
         throw new BadRequestException('유효하지 않은 원 인증코드입니다.');
+      }
+      if (role === UserRole.STUDENT && targetAcademy.educationLevel === 'ELEMENTARY') {
+        throw new BadRequestException('초등 학생은 학부모님께 받은 초대 코드로 가입해 주세요.');
       }
     }
 
@@ -719,6 +751,15 @@ export class AuthService {
       role: userRole,
       isOtpEnabled: false,
     });
+
+    if (role === UserRole.STUDENT && inviteStudent) {
+      // 학생의 이름과 소속 유치원은 입력받지 않고 초대 코드가 가리키는 원아 정보를 쓴다
+      user.name = inviteStudent.adminDisplayName || inviteStudent.name;
+      if (inviteStudent.academy) {
+        user.academy = inviteStudent.academy;
+        user.academyId = inviteStudent.academy.id;
+      }
+    }
 
     const savedUser = await this.usersRepository.save(user);
 
@@ -746,6 +787,13 @@ export class AuthService {
         savedUser.academyId = academy.id;
         savedUser.academy = academy;
         await this.usersRepository.save(savedUser);
+      } else if (userRole === UserRole.STUDENT && inviteStudent) {
+        // 초대 코드가 정해 준 원아와 연결하고, 코드를 사용 처리한다
+        inviteStudent!.studentUser = savedUser;
+        await this.studentRepository.save(inviteStudent!);
+        invite!.usedAt = new Date();
+        invite!.usedByUserId = savedUser.id;
+        await this.studentInviteRepository.save(invite!);
       } else if (userRole === UserRole.STUDENT || userRole === UserRole.PARENT) {
         if (!targetAcademy) throw new BadRequestException('소속 유치원 정보를 찾을 수 없습니다.');
         const matchingStudents = await this.studentRepository.createQueryBuilder('student')

@@ -1,6 +1,6 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, IsNull } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { ScheduleOverride, OverrideType } from '../entities/schedule-override.entity';
 import { ApprovalService } from '../approval/approval.service';
@@ -16,6 +16,8 @@ import { PickupPoint } from '../entities/pickup-point.entity';
 
 import { BoardPost } from '../entities/board-post.entity';
 import { BoardPostRead } from '../entities/board-post-read.entity';
+import { StudentInvite } from '../entities/student-invite.entity';
+import { generateInviteCode, inviteExpiresAt } from '../utils/invite-code.util';
 import { getStudentClassName, kstDateString } from '../utils/school.util';
 import { applyBoardVisibility, getLinkedClassNames } from '../utils/board-visibility.util';
 import { resolveMediaRef, resolveMediaRefs } from '../utils/s3.util';
@@ -35,6 +37,7 @@ export class ParentService {
     @InjectRepository(PickupPoint) private pickupPointRepository: Repository<PickupPoint>,
     @InjectRepository(BoardPost) private boardPostRepository: Repository<BoardPost>,
     @InjectRepository(BoardPostRead) private boardPostReadRepository: Repository<BoardPostRead>,
+    @InjectRepository(StudentInvite) private studentInviteRepository: Repository<StudentInvite>,
     private routingService: RoutingService,
     private approvalService: ApprovalService,
   ) {}
@@ -1109,6 +1112,89 @@ export class ParentService {
     await this.userRepository.save(user);
 
     return { success: true, message: '비밀번호가 성공적으로 변경되었습니다.' };
+  }
+
+  /**
+   * 자녀의 학생 계정을 만들 초대 코드를 발급한다. (학부모 전용)
+   * - 만 14세 미만 자녀의 가입이라 학부모가 동의해야 발급된다. 동의한 시각을 남긴다.
+   * - 내 자녀가 아니거나, 이미 학생 계정이 연결된 자녀는 발급하지 않는다.
+   * - 새로 발급하면 아직 안 쓴 예전 코드는 못 쓰게 된다.
+   */
+  async issueStudentInvite(email: string, studentId: number | undefined, consent: boolean) {
+    if (!consent) throw new BadRequestException('자녀의 학생 계정 가입에 대한 보호자 동의가 필요합니다.');
+    const parent = await this.userRepository.findOne({ where: { email } });
+    if (!parent || (parent.role as string) !== 'PARENT') {
+      throw new ForbiddenException('학부모 계정만 자녀의 학생 계정을 만들 수 있습니다.');
+    }
+    const children = await this.studentRepository.find({
+      where: { parentUser: { id: parent.id } },
+      relations: { studentUser: true, academy: true },
+    });
+    if (children.length === 0) throw new BadRequestException('연결된 자녀 정보가 없습니다.');
+    const child = studentId != null
+      ? children.find(c => c.id === Number(studentId))
+      : (children.length === 1 ? children[0] : undefined);
+    if (!child) {
+      throw new BadRequestException(studentId != null ? '내 자녀가 아닙니다.' : '학생 계정을 만들 자녀를 선택해 주세요.');
+    }
+    if (child.studentUser) throw new ConflictException('이미 학생 계정이 연결되어 있습니다.');
+    // 학부모 초대 코드로 학생 계정을 만드는 것은 초등 학원만 쓴다. (중·고등 학생은 직접 가입, 유치원은 학생 앱이 없다)
+    if (child.academy?.educationLevel !== 'ELEMENTARY') {
+      throw new BadRequestException('학생 앱 초대 코드는 초등 학원에서만 만들 수 있습니다.');
+    }
+
+    await this.studentInviteRepository.delete({ studentId: child.id, usedAt: IsNull() });
+    const now = new Date();
+    let saved: StudentInvite | null = null;
+    for (let attempt = 0; attempt < 5 && !saved; attempt++) {
+      try {
+        saved = await this.studentInviteRepository.save(this.studentInviteRepository.create({
+          studentId: child.id,
+          parentUserId: parent.id,
+          code: generateInviteCode(),
+          expiresAt: inviteExpiresAt(now),
+          consentAt: now,
+          usedAt: null,
+          usedByUserId: null,
+        }));
+      } catch {
+        // 같은 코드가 이미 있으면(드문 경우) 다시 만든다
+      }
+    }
+    if (!saved) throw new BadRequestException('초대 코드를 만들지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
+    return {
+      studentId: child.id,
+      studentName: child.adminDisplayName || child.name,
+      code: saved.code,
+      expiresAt: saved.expiresAt,
+    };
+  }
+
+  /** 자녀별 학생 계정 상태 (연결 여부, 발급해 둔 코드) — 학부모 본인 자녀만 */
+  async getStudentInviteStatus(email: string) {
+    const parent = await this.userRepository.findOne({ where: { email } });
+    if (!parent || (parent.role as string) !== 'PARENT') {
+      throw new ForbiddenException('학부모 계정만 볼 수 있습니다.');
+    }
+    const children = await this.studentRepository.find({
+      where: { parentUser: { id: parent.id } },
+      relations: { studentUser: true },
+    });
+    const now = Date.now();
+    return Promise.all(children.map(async c => {
+      const invite = await this.studentInviteRepository.findOne({
+        where: { studentId: c.id, usedAt: IsNull() },
+        order: { id: 'DESC' },
+      });
+      const active = invite && new Date(invite.expiresAt).getTime() > now ? invite : null;
+      return {
+        studentId: c.id,
+        studentName: c.adminDisplayName || c.name,
+        linked: !!c.studentUser,
+        studentLoginId: c.studentUser?.email ?? null,
+        activeInvite: active ? { code: active.code, expiresAt: active.expiresAt } : null,
+      };
+    }));
   }
 
   async getClassBoard(email: string, postType?: string) {

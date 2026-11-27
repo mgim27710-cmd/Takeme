@@ -1168,6 +1168,12 @@ export class ChatService implements OnModuleInit {
       userIds.push(creator.id);
     }
 
+    // 학생끼리는 대화방을 만들 수 없다 (미성년자 보호). 화면에서 막는 것과 별개로 서버에서 막는다.
+    const invitedUsers = await this.userRepo.find({ where: { id: In(userIds) } });
+    if (invitedUsers.filter(u => u.role === UserRole.STUDENT).length >= 2) {
+      throw new ForbiddenException('학생끼리는 대화방을 만들 수 없습니다.');
+    }
+
     const isDirect = userIds.length === 2;
     const roomType = isDirect ? ChatRoomType.DIRECT : ((type as any) || ChatRoomType.GROUP);
 

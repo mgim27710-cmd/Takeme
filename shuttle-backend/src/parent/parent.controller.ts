@@ -164,6 +164,26 @@ export class ParentController {
     return this.parentService.getMyChildren(email);
   }
 
+  /** 자녀의 학생 계정을 만들 초대 코드 발급 (학부모 전용, 보호자 동의 필요) */
+  @Roles('PARENT')
+  @Post('student-invite')
+  async issueStudentInvite(
+    @AuthEmail() email: string,
+    @Body('studentId') studentId?: number,
+    @Body('consent') consent?: boolean,
+  ) {
+    if (!email) throw new BadRequestException('로그인이 필요합니다.');
+    return this.parentService.issueStudentInvite(email, studentId != null ? Number(studentId) : undefined, consent === true);
+  }
+
+  /** 자녀별 학생 계정 상태와 발급해 둔 초대 코드 (학부모 전용) */
+  @Roles('PARENT')
+  @Get('student-invite')
+  async getStudentInvite(@AuthEmail() email: string) {
+    if (!email) throw new BadRequestException('로그인이 필요합니다.');
+    return this.parentService.getStudentInviteStatus(email);
+  }
+
   @Post('my-child/allergies')
   async updateChildAllergies(
     @AuthEmail() authEmail: string,
