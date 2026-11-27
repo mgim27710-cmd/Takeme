@@ -45,6 +45,25 @@
     },
     {
       "client_info": {
+        "mobilesdk_app_id": "1:872080280934:android:422308a7eead1d56fd4ca7",
+        "android_client_info": {
+          "package_name": "com.takeme.student"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBPB5OMAEdLCZT7RgemXfq4m57ERBNnc_4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:872080280934:android:4db2efc34db7bec0fd4ca7",
         "android_client_info": {
           "package_name": "com.takeme.teacher"

@@ -33,7 +33,7 @@ class TakeMeParentApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: appNavigatorKey, // 푸시 알림을 눌렀을 때 화면 이동용
-      title: 'TakeMe 학부모',
+      title: 'TakeMe 학생',
       debugShowCheckedModeBanner: false,
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
@@ -135,7 +135,7 @@ class ParentInitialRouterScreen extends StatelessWidget {
         builder: (ctx) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('접근 권한 안내', style: TextStyle(fontWeight: FontWeight.bold)),
-          content: const Text('본 앱은 [학부모님 전용 앱]입니다.\n기사님 또는 선생님 계정은 해당 전용 앱을 이용해 주시기 바랍니다.'),
+          content: const Text('본 앱은 [학생·학부모님 전용 앱]입니다.\n기사님 또는 선생님 계정은 해당 전용 앱을 이용해 주시기 바랍니다.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),

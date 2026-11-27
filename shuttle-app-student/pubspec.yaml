@@ -1,5 +1,5 @@
 name: shuttle_app_parent
-description: "Takeme 학부모용 전용 안심 통학 & 자녀 승하차 알림 앱"
+description: "Takeme 학생용 안심 통학 & 승하차 알림 앱"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
