@@ -1,0 +1,1289 @@
+import 'dart:typed_data';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import '../config.dart';
+import '../models/user_model.dart';
+import '../models/student_model.dart';
+import '../models/notification_model.dart';
+import '../models/route_model.dart';
+import 'push_notification_service.dart';
+
+/// 서버가 응답은 했지만 처리하지 못한 경우(5xx) 등, 사용자에게 보여줄 수 있는 오류
+class ApiException implements Exception {
+  final int? statusCode;
+  final String message;
+  ApiException(this.message, [this.statusCode]);
+
+  @override
+  String toString() => message;
+}
+
+/// 예외를 사용자가 이해할 수 있는 한 줄 안내로 바꾼다 (기술적인 오류 문구를 그대로 보여주지 않는다)
+String friendlyError(Object e) {
+  if (e is ApiException) return e.message;
+  final t = e.toString();
+  if (t.contains('SocketException') ||
+      t.contains('ClientException') ||
+      t.contains('TimeoutException') ||
+      t.contains('HandshakeException') ||
+      t.contains('Failed host lookup')) {
+    return '인터넷 연결을 확인해 주세요.';
+  }
+  return '잠시 후 다시 시도해 주세요.';
+}
+
+/// 5xx(서버 오류)는 "데이터 없음"과 구분되도록 예외로 알린다. 4xx 는 호출한 쪽이 데이터 없음 등으로 판단한다.
+void throwIfServerError(http.Response res) {
+  if (res.statusCode >= 500) {
+    throw ApiException('서버에 문제가 있어 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.', res.statusCode);
+  }
+}
+
+class ApiService {
+  static final ApiService _instance = ApiService._internal();
+  factory ApiService() => _instance;
+  ApiService._internal();
+
+  String? _accessToken;
+  String? _refreshToken;
+  UserModel? _currentUser;
+
+  String? get token => _accessToken;
+  String? get accessToken => _accessToken;
+  String? get refreshToken => _refreshToken;
+  UserModel? get currentUser => _currentUser;
+  bool get isLoggedIn => _accessToken != null && _accessToken!.isNotEmpty;
+
+  Future<void> init() async {
+    final prefs = await SharedPreferences.getInstance();
+    _accessToken = prefs.getString('takeme_token');
+    _refreshToken = prefs.getString('takeme_refresh_token');
+    final userJson = prefs.getString('takeme_user');
+    if (userJson != null) {
+      try {
+        _currentUser = UserModel.fromJson(jsonDecode(userJson), token: _accessToken);
+      } catch (_) {}
+    }
+    if (_accessToken != null && _accessToken!.isNotEmpty) {
+      PushNotificationService().initialize().then((_) {
+        PushNotificationService().registerTokenWithServer();
+      });
+    }
+  }
+
+  Future<void> setAuth(String? token, UserModel? user, {String? refreshToken}) async {
+    _accessToken = token;
+    _currentUser = user;
+    if (refreshToken != null) {
+      _refreshToken = refreshToken;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    if (token != null) {
+      await prefs.setString('takeme_token', token);
+      PushNotificationService().initialize().then((_) {
+        PushNotificationService().registerTokenWithServer();
+      });
+    } else {
+      await prefs.remove('takeme_token');
+    }
+    if (refreshToken != null) {
+      await prefs.setString('takeme_refresh_token', refreshToken);
+    } else if (token == null) {
+      _refreshToken = null;
+      await prefs.remove('takeme_refresh_token');
+    }
+    if (user != null) {
+      await prefs.setString('takeme_user', jsonEncode(user.toJson()));
+    } else {
+      await prefs.remove('takeme_user');
+    }
+  }
+
+  Future<void> logout() async {
+    await setAuth(null, null);
+  }
+
+  Future<bool> tryRefreshToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final rToken = prefs.getString('takeme_refresh_token') ?? _refreshToken;
+    if (rToken == null || rToken.isEmpty) return false;
+
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/auth/refresh');
+      final res = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'refreshToken': rToken}),
+      );
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        final data = _decodeBody(res);
+        final newAccessToken = data['accessToken'] as String?;
+        final newRefreshToken = data['refreshToken'] as String?;
+        if (newAccessToken != null) {
+          _accessToken = newAccessToken;
+          await prefs.setString('takeme_token', newAccessToken);
+          if (newRefreshToken != null) {
+            _refreshToken = newRefreshToken;
+            await prefs.setString('takeme_refresh_token', newRefreshToken);
+          }
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  Map<String, String> _headers([Map<String, String>? extra]) {
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+    };
+    if (_accessToken != null && _accessToken!.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $_accessToken';
+    }
+    if (extra != null) {
+      headers.addAll(extra);
+    }
+    return headers;
+  }
+
+  Future<http.Response> getWithAuth(Uri url, [Map<String, String>? extra]) async {
+    var res = await http.get(url, headers: _headers(extra));
+    if (res.statusCode == 401 && _refreshToken != null) {
+      final refreshed = await tryRefreshToken();
+      if (refreshed) {
+        res = await http.get(url, headers: _headers(extra));
+      } else {
+        await logout();
+      }
+    }
+    return res;
+  }
+
+  Future<http.Response> postWithAuth(Uri url, dynamic body, [Map<String, String>? extra]) async {
+    final encoded = body is String ? body : jsonEncode(body);
+    var res = await http.post(url, headers: _headers(extra), body: encoded);
+    if (res.statusCode == 401 && _refreshToken != null) {
+      final refreshed = await tryRefreshToken();
+      if (refreshed) {
+        res = await http.post(url, headers: _headers(extra), body: encoded);
+      } else {
+        await logout();
+      }
+    }
+    return res;
+  }
+
+  Future<http.Response> putWithAuth(Uri url, dynamic body, [Map<String, String>? extra]) async {
+    final encoded = body is String ? body : jsonEncode(body);
+    var res = await http.put(url, headers: _headers(extra), body: encoded);
+    if (res.statusCode == 401 && _refreshToken != null) {
+      final refreshed = await tryRefreshToken();
+      if (refreshed) {
+        res = await http.put(url, headers: _headers(extra), body: encoded);
+      } else {
+        await logout();
+      }
+    }
+    return res;
+  }
+
+  Future<http.Response> deleteWithAuth(Uri url, [Map<String, String>? extra]) async {
+    var res = await http.delete(url, headers: _headers(extra));
+    if (res.statusCode == 401 && _refreshToken != null) {
+      final refreshed = await tryRefreshToken();
+      if (refreshed) {
+        res = await http.delete(url, headers: _headers(extra));
+      } else {
+        await logout();
+      }
+    }
+    return res;
+  }
+
+  // ----------------------------------------------------
+  // AUTH
+  // ----------------------------------------------------
+  Future<Map<String, dynamic>> login(String email, String password, {String? otpToken, String? clientType = 'app'}) async {
+    final body = {
+      'email': email.trim(),
+      'password': password,
+      'clientType': clientType ?? 'app',
+      'clientLevel': 'MIDDLE_HIGH', // 이 앱의 교육 단계 (초등 ELEMENTARY / 중·고등 MIDDLE_HIGH)
+    };
+    if (otpToken != null && otpToken.isNotEmpty) {
+      body['otpToken'] = otpToken.trim();
+    }
+    final encodedBody = jsonEncode(body);
+    final headers = {'Content-Type': 'application/json'};
+
+    http.Response? res;
+    dynamic lastError;
+
+    // 1차 시도 (기본 apiHost: https://52.63.245.203.sslip.io 또는 kIsWeb origin)
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/auth/login');
+      res = await http.post(url, headers: headers, body: encodedBody).timeout(const Duration(seconds: 7));
+    } catch (e) {
+      lastError = e;
+      debugPrint('[ApiService] Primary host (${AppConfig.apiHost}) failed: $e');
+    }
+
+    // 1차 실패 또는 5xx 시 암호화되지 않은 대체 주소(http)로 재시도 -> 로그인 정보가 평문으로 가므로 개발(디버그)일 때만 허용
+    if (AppConfig.canUseHttpFallback && (res == null || res.statusCode >= 500)) {
+      try {
+        final fallbackUrl = Uri.parse('${AppConfig.fallbackApiHost}/auth/login');
+        debugPrint('[ApiService] Attempting fallback host: $fallbackUrl');
+        final fallbackRes = await http.post(fallbackUrl, headers: headers, body: encodedBody).timeout(const Duration(seconds: 7));
+        if (fallbackRes.statusCode < 500) {
+          res = fallbackRes;
+          AppConfig.useFallback();
+          debugPrint('[ApiService] Fallback successful! Active host switched to: ${AppConfig.apiHost}');
+        }
+      } catch (e) {
+        lastError ??= e;
+        debugPrint('[ApiService] Fallback host failed: $e');
+      }
+    }
+
+    if (res == null) {
+      debugPrint('[ApiService] 서버 연결 실패: $lastError');
+      throw Exception('서버에 연결할 수 없습니다. 인터넷 연결을 확인하고 잠시 후 다시 시도해 주세요.');
+    }
+
+    final data = _decodeBody(res);
+
+    if (data['isWebAccount'] == true) {
+      return {'success': false, 'isWebAccount': true, 'message': data['message'] ?? '본 계정은 웹기반 계정입니다.', 'data': data};
+    }
+
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      if (data['user'] != null && (data['user']['role'] == 'ACADEMY_ADMIN' || data['user']['role'] == 'SUPER_ADMIN')) {
+        return {'success': false, 'isWebAccount': true, 'message': '본 계정은 웹기반 계정입니다.', 'data': data};
+      }
+      if (data['accessToken'] != null && data['user'] != null) {
+        final user = UserModel.fromJson(data['user'], token: data['accessToken']);
+        await setAuth(data['accessToken'], user, refreshToken: data['refreshToken']);
+      }
+      return {'success': true, 'data': data};
+    } else {
+      return {'success': false, 'message': data['message'] ?? '로그인에 실패했습니다.', 'data': data};
+    }
+  }
+
+  Future<Map<String, dynamic>> sendVerificationEmail(String email) async {
+    final url = Uri.parse('${AppConfig.apiHost}/auth/email/send');
+    final res = await http.post(url, headers: _headers(), body: jsonEncode({'email': email.trim()}));
+    final data = _decodeBody(res);
+    return {'success': res.statusCode == 200 || res.statusCode == 201, 'data': data, 'message': data['message']};
+  }
+
+  Future<Map<String, dynamic>> sendSelfUnlockCode(String email) async {
+    final url = Uri.parse('${AppConfig.apiHost}/auth/self-unlock/send');
+    final res = await http.post(url, headers: _headers(), body: jsonEncode({'email': email.trim()}));
+    final data = _decodeBody(res);
+    return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
+  }
+
+  Future<Map<String, dynamic>> verifySelfUnlockCode(String email, String code) async {
+    final url = Uri.parse('${AppConfig.apiHost}/auth/self-unlock/verify');
+    final res = await http.post(url, headers: _headers(), body: jsonEncode({'email': email.trim(), 'code': code.trim()}));
+    final data = _decodeBody(res);
+    return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
+  }
+
+  Future<Map<String, dynamic>> verifyEmailCode(String email, String code) async {
+    final url = Uri.parse('${AppConfig.apiHost}/auth/email/verify');
+    final res = await http.post(url, headers: _headers(), body: jsonEncode({'email': email.trim(), 'code': code.trim()}));
+    final data = _decodeBody(res);
+    return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
+  }
+
+  Future<Map<String, dynamic>> register({
+    required String email,
+    required String password,
+    required String name,
+    required String targetName,
+    required String authCode,
+    required String role,
+    String? allergies,
+    String? assignedClass,
+  }) async {
+    final url = Uri.parse('${AppConfig.apiHost}/auth/register');
+    final body = <String, dynamic>{
+      'email': email.trim(),
+      'password': password,
+      'name': name.trim(),
+      'targetName': targetName.trim(),
+      'authCode': authCode.trim(),
+      'role': role,
+    };
+    if (allergies != null && allergies.trim().isNotEmpty) {
+      body['allergies'] = allergies.trim();
+    }
+    if (assignedClass != null && assignedClass.trim().isNotEmpty) {
+      body['assignedClass'] = assignedClass.trim();
+    }
+
+    final res = await http.post(url, headers: _headers(), body: jsonEncode(body));
+    final data = _decodeBody(res);
+    return {
+      'success': res.statusCode == 200 || res.statusCode == 201,
+      'message': data['message'] ?? '회원가입 요청 처리 완료',
+      'data': data,
+    };
+  }
+
+  /// 기관 인증코드로 그 기관에 등록된 반 목록을 조회한다 (가입 화면용)
+  Future<Map<String, dynamic>> verifyAuthCode(String authCode) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/auth/verify-auth-code');
+      final res = await http.post(url, headers: _headers(), body: jsonEncode({'authCode': authCode.trim()}));
+      final data = _decodeBody(res);
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return {
+          'success': true,
+          'academyName': data['academyName'],
+          'classes': (data['classes'] as List? ?? []).map((e) => e.toString()).toList(),
+        };
+      }
+      return {'success': false, 'message': data['message']?.toString() ?? '유효하지 않은 인증코드입니다.'};
+    } catch (e) {
+      return {'success': false, 'message': friendlyError(e)};
+    }
+  }
+
+  Future<Map<String, dynamic>> deleteAccount(String email) async {
+    final url = Uri.parse('${AppConfig.apiHost}/auth/account?email=${Uri.encodeComponent(email)}');
+    final res = await http.delete(url, headers: _headers());
+    final data = _decodeBody(res);
+    if (res.statusCode == 200) {
+      await logout();
+      return {'success': true, 'message': data['message']};
+    }
+    return {'success': false, 'message': data['message'] ?? '탈퇴 처리에 실패했습니다.'};
+  }
+
+  Future<UserModel?> fetchTeacherProfile() async {
+    final user = _currentUser;
+    if (user == null || _accessToken == null) return null;
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/routing/teacher/profile/${user.id}');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        final data = _decodeBody(res);
+        final updatedUser = UserModel(
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          name: data['name'] ?? user.name,
+          assignedClass: data['assignedClass'] ?? user.assignedClass,
+          academyId: data['academyId'] ?? user.academyId,
+          educationLevel: data['educationLevel'] ?? user.educationLevel,
+          token: _accessToken,
+        );
+        await setAuth(_accessToken!, updatedUser, refreshToken: _refreshToken);
+        return updatedUser;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // ----------------------------------------------------
+  // TEACHER NOTIFICATIONS
+  // ----------------------------------------------------
+  Future<List<NotificationModel>> getTeacherNotifications() async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications');
+    final res = await getWithAuth(url);
+    if (res.statusCode == 200) {
+      final list = _decodeBody(res) as List<dynamic>;
+      return list.map((item) => NotificationModel.fromJson(item as Map<String, dynamic>)).toList();
+    }
+    return [];
+  }
+
+  Future<int> getTeacherUnreadCount() async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications/unread-count');
+    final res = await getWithAuth(url);
+    if (res.statusCode == 200) {
+      final data = _decodeBody(res);
+      return (data['count'] as num?)?.toInt() ?? 0;
+    }
+    return 0;
+  }
+
+  Future<bool> markTeacherNotificationRead({int? id, String? key}) async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications/read');
+    final body = <String, dynamic>{};
+    if (id != null) body['id'] = id;
+    if (key != null) body['key'] = key;
+    final res = await postWithAuth(url, body);
+    return res.statusCode == 200 || res.statusCode == 201;
+  }
+
+  Future<bool> markAllTeacherNotificationsRead() async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/notifications/read-all');
+    final res = await postWithAuth(url, {});
+    return res.statusCode == 200 || res.statusCode == 201;
+  }
+
+  // ----------------------------------------------------
+  // PARENT & STUDENT
+  // ----------------------------------------------------
+  Future<List<NotificationModel>> getNotifications(String email) async {
+    final url = Uri.parse('${AppConfig.apiHost}/parent/notifications?email=${Uri.encodeComponent(email)}');
+    final res = await getWithAuth(url);
+    if (res.statusCode == 200) {
+      final list = _decodeBody(res) as List<dynamic>;
+      return list.map((item) => NotificationModel.fromJson(item as Map<String, dynamic>)).toList();
+    }
+    return [];
+  }
+
+  Future<RouteDataModel?> getParentRoute(String email) async {
+    final url = Uri.parse('${AppConfig.apiHost}/parent/route?email=${Uri.encodeComponent(email)}');
+    final res = await getWithAuth(url);
+    if (res.statusCode == 200) {
+      final data = _decodeBody(res) as Map<String, dynamic>;
+      return RouteDataModel.fromJson(data);
+    }
+    return null;
+  }
+
+  Future<StudentModel?> getMyChild(String email) async {
+    final url = Uri.parse('${AppConfig.apiHost}/parent/my-child?email=${Uri.encodeComponent(email)}');
+    final res = await getWithAuth(url);
+    if (res.statusCode == 200) {
+      final data = _decodeBody(res);
+      if (data != null && data is Map<String, dynamic>) {
+        return StudentModel.fromJson(data);
+      }
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>> updateChildAllergies(String email, String allergies) async {
+    final url = Uri.parse('${AppConfig.apiHost}/parent/my-child/allergies');
+    final res = await http.post(
+      url,
+      headers: _headers(),
+      body: jsonEncode({'email': email, 'allergies': allergies.trim()}),
+    );
+    final data = _decodeBody(res);
+    return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
+  }
+
+  Future<Map<String, dynamic>> createOverride({
+    required String email,
+    required String targetDate,
+    required String overrideType,
+    required String reason,
+  }) async {
+    final url = Uri.parse('${AppConfig.apiHost}/parent/override');
+    final res = await postWithAuth(url, jsonEncode({
+        'email': email,
+        'targetDate': targetDate,
+        'overrideType': overrideType,
+        'reason': reason,
+      }));
+    final data = _decodeBody(res);
+    return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
+  }
+
+  Future<Map<String, dynamic>> createParentMessage({
+    required String email,
+    required List<String> targetRoles,
+    required String message,
+  }) async {
+    final url = Uri.parse('${AppConfig.apiHost}/parent/message');
+    final res = await postWithAuth(url, jsonEncode({
+        'email': email,
+        'targetRoles': targetRoles,
+        'message': message,
+      }));
+    final data = _decodeBody(res);
+    return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
+  }
+
+  Future<Map<String, dynamic>?> getTodaySchedule(String email) async {
+    final url = Uri.parse('${AppConfig.apiHost}/parent/today-schedule?email=${Uri.encodeComponent(email)}');
+    final res = await getWithAuth(url);
+    if (res.statusCode == 200) {
+      return _decodeBody(res) as Map<String, dynamic>?;
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>> studentBoardByQR(String studentEmail, String teacherEmail) async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/student-board');
+    final res = await postWithAuth(url, jsonEncode({
+        'studentEmail': studentEmail,
+        'teacherEmail': teacherEmail,
+      }));
+    final data = _decodeBody(res);
+    return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
+  }
+
+  // ----------------------------------------------------
+  // TEACHER & DRIVER
+  // ----------------------------------------------------
+  /// 담당 원아 목록 원본(JSON). 한 번의 요청으로 원아 모델과 보호자 연락처를 모두 만들 수 있게 한다.
+  Future<List<Map<String, dynamic>>> getTeacherStudentsJson(String email, {String? mode}) async {
+    final modeParam = (mode != null && mode.isNotEmpty) ? '&mode=${Uri.encodeComponent(mode)}' : '';
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/students?email=${Uri.encodeComponent(email)}$modeParam');
+    final res = await getWithAuth(url);
+    throwIfServerError(res);
+    if (res.statusCode == 200) {
+      final list = _decodeBody(res) as List<dynamic>;
+      return list.whereType<Map<String, dynamic>>().toList();
+    }
+    return [];
+  }
+
+  Future<List<StudentModel>> getTeacherStudents(String email, {String? mode}) async {
+    final list = await getTeacherStudentsJson(email, mode: mode);
+    return list.map((item) => StudentModel.fromJson(item)).toList();
+  }
+
+  Future<Map<String, dynamic>?> getTeacherVehicle(String email) async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/my-vehicle?email=${Uri.encodeComponent(email)}');
+    final res = await getWithAuth(url);
+    throwIfServerError(res);
+    if (res.statusCode == 200) {
+      return _decodeBody(res) as Map<String, dynamic>?;
+    }
+    return null;
+  }
+
+  Future<RouteDataModel?> getTeacherRoute(String email, {String? mode}) async {
+    final modeParam = (mode != null && mode.isNotEmpty) ? '&mode=${Uri.encodeComponent(mode)}' : '';
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/route?email=${Uri.encodeComponent(email)}$modeParam');
+    final res = await getWithAuth(url);
+    throwIfServerError(res);
+    if (res.statusCode == 200) {
+      final data = _decodeBody(res) as Map<String, dynamic>;
+      return RouteDataModel.fromJson(data);
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>> manualBoardStudent(String email, int studentId, String reason, {String? mode}) async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/board');
+    final res = await postWithAuth(url, jsonEncode({
+        'email': email,
+        'studentId': studentId,
+        'reason': reason,
+        if (mode != null) 'mode': mode,
+      }));
+    final data = _decodeBody(res);
+    return {
+      'success': res.statusCode == 200 || res.statusCode == 201,
+      'message': data is Map ? data['message'] : null,
+      'allBoarded': data is Map ? (data['allBoarded'] == true) : false,
+      'totalCount': data is Map ? data['totalCount'] : 0,
+    };
+  }
+
+  Future<Map<String, dynamic>> skipStudent(String email, int studentId) async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/skip-student');
+    final res = await postWithAuth(url, jsonEncode({
+        'email': email,
+        'studentId': studentId,
+      }));
+    final data = _decodeBody(res);
+    return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
+  }
+
+  /// 기사님께 정류장 탑승/하차 완료 및 출발 가능 신호 전송
+  Future<Map<String, dynamic>> sendReadyToDepart({String? stopName}) async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/ready-to-depart');
+    try {
+      final res = await postWithAuth(url, jsonEncode({
+        if (stopName != null && stopName.trim().isNotEmpty) 'stopName': stopName.trim(),
+      }));
+      final data = _decodeBody(res);
+      return {'success': res.statusCode == 200 || res.statusCode == 201, 'data': data};
+    } catch (e) {
+      debugPrint('[ApiService] sendReadyToDepart error: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> saveTeacherMemo(int studentId, String memo) async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/student/$studentId/memo');
+    final res = await postWithAuth(url, jsonEncode({'memo': memo}));
+    final data = _decodeBody(res);
+    return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
+  }
+
+  Future<Map<String, dynamic>> broadcastMessage(
+    String email, {
+    required List<int> studentIds,
+    required List<String> targetRoles,
+    required String message,
+  }) async {
+    final url = Uri.parse('${AppConfig.apiHost}/teacher/send-message');
+    final res = await postWithAuth(url, jsonEncode({
+        'email': email,
+        'studentIds': studentIds,
+        'parentIds': studentIds,
+        'targetRoles': targetRoles,
+        'message': message,
+      }));
+    final data = _decodeBody(res);
+    return {'success': res.statusCode == 200 || res.statusCode == 201, 'message': data['message']};
+  }
+
+  // ==================== BOARD APIs ====================
+  Future<List<Map<String, dynamic>>> getBoardPosts({int? academyId, String? search, String? postType}) async {
+    try {
+      final qp = <String, String>{};
+      if (academyId != null) qp['academyId'] = academyId.toString();
+      if (search != null && search.isNotEmpty) qp['search'] = search;
+      if (postType != null && postType.isNotEmpty) qp['postType'] = postType;
+      final uri = Uri.parse('${AppConfig.apiHost}/routing/board/posts').replace(queryParameters: qp.isEmpty ? null : qp);
+      final res = await getWithAuth(uri);
+      if (res.statusCode == 200) {
+        final decoded = _decodeBody(res);
+        if (decoded is List) {
+          return decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        }
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  Future<Map<String, dynamic>> uploadBoardImage({
+    required Uint8List bytes,
+    required String filename,
+    required String mimeType,
+  }) async {
+    try {
+      final base64Data = 'data:$mimeType;base64,${base64Encode(bytes)}';
+      final url = Uri.parse('${AppConfig.apiHost}/routing/board/upload');
+      final res = await postWithAuth(url, jsonEncode({
+        'base64Data': base64Data,
+        'filename': filename,
+        'mimeType': mimeType,
+      }));
+      final data = _decodeBody(res);
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'url': data['url'],
+        'filename': data['filename'],
+        'message': data['message'],
+      };
+    } catch (e) {
+      return {'success': false, 'message': '이미지 업로드에 실패했습니다.'};
+    }
+  }
+
+  Future<Map<String, dynamic>> createBoardPost({
+    required String title,
+    required String content,
+    String visibility = 'ALL',
+    String? targetClass,
+    String? postType,
+    String? imageUrl,
+    List<String>? images,
+    required String authorName,
+    String authorRole = 'TEACHER',
+    int? academyId,
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts');
+      final res = await postWithAuth(url, jsonEncode({
+        'title': title,
+        'content': content,
+        'visibility': visibility,
+        'targetClass': targetClass,
+        'postType': postType ?? 'POST',
+        'imageUrl': imageUrl,
+        'images': images ?? (imageUrl != null ? [imageUrl] : []),
+        'authorName': authorName,
+        'authorRole': authorRole,
+        'academyId': academyId,
+      }));
+      final data = _decodeBody(res);
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'data': data,
+        'message': data['message'],
+      };
+    } catch (e) {
+      return {'success': false, 'message': '게시글 등록에 실패했습니다.'};
+    }
+  }
+
+  /// 이 글을 누가 읽었는지 (교직원 전용). 학부모가 글을 열면 서버에 자동으로 기록된다. 실패하면 null
+  Future<Map<String, dynamic>?> getPostReaders(int postId) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId/reads');
+      final res = await getWithAuth(url);
+      if (res.statusCode != 200) return null;
+      final data = _decodeBody(res);
+      return data is Map ? Map<String, dynamic>.from(data) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>> togglePostLike(int postId, String userId) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId/like');
+      final res = await postWithAuth(url, jsonEncode({'userId': userId}));
+      return {'success': res.statusCode == 200 || res.statusCode == 201};
+    } catch (_) {
+      return {'success': false};
+    }
+  }
+
+  Future<Map<String, dynamic>> addPostComment(
+    int postId, {
+    required String content,
+    required String authorName,
+    String authorRole = 'TEACHER',
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId/comments');
+      final res = await postWithAuth(url, jsonEncode({
+        'content': content,
+        'authorName': authorName,
+        'authorRole': authorRole,
+      }));
+      final data = _decodeBody(res);
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'data': data,
+      };
+    } catch (e) {
+      return {'success': false, 'message': '댓글 작성에 실패했습니다.'};
+    }
+  }
+
+  Future<Map<String, dynamic>> updateBoardPost(int postId, {
+    String? title,
+    String? content,
+    String? visibility,
+    String? targetClass,
+    String? postType,
+    List<String>? images,
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId');
+      final body = <String, dynamic>{};
+      if (title != null) body['title'] = title;
+      if (content != null) body['content'] = content;
+      if (visibility != null) body['visibility'] = visibility;
+      if (targetClass != null) body['targetClass'] = targetClass;
+      if (postType != null) body['postType'] = postType;
+      if (images != null) body['images'] = images;
+      final res = await putWithAuth(url, body);
+      final data = _decodeBody(res);
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'data': data,
+      };
+    } catch (e) {
+      return {'success': false, 'message': '게시글 수정에 실패했습니다.'};
+    }
+  }
+
+  Future<Map<String, dynamic>> deleteBoardPost(int postId) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/routing/board/posts/$postId');
+      final res = await deleteWithAuth(url);
+      return {'success': res.statusCode == 200 || res.statusCode == 204};
+    } catch (_) {
+      return {'success': false};
+    }
+  }
+
+  // ==================== TEACHER MESSAGES APIs ====================
+  Future<List<Map<String, dynamic>>> getTeacherInbox(String email) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/teacher/inbox?email=${Uri.encodeComponent(email)}');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        final decoded = _decodeBody(res);
+        if (decoded is List) {
+          return decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        }
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  Future<Map<String, dynamic>?> getStaffList() async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/teacher/staff');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        return _decodeBody(res) as Map<String, dynamic>?;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<Map<String, dynamic>> sendTeacherMessage({
+    required String email,
+    required String message,
+    List<int>? studentIds,
+    List<int>? parentIds,
+    List<int>? staffUserIds,
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/teacher/send-message');
+      final res = await postWithAuth(url, jsonEncode({
+        'email': email,
+        'message': message,
+        'studentIds': studentIds ?? [],
+        'parentIds': parentIds ?? [],
+        'staffUserIds': staffUserIds ?? [],
+      }));
+      final data = _decodeBody(res);
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'message': data['message'] ?? (res.statusCode == 200 || res.statusCode == 201 ? '메시지가 성공적으로 전송되었습니다.' : '전송 실패'),
+      };
+    } catch (e) {
+      return {'success': false, 'message': '메시지 전송에 실패했습니다.'};
+    }
+  }
+
+  /// 원장님(관리자) 관리자 웹 1:1 실시간 대화방으로 메시지 직접 전송
+  Future<bool> sendDirectChatMessageToAdmin({
+    required String teacherEmail,
+    int? adminId,
+    required String message,
+  }) async {
+    try {
+      int? targetAdminId = adminId;
+      if (targetAdminId == null) {
+        final staff = await getStaffList();
+        targetAdminId = staff?['admin']?['id'] as int?;
+      }
+
+      final roomUrl = Uri.parse('${AppConfig.apiHost}/chat/rooms');
+      final roomRes = await postWithAuth(roomUrl, jsonEncode({
+        'creatorEmail': teacherEmail,
+        'userIds': targetAdminId != null ? [targetAdminId] : [],
+        'type': 'DIRECT',
+      }));
+
+      if (roomRes.statusCode == 200 || roomRes.statusCode == 201) {
+        final roomData = _decodeBody(roomRes);
+        final roomId = roomData['id'];
+        if (roomId != null) {
+          final msgUrl = Uri.parse('${AppConfig.apiHost}/chat/messages');
+          await postWithAuth(msgUrl, jsonEncode({
+            'roomId': roomId,
+            'senderEmail': teacherEmail,
+            'text': message,
+          }));
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  // ==================== HOMEROOM ATTENDANCE APIs ====================
+  Future<Map<String, dynamic>?> getHomeroomAttendance({String? date}) async {
+    try {
+      final query = date != null && date.isNotEmpty ? '?date=${Uri.encodeComponent(date)}' : '';
+      final url = Uri.parse('${AppConfig.apiHost}/teacher/homeroom/attendance$query');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        return _decodeBody(res) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<Map<String, dynamic>> submitHomeroomAttendance({
+    required String date,
+    required List<Map<String, dynamic>> attendances,
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/teacher/homeroom/attendance');
+      final res = await postWithAuth(url, jsonEncode({
+        'date': date,
+        'attendances': attendances,
+      }));
+      final data = _decodeBody(res);
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'message': data['message'] ?? (res.statusCode == 200 || res.statusCode == 201 ? '출석부가 제출되었습니다.' : '제출 실패'),
+        'data': data,
+      };
+    } catch (e) {
+      return {'success': false, 'message': '출석부 제출에 실패했습니다.'};
+    }
+  }
+
+  // ==================== CHANGE REQUEST APIs ====================
+  Future<Map<String, dynamic>?> getClassTodayChangeRequests() async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/approval/class-today');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        return _decodeBody(res) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<Map<String, dynamic>> createChangeRequest({
+    required int studentId,
+    required String type,
+    required String targetDate,
+    String? direction,
+    String? targetTime,
+    String? targetAddress,
+    String? reason,
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/approval/request');
+      final payload = {
+        'studentId': studentId,
+        'type': type,
+        'targetDate': targetDate,
+        if (direction != null) 'direction': direction,
+        if (targetTime != null && targetTime.isNotEmpty) 'targetTime': targetTime,
+        if (targetAddress != null && targetAddress.isNotEmpty) 'newAddress': targetAddress,
+        if (reason != null && reason.isNotEmpty) 'reason': reason,
+      };
+      final res = await postWithAuth(url, jsonEncode(payload));
+      final data = _decodeBody(res);
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'message': data['message'] ?? (res.statusCode == 200 || res.statusCode == 201 ? '신청이 정상 등록되었습니다.' : '신청 등록 실패'),
+        'data': data,
+      };
+    } catch (e) {
+      return {'success': false, 'message': '네트워크 오류로 신청에 실패했습니다.'};
+    }
+  }
+
+  // ==================== REALTIME CHAT APIs ====================
+  Future<Map<String, dynamic>> getChatUsers() async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/users');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        final data = _decodeBody(res) as Map<String, dynamic>;
+        return {
+          'success': true,
+          'drivers': (data['drivers'] as List? ?? []).cast<Map<String, dynamic>>(),
+          'teachers': (data['teachers'] as List? ?? []).cast<Map<String, dynamic>>(),
+          'parents': (data['parents'] as List? ?? []).cast<Map<String, dynamic>>(),
+          'admins': (data['admins'] as List? ?? []).cast<Map<String, dynamic>>(),
+        };
+      } else {
+        return {
+          'success': false,
+          'statusCode': res.statusCode,
+          'errorMessage': '서버 오류가 발생했습니다 (${res.statusCode}).',
+          'drivers': <Map<String, dynamic>>[],
+          'teachers': <Map<String, dynamic>>[],
+          'parents': <Map<String, dynamic>>[],
+          'admins': <Map<String, dynamic>>[],
+        };
+      }
+    } catch (e) {
+      debugPrint('[ApiService] getChatUsers error: $e');
+      return {
+        'success': false,
+        'statusCode': 0,
+        'errorMessage': '네트워크 연결 오류가 발생했습니다.',
+        'drivers': <Map<String, dynamic>>[],
+        'teachers': <Map<String, dynamic>>[],
+        'parents': <Map<String, dynamic>>[],
+        'admins': <Map<String, dynamic>>[],
+      };
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getChatRooms({bool throwOnError = false}) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/rooms');
+      final res = await getWithAuth(url);
+      if (throwOnError) throwIfServerError(res);
+      if (res.statusCode == 200) {
+        final data = _decodeBody(res);
+        if (data is List) {
+          return data.cast<Map<String, dynamic>>();
+        }
+      }
+    } catch (e) {
+      if (throwOnError) rethrow;
+      debugPrint('[ApiService] getChatRooms error: $e');
+    }
+    return [];
+  }
+
+  Future<List<Map<String, dynamic>>> getChatMessages(int roomId, {bool throwOnError = false}) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/messages?roomId=$roomId');
+      final res = await getWithAuth(url);
+      if (throwOnError) throwIfServerError(res);
+      if (res.statusCode == 200) {
+        final data = _decodeBody(res);
+        if (data is List) {
+          return data.cast<Map<String, dynamic>>();
+        }
+      }
+    } catch (e) {
+      if (throwOnError) rethrow;
+      debugPrint('[ApiService] getChatMessages error: $e');
+    }
+    return [];
+  }
+
+  Future<Map<String, dynamic>?> createChatRoom(List<int> userIds, {String? name, String? type}) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/rooms');
+      final payload = {
+        'userIds': userIds,
+        if (name != null && name.isNotEmpty) 'name': name,
+        if (type != null && type.isNotEmpty) 'type': type,
+      };
+      final res = await postWithAuth(url, jsonEncode(payload));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return _decodeBody(res) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('[ApiService] createChatRoom error: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> sendChatMessage(int roomId, String text) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/messages');
+      final res = await postWithAuth(url, jsonEncode({'roomId': roomId, 'text': text}));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return _decodeBody(res) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('[ApiService] sendChatMessage error: $e');
+    }
+    return null;
+  }
+
+  /// 셔틀 탑승/위치 변경 결재 신청서 전송
+  Future<Map<String, dynamic>?> submitPaymentRequest(Map<String, dynamic> payload) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/payment-request');
+      final res = await postWithAuth(url, jsonEncode(payload));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('[ApiService] submitPaymentRequest error: $e');
+    }
+    return null;
+  }
+
+  /// 결재 신청건 승인 또는 반려 처리
+  Future<Map<String, dynamic>?> decidePaymentRequest(int messageId, String decision, {int? vehicleId}) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/payment-request/$messageId/decision');
+      final payload = {
+        'decision': decision,
+        if (vehicleId != null) 'vehicleId': vehicleId,
+      };
+      final res = await postWithAuth(url, jsonEncode(payload));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('[ApiService] decidePaymentRequest error: $e');
+    }
+    return null;
+  }
+
+  Future<bool> markChatRoomAsRead(int roomId) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/rooms/$roomId/read');
+      final res = await postWithAuth(url, '{}');
+      return res.statusCode == 200 || res.statusCode == 201;
+    } catch (e) {
+      debugPrint('[ApiService] markChatRoomAsRead error: $e');
+      return false;
+    }
+  }
+
+  Future<int> getChatTotalUnreadCount() async {
+    try {
+      final rooms = await getChatRooms();
+      int sum = 0;
+      for (final r in rooms) {
+        sum += (r['unreadCount'] as int? ?? 0);
+      }
+      return sum;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<Map<String, dynamic>?> getRoutePath() async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/teacher/route-path');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        return _decodeBody(res) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<Map<String, dynamic>> getMyNotificationSettings() async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/me/notification-settings');
+      final res = await getWithAuth(url);
+      if (res.statusCode == 200) {
+        return _decodeBody(res) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  Future<bool> updateMyNotificationSettings(Map<String, bool> settings) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/me/notification-settings');
+      final res = await putWithAuth(url, settings);
+      return res.statusCode == 200;
+    } catch (_) {}
+    return false;
+  }
+
+  Future<dynamic> uploadMediaAssets({
+    required List<Map<String, dynamic>> photos,
+    int? vehicleId,
+    String? className,
+  }) async {
+    final url = Uri.parse('${AppConfig.apiHost}/routing/media');
+    final payload = {
+      'photos': photos,
+      if (vehicleId != null) 'vehicleId': vehicleId,
+      if (className != null) 'className': className,
+    };
+    final res = await postWithAuth(url, jsonEncode(payload));
+    final bodyText = utf8.decode(res.bodyBytes).trim();
+    if (bodyText.startsWith('<') || bodyText.toLowerCase().contains('<!doctype html>')) {
+      throw const FormatException('서버에 이 기능이 아직 없습니다(배포 필요)');
+    }
+    if (res.statusCode == 200 || res.statusCode == 201) {
+      try {
+        return jsonDecode(bodyText);
+      } catch (_) {
+        throw const FormatException('서버에 이 기능이 아직 없습니다(배포 필요)');
+      }
+    }
+    throw Exception('업로드 실패 (${res.statusCode})');
+  }
+
+  Future<List<dynamic>> getMediaAssets({
+    String? from,
+    String? to,
+    int? vehicleId,
+    String? className,
+    String? sourceType,
+  }) async {
+    final queryParams = <String, String>{};
+    if (from != null) queryParams['from'] = from;
+    if (to != null) queryParams['to'] = to;
+    if (vehicleId != null) queryParams['vehicleId'] = vehicleId.toString();
+    if (className != null) queryParams['className'] = className;
+    if (sourceType != null && sourceType.isNotEmpty) queryParams['sourceType'] = sourceType;
+
+    final uri = Uri.parse('${AppConfig.apiHost}/routing/media').replace(queryParameters: queryParams.isEmpty ? null : queryParams);
+    final res = await getWithAuth(uri);
+    final bodyText = utf8.decode(res.bodyBytes).trim();
+    if (bodyText.startsWith('<') || bodyText.toLowerCase().contains('<!doctype html>')) {
+      throw const FormatException('서버에 이 기능이 아직 없습니다(배포 필요)');
+    }
+    if (res.statusCode == 200) {
+      try {
+        final decoded = jsonDecode(bodyText);
+        if (decoded is List) return decoded;
+      } catch (_) {
+        throw const FormatException('서버에 이 기능이 아직 없습니다(배포 필요)');
+      }
+    }
+    return [];
+  }
+
+  Future<bool> deleteMediaAsset(int id) async {
+    final url = Uri.parse('${AppConfig.apiHost}/routing/media/$id');
+    final res = await deleteWithAuth(url);
+    final bodyText = utf8.decode(res.bodyBytes).trim();
+    if (bodyText.startsWith('<') || bodyText.toLowerCase().contains('<!doctype html>')) {
+      throw const FormatException('서버에 이 기능이 아직 없습니다(배포 필요)');
+    }
+    return res.statusCode == 200 || res.statusCode == 204;
+  }
+
+  // ==================== LEAVE REQUEST (휴가·연차 전자결재) ====================
+  Future<Map<String, dynamic>> createLeaveRequest({
+    required int roomId,
+    required String applicantName,
+    required String applicantRole,
+    required String leaveType,
+    required String startDate,
+    required String endDate,
+    required bool needSubstitute,
+    required String reason,
+  }) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/leave-request');
+      final res = await postWithAuth(url, jsonEncode({
+        'roomId': roomId,
+        'applicantName': applicantName,
+        'applicantRole': applicantRole,
+        'leaveType': leaveType,
+        'startDate': startDate,
+        'endDate': endDate,
+        'needSubstitute': needSubstitute,
+        'reason': reason,
+      }));
+      final data = jsonDecode(utf8.decode(res.bodyBytes));
+      return {
+        'success': res.statusCode == 200 || res.statusCode == 201,
+        'data': data,
+        'message': data['message'],
+      };
+    } catch (e) {
+      return {'success': false, 'message': '휴가 신청서 전송에 실패했습니다.'};
+    }
+  }
+
+  Future<Map<String, dynamic>?> decideLeaveRequest(int messageId, String decision, {String? rejectionReason}) async {
+    try {
+      final url = Uri.parse('${AppConfig.apiHost}/chat/leave-request/$messageId/decision');
+      final res = await postWithAuth(url, jsonEncode({
+        'decision': decision,
+        if (rejectionReason != null) 'rejectionReason': rejectionReason,
+      }));
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        return jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>?;
+      }
+    } catch (_) {}
+    return null;
+  }
+}
+
+/// 서버 응답(JSON) 읽기. 서버가 잠깐 멈췄을 때 오는 HTML 오류 페이지 등 JSON 이 아니면
+/// 'FormatException' 대신 알아보기 쉬운 문구로 알려준다.
+dynamic _decodeBody(http.Response res) {
+  final text = utf8.decode(res.bodyBytes, allowMalformed: true);
+  try {
+    return jsonDecode(text);
+  } on FormatException {
+    debugPrint('[ApiService] JSON 이 아닌 응답 (${res.statusCode}) ${res.request?.url}');
+    throw Exception('서버에 일시적인 문제가 있습니다. 잠시 후 다시 시도해 주세요. (오류 코드 ${res.statusCode})');
+  }
+}
