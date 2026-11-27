@@ -1,0 +1,193 @@
+class ChatMember {
+  final int id;
+  final int userId;
+  final String name;
+  final String email;
+  final String role;
+  final String? assignedClass;
+
+  ChatMember({
+    required this.id,
+    required this.userId,
+    required this.name,
+    required this.email,
+    required this.role,
+    this.assignedClass,
+  });
+
+  factory ChatMember.fromJson(Map<String, dynamic> json) {
+    final user = json['user'] as Map<String, dynamic>? ?? {};
+    return ChatMember(
+      id: json['id'] as int? ?? 0,
+      userId: user['id'] as int? ?? 0,
+      name: user['name'] as String? ?? '사용자',
+      email: user['email'] as String? ?? '',
+      role: user['role'] as String? ?? '',
+      assignedClass: user['assignedClass'] as String?,
+    );
+  }
+}
+
+class ChatMessageModel {
+  final int id;
+  final int roomId;
+  final String text;
+  final String type;
+  final DateTime createdAt;
+  final int senderId;
+  final String senderName;
+  final String senderEmail;
+  final String senderRole;
+  final List<String> readBy;
+  /// 선생님 방해금지 시간에 보낸 메시지가 선생님께 전달될 시각 (null = 이미 전달됨)
+  final DateTime? deliverAt;
+  /// 사진 메시지(type IMAGE)의 사진 주소 (payload.imageUrl). 사진이 아니면 null
+  final String? imageUrl;
+
+  ChatMessageModel({
+    required this.id,
+    required this.roomId,
+    required this.text,
+    required this.type,
+    required this.createdAt,
+    required this.senderId,
+    required this.senderName,
+    required this.senderEmail,
+    required this.senderRole,
+    required this.readBy,
+    this.deliverAt,
+    this.imageUrl,
+  });
+
+  /// 아직 선생님께 전달되지 않은 메시지인지
+  bool get isWaitingDelivery => deliverAt != null && deliverAt!.isAfter(DateTime.now());
+
+  bool isMe(String? myEmail) {
+    if (myEmail == null) return false;
+    return senderEmail.toLowerCase() == myEmail.toLowerCase();
+  }
+
+  factory ChatMessageModel.fromJson(Map<String, dynamic> json) {
+    final sender = json['sender'] as Map<String, dynamic>? ?? {};
+    final rawDate = json['createdAt'] as String?;
+    DateTime parsedDate = DateTime.now();
+    if (rawDate != null) {
+      try {
+        parsedDate = DateTime.parse(rawDate).toLocal();
+      } catch (_) {}
+    }
+
+    final rawReadBy = json['readBy'] as List<dynamic>? ?? [];
+    final readByList = rawReadBy.map((e) => e.toString()).toList();
+
+    return ChatMessageModel(
+      id: json['id'] as int? ?? 0,
+      roomId: json['roomId'] is int ? json['roomId'] : (json['room']?['id'] as int? ?? 0),
+      text: json['text'] as String? ?? '',
+      type: json['type'] as String? ?? 'TEXT',
+      createdAt: parsedDate,
+      senderId: sender['id'] as int? ?? 0,
+      // 보낸 사람이 없는 메시지는 서버가 보낸 시스템 알림(TakeMe 알림)
+      senderName: sender['name'] as String? ?? ((json['payload'] is Map ? json['payload']['senderLabel'] : null)?.toString() ?? 'TakeMe 알림'),
+      senderEmail: sender['email'] as String? ?? '',
+      senderRole: sender['role'] as String? ?? '',
+      readBy: readByList,
+      deliverAt: DateTime.tryParse(json['deliverAt']?.toString() ?? '')?.toLocal(),
+      imageUrl: (json['type'] == 'IMAGE' && json['payload'] is Map && json['payload']['imageUrl'] is String)
+          ? json['payload']['imageUrl'] as String
+          : null,
+    );
+  }
+}
+
+class ChatRoomModel {
+  final int id;
+  final String name;
+  final String type;
+  final List<ChatMember> members;
+  final ChatMessageModel? latestMessage;
+  ChatMessageModel? get lastMessage => latestMessage;
+  final int unreadCount;
+  final DateTime? updatedAt;
+  /// 내 목록에서 맨 위 고정한 방인지
+  final bool isPinned;
+
+  ChatRoomModel({
+    required this.id,
+    required this.name,
+    required this.type,
+    required this.members,
+    this.latestMessage,
+    required this.unreadCount,
+    this.updatedAt,
+    this.isPinned = false,
+  });
+
+  factory ChatRoomModel.fromJson(Map<String, dynamic> json) {
+    final rawMembers = json['members'] as List<dynamic>? ?? [];
+    final members = rawMembers
+        .whereType<Map<String, dynamic>>()
+        .map((m) => ChatMember.fromJson(m))
+        .toList();
+
+    ChatMessageModel? latest;
+    if (json['latestMessage'] is Map<String, dynamic>) {
+      latest = ChatMessageModel.fromJson(json['latestMessage'] as Map<String, dynamic>);
+    } else if (json['lastMessage'] is Map<String, dynamic>) {
+      latest = ChatMessageModel.fromJson(json['lastMessage'] as Map<String, dynamic>);
+    }
+
+    final rawUpdated = json['updatedAt'] as String? ?? json['createdAt'] as String?;
+    DateTime? updated;
+    if (rawUpdated != null) {
+      try {
+        updated = DateTime.parse(rawUpdated).toLocal();
+      } catch (_) {}
+    }
+
+    return ChatRoomModel(
+      id: json['id'] as int? ?? 0,
+      name: json['name'] as String? ?? '대화방',
+      type: json['type'] as String? ?? 'DIRECT',
+      members: members,
+      latestMessage: latest,
+      unreadCount: json['unreadCount'] as int? ?? 0,
+      updatedAt: updated,
+      isPinned: json['isPinned'] == true,
+    );
+  }
+
+  /// 상대방(내가 아닌 멤버) 찾기
+  ChatMember? getOtherMember(String? myEmail) {
+    if (myEmail == null) return members.isNotEmpty ? members.first : null;
+    return members.firstWhere(
+      (m) => m.email.toLowerCase() != myEmail.toLowerCase(),
+      orElse: () => members.isNotEmpty ? members.first : ChatMember(id: 0, userId: 0, name: '상대방', email: '', role: ''),
+    );
+  }
+
+  /// 상대방 호칭/표시 이름
+  String getDisplayName(String? myEmail) {
+    // 알림 방은 항상 방 이름으로 표시 (예전 이름 "실시간 알림 채널" 은 "공지사항" 으로)
+    if (type == 'NOTIFICATION_SYSTEM') {
+      return name == '실시간 알림 채널' ? '공지사항' : name;
+    }
+    if (type == 'PAYMENT_SYSTEM') {
+      return name;
+    }
+    final other = getOtherMember(myEmail);
+    if (other != null && other.name.isNotEmpty) {
+      if (other.role == 'HOMEROOM_TEACHER') {
+        final className = other.assignedClass != null ? '${other.assignedClass} ' : '';
+        return '$className${other.name} 선생님';
+      } else if (other.role == 'ACADEMY_ADMIN') {
+        return '${other.name} (유치원 본원)';
+      } else if (other.role == 'DRIVER') {
+        return '${other.name} 기사님';
+      }
+      return other.name;
+    }
+    return name;
+  }
+}
+
